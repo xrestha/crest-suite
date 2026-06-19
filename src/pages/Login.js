@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useSettings } from '../context/SettingsContext'
 import './Login.css'
 
 export default function Login() {
@@ -9,6 +10,7 @@ export default function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { signIn } = useAuth()
+  const { settings } = useSettings()
   const navigate = useNavigate()
 
   async function handleSubmit(e) {
@@ -29,11 +31,11 @@ export default function Login() {
       <div className="login-card">
         <div className="login-brand">
           <span className="login-logo">⬡</span>
-          <span className="login-brand-name">Crest</span>
+          <span className="login-brand-name">{settings?.app_name || 'Crest'}</span>
           <span className="login-brand-sub">Inventory</span>
         </div>
         <h1 className="login-heading">Sign in</h1>
-        <p className="login-sub">Hospitality cost control, built for Nepal.</p>
+        <p className="login-sub">{settings?.app_tagline || 'Hospitality cost control, built for Nepal.'}</p>
         <form onSubmit={handleSubmit} className="login-form">
           <div className="login-field">
             <label>Email</label>

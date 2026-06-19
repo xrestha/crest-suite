@@ -3,28 +3,66 @@ import { supabase } from '../supabaseClient'
 
 const AuthContext = createContext({})
 
+// Included on all plans (Starter and above)
+const STARTER_KEYS = new Set([
+  'monthly_summary', 'reorder_report', 'vat_report', 'non_vat_report', 'wastage_report', 'settings',
+])
+// Requires Growth plan or above
+const GROWTH_KEYS = new Set([
+  'sales_entry', 'recipe_costing', 'variance_report',
+  'payment_summary', 'budget_vs_actual', 'best_sellers', 'purchase_orders',
+  'dead_stock', 'recipe_margin',
+])
+// Requires Pro plan
+const PRO_KEYS = new Set([
+  'menu_engineering', 'fifo_report', 'vendor_report',
+  'price_tracker', 'overheads', 'theoretical_variance',
+  'period_comparison',
+])
+
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(null)
-  const [profile, setProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [session, setSession]                   = useState(null)
+  const [profile, setProfile]                   = useState(null)
+  const [featureFlags, setFeatureFlags]         = useState({})
+  const [loading, setLoading]                   = useState(true)
+  const [ready, setReady]                       = useState(false)
+  const [adminViewClientId, setAdminViewClientId]     = useState(() => localStorage.getItem('crest_admin_client_id') || null)
+  const [adminViewClientName, setAdminViewClientName] = useState(() => localStorage.getItem('crest_admin_client_name') || '')
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let mounted = true
+
+    async function initialize() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!mounted) return
       setSession(session)
-      if (session) fetchProfile(session.user.id)
-      else setLoading(false)
+      if (session) {
+        await fetchProfile(session.user.id, mounted)
+      } else {
+        setLoading(false)
+        setReady(true)
+      }
+    }
+
+    initialize()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return
+      setSession(session)
+      if (session) {
+        await fetchProfile(session.user.id, mounted)
+      } else {
+        setProfile(null)
+        setFeatureFlags({})
+        setLoading(false)
+        setReady(true)
+      }
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      if (session) fetchProfile(session.user.id)
-      else { setProfile(null); setLoading(false) }
-    })
-
-    return () => subscription.unsubscribe()
+    return () => { mounted = false; subscription.unsubscribe() }
   }, [])
 
-  async function fetchProfile(userId) {
+  async function fetchProfile(userId, mounted = true) {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -32,27 +70,42 @@ export function AuthProvider({ children }) {
         .eq('id', userId)
         .single()
 
-      if (error) {
-        console.error('Profile fetch error:', error)
-        setLoading(false)
-        return
-      }
+      if (!mounted) return
+      if (error) { console.error('Profile fetch error:', error); return }
 
-      // If profile has a client_id, fetch client details separately
-      if (data && data.client_id) {
+      if (data?.client_id) {
         const { data: client } = await supabase
           .from('clients')
-          .select('id, name, location')
+          .select('id, name, location, is_premium, plan, trial_ends_at, subscription_ends_at')
           .eq('id', data.client_id)
           .single()
-        data.clients = client
+        if (mounted) data.clients = client
+
+        const { data: flags } = await supabase
+          .from('feature_flags')
+          .select('*')
+          .eq('client_id', data.client_id)
+          .maybeSingle()
+        if (mounted) setFeatureFlags(flags || {})
       }
 
-      setProfile(data)
+      if (mounted) {
+        setProfile(data)
+        // Only seed the admin view from profile on first login (no saved selection)
+        if (data.role === 'admin' && !localStorage.getItem('crest_admin_client_id')) {
+          setAdminViewClientId(data.client_id || null)
+          setAdminViewClientName(data.clients?.name || '')
+        }
+        // Fire-and-forget presence ping — .then() required to trigger Supabase lazy execution
+        supabase.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', userId).then(() => {})
+      }
     } catch (err) {
-      console.error('Unexpected error fetching profile:', err)
+      console.error('Profile error:', err)
     } finally {
-      setLoading(false)
+      if (mounted) {
+        setLoading(false)
+        setReady(true)
+      }
     }
   }
 
@@ -62,14 +115,59 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
+    setProfile(null)
+    setFeatureFlags({})
+    setAdminViewClientId(null)
+    setAdminViewClientName('')
+    localStorage.removeItem('crest_admin_client_id')
+    localStorage.removeItem('crest_admin_client_name')
+    setReady(false)
     await supabase.auth.signOut()
   }
 
-  const clientId = profile?.client_id || null
-  const isAdmin = profile?.role === 'admin'
+  const isAdmin  = profile?.role === 'admin'
+  const clientId = isAdmin ? adminViewClientId : (profile?.client_id || null)
+
+  function switchAdminClient(id, name) {
+    setAdminViewClientId(id)
+    setAdminViewClientName(name)
+    if (id) {
+      localStorage.setItem('crest_admin_client_id', id)
+      localStorage.setItem('crest_admin_client_name', name)
+    } else {
+      localStorage.removeItem('crest_admin_client_id')
+      localStorage.removeItem('crest_admin_client_name')
+    }
+  }
+
+  // Derive plan: admin always gets 'pro'; fallback to is_premium for pre-migration rows
+  const plan = isAdmin
+    ? 'pro'
+    : (profile?.clients?.plan || (profile?.clients?.is_premium ? 'pro' : 'starter'))
+
+  // isPremium = true for Growth and Pro (any paid plan) — keeps existing checks working
+  const isPremium = isAdmin || plan === 'growth' || plan === 'pro'
+
+  const trialEndsAt = profile?.clients?.trial_ends_at || null
+  const isTrialing  = plan === 'starter' && !!trialEndsAt && new Date(trialEndsAt) > new Date()
+
+  function hasFeature(featureKey) {
+    if (isAdmin) return true
+    if (STARTER_KEYS.has(featureKey)) return true
+    if (GROWTH_KEYS.has(featureKey) && (plan === 'growth' || plan === 'pro')) return true
+    if (PRO_KEYS.has(featureKey)    && plan === 'pro') return true
+    return featureFlags[featureKey] === true
+  }
 
   return (
-    <AuthContext.Provider value={{ session, profile, loading, signIn, signOut, clientId, isAdmin }}>
+    <AuthContext.Provider value={{
+      session, profile, loading, ready,
+      signIn, signOut,
+      clientId, isAdmin, isPremium,
+      plan, isTrialing, trialEndsAt,
+      featureFlags, hasFeature,
+      adminViewClientId, adminViewClientName, switchAdminClient,
+    }}>
       {children}
     </AuthContext.Provider>
   )

@@ -2,9 +2,9 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export default function ProtectedRoute({ children, adminOnly = false }) {
-  const { session, profile, loading } = useAuth()
+  const { session, profile, ready } = useAuth()
 
-  if (loading) {
+  if (!ready) {
     return (
       <div style={{
         minHeight: '100vh', background: '#0f1117',
@@ -18,6 +18,7 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
 
   if (!session) return <Navigate to="/login" replace />
   if (adminOnly && profile?.role !== 'admin') return <Navigate to="/dashboard" replace />
+  if (!profile) return <Navigate to="/login" replace />
 
   return children
 }
