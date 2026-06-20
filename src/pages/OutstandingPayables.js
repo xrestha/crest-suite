@@ -23,18 +23,27 @@ export default function OutstandingPayables() {
   const [markingPaid, setMarkingPaid] = useState(null)
   const [filterVendor, setFilterVendor] = useState('all')
   const [filterAging, setFilterAging]   = useState('all')
+  const [activeTab, setActiveTab]       = useState('outstanding')
 
-  useEffect(() => { if (!authLoading && effectiveClientId) load() }, [clientId]) // eslint-disable-line
+  useEffect(() => { if (!authLoading && effectiveClientId) load(activeTab) }, [clientId]) // eslint-disable-line
 
-  async function load() {
+  async function load(tab = activeTab) {
     setLoading(true)
-    const { data, error } = await supabase
+    setFilterVendor('all')
+    setFilterAging('all')
+    let query = supabase
       .from('purchase_entries')
       .select('id, bs_day, qty, rate, invoice_ref, paid_at, monthly_periods!inner(client_id, bs_year, bs_month), items(name, uom, categories(name)), vendors(name)')
       .eq('monthly_periods.client_id', effectiveClientId)
       .eq('payment_method', 'Credit')
-      .is('paid_at', null)
-      .order('created_at', { ascending: true })
+
+    if (tab === 'outstanding') {
+      query = query.is('paid_at', null).order('created_at', { ascending: true })
+    } else {
+      query = query.not('paid_at', 'is', null).order('paid_at', { ascending: false })
+    }
+
+    const { data, error } = await query
 
     if (error) {
       // paid_at column not yet added — show setup banner
@@ -52,6 +61,11 @@ export default function OutstandingPayables() {
     })
     setEntries(enriched)
     setLoading(false)
+  }
+
+  function switchTab(tab) {
+    setActiveTab(tab)
+    load(tab)
   }
 
   async function markPaid(id) {
@@ -92,8 +106,13 @@ export default function OutstandingPayables() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Outstanding Payables</h1>
-          <p className="page-subtitle">Unpaid credit purchases by vendor — aging analysis</p>
+          <p className="page-subtitle">{activeTab === 'outstanding' ? 'Unpaid credit purchases by vendor — aging analysis' : 'Settled credit purchases — payment history'}</p>
         </div>
+      </div>
+
+      <div className="tab-bar" style={{ marginBottom: 24 }}>
+        <button className={`tab-btn${activeTab === 'outstanding' ? ' tab-btn--active' : ''}`} onClick={() => switchTab('outstanding')}>Outstanding</button>
+        <button className={`tab-btn${activeTab === 'paid' ? ' tab-btn--active' : ''}`} onClick={() => switchTab('paid')}>Paid History</button>
       </div>
 
       {setupNeeded && (
@@ -109,29 +128,41 @@ export default function OutstandingPayables() {
       )}
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 24 }}>
-        <div className="stat-card">
-          <div className="stat-label">
-            <Tip text="Sum of all unpaid credit purchase amounts matching current filters." width={220}>Total Outstanding</Tip>
+        {activeTab === 'outstanding' ? (<>
+          <div className="stat-card">
+            <div className="stat-label"><Tip text="Sum of all unpaid credit purchase amounts matching current filters." width={220}>Total Outstanding</Tip></div>
+            <div className="stat-value" style={{ fontSize: 18, color: totalOutstanding > 0 ? '#f87171' : '#6b7280' }}>{fmt(totalOutstanding)}</div>
+            <div className="stat-sub">{filtered.length} unpaid invoices · {Object.keys(byVendor).length} vendors</div>
           </div>
-          <div className="stat-value" style={{ fontSize: 18, color: totalOutstanding > 0 ? '#f87171' : '#6b7280' }}>{fmt(totalOutstanding)}</div>
-          <div className="stat-sub">{filtered.length} unpaid invoices · {Object.keys(byVendor).length} vendors</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">
-            <Tip text="Invoices older than 60 days still unpaid — vendors waiting longest." width={230}>Overdue Items</Tip>
+          <div className="stat-card">
+            <div className="stat-label"><Tip text="Invoices older than 60 days still unpaid — vendors waiting longest." width={230}>Overdue Items</Tip></div>
+            <div className="stat-value" style={{ color: overdueItems > 0 ? '#f97316' : '#6b7280' }}>{overdueItems}</div>
+            <div className="stat-sub">&gt;60 days outstanding</div>
           </div>
-          <div className="stat-value" style={{ color: overdueItems > 0 ? '#f97316' : '#6b7280' }}>{overdueItems}</div>
-          <div className="stat-sub">&gt;60 days outstanding</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">
-            <Tip text="Value of invoices over 90 days old. These vendors need urgent settlement." width={240}>90+ Day Value</Tip>
+          <div className="stat-card">
+            <div className="stat-label"><Tip text="Value of invoices over 90 days old. These vendors need urgent settlement." width={240}>90+ Day Value</Tip></div>
+            <div className="stat-value" style={{ fontSize: 16, color: urgentValue > 0 ? '#f87171' : '#6b7280' }}>{urgentValue > 0 ? fmt(urgentValue) : '—'}</div>
+            <div className="stat-sub">Urgent settlement</div>
           </div>
-          <div className="stat-value" style={{ fontSize: 16, color: urgentValue > 0 ? '#f87171' : '#6b7280' }}>
-            {urgentValue > 0 ? fmt(urgentValue) : '—'}
+        </>) : (<>
+          <div className="stat-card">
+            <div className="stat-label"><Tip text="Total value of all settled credit purchases matching current filters." width={220}>Total Paid</Tip></div>
+            <div className="stat-value" style={{ fontSize: 18, color: '#34d399' }}>{fmt(totalOutstanding)}</div>
+            <div className="stat-sub">{filtered.length} settled invoices</div>
           </div>
-          <div className="stat-sub">Urgent settlement</div>
-        </div>
+          <div className="stat-card">
+            <div className="stat-label">Vendors Paid</div>
+            <div className="stat-value">{Object.keys(byVendor).length}</div>
+            <div className="stat-sub">Unique vendors settled</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label"><Tip text="Most recently settled invoice date." width={200}>Last Settlement</Tip></div>
+            <div className="stat-value" style={{ fontSize: 14 }}>
+              {filtered.length > 0 ? filtered[0].paid_at : '—'}
+            </div>
+            <div className="stat-sub">{filtered.length > 0 ? filtered[0].vendors?.name : ''}</div>
+          </div>
+        </>)}
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -139,11 +170,13 @@ export default function OutstandingPayables() {
           <option value="all">All Vendors</option>
           {vendors.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
         </select>
-        <select className="form-select" value={filterAging} onChange={e => setFilterAging(e.target.value)}>
-          <option value="all">All Ages</option>
-          {AGING_LABELS.map(a => <option key={a} value={a}>{a}</option>)}
-        </select>
-        <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={load}>↻ Refresh</button>
+        {activeTab === 'outstanding' && (
+          <select className="form-select" value={filterAging} onChange={e => setFilterAging(e.target.value)}>
+            <option value="all">All Ages</option>
+            {AGING_LABELS.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        )}
+        <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => load(activeTab)}>↻ Refresh</button>
       </div>
 
       {loading ? (
@@ -181,15 +214,19 @@ export default function OutstandingPayables() {
                         <th style={{ textAlign: 'right' }}>Qty</th>
                         <th style={{ textAlign: 'right' }}>Rate</th>
                         <th style={{ textAlign: 'right' }}>Amount</th>
-                        <th style={{ textAlign: 'right' }}>
-                          <Tip text="Calendar days since this purchase was recorded in the system." width={200}>Days</Tip>
-                        </th>
-                        <th>Aging</th>
-                        <th></th>
+                        {activeTab === 'outstanding' ? (<>
+                          <th style={{ textAlign: 'right' }}>
+                            <Tip text="Calendar days since this purchase was recorded in the system." width={200}>Days</Tip>
+                          </th>
+                          <th>Aging</th>
+                          <th></th>
+                        </>) : (
+                          <th>Paid On</th>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
-                      {vRows.sort((a, b) => b.daysOld - a.daysOld).map(e => (
+                      {(activeTab === 'outstanding' ? vRows.sort((a, b) => b.daysOld - a.daysOld) : vRows).map(e => (
                         <tr key={e.id}>
                           <td style={{ fontWeight: 600, color: '#e8e0d0' }}>{e.items?.name}</td>
                           <td><span className="badge badge-yellow">{e.items?.categories?.name || '—'}</span></td>
@@ -204,26 +241,30 @@ export default function OutstandingPayables() {
                             NPR {parseFloat(e.rate).toLocaleString()}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 600, color: '#c9a84c' }}>{fmt(e.value)}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: e.aging.color }}>{e.daysOld}</td>
-                          <td>
-                            <span style={{
-                              fontSize: 11, fontWeight: 700, color: e.aging.color,
-                              background: `${e.aging.color}18`, border: `1px solid ${e.aging.color}40`,
-                              borderRadius: 4, padding: '2px 8px', whiteSpace: 'nowrap'
-                            }}>
-                              {e.aging.label}
-                            </span>
-                          </td>
-                          <td>
-                            <button
-                              className="btn btn-ghost"
-                              style={{ fontSize: 11, padding: '4px 10px', color: '#34d399', borderColor: 'rgba(52,211,153,0.3)' }}
-                              disabled={markingPaid === e.id}
-                              onClick={() => markPaid(e.id)}
-                            >
-                              {markingPaid === e.id ? '…' : '✓ Mark Paid'}
-                            </button>
-                          </td>
+                          {activeTab === 'outstanding' ? (<>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: e.aging.color }}>{e.daysOld}</td>
+                            <td>
+                              <span style={{
+                                fontSize: 11, fontWeight: 700, color: e.aging.color,
+                                background: `${e.aging.color}18`, border: `1px solid ${e.aging.color}40`,
+                                borderRadius: 4, padding: '2px 8px', whiteSpace: 'nowrap'
+                              }}>
+                                {e.aging.label}
+                              </span>
+                            </td>
+                            <td>
+                              <button
+                                className="btn btn-ghost"
+                                style={{ fontSize: 11, padding: '4px 10px', color: '#34d399', borderColor: 'rgba(52,211,153,0.3)' }}
+                                disabled={markingPaid === e.id}
+                                onClick={() => markPaid(e.id)}
+                              >
+                                {markingPaid === e.id ? '…' : '✓ Mark Paid'}
+                              </button>
+                            </td>
+                          </>) : (
+                            <td style={{ color: '#34d399', fontWeight: 600, fontSize: 13 }}>{e.paid_at}</td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
