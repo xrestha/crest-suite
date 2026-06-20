@@ -101,6 +101,45 @@ Starter: 3-month free trial. Prices listed with bargaining headroom (~35–40%).
 
 ## Session Log
 
+### S91 — 2026-06-20 — Purchases: Bill-Form Redesign, VAT Fix, Daily Register + Items Filter
+
+**VAT formula corrections:**
+- `VatReport.js`: stored rates are ex-VAT bases (NetRate on vendor bill), not VAT-inclusive. Fixed all formulas from `total ÷ 1.13` to `base × 0.13`. Columns reordered to Base (ex-VAT) → VAT (13%) → Total (incl. VAT). Stat cards now show Grand Total = what was actually paid. Excel export updated to match.
+- `Purchases.js` group header: VAT hint was using `× 13/113` (extractive) — reverted to `× 0.13` (additive) matching vendor bill's "Tax Collected" figure.
+
+**Purchase form redesigned to match vendor bill layout:**
+- Rate field now takes **ex-VAT NetRate** (as printed on bill), not VAT-inclusive price. Removed `/1.13` division from `saveBill()` and rate-update check.
+- Added **Amount column** (qty × rate for non-VAT; qty × rate × 1.13 for VAT items — what you actually pay).
+- VAT hint changed from `ex-VAT: X` → `+VAT: X → total Y per unit`.
+- Expiry date + shelf life moved as compact inline fields below the item dropdown, with `Expiry` / `Shelf life` labels.
+- Footer redesigned to 3-line bill breakdown: **Subtotal (ex-VAT) / VAT (13%) / Grand Total** matching the vendor's bill totals exactly.
+
+**Bill-level discount added:**
+- New `Discount (NPR)` input in the bill footer — deducted from Grand Total.
+- Stored as `discount_amount` column on every row in the group (denormalized like `purchase_group_id`).
+- Grouped bill view shows net Grand Total with red `−Disc: X` line below.
+- Edit flow loads discount from DB.
+
+**SQL required:**
+```sql
+ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2) DEFAULT 0;
+```
+
+**Daily Purchase Register tab added to Purchases page:**
+- New "Daily Register" tab — matrix view: rows = items (grouped by category), columns = days of the month.
+- Purchased days highlighted in amber with base-unit qty; empty days show `·`.
+- Columns: S.No | Item Name | UOM | Day 1 … Day N (P.Qty / Rate / Per UOM / Opening removed per user request).
+- Export Excel downloads full register as `.xlsx`.
+- Opening stock fetched from `stock_counts` on tab switch (kept in state, used for Excel export).
+
+**Items page — "With Conversion" filter:**
+- Toggle button next to the search box; when active (teal) floats all items with `purchase_unit + conversion_factor > 1` to the top of the list.
+
+**Files:** `src/pages/Purchases.js`, `src/pages/VatReport.js`, `src/pages/Items.js`  
+**Commits:** `46af719`, `c9dd99f`, `7ed98e5`, `29a4f09`, `5739ea6`, `6775a17`, `cc16965`, `c5d8b1b`
+
+---
+
 ### S90 — 2026-06-20 — Purchases: Grouped Bill View + Cross-Page Bug Fixes
 
 **Purchases page reworked from per-item rows to per-bill groups:**
