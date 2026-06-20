@@ -37,6 +37,7 @@ export default function Items() {
   const [error, setError] = useState('')
   const [filterCat, setFilterCat] = useState('all')
   const [search, setSearch] = useState('')
+  const [sortConvFirst, setSortConvFirst] = useState(false)
   const [initingCats, setInitingCats] = useState(false)
   const [usageMap, setUsageMap] = useState({})
 
@@ -237,6 +238,11 @@ export default function Items() {
     const s = search.toLowerCase()
     const matchSearch = item.name.toLowerCase().includes(s) || (item.item_code || '').toLowerCase().includes(s)
     return matchCat && matchSearch
+  }).sort((a, b) => {
+    if (!sortConvFirst) return 0
+    const aHas = !!(a.purchase_unit && a.conversion_factor > 1)
+    const bHas = !!(b.purchase_unit && b.conversion_factor > 1)
+    return bHas - aHas
   })
 
   const tabStyle = (tab) => ({
@@ -470,8 +476,8 @@ export default function Items() {
         </div>
       )}
 
-      {/* Search */}
-      <div style={{ marginBottom: 16 }}>
+      {/* Search + filters */}
+      <div style={{ marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <input
           style={{
             background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 6,
@@ -481,6 +487,18 @@ export default function Items() {
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
+        <button
+          onClick={() => setSortConvFirst(v => !v)}
+          style={{
+            fontSize: 12, padding: '7px 14px', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+            border: sortConvFirst ? '1px solid rgba(20,184,166,0.5)' : '1px solid #2a2f3d',
+            background: sortConvFirst ? 'rgba(20,184,166,0.1)' : 'transparent',
+            color: sortConvFirst ? '#2dd4bf' : '#6b7280',
+            fontWeight: sortConvFirst ? 600 : 400
+          }}
+        >
+          {sortConvFirst ? '✕ ' : ''}With Conversion
+        </button>
       </div>
 
       {/* Category tabs */}
