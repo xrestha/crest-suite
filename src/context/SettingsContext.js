@@ -120,9 +120,11 @@ export function SettingsProvider({ children }) {
       .maybeSingle()
 
     if (existing?.id) {
-      await supabase.from('feature_flags').update({ ...flags, updated_at: new Date().toISOString() }).eq('id', existing.id)
+      const { error } = await supabase.from('feature_flags').update({ ...flags, updated_at: new Date().toISOString() }).eq('id', existing.id)
+      if (error) throw new Error(error.message)
     } else {
-      await supabase.from('feature_flags').insert({ client_id: cid, ...flags })
+      const { error } = await supabase.from('feature_flags').insert({ client_id: cid, ...flags })
+      if (error) throw new Error(error.message)
     }
     if (cid === clientId) await loadFeatureFlags(cid)
   }
