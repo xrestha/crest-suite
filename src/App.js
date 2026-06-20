@@ -62,8 +62,6 @@ export default function App() {
               <Route path="/items"      element={<Items />} />
               <Route path="/vendors"    element={<Vendors />} />
               <Route path="/purchases"  element={<Purchases />} />
-              <Route path="/purchase-orders"
-                element={<PremiumGate featureKey="purchase_orders" minPlan="growth"><PurchaseOrders /></PremiumGate>} />
               <Route path="/stock"      element={<Stock />} />
               <Route path="/help"       element={<Help />} />
 
@@ -104,6 +102,8 @@ export default function App() {
                 element={<PremiumGate featureKey="recipe_margin" minPlan="growth"><RecipeMargin /></PremiumGate>} />
               <Route path="/best-sellers"
                 element={<PremiumGate featureKey="best_sellers" minPlan="growth"><BestSellers /></PremiumGate>} />
+              <Route path="/purchase-orders"
+                element={<PremiumGate featureKey="purchase_orders" minPlan="growth"><PurchaseOrders /></PremiumGate>} />
 
               {/* Pro plan — advanced analytics */}
               <Route path="/period-comparison"

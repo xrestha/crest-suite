@@ -28,7 +28,7 @@ const DEFAULT_FLAGS = {
   dead_stock: null, recipe_margin: null, period_comparison: null,
   theoretical_variance: null, annual_summary: null,
   outstanding_payables: null, shrinkage_report: null,
-  staff_meals: null,
+  staff_meals: null, settings: null,
 }
 
 const FEATURE_GROUPS = [
@@ -49,6 +49,7 @@ const FEATURE_GROUPS = [
     { key: 'vat_report',      label: 'VAT Report' },
     { key: 'non_vat_report',  label: 'Non-VAT Report' },
     { key: 'wastage_report',  label: 'Wastage Report' },
+    { key: 'settings',        label: 'Settings' },
   ]},
   { tier: 'growth',  label: 'Growth Plan',      color: '#34d399', features: [
     { key: 'recipe_costing',       label: 'Recipe Costing' },
