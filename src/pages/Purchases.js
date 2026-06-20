@@ -33,7 +33,8 @@ export default function Purchases() {
   const [filterDay, setFilterDay]           = useState('all')
   const [filterItem, setFilterItem]         = useState('all')
   const [editingGroupId, setEditingGroupId] = useState(null)
-  const [rateUpdatePrompt, setRateUpdatePrompt] = useState(null)
+  const [rateUpdateItems, setRateUpdateItems]       = useState([])
+  const [rateUpdateSelected, setRateUpdateSelected] = useState(new Set())
   // Bill (multi-row add) state
   const [billHeader, setBillHeader]         = useState(EMPTY_HEADER)
   const [billLines, setBillLines]           = useState([newLine()])
@@ -220,23 +221,30 @@ export default function Purchases() {
     setEditingGroupId(null)
     loadPurchases(selectedPeriod.id)
 
-    // Rate update check — show prompt for first item with a changed rate
+    // Rate update check — collect ALL items whose entered rate differs from Item Master
+    const changed = []
     for (const l of valid) {
       const capturedRate = parseFloat(l.rate)
       const { data: fi } = await supabase.from('items').select('id, name, rate, purchase_qty').eq('id', l.item_id).single()
       if (fi && capturedRate !== parseFloat(fi.rate)) {
-        setRateUpdatePrompt({ itemId: fi.id, itemName: fi.name, oldRate: parseFloat(fi.rate), newRate: capturedRate, purchaseQty: parseFloat(fi.purchase_qty) })
-        break
+        changed.push({ itemId: fi.id, itemName: fi.name, oldRate: parseFloat(fi.rate), newRate: capturedRate, purchaseQty: parseFloat(fi.purchase_qty) })
       }
+    }
+    if (changed.length > 0) {
+      setRateUpdateItems(changed)
+      setRateUpdateSelected(new Set(changed.map(i => i.itemId)))
     }
   }
 
-  async function applyRateUpdate() {
-    if (!rateUpdatePrompt) return
-    const { itemId, newRate } = rateUpdatePrompt
-    const { error } = await supabase.from('items').update({ rate: newRate }).eq('id', itemId)
-    if (!error) setItems(prev => prev.map(i => i.id === itemId ? { ...i, rate: newRate } : i))
-    setRateUpdatePrompt(null)
+  async function applyRateUpdates() {
+    const toUpdate = rateUpdateItems.filter(i => rateUpdateSelected.has(i.itemId))
+    await Promise.all(toUpdate.map(i => supabase.from('items').update({ rate: i.newRate }).eq('id', i.itemId)))
+    setItems(prev => prev.map(i => {
+      const upd = toUpdate.find(r => r.itemId === i.id)
+      return upd ? { ...i, rate: upd.newRate } : i
+    }))
+    setRateUpdateItems([])
+    setRateUpdateSelected(new Set())
   }
 
   async function deleteGroup(groupId) {
@@ -376,24 +384,55 @@ export default function Purchases() {
   return (
     <div>
 
-      {/* Rate update toast */}
-      {rateUpdatePrompt && (
-        <div style={{ position: 'fixed', bottom: 28, right: 28, zIndex: 1000, background: '#181c27', border: '1px solid rgba(201,168,76,0.45)', borderRadius: 10, padding: '16px 20px', maxWidth: 360, boxShadow: '0 8px 32px rgba(0,0,0,0.55)' }}>
-          <div style={{ fontSize: 13, color: '#e8e0d0', marginBottom: 4, fontWeight: 600 }}>
-            📦 Rate changed — {rateUpdatePrompt.itemName}
-          </div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14 }}>
-            Item master: <span style={{ color: '#f87171', fontWeight: 600 }}>NPR {rateUpdatePrompt.oldRate.toLocaleString()}</span>
-            {' → '}
-            <span style={{ color: '#34d399', fontWeight: 600 }}>NPR {rateUpdatePrompt.newRate.toLocaleString()}</span>
-            <br />
-            <span style={{ color: '#6b7280' }}>New per-unit rate: NPR {(rateUpdatePrompt.newRate / rateUpdatePrompt.purchaseQty).toFixed(4)}</span>
-            <br />
-            <span style={{ color: '#6b7280', fontSize: 11, marginTop: 2, display: 'block' }}>This will update the Item Master and affect recipe costing.</span>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" style={{ fontSize: 12, padding: '6px 14px' }} onClick={applyRateUpdate}>Yes, update item master</button>
-            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 14px' }} onClick={() => setRateUpdatePrompt(null)}>No, keep old rate</button>
+      {/* Rate update modal */}
+      {rateUpdateItems.length > 0 && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#181c27', border: '1px solid rgba(201,168,76,0.3)', borderRadius: 12, padding: '24px 28px', maxWidth: 520, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#e8e0d0', marginBottom: 4 }}>📦 Rate changes detected</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>Select items to update in the Item Master. This affects recipe costing going forward.</div>
+
+            {/* Select all */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#9ca3af', marginBottom: 10, cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox"
+                checked={rateUpdateSelected.size === rateUpdateItems.length}
+                onChange={e => setRateUpdateSelected(e.target.checked ? new Set(rateUpdateItems.map(i => i.itemId)) : new Set())} />
+              Select all ({rateUpdateItems.length} item{rateUpdateItems.length !== 1 ? 's' : ''})
+            </label>
+
+            {/* Item rows */}
+            <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
+              {rateUpdateItems.map(item => (
+                <label key={item.itemId} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#0f1117', borderRadius: 7, padding: '10px 12px', cursor: 'pointer', userSelect: 'none' }}>
+                  <input type="checkbox"
+                    checked={rateUpdateSelected.has(item.itemId)}
+                    onChange={e => {
+                      const next = new Set(rateUpdateSelected)
+                      e.target.checked ? next.add(item.itemId) : next.delete(item.itemId)
+                      setRateUpdateSelected(next)
+                    }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#e8e0d0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.itemName}</div>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>per-unit → NPR {(item.newRate / item.purchaseQty).toFixed(4)}</div>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0, fontSize: 13 }}>
+                    <span style={{ color: '#f87171', fontWeight: 600 }}>NPR {item.oldRate.toLocaleString()}</span>
+                    <span style={{ color: '#6b7280' }}> → </span>
+                    <span style={{ color: '#34d399', fontWeight: 600 }}>NPR {item.newRate.toLocaleString()}</span>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-primary" style={{ fontSize: 12, padding: '7px 16px' }}
+                onClick={applyRateUpdates} disabled={rateUpdateSelected.size === 0}>
+                Update {rateUpdateSelected.size} item{rateUpdateSelected.size !== 1 ? 's' : ''}
+              </button>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '7px 16px' }}
+                onClick={() => { setRateUpdateItems([]); setRateUpdateSelected(new Set()) }}>
+                Skip all
+              </button>
+            </div>
           </div>
         </div>
       )}
