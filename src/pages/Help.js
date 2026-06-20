@@ -145,45 +145,119 @@ export default function Help() {
       {/* GETTING STARTED */}
       {activeSection === 'guide' && (
         <div>
+
+          {/* Welcome */}
+          <div className="card" style={{ marginBottom: 16, background: 'rgba(201,168,76,0.03)', borderColor: 'rgba(201,168,76,0.2)' }}>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⬡</span>
+              <div>
+                <h3 style={{ margin: '0 0 8px', fontSize: 15, color: '#e8e0d0' }}>Welcome to Crest Inventory</h3>
+                <p style={{ margin: '0 0 8px', fontSize: 13, color: '#6b7280', lineHeight: 1.75 }}>
+                  Crest tracks your ingredient purchases, stock levels, and food cost in real time. The core idea is simple:
+                </p>
+                <div style={{ background: '#0f1117', border: '1px solid #2a2f3d', borderRadius: 6, padding: '10px 16px', display: 'inline-block', marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: '#c9a84c', fontWeight: 600 }}>Opening Stock + Purchases − Wastage − Closing Stock = COGS (what you actually used)</span>
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: '#6b7280', lineHeight: 1.75 }}>
+                  Follow the steps below to get set up. First-time setup takes about 30–60 minutes. After that, the monthly routine takes 15–20 minutes of admin at month end.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* First-Time Setup */}
           <div className="card" style={{ marginBottom: 16 }}>
-            <h3 style={{ margin: '0 0 20px', fontSize: 15, color: '#e8e0d0' }}>First-Time Setup — Do This Once</h3>
+            <h3 style={{ margin: '0 0 6px', fontSize: 15, color: '#e8e0d0' }}>First-Time Setup</h3>
+            <p style={{ margin: '0 0 20px', fontSize: 12, color: '#6b7280' }}>Do this once when you first log in. Takes 30–60 minutes.</p>
             {[
-              { step: 1, title: 'Create your Item Master', desc: 'Go to Item Master → load default categories → add all your ingredients with UOM, purchase qty, and rate.' },
-              { step: 2, title: 'Add your Vendors', desc: 'Go to Vendors → add all your suppliers. You need at least one vendor before entering purchases.' },
-              { step: 3, title: 'Build your Recipes', desc: 'Go to Recipe Costing → create each menu item with its ingredients and selling price.' },
-            ].map(s => (
-              <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid #2a2f3d' }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(201,168,76,0.15)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#c9a84c', flexShrink: 0 }}>{s.step}</div>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: '#e8e0d0', marginBottom: 4 }}>{s.title}</div>
-                  <div style={{ fontSize: 13, color: '#6b7280' }}>{s.desc}</div>
+              {
+                step: 1, title: 'Add your Ingredients', route: 'Item Master',
+                desc: 'Go to Item Master → add every ingredient you buy. Each item needs a name, category, unit of measure (UOM), pack size, and rate per pack.',
+                why: 'Every purchase and stock count is linked to items here. You cannot enter purchases without items.',
+              },
+              {
+                step: 2, title: 'Add your Vendors', route: 'Vendors',
+                desc: 'Go to Vendors → add all your suppliers.',
+                why: 'Every purchase must be linked to a vendor. Add at least one before entering any purchase.',
+              },
+              {
+                step: 3, title: 'Create your first Period', route: 'Periods',
+                desc: 'Go to Periods → New Period → select the current BS year and month → Create.',
+                why: 'All purchases, stock, and sales live inside a period. Nothing can be entered without an open period.',
+              },
+              {
+                step: 4, title: 'Enter Opening Stock', route: 'Stock Count',
+                desc: 'Go to Stock Count → Opening Stock tab → enter the quantity of each ingredient you have right now.',
+                why: 'COGS calculation starts from opening stock. Skip this and your food cost % will be wrong for the first month.',
+              },
+              {
+                step: 5, title: 'Build your Recipes', route: 'Recipe Costing', plan: 'Growth+',
+                desc: 'Go to Recipe Costing → New Recipe → add each menu item with its ingredients and selling price.',
+                why: 'Required for the Variance Report and food cost % per dish. Skip this step if you are on the Starter plan.',
+              },
+            ].map((s, i, arr) => (
+              <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 16, paddingBottom: 16, borderBottom: i < arr.length - 1 ? '1px solid #2a2f3d' : 'none' }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#c9a84c', flexShrink: 0 }}>{s.step}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: '#e8e0d0' }}>{s.title}</span>
+                    {s.plan && <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(129,140,248,0.1)', border: '1px solid rgba(129,140,248,0.2)', padding: '1px 7px', borderRadius: 8 }}>{s.plan}</span>}
+                  </div>
+                  <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 6 }}>{s.desc}</div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                    <span style={{ color: '#c9a84c', fontSize: 11, marginTop: 1, flexShrink: 0 }}>Why:</span>
+                    <span style={{ fontSize: 12, color: '#6b7280' }}>{s.why}</span>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="card">
-            <h3 style={{ margin: '0 0 20px', fontSize: 15, color: '#e8e0d0' }}>Every Month — Do This Each Period</h3>
+          {/* Monthly Workflow */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: 15, color: '#e8e0d0' }}>Monthly Workflow</h3>
+            <p style={{ margin: '0 0 20px', fontSize: 12, color: '#6b7280' }}>Repeat this every BS month. Steps 1–4 are ongoing during the month; steps 5–9 happen at month end.</p>
             {[
-              { step: 1, title: 'Create a new Period', desc: 'Go to Periods → New Period → select BS year and month → Create.' },
-              { step: 2, title: 'Enter Opening Stock', desc: 'Go to Stock Count → Opening Stock tab → enter qty for each item on day 1.' },
-              { step: 3, title: 'Record Purchases daily', desc: 'Go to Purchases → Add Purchase → enter each purchase as it happens with vendor, qty, rate, and payment method.' },
-              { step: 4, title: 'Record Wastage as it happens', desc: 'Go to Stock Count → Wastage tab → enter spoilage as it occurs.' },
-              { step: 5, title: 'Enter Sales (daily or bulk)', desc: 'Go to Sales Entry → enter qty sold per menu item per day, or use Bulk Entry for period totals.' },
-              { step: 6, title: 'Physical Stock Count at month end', desc: 'Print the Stock Count Sheet → physically count all items → enter counts in Stock Count → Closing Stock tab.' },
-              { step: 7, title: 'Run Monthly Summary', desc: 'Review food cost %, COGS, and category breakdown. Export to Excel if needed.' },
-              { step: 8, title: 'Review Variance Report', desc: 'Identify items with high variance — investigate theft, wastage, or portioning issues.' },
-              { step: 9, title: 'Close the Period', desc: 'Go to Periods → Close the period to lock data. Opening stock for next month carries over.' },
-            ].map(s => (
-              <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 14, paddingBottom: 14, borderBottom: s.step < 9 ? '1px solid #2a2f3d' : 'none' }}>
-                <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#0f1117', border: '1px solid #2a2f3d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: '#c9a84c', flexShrink: 0 }}>{s.step}</div>
+              { step: 1, title: 'Open a new Period',            desc: 'Periods → New Period → select BS month → Create. Do this on day 1 of the month.' },
+              { step: 2, title: 'Enter Opening Stock',           desc: 'Stock Count → Opening Stock tab → enter qty for each item. For month 2 onward, this auto-carries from last month\'s closing.' },
+              { step: 3, title: 'Record Purchases as they arrive', desc: 'Purchases → Add Purchase → enter vendor, item, qty, rate, payment method. Enter each bill on the day it arrives.' },
+              { step: 4, title: 'Record Wastage as it happens',  desc: 'Stock Count → Wastage tab → log any spoilage or discards on the day.' },
+              { step: 5, title: 'Enter Sales', plan: 'Growth+',  desc: 'Sales Entry → enter qty sold per menu item. Use Bulk Entry if you have a POS or month-end tally.' },
+              { step: 6, title: 'Physical Stock Count',           desc: 'On the last day: print the Stock Count Sheet (Stock → Print Sheet), do a physical walk of your storeroom, enter counts in Stock Count → Closing Stock.' },
+              { step: 7, title: 'Review Monthly Summary',        desc: 'Monthly Summary → check food cost %, COGS per category, and revenue. Export to Excel for management.' },
+              { step: 8, title: 'Review Variance Report', plan: 'Growth+', desc: 'Variance → sort by NPR value → investigate any item with >10% variance. High variance = waste, theft, or over-portioning.' },
+              { step: 9, title: 'Close the Period',              desc: 'Periods → Close → confirm. Locks all data. Closing stock automatically becomes opening stock for next month.' },
+            ].map((s, i, arr) => (
+              <div key={s.step} style={{ display: 'flex', gap: 14, marginBottom: 12, paddingBottom: 12, borderBottom: i < arr.length - 1 ? '1px solid #1e2330' : 'none' }}>
+                <div style={{ width: 26, height: 26, borderRadius: '50%', background: '#0f1117', border: '1px solid #2a2f3d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#c9a84c', flexShrink: 0 }}>{s.step}</div>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#e8e0d0', marginBottom: 3 }}>{s.title}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#e8e0d0' }}>{s.title}</span>
+                    {s.plan && <span style={{ fontSize: 10, fontWeight: 700, color: '#818cf8', background: 'rgba(129,140,248,0.1)', border: '1px solid rgba(129,140,248,0.2)', padding: '1px 7px', borderRadius: 8 }}>{s.plan}</span>}
+                  </div>
                   <div style={{ fontSize: 12, color: '#6b7280' }}>{s.desc}</div>
                 </div>
               </div>
             ))}
           </div>
+
+          {/* Common Mistakes */}
+          <div className="card" style={{ borderColor: 'rgba(248,113,113,0.15)' }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 15, color: '#e8e0d0' }}>Common Mistakes to Avoid</h3>
+            {[
+              { icon: '✕', text: 'Closing a period before entering closing stock — your COGS will be inflated with no closing offset.' },
+              { icon: '✕', text: 'Skipping opening stock in month 1 — your food cost % will be artificially high.' },
+              { icon: '✕', text: 'Entering all purchases at month end from memory — enter them daily from the actual invoice for an accurate rate and vendor record.' },
+              { icon: '✕', text: 'Ignoring the Variance Report — if you don\'t check it, waste and over-portioning go undetected for months.' },
+              { icon: '✕', text: 'Using estimated closing stock — always do a physical count. Estimated numbers make every report inaccurate.' },
+            ].map((m, i) => (
+              <div key={i} style={{ display: 'flex', gap: 10, marginBottom: i < 4 ? 10 : 0 }}>
+                <span style={{ color: '#f87171', fontSize: 12, flexShrink: 0, marginTop: 1 }}>{m.icon}</span>
+                <span style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>{m.text}</span>
+              </div>
+            ))}
+          </div>
+
         </div>
       )}
 
