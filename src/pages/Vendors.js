@@ -6,7 +6,7 @@ import { supabase } from '../supabaseClient'
 const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '' }
 
 export default function Vendors() {
-  const { clientId } = useAuth()
+  const { clientId, isAdmin } = useAuth()
   const { settings } = useSettings()
   const [vendors, setVendors] = useState([])
   const [loading, setLoading] = useState(true)
@@ -94,6 +94,20 @@ export default function Vendors() {
 
   async function toggleActive(vendor) {
     await supabase.from('vendors').update({ is_active: !vendor.is_active }).eq('id', vendor.id)
+    loadVendors()
+  }
+
+  async function deleteVendor(vendor) {
+    const { count } = await supabase
+      .from('purchase_entries')
+      .select('*', { count: 'exact', head: true })
+      .eq('vendor_id', vendor.id)
+    if (count > 0) {
+      alert(`Cannot delete "${vendor.name}" — it has ${count} purchase entr${count === 1 ? 'y' : 'ies'} linked to it. Deactivate instead.`)
+      return
+    }
+    if (!window.confirm(`Permanently delete "${vendor.name}"? This cannot be undone.`)) return
+    await supabase.from('vendors').delete().eq('id', vendor.id)
     loadVendors()
   }
 
@@ -238,6 +252,12 @@ export default function Vendors() {
                         onClick={() => toggleActive(v)}>
                         {v.is_active ? 'Deactivate' : 'Activate'}
                       </button>
+                      {isAdmin && (
+                        <button className="btn btn-danger" style={{ fontSize: 12, padding: '5px 12px' }}
+                          onClick={() => deleteVendor(v)}>
+                          Delete
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
