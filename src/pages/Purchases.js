@@ -7,7 +7,7 @@ import Tip from '../components/Tip'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
-const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash' }
+const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '' }
 const EMPTY_RETURN = { purchase_entry_id: '', qty: '', notes: '' }
 const PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
 const newLine = () => ({ _key: Date.now() + Math.random(), item_id: '', qty: '', rate: '', expiry_date: '', shelf_life: '', vat_inclusive: false })
@@ -117,7 +117,8 @@ export default function Purchases() {
       vendor_id: first.vendor_id || '',
       bs_day: String(first.bs_day),
       invoice_ref: first.invoice_ref || '',
-      payment_method: first.payment_method || 'Cash'
+      payment_method: first.payment_method || 'Cash',
+      discount: first.discount_amount ? String(first.discount_amount) : ''
     })
     setBillLines(groupEntries.map(e => {
       const item = items.find(i => i.id === e.item_id)
@@ -181,21 +182,23 @@ export default function Purchases() {
 
     setSaving(true); setError('')
 
+    const discountAmt = parseFloat(billHeader.discount) || 0
     const entries = valid.map(l => {
       const item = items.find(i => i.id === l.item_id)
       const cf = getCf(item)
       const exVatRate = parseFloat(l.rate)  // entered rate is always ex-VAT (NetRate on bill)
       return {
-        period_id:      selectedPeriod.id,
-        item_id:        l.item_id,
-        vendor_id:      billHeader.vendor_id || null,
-        bs_day:         parseInt(billHeader.bs_day),
-        qty:            parseFloat(l.qty) * cf,
-        rate:           exVatRate / cf,
-        invoice_ref:    billHeader.invoice_ref.trim() || null,
-        expiry_date:    l.expiry_date || null,
-        payment_method: billHeader.payment_method || 'Cash',
-        vat_inclusive:  l.vat_inclusive || false,
+        period_id:       selectedPeriod.id,
+        item_id:         l.item_id,
+        vendor_id:       billHeader.vendor_id || null,
+        bs_day:          parseInt(billHeader.bs_day),
+        qty:             parseFloat(l.qty) * cf,
+        rate:            exVatRate / cf,
+        invoice_ref:     billHeader.invoice_ref.trim() || null,
+        expiry_date:     l.expiry_date || null,
+        payment_method:  billHeader.payment_method || 'Cash',
+        vat_inclusive:   l.vat_inclusive || false,
+        discount_amount: discountAmt,
       }
     })
 
@@ -606,19 +609,35 @@ export default function Purchases() {
                 {(() => {
                   const subTotal   = billLines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0)
                   const vatTotal   = billLines.filter(l => l.vat_inclusive).reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0) * 0.13, 0)
-                  const grandTotal = subTotal + vatTotal
+                  const grossTotal = subTotal + vatTotal
+                  const discount   = parseFloat(billHeader.discount) || 0
+                  const grandTotal = grossTotal - discount
                   if (subTotal === 0) return null
                   return (
-                    <div style={{ textAlign: 'right', fontSize: 13 }}>
-                      <div style={{ color: '#9ca3af', marginBottom: 2 }}>
+                    <div style={{ textAlign: 'right', fontSize: 13, minWidth: 280 }}>
+                      <div style={{ color: '#9ca3af', marginBottom: 3 }}>
                         Subtotal (ex-VAT): <span style={{ color: '#e8e0d0', fontWeight: 600, marginLeft: 8 }}>NPR {subTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
                       {vatTotal > 0 && (
-                        <div style={{ color: '#9ca3af', marginBottom: 2 }}>
+                        <div style={{ color: '#9ca3af', marginBottom: 3 }}>
                           VAT (13%): <span style={{ color: '#fbbf24', fontWeight: 600, marginLeft: 8 }}>NPR {vatTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                       )}
-                      <div style={{ color: '#c9a84c', fontWeight: 700, fontSize: 14, borderTop: '1px solid #2a2f3d', paddingTop: 4, marginTop: 2 }}>
+                      <div style={{ color: '#9ca3af', marginBottom: 3 }}>
+                        Gross Total: <span style={{ color: '#e8e0d0', fontWeight: 600, marginLeft: 8 }}>NPR {grossTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 6 }}>
+                        <span style={{ color: '#9ca3af', fontSize: 12 }}><Tip text="Promo or trade discount given by the vendor on the total bill. Stored against all items on this bill." width={240}>Discount (NPR):</Tip></span>
+                        <span style={{ color: '#f87171', fontSize: 12 }}>−</span>
+                        <input
+                          type="number" min="0" step="any"
+                          value={billHeader.discount}
+                          onChange={e => setBillHeader(h => ({ ...h, discount: e.target.value }))}
+                          placeholder="0.00"
+                          style={{ background: '#0f1117', border: '1px solid #2a2f3d', borderRadius: 5, padding: '5px 8px', fontSize: 12, color: '#f87171', outline: 'none', width: 90, textAlign: 'right' }}
+                        />
+                      </div>
+                      <div style={{ color: '#c9a84c', fontWeight: 700, fontSize: 14, borderTop: '1px solid #2a2f3d', paddingTop: 6 }}>
                         Grand Total: NPR {grandTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </div>
@@ -682,8 +701,9 @@ export default function Purchases() {
                       return groupIds.flatMap((gid, gIdx) => {
                         const groupEntries = dayGroupsObj[gid]
                         const first = groupEntries[0]
-                        const groupTotal = groupEntries.reduce((s, e) => s + e.qty * e.rate, 0)
-                        const vatAmount  = groupEntries.filter(e => e.vat_inclusive).reduce((s, e) => s + e.qty * e.rate * 0.13, 0)
+                        const groupTotal   = groupEntries.reduce((s, e) => s + e.qty * e.rate, 0)
+                        const vatAmount    = groupEntries.filter(e => e.vat_inclusive).reduce((s, e) => s + e.qty * e.rate * 0.13, 0)
+                        const discountAmt  = parseFloat(first.discount_amount) || 0
                         return [
                           // Group header row
                           <tr key={`gh-${gid}`} style={{ background: 'rgba(201,168,76,0.04)', borderTop: gIdx > 0 ? '2px solid #1a1f2e' : undefined }}>
@@ -706,8 +726,9 @@ export default function Purchases() {
                             </td>
                             <td colSpan={3}></td>
                             <td style={{ textAlign: 'right', fontWeight: 700, color: '#c9a84c', fontSize: 13, verticalAlign: 'middle' }}>
-                              {groupTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {(groupTotal + vatAmount - discountAmt).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               {vatAmount > 0 && <div style={{ fontSize: 10, color: '#fbbf24', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              {discountAmt > 0 && <div style={{ fontSize: 10, color: '#f87171', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                             </td>
                             <td></td>
                             <td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
