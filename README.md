@@ -101,6 +101,36 @@ Starter: 3-month free trial. Prices listed with bargaining headroom (~35–40%).
 
 ## Session Log
 
+### S86 — 2026-06-20 — Sub-Recipe → Item Auto-Sync for Stock Tracking
+
+**Sub-recipes now appear in Stock Count (Opening/Closing/Wastage) automatically.**
+
+When a Sub-Recipe is saved in Recipe Costing, a mirror item is auto-created in the `items` table (`is_sub_recipe = true`) with the SR's name, yield UOM, and cost-per-unit as `per_uom_rate`. On re-save the item updates; on delete the item is soft-deleted. A "Sub-Recipes" category is auto-created in `categories` if it doesn't exist.
+
+SR items are hidden from: Item Master, Purchases, Purchase Orders, Requisitions, Reorder Report, Supplier Price Tracker, Dead Stock, and the Recipe ingredient picker. They appear in: Stock Count, Variance, Theoretical Variance, Wastage Report, Shrinkage Report, Monthly/Annual Summary.
+
+"Kitchen Production" removed from default category list — pre-made purchased items go under Groceries; in-house made items become Sub-Recipes.
+
+**SQL required (run once in Supabase SQL Editor):**
+```sql
+ALTER TABLE items ADD COLUMN IF NOT EXISTS is_sub_recipe boolean DEFAULT false;
+ALTER TABLE recipes ADD COLUMN IF NOT EXISTS linked_item_id uuid REFERENCES items(id);
+```
+
+**Files:** `src/pages/Recipes.js` (save + deleteRecipe), `src/pages/Items.js` (filter SR items + remove Kitchen Production default), `src/pages/Purchases.js`, `src/pages/PurchaseOrders.js`, `src/pages/Requisitions.js`, `src/pages/ReorderReport.js`, `src/pages/SupplierPriceTracker.js`, `src/pages/DeadStock.js`  
+**Commit:** `4618164`
+
+---
+
+### S85 — 2026-06-20 — Login: Show Password Toggle
+
+Added "Show password" checkbox below the password field on the login page. Toggles input type between `password` and `text`. Checkbox uses `accent-color` gold to match the theme.
+
+**Files:** `src/pages/Login.js`, `src/pages/Login.css`  
+**Commit:** `38b5460`
+
+---
+
 ### S84 — 2026-06-20 — IMS Reports: Annual Summary + Outstanding Payables + Shrinkage
 
 **Three new report pages:**
