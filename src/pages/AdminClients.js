@@ -28,6 +28,7 @@ const DEFAULT_FLAGS = {
   dead_stock: null, recipe_margin: null, period_comparison: null,
   theoretical_variance: null, annual_summary: null,
   outstanding_payables: null, shrinkage_report: null,
+  staff_meals: null,
 }
 
 const FEATURE_GROUPS = [
@@ -59,6 +60,7 @@ const FEATURE_GROUPS = [
     { key: 'dead_stock',           label: 'Dead Stock' },
     { key: 'recipe_margin',        label: 'Recipe Margin' },
     { key: 'outstanding_payables', label: 'Outstanding Payables' },
+    { key: 'staff_meals',          label: 'Staff Meals' },
   ]},
   { tier: 'pro',     label: 'Pro Plan',         color: '#c9a84c', features: [
     { key: 'menu_engineering',     label: 'Menu Engineering' },

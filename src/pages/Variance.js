@@ -48,6 +48,7 @@ export default function Variance() {
       { data: purchases },
       { data: returns },
       { data: wastages },
+      { data: staffMealsData },
       { data: sales },
       { data: recipeIngs }
     ] = await Promise.all([
@@ -57,6 +58,7 @@ export default function Variance() {
       supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId),
       supabase.from('vendor_returns').select('item_id, qty').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
       supabase.from('recipe_ingredients').select('recipe_id, item_id, qty_per_portion')
     ])
@@ -71,6 +73,9 @@ export default function Variance() {
 
     const wasteMap = {}
     ;(wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + parseFloat(r.qty) })
+
+    const staffMealMap = {}
+    ;(staffMealsData || []).forEach(r => { staffMealMap[r.item_id] = (staffMealMap[r.item_id] || 0) + parseFloat(r.qty) })
 
     const soldMap = {}
     ;(sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold) })
@@ -90,8 +95,9 @@ export default function Variance() {
       const openQty      = openMap[item.id] || 0
       const netPurchQty  = purchMap[item.id] || 0  // already net of returns
       const closeQty     = closeMap[item.id] || 0
-      const wasteQty     = wasteMap[item.id] || 0
-      const actualUsed   = openQty + netPurchQty - closeQty - wasteQty
+      const wasteQty     = wasteMap[item.id]     || 0
+      const staffMealQty = staffMealMap[item.id] || 0
+      const actualUsed   = openQty + netPurchQty - closeQty - wasteQty - staffMealQty
       const theoreticalUsed = theoreticalMap[item.id] || 0
       const variance     = actualUsed - theoreticalUsed
       const variancePct  = theoreticalUsed > 0 ? (variance / theoreticalUsed) * 100 : null

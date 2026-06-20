@@ -45,6 +45,7 @@ export default function MonthlySummary() {
       { data: purchases },
       { data: returns },
       { data: wastages },
+      { data: staffMealsData },
       { data: salesData },
       { data: recipes }
     ] = await Promise.all([
@@ -55,6 +56,7 @@ export default function MonthlySummary() {
       supabase.from('purchase_entries').select('item_id, qty, rate').eq('period_id', periodId),
       supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
       supabase.from('recipes').select('id, selling_price').eq('client_id', effectiveClientId)
     ])
@@ -62,6 +64,7 @@ export default function MonthlySummary() {
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
     const wasteMap = {}; (wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + parseFloat(r.qty) })
+    const staffMealMap = {}; (staffMealsData || []).forEach(r => { staffMealMap[r.item_id] = (staffMealMap[r.item_id] || 0) + parseFloat(r.qty) })
 
     // Purchase map: item_id -> { qty, value }
     const purchMap = {}
@@ -92,14 +95,14 @@ export default function MonthlySummary() {
       const purchaseVal = catItems.reduce((s, i) => s + (purchMap[i.id]?.value || 0), 0)
       const returnVal   = catItems.reduce((s, i) => s + (retMap[i.id]?.value || 0), 0)
       const netPurchaseVal = purchaseVal - returnVal
-      const wastageVal  = catItems.reduce((s, i) => s + (wasteMap[i.id] || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      const closingVal  = catItems.reduce((s, i) => s + (closeMap[i.id] || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      // PATCHED: COGS = Opening + Net Purchases − Wastage − Closing
-      const cogsVal = openingVal + netPurchaseVal - wastageVal - closingVal
+      const wastageVal    = catItems.reduce((s, i) => s + (wasteMap[i.id]     || 0) * parseFloat(i.per_uom_rate || 0), 0)
+      const staffMealsVal = catItems.reduce((s, i) => s + (staffMealMap[i.id] || 0) * parseFloat(i.per_uom_rate || 0), 0)
+      const closingVal    = catItems.reduce((s, i) => s + (closeMap[i.id]     || 0) * parseFloat(i.per_uom_rate || 0), 0)
+      const cogsVal = openingVal + netPurchaseVal - wastageVal - staffMealsVal - closingVal
 
       return {
         category: cat.name,
-        openingVal, purchaseVal, returnVal, netPurchaseVal, wastageVal, closingVal, cogsVal,
+        openingVal, purchaseVal, returnVal, netPurchaseVal, wastageVal, staffMealsVal, closingVal, cogsVal,
         itemCount: catItems.length
       }
     }).filter(r => r.openingVal > 0 || r.purchaseVal > 0 || r.closingVal > 0)
@@ -109,6 +112,7 @@ export default function MonthlySummary() {
     const totalReturn      = catRows.reduce((s, r) => s + r.returnVal, 0)
     const totalNetPurchase = totalPurchase - totalReturn
     const totalWastage     = catRows.reduce((s, r) => s + r.wastageVal, 0)
+    const totalStaffMeals  = catRows.reduce((s, r) => s + (r.staffMealsVal || 0), 0)
     const totalClosing     = catRows.reduce((s, r) => s + r.closingVal, 0)
     const totalCOGS        = catRows.reduce((s, r) => s + r.cogsVal, 0)
     const fcPct            = totalRevenue > 0 ? (totalCOGS / totalRevenue) * 100 : null
@@ -116,7 +120,7 @@ export default function MonthlySummary() {
 
     setReport({
       catRows, totalOpening, totalPurchase, totalReturn, totalNetPurchase,
-      totalWastage, totalClosing, totalCOGS, totalRevenue, fcPct, purchaseFcPct
+      totalWastage, totalStaffMeals, totalClosing, totalCOGS, totalRevenue, fcPct, purchaseFcPct
     })
   }
 
@@ -195,10 +199,10 @@ export default function MonthlySummary() {
             </div>
             <div>
               <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>
-                <Tip text="Opening Stock + Net Purchases − Wastage − Closing Stock. This is the actual ingredient cost consumed during the period." width={250}>Cost of Goods Used (COGS)</Tip>
+                <Tip text="Opening Stock + Net Purchases − Wastage − Staff Meals − Closing Stock. This is the actual ingredient cost consumed during the period." width={260}>Cost of Goods Used (COGS)</Tip>
               </div>
               <div style={{ fontSize: 22, fontWeight: 700, color: '#c9a84c' }}>{fmt(report.totalCOGS)}</div>
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>Opening + Net Purchases − Wastage − Closing</div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>Opening + Net Purchases − Wastage − Staff Meals − Closing</div>
             </div>
             <div>
               <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>
@@ -240,8 +244,9 @@ export default function MonthlySummary() {
                     <th style={{ textAlign: 'right', color: '#f87171' }}>Returns</th>
                     <th style={{ textAlign: 'right' }}><Tip text="Gross purchases minus returns to vendor. The true amount spent on stock this period." width={220}>Net Purchases</Tip></th>
                     <th style={{ textAlign: 'right' }}>Wastage</th>
+                    <th style={{ textAlign: 'right', color: '#a78bfa' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from COGS separately from wastage." width={240}>Staff Meals</Tip></th>
                     <th style={{ textAlign: 'right' }}>Closing Stock</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Cost of Goods Used: Opening + Net Purchases − Wastage − Closing. Ingredient cost actually consumed." width={240}>COGS</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Cost of Goods Used: Opening + Net Purchases − Wastage − Staff Meals − Closing. Ingredient cost actually consumed." width={250}>COGS</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="This category's COGS as a share of total COGS. Shows which category drives your ingredient spend." width={230}>% of Total COGS</Tip></th>
                   </tr>
                 </thead>
@@ -268,6 +273,9 @@ export default function MonthlySummary() {
                         </td>
                         <td style={{ textAlign: 'right', color: '#f87171' }}>
                           {row.wastageVal > 0 ? fmt(row.wastageVal) : <span style={{ color: '#9ca3af' }}>—</span>}
+                        </td>
+                        <td style={{ textAlign: 'right', color: '#a78bfa' }}>
+                          {(row.staffMealsVal || 0) > 0 ? fmt(row.staffMealsVal) : <span style={{ color: '#9ca3af' }}>—</span>}
                         </td>
                         <td style={{ textAlign: 'right', color: '#34d399' }}>
                           {row.closingVal > 0 ? fmt(row.closingVal) : <span style={{ color: '#9ca3af' }}>—</span>}

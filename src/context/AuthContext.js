@@ -13,7 +13,7 @@ const GROWTH_KEYS = new Set([
   'recipe_costing', 'variance_report',
   'budget_vs_actual', 'best_sellers', 'purchase_orders',
   'dead_stock', 'recipe_margin', 'outstanding_payables',
-  'requisitions',
+  'requisitions', 'staff_meals',
 ])
 // Requires Pro plan
 const PRO_KEYS = new Set([

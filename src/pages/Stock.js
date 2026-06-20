@@ -47,23 +47,29 @@ export default function Stock() {
   }
 
   async function loadStockData(periodId, itemList) {
-    const [{ data: opening }, { data: closing }, { data: wastages }, { data: purch }, { data: rets }] = await Promise.all([
+    const [{ data: opening }, { data: closing }, { data: wastages }, { data: staffMealsData }, { data: purch }, { data: rets }] = await Promise.all([
       supabase.from('opening_stock').select('*').eq('period_id', periodId),
       supabase.from('closing_stock').select('*').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId),
       supabase.from('vendor_returns').select('item_id, qty').eq('period_id', periodId)
     ])
 
     const data = {}
     const items = itemList || []
-    items.forEach(item => { data[item.id] = { opening: '', closing: '', wastage: '' } })
+    items.forEach(item => { data[item.id] = { opening: '', closing: '', wastage: '', staff_meal: '' } })
     ;(opening || []).forEach(r => { if (data[r.item_id]) data[r.item_id].opening = r.qty })
     ;(closing || []).forEach(r => { if (data[r.item_id]) data[r.item_id].closing = r.physical_qty })
 
     const wastageMap = {}
     ;(wastages || []).forEach(r => { wastageMap[r.item_id] = (wastageMap[r.item_id] || 0) + parseFloat(r.qty) })
     Object.keys(wastageMap).forEach(id => { if (data[id]) data[id].wastage = wastageMap[id] })
+
+    const staffMealMap = {}
+    ;(staffMealsData || []).forEach(r => { staffMealMap[r.item_id] = (staffMealMap[r.item_id] || 0) + parseFloat(r.qty) })
+    Object.keys(staffMealMap).forEach(id => { if (data[id]) data[id].staff_meal = staffMealMap[id] })
+
     setStockData(data)
 
     const purchMap = {}
@@ -126,12 +132,18 @@ export default function Stock() {
         await supabase.from('wastages').insert({ period_id: selectedPeriod.id, item_id: itemId, qty })
       }
     }
+    if (fieldKey === 'staff_meal') {
+      await supabase.from('staff_meals').delete().eq('period_id', selectedPeriod.id).eq('item_id', itemId)
+      if (qty > 0) {
+        await supabase.from('staff_meals').insert({ period_id: selectedPeriod.id, item_id: itemId, qty, type: 'staff' })
+      }
+    }
   }
 
   async function saveRow(itemId) {
     setSaving(prev => ({ ...prev, [itemId]: true }))
     const row = stockData[itemId] || {}
-    const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : 'wastage'
+    const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
     const qty = parseFloat(row[fieldKey]) || 0
     await persistValue(itemId, fieldKey, qty)
     setSaving(prev => ({ ...prev, [itemId]: false }))
@@ -147,7 +159,7 @@ export default function Stock() {
   }
 
   async function clearAll() {
-    const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : 'wastage'
+    const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
     const label = TABS.find(t => t.id === activeTab)?.label || 'these'
     const visibleItems = filteredItems()
     if (!window.confirm(`Clear all entered ${label} values for the ${visibleItems.length} item(s) currently shown? This cannot be undone.`)) return
@@ -178,8 +190,9 @@ export default function Stock() {
     const purchased = parseFloat(purchases[itemId]) || 0
     const returned = parseFloat(returns[itemId]) || 0
     const closing = parseFloat(row.closing) || 0
-    const wastage = parseFloat(row.wastage) || 0
-    return opening + purchased - returned - closing - wastage
+    const wastage    = parseFloat(row.wastage)    || 0
+    const staffMeal  = parseFloat(row.staff_meal) || 0
+    return opening + purchased - returned - closing - wastage - staffMeal
   }
 
   // PATCHED: subtract returns from system ref qty
@@ -218,9 +231,10 @@ export default function Stock() {
       const openingVal   = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.opening) || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const closingVal   = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.closing) || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const purchasesVal = catItems.reduce((sum, i) => sum + (parseFloat(purchases[i.id]) || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      const wastageVal   = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.wastage) || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      const cogsVal      = catItems.reduce((sum, i) => sum + getUsed(i.id) * parseFloat(i.per_uom_rate || 0), 0)
-      byCategory[c.name] = { opening: openingVal, closing: closingVal, purchases: purchasesVal, wastage: wastageVal, cogs: cogsVal }
+      const wastageVal    = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.wastage)    || 0) * parseFloat(i.per_uom_rate || 0), 0)
+      const staffMealsVal = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.staff_meal) || 0) * parseFloat(i.per_uom_rate || 0), 0)
+      const cogsVal       = catItems.reduce((sum, i) => sum + getUsed(i.id) * parseFloat(i.per_uom_rate || 0), 0)
+      byCategory[c.name] = { opening: openingVal, closing: closingVal, purchases: purchasesVal, wastage: wastageVal, staffMeals: staffMealsVal, cogs: cogsVal }
     })
     return byCategory
   }
@@ -233,24 +247,27 @@ export default function Stock() {
       const openQty  = parseFloat(row.opening  || 0)
       const purchQty = parseFloat(purchases[item.id] || 0)
       const retQty   = parseFloat(returns[item.id]   || 0)
-      const wastQty  = parseFloat(row.wastage  || 0)
-      const closeQty = parseFloat(row.closing  || 0)
+      const wastQty  = parseFloat(row.wastage    || 0)
+      const staffQty = parseFloat(row.staff_meal || 0)
+      const closeQty = parseFloat(row.closing    || 0)
       const usedQty  = getUsed(item.id)
       return {
-        'Item':           item.name,
-        'Category':       item.categories?.name || '',
-        'UOM':            item.uom,
-        'Opening Qty':    openQty  || '',
-        'Opening Value':  rate > 0 ? Math.round(openQty  * rate) : '',
-        'Purchased Qty':  purchQty || '',
-        'Purchase Value': rate > 0 ? Math.round(purchQty * rate) : '',
-        'Returned Qty':   retQty   || '',
-        'Returns Value':  rate > 0 ? Math.round(retQty   * rate) : '',
-        'Wastage Qty':    wastQty  || '',
-        'Wastage Value':  rate > 0 ? Math.round(wastQty  * rate) : '',
-        'Closing Qty':    closeQty || '',
-        'Closing Value':  rate > 0 ? Math.round(closeQty * rate) : '',
-        'Used Qty':          usedQty  || '',
+        'Item':              item.name,
+        'Category':          item.categories?.name || '',
+        'UOM':               item.uom,
+        'Opening Qty':       openQty   || '',
+        'Opening Value':     rate > 0 ? Math.round(openQty  * rate) : '',
+        'Purchased Qty':     purchQty  || '',
+        'Purchase Value':    rate > 0 ? Math.round(purchQty * rate) : '',
+        'Returned Qty':      retQty    || '',
+        'Returns Value':     rate > 0 ? Math.round(retQty   * rate) : '',
+        'Wastage Qty':       wastQty   || '',
+        'Wastage Value':     rate > 0 ? Math.round(wastQty  * rate) : '',
+        'Staff Meals Qty':   staffQty  || '',
+        'Staff Meals Value': rate > 0 ? Math.round(staffQty * rate) : '',
+        'Closing Qty':       closeQty  || '',
+        'Closing Value':     rate > 0 ? Math.round(closeQty * rate) : '',
+        'Used Qty':          usedQty   || '',
         'COGS (NPR)':        rate > 0 ? Math.round(usedQty  * rate) : '',
         'Requisitioned Qty': requisitioned[item.id] || '',
       }
@@ -264,11 +281,12 @@ export default function Stock() {
   const visible = filteredItems()
 
   const TABS = [
-    { id: 'opening', label: 'Opening Stock', desc: 'Stock at start of month' },
-    { id: 'closing', label: 'Closing Stock', desc: 'Physical count at month end' },
-    { id: 'wastage', label: 'Wastage', desc: 'Spoilage & waste recorded' },
-    { id: 'summary', label: 'Summary', desc: 'Full picture per item' },
-    { id: 'print', label: 'Print Sheet', desc: 'Physical count sheet for the floor' },
+    { id: 'opening',    label: 'Opening Stock', desc: 'Stock at start of month' },
+    { id: 'closing',    label: 'Closing Stock', desc: 'Physical count at month end' },
+    { id: 'wastage',    label: 'Wastage',       desc: 'Spoilage & waste recorded' },
+    { id: 'staff_meal', label: 'Staff Meals',   desc: 'Staff & complimentary consumption — tracked separately from wastage' },
+    { id: 'summary',    label: 'Summary',       desc: 'Full picture per item' },
+    { id: 'print',      label: 'Print Sheet',   desc: 'Physical count sheet for the floor' },
   ]
 
   return (
@@ -315,13 +333,14 @@ export default function Stock() {
         <div>
           {(() => {
               const summary = getSummary()
-              const rows = categories.map(c => summary[c.name] || { opening: 0, purchases: 0, closing: 0, wastage: 0, cogs: 0 })
+              const rows = categories.map(c => summary[c.name] || { opening: 0, purchases: 0, closing: 0, wastage: 0, staffMeals: 0, cogs: 0 })
               const totals = {
-                opening:   rows.reduce((s, r) => s + r.opening,   0),
-                purchases: rows.reduce((s, r) => s + r.purchases, 0),
-                closing:   rows.reduce((s, r) => s + r.closing,   0),
-                wastage:   rows.reduce((s, r) => s + r.wastage,   0),
-                cogs:      rows.reduce((s, r) => s + r.cogs,      0),
+                opening:    rows.reduce((s, r) => s + r.opening,            0),
+                purchases:  rows.reduce((s, r) => s + r.purchases,          0),
+                closing:    rows.reduce((s, r) => s + r.closing,            0),
+                wastage:    rows.reduce((s, r) => s + r.wastage,            0),
+                staffMeals: rows.reduce((s, r) => s + (r.staffMeals || 0), 0),
+                cogs:       rows.reduce((s, r) => s + r.cogs,               0),
               }
               const fmt = v => v.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
               const thStyle = { textAlign: 'right', whiteSpace: 'nowrap' }
@@ -338,12 +357,13 @@ export default function Stock() {
                           <th style={thStyle}>Production / Purchase (NPR)</th>
                           <th style={thStyle}>Closing Stock (NPR)</th>
                           <th style={thStyle}>Wastage (NPR)</th>
+                          <th style={thStyle}>Staff Meals (NPR)</th>
                           <th style={thStyle}>COGS (NPR)</th>
                         </tr>
                       </thead>
                       <tbody>
                         {categories.map((c, idx) => {
-                          const s = summary[c.name] || { opening: 0, purchases: 0, closing: 0, wastage: 0, cogs: 0 }
+                          const s = summary[c.name] || { opening: 0, purchases: 0, closing: 0, wastage: 0, staffMeals: 0, cogs: 0 }
                           return (
                             <tr key={c.id}>
                               <td style={{ textAlign: 'center', color: '#6b7280' }}>{idx + 1}</td>
@@ -352,6 +372,7 @@ export default function Stock() {
                               <td style={tdStyle('#c9a84c')}>{s.purchases > 0 ? fmt(s.purchases) : '—'}</td>
                               <td style={tdStyle('#34d399')}>{s.closing > 0 ? fmt(s.closing) : '—'}</td>
                               <td style={tdStyle('#f87171')}>{s.wastage > 0 ? fmt(s.wastage) : '—'}</td>
+                              <td style={tdStyle('#a78bfa')}>{(s.staffMeals || 0) > 0 ? fmt(s.staffMeals) : '—'}</td>
                               <td style={{ textAlign: 'right', fontWeight: 600, color: s.cogs < 0 ? '#f87171' : '#e8e0d0', whiteSpace: 'nowrap' }}>{fmt(s.cogs)}</td>
                             </tr>
                           )
@@ -365,6 +386,7 @@ export default function Stock() {
                           <td style={{ textAlign: 'right', fontWeight: 700, color: '#c9a84c', whiteSpace: 'nowrap' }}>{fmt(totals.purchases)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: '#34d399', whiteSpace: 'nowrap' }}>{fmt(totals.closing)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: '#f87171', whiteSpace: 'nowrap' }}>{fmt(totals.wastage)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: '#a78bfa', whiteSpace: 'nowrap' }}>{fmt(totals.staffMeals)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: '#c9a84c', whiteSpace: 'nowrap' }}>{fmt(totals.cogs)}</td>
                         </tr>
                       </tfoot>
@@ -390,12 +412,14 @@ export default function Stock() {
                     <th style={{ textAlign: 'right' }}>Purchased</th>
                     <th style={{ textAlign: 'right', color: '#f87171' }}>Returned</th>
                     <th style={{ textAlign: 'right' }}>Wastage</th>
+                    <th style={{ textAlign: 'right', color: '#a78bfa' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from Used separately from wastage." width={240}>Staff Meals</Tip></th>
                     <th style={{ textAlign: 'right' }}>Closing</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Opening + Purchased − Returned − Wastage − Closing. What was actually consumed this period." width={230}>Used</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Opening + Purchased − Returned − Wastage − Staff Meals − Closing. What was actually consumed this period." width={240}>Used</Tip></th>
                     <th style={{ textAlign: 'right', color: '#a78bfa' }}><Tip text="Total qty issued from the store via requisition slips this period. Should align with Used quantity." width={240}>Requisitioned</Tip></th>
                     <th style={{ textAlign: 'right', color: '#9ca3af', borderLeft: '1px solid #2a2f3d' }}>Open. Value</th>
                     <th style={{ textAlign: 'right', color: '#c9a84c' }}>Purch. Value</th>
                     <th style={{ textAlign: 'right', color: '#f87171' }}>Wastage Value</th>
+                    <th style={{ textAlign: 'right', color: '#a78bfa' }}>Staff Meals Value</th>
                     <th style={{ textAlign: 'right', color: '#34d399' }}>Close Value</th>
                     <th style={{ textAlign: 'right', color: '#c9a84c' }}>COGS (NPR)</th>
                   </tr>
@@ -407,10 +431,11 @@ export default function Stock() {
                     const returned = returns[item.id] || 0
                     const hasData  = row.opening !== '' || row.closing !== '' || purchases[item.id]
                     const rate     = parseFloat(item.per_uom_rate || 0)
-                    const openQty  = parseFloat(row.opening  || 0)
+                    const openQty  = parseFloat(row.opening     || 0)
                     const purchQty = parseFloat(purchases[item.id] || 0)
-                    const wastQty  = parseFloat(row.wastage  || 0)
-                    const closeQty = parseFloat(row.closing  || 0)
+                    const wastQty  = parseFloat(row.wastage     || 0)
+                    const staffQty = parseFloat(row.staff_meal  || 0)
+                    const closeQty = parseFloat(row.closing     || 0)
                     const fmtVal   = (qty) => rate > 0 && qty !== 0
                       ? `NPR ${Math.round(qty * rate).toLocaleString('en-NP')}`
                       : '—'
@@ -423,6 +448,7 @@ export default function Stock() {
                         <td style={{ textAlign: 'right', color: '#c9a84c' }}>{purchases[item.id] ? Number(purchases[item.id]).toLocaleString() : '—'}</td>
                         <td style={{ textAlign: 'right', color: '#f87171' }}>{returned > 0 ? `−${Number(returned).toLocaleString()}` : '—'}</td>
                         <td style={{ textAlign: 'right', color: '#f87171' }}>{row.wastage ? Number(row.wastage).toLocaleString() : '—'}</td>
+                        <td style={{ textAlign: 'right', color: '#a78bfa' }}>{staffQty > 0 ? Number(staffQty).toLocaleString() : '—'}</td>
                         <td style={{ textAlign: 'right', color: '#34d399' }}>{row.closing !== '' ? Number(row.closing).toLocaleString() : '—'}</td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: used < 0 ? '#f87171' : '#e8e0d0' }}>
                           {hasData ? Number(used).toLocaleString() : '—'}
@@ -433,6 +459,7 @@ export default function Stock() {
                         <td style={{ textAlign: 'right', color: '#9ca3af', borderLeft: '1px solid #2a2f3d' }}>{fmtVal(openQty)}</td>
                         <td style={{ textAlign: 'right', color: '#c9a84c' }}>{fmtVal(purchQty)}</td>
                         <td style={{ textAlign: 'right', color: '#f87171' }}>{fmtVal(wastQty)}</td>
+                        <td style={{ textAlign: 'right', color: '#a78bfa' }}>{fmtVal(staffQty)}</td>
                         <td style={{ textAlign: 'right', color: '#34d399' }}>{fmtVal(closeQty)}</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: used < 0 ? '#f87171' : '#c9a84c' }}>
                           {hasData ? fmtVal(used) : '—'}
@@ -559,7 +586,7 @@ export default function Stock() {
                       <th>Category</th>
                       <th style={{ textAlign: 'right' }}>UOM</th>
                       <th style={{ textAlign: 'right', color: '#c9a84c' }}>
-                        {activeTab === 'opening' ? 'Opening Qty' : activeTab === 'closing' ? 'Physical Count' : 'Wastage Qty'}
+                        {activeTab === 'opening' ? 'Opening Qty' : activeTab === 'closing' ? 'Physical Count' : activeTab === 'staff_meal' ? 'Staff Meals Qty' : 'Wastage Qty'}
                       </th>
                       <th style={{ textAlign: 'right' }}>Purchased</th>
                       <th style={{ textAlign: 'right', color: '#f87171' }}>Returned</th>
@@ -572,7 +599,7 @@ export default function Stock() {
                   <tbody>
                     {visible.map(item => {
                       const row = stockData[item.id] || {}
-                      const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : 'wastage'
+                      const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
                       const val = row[fieldKey]
                       const isSaving = saving[item.id]
                       const returned = returns[item.id] || 0
