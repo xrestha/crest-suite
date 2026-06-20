@@ -5,19 +5,19 @@ const AuthContext = createContext({})
 
 // Included on all plans (Starter and above)
 const STARTER_KEYS = new Set([
-  'monthly_summary', 'reorder_report', 'vat_report', 'non_vat_report', 'wastage_report', 'settings',
+  'monthly_summary', 'annual_summary', 'reorder_report', 'vat_report', 'non_vat_report', 'wastage_report', 'settings',
 ])
 // Requires Growth plan or above
 const GROWTH_KEYS = new Set([
   'sales_entry', 'recipe_costing', 'variance_report',
   'payment_summary', 'budget_vs_actual', 'best_sellers', 'purchase_orders',
-  'dead_stock', 'recipe_margin',
+  'dead_stock', 'recipe_margin', 'outstanding_payables',
 ])
 // Requires Pro plan
 const PRO_KEYS = new Set([
   'menu_engineering', 'fifo_report', 'vendor_report',
   'price_tracker', 'overheads', 'theoretical_variance',
-  'period_comparison',
+  'period_comparison', 'shrinkage_report',
 ])
 
 export function AuthProvider({ children }) {

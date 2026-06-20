@@ -25,6 +25,7 @@ const NAV = [
 const REPORTS = [
   // Starter — all plans
   { to: '/summary',              label: 'Monthly Summary',      icon: '◻', featureKey: 'monthly_summary'    },
+  { to: '/annual-summary',       label: 'Annual Summary',       icon: '◫', featureKey: 'annual_summary'     },
   { to: '/reorder',              label: 'Reorder Report',       icon: '↻', featureKey: 'reorder_report'     },
   { to: '/vat-report',           label: 'VAT Report',           icon: '₨', featureKey: 'vat_report'         },
   { to: '/non-vat-report',      label: 'Non-VAT Report',       icon: '₨', featureKey: 'non_vat_report'     },
@@ -36,12 +37,14 @@ const REPORTS = [
   { to: '/best-sellers',         label: 'Best & Worst Sellers', icon: '▲', featureKey: 'best_sellers',      minPlan: 'growth' },
   { to: '/dead-stock',           label: 'Dead Stock',           icon: '⊘', featureKey: 'dead_stock',        minPlan: 'growth' },
   { to: '/recipe-margin',        label: 'Recipe Margin',        icon: '◈', featureKey: 'recipe_margin',     minPlan: 'growth' },
+  { to: '/payables',             label: 'Outstanding Payables', icon: '₨', featureKey: 'outstanding_payables', minPlan: 'growth' },
   // Pro
   { to: '/vendors-report',       label: 'Vendor Report',        icon: '⊙', featureKey: 'vendor_report',        minPlan: 'pro' },
   { to: '/fifo',                 label: 'FIFO / Expiry',        icon: '◷', featureKey: 'fifo_report',          minPlan: 'pro' },
   { to: '/supplier-prices',      label: 'Price Tracker',        icon: '₨', featureKey: 'price_tracker',        minPlan: 'pro' },
   { to: '/theoretical-variance', label: 'Theoretical Variance', icon: '⊿', featureKey: 'theoretical_variance', minPlan: 'pro' },
   { to: '/period-comparison',    label: 'Period Comparison',    icon: '⇄', featureKey: 'period_comparison',    minPlan: 'pro' },
+  { to: '/shrinkage',            label: 'Shrinkage Report',     icon: '⚠', featureKey: 'shrinkage_report',    minPlan: 'pro' },
 ]
 
 export default function Layout() {

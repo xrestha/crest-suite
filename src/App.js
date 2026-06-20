@@ -39,6 +39,9 @@ import WastageReport from './pages/WastageReport'
 import DeadStock from './pages/DeadStock'
 import RecipeMargin from './pages/RecipeMargin'
 import PeriodComparison from './pages/PeriodComparison'
+import AnnualSummary from './pages/AnnualSummary'
+import OutstandingPayables from './pages/OutstandingPayables'
+import ShrinkageReport from './pages/ShrinkageReport'
 import './components/Layout.css'
 
 export default function App() {
@@ -73,6 +76,10 @@ export default function App() {
                 element={<PremiumGate featureKey="variance_report" minPlan="growth"><Variance /></PremiumGate>} />
               <Route path="/summary"
                 element={<PremiumGate featureKey="monthly_summary" minPlan="starter"><MonthlySummary /></PremiumGate>} />
+              <Route path="/annual-summary"
+                element={<PremiumGate featureKey="annual_summary" minPlan="starter"><AnnualSummary /></PremiumGate>} />
+              <Route path="/payables"
+                element={<PremiumGate featureKey="outstanding_payables" minPlan="growth"><OutstandingPayables /></PremiumGate>} />
               <Route path="/payments"
                 element={<PremiumGate featureKey="payment_summary" minPlan="growth"><PaymentReport /></PremiumGate>} />
               <Route path="/reorder"
@@ -89,6 +96,8 @@ export default function App() {
                 element={<PremiumGate featureKey="recipe_margin" minPlan="growth"><RecipeMargin /></PremiumGate>} />
               <Route path="/period-comparison"
                 element={<PremiumGate featureKey="period_comparison" minPlan="pro"><PeriodComparison /></PremiumGate>} />
+              <Route path="/shrinkage"
+                element={<PremiumGate featureKey="shrinkage_report" minPlan="pro"><ShrinkageReport /></PremiumGate>} />
               <Route path="/best-sellers"
                 element={<PremiumGate featureKey="best_sellers" minPlan="growth"><BestSellers /></PremiumGate>} />
               <Route path="/vat-report"

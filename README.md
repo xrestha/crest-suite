@@ -101,6 +101,157 @@ Starter: 3-month free trial. Prices listed with bargaining headroom (~35–40%).
 
 ## Session Log
 
+### S84 — 2026-06-20 — IMS Reports: Annual Summary + Outstanding Payables + Shrinkage
+
+**Three new report pages:**
+
+- **Annual Summary** (`/annual-summary`, Starter+) — Full-year rollup with Calendar Year / Fiscal Year toggle (Nepal FY = Shrawan–Ashadh). Month-by-month table: Revenue, Gross Purchases, Returns, Net Purchases, Wastage, COGS, FC% with pp trend vs prior month. Annual totals footer. Print + Excel export. FC% colour-coded green/amber/red.
+- **Outstanding Payables** (`/payables`, Growth) — Unpaid credit purchases by vendor with aging buckets (Current / 31–60 / 61–90 / 90+ days). Inline "✓ Mark Paid" button sets `paid_at` on the entry and removes it from the list. Setup banner shows the required SQL if `paid_at` column not yet added. Vendor filter + aging filter.
+- **Shrinkage Report** (`/shrinkage`, Pro) — Multi-period unexplained stock loss analysis. Computes variance (actual used − theoretical) across last 3/6/12 closed periods per item. Only items with recipe coverage included. Status badges: Consistent (≥67% of periods flagged), Occasional (2+ periods), Once, Clear. Sorted by total loss value NPR.
+
+**SQL required for Outstanding Payables (run once in Supabase SQL Editor):**
+```sql
+ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
+```
+
+**Files:** `src/pages/AnnualSummary.js` (new), `src/pages/OutstandingPayables.js` (new), `src/pages/ShrinkageReport.js` (new), `src/context/AuthContext.js` (added annual_summary/outstanding_payables/shrinkage_report to plan sets), `src/App.js` (3 routes), `src/components/Layout.js` (3 nav entries)  
+**Commit:** TBD
+
+---
+
+### S83 — 2026-06-20 — Crest Suite Scaffold + IMS Pricing Corrected
+
+**Scaffolded Crest Suite module structure** based on `CREST_SUITE_PROJECT_CONTEXT.md`:
+- `src/modules/{ims,pos,hr}/` — 28 sub-directories with `.gitkeep` files
+- `src/shared/hooks/` — `useClientFeatures.js`, `useBS.js`, `index.js`
+- `src/shared/constants/` — `leaveTypes.js`, `taxSlabs.js` (computeAnnualTDS/Monthly), `ssfRates.js` (computeSSF), `shiftTypes.js`, `index.js`
+- `src/dashboard/OwnerDashboard.js` — placeholder (Suite Growth+)
+- `src/auth/PinEntry.js` — working 4-digit PIN pad component
+- `supabase/migrations/` — directory created
+
+**IMS Pricing corrected** (`src/pages/Pricing.js`): Starter NPR 5,000, Growth NPR 8,000, Pro NPR 12,000/mo. Annual badge corrected from 40% → 25%.
+
+**Files:** 44 new/modified files across scaffold + Pricing.js  
+**Commit:** `8a83d6f`
+
+---
+
+### S81 — 2026-06-20 — Getting Started Guide Expanded
+
+**Rewrote Help → Getting Started tab (`src/pages/Help.js`)**
+- Added welcome card with plain-English intro and the COGS formula highlighted in a callout box.
+- First-Time Setup steps now include a "Why this matters" line per step + Growth+ plan badges on relevant steps.
+- Monthly Workflow steps now note which are ongoing (steps 1–4) vs month-end (steps 5–9).
+- Added "Common Mistakes to Avoid" card (5 red-flagged pitfalls: closing before closing stock, skipping opening stock, batch-entering purchases, ignoring Variance, estimated closing counts).
+
+**Files:** `src/pages/Help.js`  
+**Commit:** `08051ad`
+
+---
+
+### S80 — 2026-06-19 — PWA Icons Updated
+
+**Replaced default CRA icons with Crest gold hexagon logo (`public/`)**
+- `logo192.png`, `logo512.png`, `favicon.ico` all regenerated from `GHC.png` source file.
+- Icons use dark navy (`#0f1117`) background with logo centered at 84% of canvas (8% padding each side — maskable safe zone compliant).
+- Used `sharp` npm package for correct alpha compositing; uninstalled after use.
+- `manifest.json` unchanged — already pointed to correct filenames with `purpose: "any maskable"`.
+
+**Files:** `public/logo192.png`, `public/logo512.png`, `public/favicon.ico`  
+**Commit:** `8c79a30`
+
+---
+
+### S79 — 2026-06-19 — Admin: Clear Audit Logs
+
+**Clear All button on Audit Log page (`src/pages/AuditLog.js`)**
+- Added `clearLogs()` function — builds filters matching the active Client / Area / Time selectors and calls a Supabase RPC to delete matching rows.
+- Direct `DELETE` on `audit_logs` was blocked by RLS → switched to `supabase.rpc('admin_clear_audit_logs', {...})` with a `SECURITY DEFINER` Postgres function that bypasses RLS.
+- "✕ Clear Logs" button appears in page header (red ghost style, next to Refresh) only when logs are visible.
+- Confirm dialog shows entry count and current filter scope before deleting.
+
+**SQL added to Supabase:** `admin_clear_audit_logs(p_client_id, p_table_name, p_cutoff)` — accepts optional filters, deletes matching rows, returns deleted count.
+
+**Files:** `src/pages/AuditLog.js`  
+**Commits:** `4dc4b98`, `2206e7b`
+
+---
+
+### S78 — 2026-06-19 — Table Column Padding Tightened
+
+**Reduced horizontal padding on all data tables (`src/components/Layout.css`)**
+- `table.data-table th` and `td` horizontal padding reduced: `14px → 5px`.
+- Vertical padding unchanged (`11px`) — only column spacing tightened.
+- Applies globally to all tables in the app (Item Master, Purchases, Stock, Vendors, Reports, etc.).
+
+**Files:** `src/components/Layout.css`
+
+---
+
+### S77 — 2026-06-19 — Admin: Clear All Conversions
+
+**Admin-only bulk clear for unit conversions (`src/pages/Items.js`, `src/pages/AdminClients.js`)**
+
+- **Items page** (`src/pages/Items.js`): Added `isAdmin` from `useAuth()`. New `clearAllConversions()` function — counts items with a conversion, shows count in confirm dialog, bulk-updates all affected items: `purchase_unit = null`, `base_unit = null`, `conversion_factor = 1`, `purchase_qty = 1`. Button (red ghost style) appears in page header only when `isAdmin && items.some(i => i.purchase_unit)` — hidden for non-admins and when no conversions exist.
+
+- **AdminClients Danger Zone** (`src/pages/AdminClients.js`): Added `handleClearConversions()` — queries how many items have a conversion first, confirms with count, then bulk-updates. Button added as the first (lightest) action in the Danger Zone button row, before "Clear Client Data" and "Delete Client". Success/error message reuses `deleteMsg` state. Accessible without switching into a client context.
+
+**Files:** `src/pages/Items.js`, `src/pages/AdminClients.js`
+
+---
+
+### S76 — 2026-06-19 — Purchases Multi-Row Bill Entry Form
+
+**Redesigned Add Purchase form — bill-header + line-items (`src/pages/Purchases.js`)**
+- Replaced single-item-at-a-time entry with a two-section bill form matching real-world purchasing workflow.
+- **Header row** (shared across all items on the bill): Vendor · BS Day · Invoice Ref · Payment Method.
+- **Line table** (one row per item): Item dropdown (auto-fills rate from item master) · Qty (shows UOM, converts to base units if CF set) · Rate (shows ex-VAT amount below when VAT ticked, line total in gold) · Expiry Date · Shelf Life in days (auto-calculates expiry from header day; updates all lines when header day changes) · VAT checkbox per line (each item independently taxable) · × remove row.
+- **Bottom bar**: Bill total + VAT amount summary · `+ Add Item` button · `Save N Entries` button (only counts valid lines).
+- Batch inserts all valid lines in one `supabase.from('purchase_entries').insert(entries[])` call.
+- Rate update prompt shown for first item with a changed rate (same logic as before).
+- Edit flow (clicking Edit on an existing entry) unchanged — still uses single-row form.
+- Build confirmed clean before push.
+
+**Files:** `src/pages/Purchases.js`
+
+---
+
+### S75 — 2026-06-19 — PO Admin Delete · Deploy to Vercel
+
+**PO delete restricted to admin only (`src/pages/PurchaseOrders.js`)**
+- Delete button now only visible when `isAdmin = true` — client users see no delete button at all.
+- Admin can delete any PO status (Draft, Sent, Partial, Received, Cancelled), not just drafts.
+- Cleanup order: deletes `purchase_order_items` first (FK constraint), then `purchase_orders`.
+- Non-draft deletions show a warning that linked purchase entries are not affected.
+
+**First production deployment to Vercel**
+- All changes since initial commit (S62–S73) committed and pushed to `xrestha/crest-inventory` on GitHub.
+- Vercel auto-deployed at `https://crest-inventory.vercel.app`.
+- Environment variables set in Vercel dashboard: `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY`, `REACT_APP_SUPABASE_SERVICE_ROLE_KEY` (legacy anon/service_role keys).
+- Future deploys are automatic on every `git push origin master`.
+
+**Files:** `src/pages/PurchaseOrders.js`
+
+---
+
+### S74 — 2026-06-19 — First Production Deployment to Vercel
+
+**App deployed to Vercel — now live at `https://crest-inventory.vercel.app`**
+- Committed all changes since initial commit (S62–S73) in one bundle: 59 files, 18,040 insertions.
+- Pushed to `origin/master` (GitHub: `xrestha/crest-inventory`) — Vercel auto-deployed on push.
+- Environment variables set in Vercel dashboard:
+  - `REACT_APP_SUPABASE_URL` = `https://dkgusgktifwnqmqkkshz.supabase.co`
+  - `REACT_APP_SUPABASE_ANON_KEY` = legacy anon/public key
+  - `REACT_APP_SUPABASE_SERVICE_ROLE_KEY` = legacy service_role key
+- Used **Legacy anon, service_role API keys** tab in Supabase (not the new Publishable/Secret format).
+- Build completed with 2 warnings (non-blocking), login screen confirmed on Vercel preview.
+- **Future deploys are automatic** — every `git push origin master` triggers a new Vercel build (2–3 min).
+- Custom domain deferred — Vercel URL sufficient for now.
+
+**Files:** All source files committed. Excel salary files and `verify_login.png` intentionally excluded from repo.
+
+---
+
 ### S73 — 2026-06-19 — Dashboard Locked KPI Cleanup
 
 **Hide locked KPIs from client dashboard instead of showing blurred lock overlays (`src/pages/Dashboard.js`)**
