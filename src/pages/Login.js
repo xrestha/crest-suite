@@ -7,6 +7,7 @@ import './Login.css'
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { signIn } = useAuth()
@@ -51,12 +52,20 @@ export default function Login() {
           <div className="login-field">
             <label>Password</label>
             <input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="••••••••"
               required
             />
+            <label className="login-show-pw">
+              <input
+                type="checkbox"
+                checked={showPassword}
+                onChange={e => setShowPassword(e.target.checked)}
+              />
+              Show password
+            </label>
           </div>
           {error && <p className="login-error">{error}</p>}
           <button type="submit" className="login-btn" disabled={loading}>
