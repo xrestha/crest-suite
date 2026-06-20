@@ -1029,16 +1029,12 @@ export default function Purchases() {
           const wb = XLSX.utils.book_new()
           const rows = []
           sortedCats.forEach(cat => {
-            rows.push({ 'S.No': '', 'Item Name': cat.toUpperCase(), UOM: '', 'P.Qty': '', Rate: '', 'Per UOM': '', Opening: '' })
+            rows.push({ 'S.No': '', 'Item Name': cat.toUpperCase(), UOM: '' })
             byCategory[cat].forEach((item, idx) => {
               const row = {
                 'S.No': idx + 1,
                 'Item Name': item.name,
                 'UOM': item.uom,
-                'P.Qty': parseFloat(item.purchase_qty || item.conversion_factor || 1),
-                'Rate': parseFloat(item.rate || 0),
-                'Per UOM': parseFloat(item.per_uom_rate || 0),
-                'Opening': registerOpening[item.id] || '',
               }
               days.forEach(d => {
                 const qty = dayMatrix[item.id]?.[d]
@@ -1079,10 +1075,6 @@ export default function Purchases() {
                       <th style={{ ...thStyle, textAlign: 'center', width: 36 }}>S.No</th>
                       <th style={{ ...thStyle, textAlign: 'left', minWidth: 160 }}>Item Name</th>
                       <th style={{ ...thStyle, width: 48 }}>UOM</th>
-                      <th style={{ ...thStyle, width: 60 }}><Tip text="Pack size — how many base units per purchase pack.">P.Qty</Tip></th>
-                      <th style={{ ...thStyle, width: 70 }}>Rate</th>
-                      <th style={{ ...thStyle, width: 70 }}><Tip text="Cost per base unit = Rate ÷ P.Qty.">Per UOM</Tip></th>
-                      <th style={{ ...thStyle, width: 80, color: '#c9a84c' }}><Tip text="Opening stock in base units at the start of this period.">Opening</Tip></th>
                       {days.map(d => (
                         <th key={d} style={{ ...thStyle, width: 52, color: d % 2 === 0 ? '#6b7280' : '#9ca3af' }}>{d}</th>
                       ))}
@@ -1093,24 +1085,16 @@ export default function Purchases() {
                       <>
                         {/* Category header */}
                         <tr key={`cat-${cat}`} style={{ background: 'rgba(201,168,76,0.06)' }}>
-                          <td colSpan={7 + numDays} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 11, color: '#c9a84c', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #2a2f3d' }}>
+                          <td colSpan={3 + numDays} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 11, color: '#c9a84c', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid #2a2f3d' }}>
                             {cat}
                           </td>
                         </tr>
                         {byCategory[cat].map((item, idx) => {
-                          const pQty = parseFloat(item.purchase_qty || item.conversion_factor || 1)
-                          const opening = registerOpening[item.id]
                           return (
                             <tr key={item.id} style={{ background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)' }}>
                               <td style={{ ...tdStyle, textAlign: 'center', color: '#4b5563' }}>{idx + 1}</td>
                               <td style={{ ...tdStyle, textAlign: 'left', color: '#e8e0d0', fontWeight: 500 }}>{item.name}</td>
                               <td style={{ ...tdStyle, color: '#6b7280' }}>{item.uom}</td>
-                              <td style={{ ...tdStyle, color: '#9ca3af' }}>{pQty > 1 ? pQty.toLocaleString('en-NP') : '—'}</td>
-                              <td style={{ ...tdStyle, color: '#9ca3af' }}>{parseFloat(item.rate || 0).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                              <td style={{ ...tdStyle, color: '#6b7280', fontSize: 11 }}>{parseFloat(item.per_uom_rate || 0).toFixed(2)}</td>
-                              <td style={{ ...tdStyle, color: '#c9a84c', fontWeight: 600 }}>
-                                {opening != null && opening > 0 ? opening.toLocaleString('en-NP', { maximumFractionDigits: 2 }) : '—'}
-                              </td>
                               {days.map(d => {
                                 const qty = dayMatrix[item.id]?.[d]
                                 return (
