@@ -8,11 +8,16 @@ const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Co
 
 export default function Settings() {
   const { settings, saveSettings, loadSettings } = useSettings()
-  const { clientId, isAdmin } = useAuth()
+  const { clientId, isAdmin, hasFeature } = useAuth()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
   const ADMIN_TABS = new Set(['Branding', 'Contact', 'Theme', 'Data'])
   const CLIENT_HIDDEN = new Set(['Contact', 'Branding', 'Property', 'Data'])
-  const TABS = ALL_TABS.filter(t => isAdmin ? ADMIN_TABS.has(t) : !CLIENT_HIDDEN.has(t))
+  const TABS = ALL_TABS.filter(t => {
+    if (isAdmin) return ADMIN_TABS.has(t)
+    if (CLIENT_HIDDEN.has(t)) return false
+    if (t === 'Sub-Recipe Codes' && !hasFeature('recipe_costing')) return false
+    return true
+  })
   const [activeTab, setActiveTab] = useState(isAdmin ? 'Branding' : 'Thresholds')
   const [form, setForm] = useState({ ...settings })
   const [saving, setSaving] = useState(false)
