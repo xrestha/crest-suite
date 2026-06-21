@@ -158,8 +158,8 @@ Starter: 1-month free trial. Annual = 25% off monthly.
   - Green syncing banner while flush is in progress
   - Mobile cards: dashed amber border (`mobile-stock-card.pending`) for items with queued offline entries
 
-**Files:** `src/utils/offlineQueue.js` (new), `src/pages/Stock.js`, `src/pages/Stock.css`  
-**Commit:** (this session)
+**Files:** `src/utils/offlineQueue.js` (new), `src/pages/Stock.js`, `src/pages/Stock.css`, `src/pages/Help.js`, `public/manifest.json`  
+**Commits:** `f4b4c6c` (offline), `52f5b02` (start_url → /stock), `50d1ccf` (Help page)
 
 ---
 
