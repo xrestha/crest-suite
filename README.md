@@ -137,6 +137,30 @@ Starter: 1-month free trial. Annual = 25% off monthly.
 
 ---
 
+### S95 — 2026-06-21 — Outstanding Payables Bug Fixes + Vercel Cache Fix
+
+**payable_payments RLS fix:**
+- Initial RLS policy used a two-level subquery (`purchase_entries → monthly_periods → client_id`) which caused 403 permission denied errors on both SELECT and INSERT
+- Fix: added `client_id` column directly to `payable_payments` (same denormalized pattern as `budgets`, `overheads`)
+- Dropped old policy, created new simple `client_id = (SELECT client_id FROM profiles WHERE id = auth.uid())` policy
+- JS updated to pass `client_id: effectiveClientId` on insert
+- Added error handling to `addPayment()` — insert errors now shown inline in red below the payment form
+- **DB migration run ✓** (`ALTER TABLE payable_payments ADD COLUMN client_id` + new RLS policy + re-GRANT)
+
+**Outstanding Payables page-hang on browser refresh fixed:**
+- `useEffect` was watching `[clientId]` — regular client users never have `clientId` set (they use `profile.client_id`), so `effectiveClientId` was always undefined on mount and `load()` never fired
+- Fixed by changing dependency to `[effectiveClientId]`
+
+**Vercel cache fix (`vercel.json` added):**
+- Normal browser refresh was serving stale `index.html` from CDN cache → old JS bundle → old UI (e.g. Add Purchase button in wrong position)
+- Hard refresh (Ctrl+Shift+R) bypassed cache and loaded correct code
+- Fix: `vercel.json` sets `Cache-Control: no-cache, no-store, must-revalidate` on `/index.html` so it is always fetched fresh; content-hashed JS/CSS assets remain long-cached
+
+**Files:** `src/pages/OutstandingPayables.js`, `vercel.json`  
+**Commits:** `a395b71`, `6b47b97`, `730e016`
+
+---
+
 ### S93 — 2026-06-20 — Staff Meals Tracking + Purchase Rate Modal Fix
 
 **Staff Meals tracking (new feature):**
