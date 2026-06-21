@@ -158,8 +158,17 @@ Starter: 1-month free trial. Annual = 25% off monthly.
   - Green syncing banner while flush is in progress
   - Mobile cards: dashed amber border (`mobile-stock-card.pending`) for items with queued offline entries
 
+**Help page updates (same session):**
+- `Mobile App` module added (All Plans, no badge) — PWA install instructions + offline counting flow + banner/badge explanations
+- `Dashboard` module added (All Plans) — was missing entirely
+- `Settings` module added (Starter+) — was missing entirely
+- `Stock Count` guide updated: mentions mobile card layout + tip pointing to Mobile App entry
+- `STARTER_FEATURES` pricing list: added "Mobile app — installable PWA, offline stock counting"
+- Plan reclassification audit: all 31 existing module entries already had correct plan labels; only Dashboard and Settings were missing
+- `manifest.json` `start_url` changed from `/` to `/stock` — installed PWA opens directly to Stock Count
+
 **Files:** `src/utils/offlineQueue.js` (new), `src/pages/Stock.js`, `src/pages/Stock.css`, `src/pages/Help.js`, `public/manifest.json`  
-**Commits:** `f4b4c6c` (offline), `52f5b02` (start_url → /stock), `50d1ccf` (Help page)
+**Commits:** `f4b4c6c` (offline), `52f5b02` (start_url → /stock), `50d1ccf` (Help: Mobile App + Stock Count tips), `0ef016a` (Help: Dashboard + Settings modules)
 
 ---
 
