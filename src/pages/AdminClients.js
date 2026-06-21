@@ -125,6 +125,14 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [savingSettings, setSavingSettings]   = useState(false)
   const [settingsMsg, setSettingsMsg]         = useState('')
 
+  // Modules tab state
+  const [hrEnabled]                  = useState(client.hr_enabled || false)
+  const [hrPlan, setHrPlan]         = useState(client.hr_plan || 'starter')
+  const [savingIms, setSavingIms]   = useState(false)
+  const [imsMsg, setImsMsg]         = useState('')
+  const [savingHr, setSavingHr]     = useState(false)
+  const [hrMsg, setHrMsg]           = useState('')
+
   // Billing tab state
   const [trialEndsAt, setTrialEndsAt] = useState(client.trial_ends_at || '')
   const [settingTrial, setSettingTrial] = useState(false)
@@ -273,6 +281,25 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
     setSavingSettings(false)
   }
 
+  // ── Modules ──
+  async function handleSaveIms() {
+    setSavingIms(true); setImsMsg('')
+    const { error } = await supabase.from('clients').update({ plan: currentPlan }).eq('id', client.id)
+    if (error) { setImsMsg('error:' + error.message) }
+    else { setImsMsg('ok:Saved.'); onClientUpdated() }
+    setSavingIms(false)
+  }
+
+  async function handleSaveHr() {
+    setSavingHr(true); setHrMsg('')
+    const { error } = await supabase.from('clients').update({
+      hr_plan: hrPlan,
+    }).eq('id', client.id)
+    if (error) { setHrMsg('error:' + error.message) }
+    else { setHrMsg('ok:Saved.'); onClientUpdated() }
+    setSavingHr(false)
+  }
+
   // ── Billing ──
   async function handleSetTrial() {
     setSettingTrial(true)
@@ -391,6 +418,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   const tabs = [
     { key: 'users',      label: 'Users' },
+    { key: 'modules',    label: 'Modules' },
     { key: 'billing',    label: 'Billing' },
     { key: 'settings',   label: 'Settings' },
     { key: 'thresholds', label: 'Thresholds' },
@@ -564,6 +592,106 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* ── MODULES TAB ── */}
+          {activeTab === 'modules' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              <p style={{ fontSize: 11, color: '#6b7280', margin: '0 0 16px', lineHeight: 1.6 }}>
+                Enable / disable modules from the client card. Set the plan tier for each enabled module here.
+              </p>
+
+              {/* IMS plan */}
+              <div style={{ padding: '16px 0', borderBottom: '1px solid #2a2f3d' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                  <div style={{ minWidth: 120 }}>
+                    <p style={{ margin: '0 0 2px', fontSize: 13, fontWeight: 700, color: '#e8e0d0' }}>Crest IMS</p>
+                    <p style={{ margin: 0, fontSize: 12, color: '#6b7280' }}>Inventory Management System</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                    {['starter','growth','pro'].map(p => (
+                      <button key={p} onClick={() => setCurrentPlan(p)} style={{
+                        padding: '4px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                        border: currentPlan === p
+                          ? `1px solid ${p === 'pro' ? '#c9a84c' : p === 'growth' ? '#34d399' : '#6b7280'}`
+                          : '1px solid #2a2f3d',
+                        background: currentPlan === p
+                          ? (p === 'pro' ? 'rgba(201,168,76,0.12)' : p === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)')
+                          : 'none',
+                        color: currentPlan === p
+                          ? (p === 'pro' ? '#c9a84c' : p === 'growth' ? '#34d399' : '#9ca3af')
+                          : '#4b5563',
+                      }}>
+                        {p.charAt(0).toUpperCase() + p.slice(1)}
+                      </button>
+                    ))}
+                    <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 12px' }} onClick={handleSaveIms} disabled={savingIms}>
+                      {savingIms ? '…' : imsMsg.startsWith('ok:') ? '✓' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+                {imsMsg && <p style={{ margin: '6px 0 0', fontSize: 11, color: imsMsg.startsWith('ok:') ? '#34d399' : '#f87171' }}>{imsMsg.replace(/^(ok|error):/, '')}</p>}
+              </div>
+
+              {/* HR plan */}
+              <div style={{ padding: '16px 0', borderBottom: '1px solid #2a2f3d' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                  <div style={{ minWidth: 120 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: hrEnabled ? '#e8e0d0' : '#4b5563' }}>Crest HR</p>
+                      {!hrEnabled && <span style={{ fontSize: 10, color: '#374151' }}>not enabled</span>}
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12, color: '#6b7280' }}>Human Resources</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, opacity: hrEnabled ? 1 : 0.35 }}>
+                    {['starter','growth','pro'].map(p => (
+                      <button key={p} onClick={() => hrEnabled && setHrPlan(p)} style={{
+                        padding: '4px 12px', borderRadius: 4, cursor: hrEnabled ? 'pointer' : 'not-allowed', fontSize: 11, fontWeight: 700,
+                        border: hrPlan === p
+                          ? `1px solid ${p === 'pro' ? '#c9a84c' : p === 'growth' ? '#34d399' : '#6b7280'}`
+                          : '1px solid #2a2f3d',
+                        background: hrPlan === p
+                          ? (p === 'pro' ? 'rgba(201,168,76,0.12)' : p === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)')
+                          : 'none',
+                        color: hrPlan === p
+                          ? (p === 'pro' ? '#c9a84c' : p === 'growth' ? '#34d399' : '#9ca3af')
+                          : '#4b5563',
+                      }}>
+                        {p.charAt(0).toUpperCase() + p.slice(1)}
+                      </button>
+                    ))}
+                    <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 12px' }} onClick={handleSaveHr} disabled={savingHr || !hrEnabled}>
+                      {savingHr ? '…' : hrMsg.startsWith('ok:') ? '✓' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+                {hrMsg && <p style={{ margin: '6px 0 0', fontSize: 11, color: hrMsg.startsWith('ok:') ? '#34d399' : '#f87171' }}>{hrMsg.replace(/^(ok|error):/, '')}</p>}
+              </div>
+
+              {/* POS plan */}
+              <div style={{ padding: '16px 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#4b5563' }}>Crest POS</p>
+                      <span style={{ fontSize: 10, color: '#374151', fontStyle: 'italic' }}>coming soon</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12, color: '#6b7280' }}>Point of Sale</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0, opacity: 0.25 }}>
+                    {['starter','growth','pro'].map(p => (
+                      <button key={p} disabled style={{
+                        padding: '4px 12px', borderRadius: 4, cursor: 'not-allowed', fontSize: 11, fontWeight: 700,
+                        border: '1px solid #2a2f3d', background: 'none', color: '#4b5563',
+                      }}>
+                        {p.charAt(0).toUpperCase() + p.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
             </div>
           )}
 
@@ -1105,16 +1233,22 @@ export default function AdminClients() {
   const [activeDrawer, setActiveDrawer] = useState(null)
   const [featureModalClient, setFeatureModalClient] = useState(null)
   const [lastSeenMap, setLastSeenMap] = useState({})
+  const [lastUserMap, setLastUserMap] = useState({})
 
   useEffect(() => { loadClients(); loadLastSeen() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadLastSeen() {
-    const { data } = await supabase.from('profiles').select('client_id, last_seen_at').not('client_id', 'is', null).not('last_seen_at', 'is', null)
-    const map = {}
+    const { data } = await supabase.from('profiles').select('client_id, last_seen_at, full_name').not('client_id', 'is', null).not('last_seen_at', 'is', null)
+    const timeMap = {}
+    const userMap = {}
     for (const row of (data || [])) {
-      if (!map[row.client_id] || row.last_seen_at > map[row.client_id]) map[row.client_id] = row.last_seen_at
+      if (!timeMap[row.client_id] || row.last_seen_at > timeMap[row.client_id]) {
+        timeMap[row.client_id] = row.last_seen_at
+        userMap[row.client_id] = row.full_name
+      }
     }
-    setLastSeenMap(map)
+    setLastSeenMap(timeMap)
+    setLastUserMap(userMap)
   }
 
   async function loadClients() {
@@ -1177,19 +1311,35 @@ export default function AdminClients() {
     loadClients()
   }
 
-  async function changePlan(client, newPlan, e) {
-    e.stopPropagation()
-    const { error } = await supabase.from('clients').update({ plan: newPlan }).eq('id', client.id)
-    if (error) { alert('Update failed: ' + error.message); return }
-    await loadClients()
-    if (activeDrawer?.id === client.id) setActiveDrawer(prev => ({ ...prev, plan: newPlan }))
-  }
-
   async function toggleActive(client, e) {
     e.stopPropagation()
     await supabase.from('clients').update({ is_active: !client.is_active }).eq('id', client.id)
     loadClients()
     if (activeDrawer?.id === client.id) setActiveDrawer(prev => ({ ...prev, is_active: !prev.is_active }))
+  }
+
+  async function toggleImsEnabled(client, e) {
+    e.stopPropagation()
+    if (client.ims_enabled !== false) {
+      const ok = window.confirm(
+        `Disable Crest IMS for "${client.name}"?\n\n` +
+        `The client will immediately lose access to all IMS pages — dashboard, items, purchases, stock, recipes, and reports.\n\n` +
+        `No data is deleted. Re-enabling restores full access instantly.`
+      )
+      if (!ok) return
+    }
+    await supabase.from('clients').update({ ims_enabled: client.ims_enabled !== false ? false : true }).eq('id', client.id)
+    loadClients()
+  }
+
+  async function toggleHrEnabled(client, e) {
+    e.stopPropagation()
+    const newVal = !client.hr_enabled
+    await supabase.from('clients').update({
+      hr_enabled: newVal,
+      hr_plan: newVal ? (client.hr_plan || 'starter') : null,
+    }).eq('id', client.id)
+    loadClients()
   }
 
   return (
@@ -1232,103 +1382,170 @@ export default function AdminClients() {
         </div>
       )}
 
-      {/* Clients table */}
-      <div className="card">
-        {loading ? (
-          <p style={{ color: '#6b7280', fontSize: 13 }}>Loading…</p>
-        ) : clients.length === 0 ? (
+      {/* Client cards */}
+      {loading ? (
+        <div className="card"><p style={{ color: '#6b7280', fontSize: 13 }}>Loading…</p></div>
+      ) : clients.length === 0 ? (
+        <div className="card">
           <div className="empty-state">
             <div className="empty-state-icon">⊛</div>
             <p className="empty-state-text">No clients yet. Create your first property to get started.</p>
           </div>
-        ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Property Name</th>
-                  <th>Location</th>
-                  <th>Contact</th>
-                  <th>Status</th>
-                  <th>Last Seen</th>
-                  <th>Plan</th>
-                  <th>Expires</th>
-                  <th>Features</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {clients.map(c => (
-                  <tr
-                    key={c.id}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => setActiveDrawer(c)}
-                  >
-                    <td style={{ fontWeight: 600, color: '#e8e0d0' }}>{c.name}</td>
-                    <td>{c.location || <span style={{ color: '#9ca3af' }}>—</span>}</td>
-                    <td>
-                      <div style={{ fontSize: 13 }}>{c.contact_person || <span style={{ color: '#9ca3af' }}>—</span>}</div>
-                      {c.contact_phone && <div style={{ fontSize: 11, color: '#6b7280' }}>{c.contact_phone}</div>}
-                    </td>
-                    <td>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {clients.map(c => {
+            const rel      = relativeTime(lastSeenMap[c.id])
+            const isRecent = lastSeenMap[c.id] && Date.now() - new Date(lastSeenMap[c.id]).getTime() < 86400000
+            const lastUser = lastUserMap[c.id]
+            const planColor = p => p === 'pro' ? '#c9a84c' : p === 'growth' ? '#34d399' : '#9ca3af'
+            const planLabel = p => p === 'pro' ? 'Pro' : p === 'growth' ? 'Growth' : 'Starter'
+
+            return (
+              <div
+                key={c.id}
+                onClick={() => setActiveDrawer(c)}
+                style={{
+                  background: '#141820', border: '1px solid #2a2f3d', borderRadius: 10,
+                  overflow: 'hidden', cursor: 'pointer',
+                  transition: 'border-color 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.borderColor = '#3a3f4d'}
+                onMouseLeave={e => e.currentTarget.style.borderColor = '#2a2f3d'}
+              >
+                {/* Header row */}
+                <div style={{ padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: '#e8e0d0', fontFamily: 'Georgia, serif' }}>{c.name}</span>
                       <span className={`badge ${c.is_active ? 'badge-green' : 'badge-gray'}`}>
                         {c.is_active ? 'Active' : 'Inactive'}
                       </span>
-                    </td>
-                    <td>
-                      {(() => {
-                        const rel = relativeTime(lastSeenMap[c.id])
-                        const isRecent = lastSeenMap[c.id] && Date.now() - new Date(lastSeenMap[c.id]).getTime() < 86400000
-                        return rel
-                          ? <span style={{ fontSize: 12, color: isRecent ? '#34d399' : '#6b7280', fontWeight: isRecent ? 600 : 400 }}>{rel}</span>
-                          : <span style={{ color: '#374151', fontSize: 12 }}>Never</span>
-                      })()}
-                    </td>
-                    <td onClick={e => e.stopPropagation()}>
-                      <select
-                        value={c.plan || 'starter'}
-                        onChange={e => changePlan(c, e.target.value, e)}
-                        style={{
-                          background: '#0f1117', border: '1px solid #2a2f3d', borderRadius: 5,
-                          color: c.plan === 'pro' ? '#c9a84c' : c.plan === 'growth' ? '#34d399' : '#6b7280',
-                          fontSize: 12, fontWeight: 700, padding: '4px 8px', cursor: 'pointer',
-                        }}>
-                        <option value="starter">Starter</option>
-                        <option value="growth">Growth</option>
-                        <option value="pro">Pro</option>
-                      </select>
-                    </td>
-                    <td onClick={e => e.stopPropagation()}>
-                      <SubBadge client={c} />
-                    </td>
-                    <td onClick={e => e.stopPropagation()}>
+                      {rel && (
+                        <span style={{ fontSize: 11, color: isRecent ? '#34d399' : '#6b7280', fontWeight: isRecent ? 600 : 400 }}>
+                          {rel}
+                          {lastUser && (
+                            <span style={{ color: '#6b7280', fontWeight: 400 }}> · {lastUser}</span>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#6b7280' }}>
+                      {[c.location, c.contact_person, c.contact_phone].filter(Boolean).join(' · ') || '—'}
+                    </div>
+                  </div>
+                  <SubBadge client={c} />
+                </div>
+
+                {/* Module strip */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: '1px solid #2a2f3d' }}>
+                  {/* IMS */}
+                  <div style={{ padding: '10px 18px', borderRight: '1px solid #2a2f3d' }} onClick={e => e.stopPropagation()}>
+                    <div style={{ fontSize: 10, color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>IMS</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <button
-                        className="btn btn-ghost"
-                        style={{ fontSize: 11, padding: '4px 10px', color: '#818cf8', borderColor: 'rgba(129,140,248,0.3)' }}
-                        onClick={e => { e.stopPropagation(); setFeatureModalClient(c) }}
+                        onClick={e => toggleImsEnabled(c, e)}
+                        style={{
+                          width: 32, height: 18, borderRadius: 9, border: 'none', cursor: 'pointer',
+                          position: 'relative', flexShrink: 0, padding: 0,
+                          background: c.ims_enabled !== false ? '#34d399' : '#374151', transition: 'background 0.2s',
+                        }}
                       >
-                        Features ⊞
+                        <span style={{
+                          position: 'absolute', top: 2, left: c.ims_enabled !== false ? 15 : 2,
+                          width: 14, height: 14, borderRadius: '50%', background: '#fff', transition: 'left 0.2s',
+                        }} />
                       </button>
-                    </td>
-                    <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
-                          onClick={e => toggleActive(c, e)}>
-                          {c.is_active ? 'Deactivate' : 'Activate'}
-                        </button>
-                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px', color: '#c9a84c', borderColor: 'rgba(201,168,76,0.3)' }}
-                          onClick={e => { e.stopPropagation(); setActiveDrawer(c) }}>
-                          Manage →
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                      {c.ims_enabled !== false ? (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: planColor(c.plan) }}>
+                          {planLabel(c.plan || 'starter')}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 12, color: '#374151' }}>Not enabled</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* HR */}
+                  <div style={{ padding: '10px 18px', borderRight: '1px solid #2a2f3d' }} onClick={e => e.stopPropagation()}>
+                    <div style={{ fontSize: 10, color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>HR</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button
+                        onClick={e => toggleHrEnabled(c, e)}
+                        style={{
+                          width: 32, height: 18, borderRadius: 9, border: 'none', cursor: 'pointer',
+                          position: 'relative', flexShrink: 0, padding: 0,
+                          background: c.hr_enabled ? '#34d399' : '#374151', transition: 'background 0.2s',
+                        }}
+                      >
+                        <span style={{
+                          position: 'absolute', top: 2, left: c.hr_enabled ? 15 : 2,
+                          width: 14, height: 14, borderRadius: '50%', background: '#fff', transition: 'left 0.2s',
+                        }} />
+                      </button>
+                      {c.hr_enabled ? (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: planColor(c.hr_plan) }}>
+                          {planLabel(c.hr_plan || 'starter')}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 12, color: '#374151' }}>Not enabled</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* POS */}
+                  <div style={{ padding: '10px 18px' }}>
+                    <div style={{ fontSize: 10, color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>POS</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button
+                        disabled
+                        style={{
+                          width: 32, height: 18, borderRadius: 9, border: 'none', cursor: 'not-allowed',
+                          position: 'relative', flexShrink: 0, padding: 0,
+                          background: '#1f2937', opacity: 0.45,
+                        }}
+                      >
+                        <span style={{ position: 'absolute', top: 2, left: 2, width: 14, height: 14, borderRadius: '50%', background: '#4b5563' }} />
+                      </button>
+                      <span style={{ fontSize: 12, color: '#374151', fontStyle: 'italic' }}>Coming soon</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action footer */}
+                <div
+                  style={{ padding: '10px 18px', borderTop: '1px solid #2a2f3d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0f1117' }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <button
+                    className="btn btn-ghost"
+                    style={{ fontSize: 11, padding: '4px 10px', color: '#818cf8', borderColor: 'rgba(129,140,248,0.3)' }}
+                    onClick={e => { e.stopPropagation(); setFeatureModalClient(c) }}
+                  >
+                    Features ⊞
+                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ fontSize: 11, padding: '4px 10px' }}
+                      onClick={e => toggleActive(c, e)}
+                    >
+                      {c.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ fontSize: 11, padding: '4px 10px', color: '#c9a84c', borderColor: 'rgba(201,168,76,0.3)' }}
+                      onClick={e => { e.stopPropagation(); setActiveDrawer(c) }}
+                    >
+                      Manage →
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Slide-over drawer */}
       {activeDrawer && (

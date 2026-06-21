@@ -78,7 +78,7 @@ export function AuthProvider({ children }) {
       if (data?.client_id) {
         const { data: client } = await supabase
           .from('clients')
-          .select('id, name, location, is_premium, plan, trial_ends_at, subscription_ends_at')
+          .select('id, name, location, is_premium, plan, trial_ends_at, subscription_ends_at, ims_enabled, hr_enabled, hr_plan')
           .eq('id', data.client_id)
           .single()
         if (mounted) data.clients = client
@@ -171,6 +171,9 @@ export function AuthProvider({ children }) {
       clientId, isAdmin, isPremium,
       plan, isTrialing, trialEndsAt,
       featureFlags, hasFeature,
+      imsEnabled: isAdmin || (profile?.clients?.ims_enabled ?? true),
+      hrEnabled: isAdmin || (profile?.clients?.hr_enabled ?? false),
+      hrPlan: isAdmin ? 'pro' : (profile?.clients?.hr_plan || null),
       adminViewClientId, adminViewClientName, switchAdminClient,
     }}>
       {children}

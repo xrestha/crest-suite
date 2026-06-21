@@ -9,7 +9,7 @@ import { cacheItems, getCachedItems, cacheCategories, getCachedCategories, cache
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 export default function Stock() {
-  const { clientId, profile, loading: authLoading, isAdmin } = useAuth()
+  const { clientId, profile, loading: authLoading, isAdmin, hasFeature } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
@@ -399,7 +399,7 @@ export default function Stock() {
     { id: 'opening',    label: 'Opening Stock', desc: 'Stock at start of month' },
     { id: 'closing',    label: 'Closing Stock', desc: 'Physical count at month end' },
     { id: 'wastage',    label: 'Wastage',       desc: 'Spoilage & waste recorded' },
-    { id: 'staff_meal', label: 'Staff Meals',   desc: 'Staff & complimentary consumption — tracked separately from wastage' },
+    ...(hasFeature('staff_meals') ? [{ id: 'staff_meal', label: 'Staff Meals', desc: 'Staff & complimentary consumption — tracked separately from wastage' }] : []),
     { id: 'summary',    label: 'Summary',       desc: 'Full picture per item' },
     { id: 'print',      label: 'Print Sheet',   desc: 'Physical count sheet for the floor' },
   ]

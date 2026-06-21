@@ -100,13 +100,191 @@ Starter: 1-month free trial. Annual = 25% off monthly.
 - **Deferred (client):** Owner Dashboard — mobile-first single-page P&L view
 - **Deferred (client):** Role-based users Owner/Manager
 
-### Future Products (separate apps — not in this codebase)
-- **Crest HR** — payroll (SSF/EPF 11%+20%), Dashain bonus, advance/loan ledger, gratuity accrual, leave balance, TDS, service charge distribution
-- **Crest POS** — point-of-sale; closes the loop by auto-populating Sales Entry in Crest Inventory
+### Crest Suite — One Codebase, Three Modules
+Architecture: single React app, single Supabase project, feature flags per client. Sell IMS / HR / POS individually or as a bundle.
+
+| Module | Status | Routes |
+|---|---|---|
+| Crest IMS | ✅ Live | All existing routes |
+| Crest HR | 🔨 Building | `/hr/employees` (Session 1 done) |
+| Crest POS | 🔲 Planned | — |
+
+**Suite pricing:**
+| Suite Plan | Monthly | Annual /mo |
+|---|---|---|
+| Suite Starter | NPR 12,000 | NPR 9,000 |
+| Suite Growth | NPR 22,000 | NPR 16,500 |
+| Suite Pro | NPR 32,000 | NPR 24,000 |
+
+**Module flags on `clients` table:** `ims_enabled` (DEFAULT true), `hr_enabled` (DEFAULT false), `pos_enabled`, `ims_plan`, `hr_plan`, `pos_plan`  
+**Admin UI:** AdminClients → **card module strip** — toggle IMS/HR/POS directly on each client card; **Modules tab** in drawer = plan tier selectors with individual Save buttons per module  
+**Route guard:** `src/components/ModuleGate.js` — wraps all IMS and HR routes in App.js; redirects to `/dashboard` when module is off (admin always bypasses)
 
 ---
 
 ## Session Log
+
+### S103 — 2026-06-21 — Help Page Module-Based Reorganisation
+
+Full rewrite of `src/pages/Help.js` — the Module Guide tab is now module-aware and plan-tier aware.
+
+**Problem:** The previous Help page had a flat MODULES array with all features listed in order of plan tier, regardless of which modules the client had enabled. A client with only IMS would still see Crest HR features listed, and there was no visual distinction between features the client could access vs features locked behind a higher plan.
+
+**Change — Module Guide tab:**
+- Added `useAuth()` import to extract `imsEnabled`, `hrEnabled`, `plan`, `isAdmin`
+- Replaced flat `MODULES` array with two structured collections:
+  - `IMS_TIERS`: array of 4 tiers — Core (All Plans), Starter Plan, Growth Plan, Pro Plan — each containing their feature entries (icon, name, guide text, tips)
+  - `HR_FEATURES`: single array for the HR module (currently Employees)
+- **Module sections**: Crest IMS renders only when `imsEnabled`; Crest HR renders only when `hrEnabled`; if both are off, a "No modules active" message is shown
+- **Tier unlock logic** (`isTierUnlocked`): `core` and `starter` always unlocked for active IMS users; `growth` requires `plan === 'growth' || plan === 'pro'`; `pro` requires `plan === 'pro'`; `isAdmin` bypasses all
+- **Unlocked features**: full expandable accordion card with guide text and tips (same as before)
+- **Locked features**: compact dimmed row (opacity 0.45), non-expandable, lock icon visual — shows what exists without full detail
+- **Upgrade nudge**: each locked tier gets a dismissible-style banner — "Upgrade to Growth/Pro to unlock X features" with a "View plans →" button linking to `/pricing`
+- Module header for each active section shows module name + Active badge + current plan label
+
+**Other tabs:** Getting Started, Glossary, FAQ, Pricing — content identical, no structural changes.
+
+**Files:** `src/pages/Help.js`
+
+---
+
+### S102 — 2026-06-21 — Full Codebase Audit + 4 Bug Fixes
+
+Full cross-check of all pages, feature functions, and logic. No new features — pure bug fixes.
+
+**Bug 1 — Dashboard.js: `canSales`/`canReorder` wrong for Starter plan users**
+- `canSales = isAdmin || isPremium || isFeatureEnabled('sales_entry')` evaluated to `false` for Starter users because `isFeatureEnabled` (SettingsContext) only returns `true` for admin or premium (Growth/Pro) users. But `sales_entry` is in `STARTER_KEYS` — all plans should see Revenue, FC%, Net Margin, and related charts.
+- Same bug for `canReorder` (`reorder_report` ∈ `STARTER_KEYS`).
+- Fix: replaced all four `can*` variables with `hasFeature(key)` from AuthContext, which correctly respects STARTER_KEYS/GROWTH_KEYS/PRO_KEYS tier logic. Removed now-unused `useSettings` import and `isPremium` destructure from Dashboard.
+
+**Bug 2 — AdminClients.js: `handleSaveHr` wrote stale `hr_enabled` snapshot**
+- `ClientDrawer` captured `hr_enabled` in a read-only `useState` snapshot at drawer-open time. If the card toggle changed `hr_enabled` while the drawer was open, clicking Save in the Modules tab would write the stale snapshot value back to the DB, overwriting the toggle's change.
+- Fix: `handleSaveHr` now only saves `{ hr_plan: hrPlan }`. The `hr_enabled` flag is owned exclusively by the card toggle (`toggleHrEnabled`) — the drawer Modules tab only controls plan tier.
+
+**Bug 3 — Stock.js: Staff Meals tab always visible regardless of plan**
+- The `TABS` array included `{ id: 'staff_meal', ... }` unconditionally. `staff_meals` is a Growth-plan feature — Starter users should not see or use this tab.
+- Fix: added `hasFeature` to `useAuth()` destructure; the `staff_meal` entry is now spread into TABS only when `hasFeature('staff_meals')` is true.
+
+**Bug 4 — Help.js: No HR / Employees documentation**
+- The HR Employee Master (S100) and HR module (S101) were never documented in the Help page, violating the project rule "update Help after every new feature".
+- Fix: added `Employees (HR)` entry to the Module Guide MODULES array with full guide text and 4 tips. Added `'Crest HR'` plan badge case (blue `#60a5fa`) to the plan badge colour renderer alongside the existing Pro/Growth+/Starter+ cases.
+
+**Files:** `src/pages/Dashboard.js`, `src/pages/AdminClients.js`, `src/pages/Stock.js`, `src/pages/Help.js`
+
+---
+
+### S101 — 2026-06-21 — Module Access Control: IMS Toggle + AdminClients Redesign + Conditional Dashboard
+
+**DB migration (run S101):**
+- `ALTER TABLE clients ADD COLUMN IF NOT EXISTS ims_enabled boolean DEFAULT true` — existing clients unaffected (null treated as true via `?? true` fallback)
+
+**EmployeeForm.jsx (polish):**
+- Added `fontFamily: 'inherit'` to the `inp` style constant → date/number inputs now use Georgia (brand font) instead of browser default
+- Renamed "Citizenship No." → "National Identity No." (placeholder: "NID / Citizenship No."); DB column `citizenship_no` unchanged
+
+**AdminClients.js — full redesign:**
+- Replaced flat table with **card-per-client layout** — each card has: header (name, sub badge, last seen, contact), 3-column module strip, footer actions
+- **Module strip (IMS / HR / POS):** each column shows toggle switch + current plan; toggle fires immediately (no Save needed for on/off)
+- `toggleImsEnabled()`: confirmation dialog when disabling IMS ("No data is deleted. Re-enabling restores full access instantly."); uses `client.ims_enabled !== false ? false : true` to safely handle null legacy rows
+- `toggleHrEnabled()`: saves `hr_enabled` (and clears `hr_plan` to null when disabling)
+- **Modules tab in drawer** redesigned: purely plan-tier selectors (IMS plan / HR plan / POS plan — Coming Soon), with individual **Save** buttons per module (`handleSaveIms`, `handleSaveHr`)
+
+**AuthContext.js:**
+- Added `ims_enabled` to `clients` select query
+- Exposed `imsEnabled`: `isAdmin || (profile?.clients?.ims_enabled ?? true)` — admin always true; `?? true` ensures null legacy rows = on
+
+**Layout.js:**
+- Imports `imsEnabled` from `useAuth()`
+- Entire IMS nav block gated on `imsEnabled` — clients with IMS off see no IMS pages in sidebar
+
+**ModuleGate.js (new — `src/components/ModuleGate.js`):**
+- Route-level guard: `isAdmin` always passes; `module="ims"` redirects to `/dashboard` if `!imsEnabled`; `module="hr"` redirects if `!hrEnabled`
+- Applied to every IMS route and the HR `/hr/employees` route in App.js
+- IMS + PremiumGate stacked: `<ModuleGate module="ims"><PremiumGate ...><Page /></PremiumGate></ModuleGate>`
+
+**Dashboard.js — conditional rendering:**
+- `imsEnabled && hrEnabled` both read from `useAuth()`
+- `loadStats()` (IMS data fetch) only called when `imsEnabled`; otherwise `setLoading(false)` immediately
+- `loadHrStats()` fetches `hr_employees` (total / active / probation / basic_salary sum) when `hrEnabled`
+- **IMS off:** entire KPI grid + charts hidden
+- **HR on:** HR stat cards (Total Employees / Active / Basic Payroll/Month) shown below IMS section
+- **Both off:** "No modules enabled — contact your consultant to activate your subscription." message
+
+**Toggle safety — data integrity:**
+- Toggling IMS off sets `ims_enabled = false` only; zero data deleted, zero cascade
+- Re-enabling restores full access instantly (just a boolean flip)
+
+**Files:** `src/modules/hr/employees/EmployeeForm.jsx`, `src/pages/AdminClients.js`, `src/context/AuthContext.js`, `src/components/Layout.js`, `src/components/ModuleGate.js` (new), `src/App.js`, `src/pages/Dashboard.js`
+
+---
+
+### S100 — 2026-06-21 — Crest HR Foundation + Employee Master (Session 1)
+
+**Architecture confirmed:** Crest Suite is ONE React app, ONE Supabase project, ONE Vercel deployment. Three modules (IMS, HR, POS) controlled by per-client feature flags. Sell individually or as a bundle.
+
+**DB migrations (run S100):**
+- `ALTER TABLE clients ADD COLUMN hr_enabled boolean DEFAULT false, ADD COLUMN hr_plan text DEFAULT null`
+- `CREATE TABLE hr_employees` — 24 columns: identity (code, name, gender, DOB, PAN, citizenship), employment (designation, department, type, join_date, end_date, status), contact (phone, email, address, emergency contact), banking (bank name/account/branch), SSF no., basic_salary, notes
+- RLS: `client_id = my_client_id()` policy on hr_employees
+
+**AuthContext.js:**
+- `clients` select query extended to include `hr_enabled`, `hr_plan`
+- Context now exposes `hrEnabled` (true for admin, or `clients.hr_enabled` for client) and `hrPlan`
+
+**AdminClients.js — Modules tab (initial):**
+- New **Modules** tab added to client drawer (between Users and Billing)
+- Shows all three modules: Crest IMS (plan selector), Crest HR (toggle + plan selector), Crest POS (coming soon)
+- `handleSaveModules()` saves `plan`, `hr_enabled`, `hr_plan`; Billing tab = subscription/trial only
+- *(Note: card layout + individual Save buttons + IMS toggle added in S101)*
+
+**Layout.js:**
+- Imports `hrEnabled` from `useAuth()`
+- HR nav section renders below IMS nav when `hrEnabled && (!isAdmin || adminViewClientId)`
+- Shows: Human Resources section header + Employees link (`/hr/employees`)
+
+**HR Session 1 — Employee Master:**
+- `src/modules/hr/employees/EmployeeList.jsx` (new): stat cards (total / active / basic payroll), search input, status filter tabs (All / Active / Probation / Resigned / Terminated / Inactive), table with code / name / designation / department / type / join date / basic salary / status badge / Edit button
+- `src/modules/hr/employees/EmployeeForm.jsx` (new): slide-in drawer, 4 tabs:
+  - Personal — code, name, gender, DOB, PAN, citizenship, phone, email, address, emergency contact
+  - Employment — designation, department, type (permanent/probation/contract/part-time), join date, end date (contract only), status, notes
+  - Salary — basic salary input + live SSF preview (11% employee / 20% employer / 31% total)
+  - Bank / SSF — bank name, account no., branch, SSF registration no.
+- Add / Edit / Deactivate flows; validation on full_name and join_date
+- `App.js`: `import EmployeeList` + `<Route path="/hr/employees" element={<EmployeeList />} />`
+
+**How to enable HR for a client:**
+1. `/admin/clients` → open client drawer → **Modules** tab
+2. Toggle Crest HR on → select plan → **Save Modules**
+3. Client re-logs in → Human Resources → Employees appears in sidebar
+
+**Files:** `src/context/AuthContext.js`, `src/pages/AdminClients.js`, `src/components/Layout.js`, `src/modules/hr/employees/EmployeeList.jsx` (new), `src/modules/hr/employees/EmployeeForm.jsx` (new), `src/App.js`
+
+---
+
+### S99 — 2026-06-21 — Cross-Client Data Leak Fixes + Admin Impersonation + Bug Fixes
+
+**recipe_ingredients cross-client data leak (no client_id column):**
+- `recipe_ingredients` has no `client_id` — was being fetched with no filter, returning all clients' ingredient data
+- Fix pattern: first fetch client-scoped recipes, extract `recipeIds`, then fetch `recipe_ingredients.in('recipe_id', recipeIds)`
+- Applied to: `Recipes.js`, `Variance.js`, `ReorderReport.js`, `ShrinkageReport.js`, `TheoreticalVariance.js`
+- `Dashboard.js`: parallel fetch retained (performance), post-load JS filter using `clientRecipeIdSet`
+
+**Admin impersonation bug (effectiveClientId pattern):**
+- 7 pages were using `clientId` directly — admins (who have no `client_id` of their own) saw empty data
+- Fix: `const effectiveClientId = clientId || profile?.client_id` on every affected page
+- Applied to: `BestSellers.js`, `DeadStock.js`, `VatReport.js`, `WastageReport.js`, `RecipeMargin.js`, `NonVatReport.js`, `PeriodComparison.js`
+
+**MonthlySummary tfoot column offset:**
+- `tfoot` had 9 `<td>` cells vs 10 `<thead>` columns — Staff Meals total was missing, shifting all totals right of Wastage under wrong headers
+- Fix: inserted Staff Meals `<td>` in correct position; updated COGS formula text to include "Staff Meals"
+
+**Layout.js nav plan flag corrections:**
+- `/sales` (Sales Entry): `minPlan: 'growth'` → `'starter'` — Sales Entry is a Starter feature
+- `/payments` (Payment Summary): `minPlan: 'growth'` → `'starter'` — Payment Summary is a Starter feature
+
+**Files:** `src/pages/Recipes.js`, `src/pages/Variance.js`, `src/pages/ReorderReport.js`, `src/pages/ShrinkageReport.js`, `src/pages/TheoreticalVariance.js`, `src/pages/Dashboard.js`, `src/pages/BestSellers.js`, `src/pages/DeadStock.js`, `src/pages/VatReport.js`, `src/pages/WastageReport.js`, `src/pages/RecipeMargin.js`, `src/pages/NonVatReport.js`, `src/pages/PeriodComparison.js`, `src/pages/MonthlySummary.js`, `src/components/Layout.js`
+
+---
 
 ### S94 — 2026-06-20 — Help Page: All 28 Modules + Corrected Pricing
 

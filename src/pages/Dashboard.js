@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { useSettings } from '../context/SettingsContext'
 import { supabase } from '../supabaseClient'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
@@ -15,8 +14,7 @@ const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#f
 
 
 export default function Dashboard() {
-  const { profile, clientId, isAdmin, isPremium, loading: authLoading, adminViewClientId, adminViewClientName, switchAdminClient } = useAuth()
-  const { isFeatureEnabled } = useSettings()
+  const { profile, clientId, isAdmin, imsEnabled, hrEnabled, hasFeature, loading: authLoading, adminViewClientId, adminViewClientName, switchAdminClient } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const showAdminDash = isAdmin && !adminViewClientId
   const navigate = useNavigate()
@@ -30,6 +28,7 @@ export default function Dashboard() {
   const [topItemSpend, setTopItemSpend] = useState([])
   const [reorderItems, setReorderItems]   = useState([])
   const [fcTrend, setFcTrend]             = useState([])
+  const [hrStats, setHrStats]             = useState(null)
   const [adminClients, setAdminClients]   = useState([])
   const [clientPeriods, setClientPeriods] = useState({})
   const [adminLoading, setAdminLoading]   = useState(true)
@@ -38,13 +37,17 @@ export default function Dashboard() {
   useEffect(() => {
     if (authLoading) return
     if (showAdminDash) { loadAdminStats(); return }
-    if (effectiveClientId) loadStats()
-  }, [authLoading, showAdminDash, effectiveClientId, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (effectiveClientId) {
+      if (imsEnabled) loadStats()
+      else setLoading(false)
+      if (hrEnabled) loadHrStats()
+    }
+  }, [authLoading, showAdminDash, effectiveClientId, imsEnabled, hrEnabled, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const canSales    = isAdmin || isPremium || isFeatureEnabled('sales_entry')
-  const canVariance = isAdmin || isPremium || isFeatureEnabled('variance_report')
-  const canRecipes  = isAdmin || isPremium || isFeatureEnabled('recipe_costing')
-  const canReorder  = isAdmin || isPremium || isFeatureEnabled('reorder_report')
+  const canSales    = hasFeature('sales_entry')
+  const canVariance = hasFeature('variance_report')
+  const canRecipes  = hasFeature('recipe_costing')
+  const canReorder  = hasFeature('reorder_report')
 
   async function loadStats() {
     setLoading(true)
@@ -210,6 +213,20 @@ export default function Dashboard() {
     setLoading(false)
     const fcPctNow = revenueTotal > 0 ? (purchaseTotal / revenueTotal) * 100 : null
     loadFcTrend(period, fcPctNow)
+  }
+
+  async function loadHrStats() {
+    const { data: employees } = await supabase
+      .from('hr_employees')
+      .select('status, basic_salary')
+      .eq('client_id', effectiveClientId)
+    const total     = employees?.length || 0
+    const active    = employees?.filter(e => e.status === 'active').length || 0
+    const probation = employees?.filter(e => e.status === 'probation').length || 0
+    const payroll   = (employees || [])
+      .filter(e => e.status === 'active' || e.status === 'probation')
+      .reduce((s, e) => s + parseFloat(e.basic_salary || 0), 0)
+    setHrStats({ total, active, probation, payroll })
   }
 
   async function closeAndAdvancePeriod() {
@@ -668,8 +685,56 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Row 1: Primary KPIs ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 14 }}>
+      {/* ── No modules enabled ── */}
+      {!imsEnabled && !hrEnabled && (
+        <div className="card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⊛</div>
+          <p style={{ fontSize: 15, color: '#e8e0d0', fontWeight: 600, margin: '0 0 8px' }}>No modules enabled</p>
+          <p style={{ fontSize: 13, color: '#6b7280', margin: 0 }}>Contact your consultant to activate Crest IMS, Crest HR, or Crest POS.</p>
+        </div>
+      )}
+
+      {/* ── HR KPIs ── */}
+      {hrEnabled && hrStats && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+            Human Resources
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
+            <div style={kpiCard(() => navigate('/hr/employees'))} onClick={() => navigate('/hr/employees')}>
+              <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Total Employees</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#e8e0d0', lineHeight: 1.1 }}>{hrStats.total}</div>
+              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>All statuses →</div>
+            </div>
+            <div style={kpiCard(() => navigate('/hr/employees'))} onClick={() => navigate('/hr/employees')}>
+              <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Active</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#34d399', lineHeight: 1.1 }}>{hrStats.active}</div>
+              {hrStats.probation > 0 && (
+                <div style={{ fontSize: 11, color: '#c9a84c', marginTop: 5 }}>{hrStats.probation} on probation</div>
+              )}
+            </div>
+            <div style={kpiCard(null)}>
+              <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+                <Tip text="Sum of basic salary for active and probation employees. Full payroll with allowances, SSF and TDS is computed during payroll run." width={260}>Basic Payroll / Month</Tip>
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#c9a84c', lineHeight: 1.1 }}>
+                NPR {Math.round(hrStats.payroll).toLocaleString('en-NP')}
+              </div>
+              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>Basic salary only</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hrEnabled && !hrStats && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Human Resources</div>
+          <div className="card"><p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>Loading HR data…</p></div>
+        </div>
+      )}
+
+      {/* ── IMS KPIs ── */}
+      {imsEnabled && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 14 }}>
 
         {/* Net Purchases */}
         <div style={kpiCard(() => navigate('/purchases'))} onClick={() => navigate('/purchases')}>
@@ -740,10 +805,10 @@ export default function Dashboard() {
             <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>After food & overheads · target ≥20%</div>
           </div>
         )}
-      </div>
+      </div>}
 
-      {/* ── Row 2: Secondary KPIs ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 20 }}>
+      {/* ── IMS Row 2 + Charts ── */}
+      {imsEnabled && <><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 20 }}>
 
         <div style={kpiCard(null)}>
           <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Active Period</div>
@@ -1036,6 +1101,7 @@ export default function Dashboard() {
           </div>}
         </>
       )}
+      </>}
     </div>
   )
 }

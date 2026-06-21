@@ -49,7 +49,7 @@ const REPORTS = [
 ]
 
 export default function Layout() {
-  const { profile, isAdmin, plan, hasFeature, signOut, adminViewClientId, switchAdminClient } = useAuth()
+  const { profile, isAdmin, plan, hasFeature, imsEnabled, hrEnabled, signOut, adminViewClientId, switchAdminClient } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
   const clientName = profile?.clients?.name
@@ -298,7 +298,7 @@ export default function Layout() {
             </>
           )}
 
-          {(!isAdmin || adminViewClientId) && (
+          {imsEnabled && (!isAdmin || adminViewClientId) && (
             <>
               {unlockedItems(NAV.slice(1)).map(renderNavItem)}
 
@@ -314,6 +314,16 @@ export default function Layout() {
                   {renderNavItem({ to: '/settings', label: 'Settings', icon: '⚙' })}
                 </>
               )}
+            </>
+          )}
+
+          {hrEnabled && (!isAdmin || adminViewClientId) && (
+            <>
+              <div className="sidebar-divider" />
+              {!collapsed && <div className="sidebar-section-label">Human Resources</div>}
+              {[
+                { to: '/hr/employees', label: 'Employees', icon: '👤' },
+              ].map(renderNavItem)}
             </>
           )}
 

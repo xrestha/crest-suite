@@ -26,6 +26,7 @@ import MenuEngineering from './pages/MenuEngineering'
 import AdminClients from './pages/AdminClients'
 import AuditLog from './pages/AuditLog'
 import PremiumGate from './components/PremiumGate'
+import ModuleGate from './components/ModuleGate'
 import Overheads from './pages/Overheads'
 import BudgetVsActual from './pages/BudgetVsActual'
 import BestSellers from './pages/BestSellers'
@@ -42,6 +43,7 @@ import PeriodComparison from './pages/PeriodComparison'
 import AnnualSummary from './pages/AnnualSummary'
 import OutstandingPayables from './pages/OutstandingPayables'
 import ShrinkageReport from './pages/ShrinkageReport'
+import EmployeeList from './modules/hr/employees/EmployeeList'
 import './components/Layout.css'
 
 export default function App() {
@@ -56,72 +58,77 @@ export default function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
 
-              {/* Basic — available to all authenticated users */}
+              {/* Universal — all authenticated users regardless of module */}
               <Route path="/dashboard"  element={<Dashboard />} />
               <Route path="/periods"    element={<Periods />} />
-              <Route path="/items"      element={<Items />} />
-              <Route path="/vendors"    element={<Vendors />} />
-              <Route path="/purchases"  element={<Purchases />} />
-              <Route path="/stock"      element={<Stock />} />
               <Route path="/help"       element={<Help />} />
 
-              {/* Starter plan — reports & entry modules */}
+              {/* Crest IMS — gated on ims_enabled */}
+              <Route path="/items"     element={<ModuleGate module="ims"><Items /></ModuleGate>} />
+              <Route path="/vendors"   element={<ModuleGate module="ims"><Vendors /></ModuleGate>} />
+              <Route path="/purchases" element={<ModuleGate module="ims"><Purchases /></ModuleGate>} />
+              <Route path="/stock"     element={<ModuleGate module="ims"><Stock /></ModuleGate>} />
+
+              {/* IMS Starter */}
               <Route path="/sales"
-                element={<PremiumGate featureKey="sales_entry" minPlan="starter"><Sales /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="sales_entry" minPlan="starter"><Sales /></PremiumGate></ModuleGate>} />
               <Route path="/payments"
-                element={<PremiumGate featureKey="payment_summary" minPlan="starter"><PaymentReport /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="payment_summary" minPlan="starter"><PaymentReport /></PremiumGate></ModuleGate>} />
               <Route path="/summary"
-                element={<PremiumGate featureKey="monthly_summary" minPlan="starter"><MonthlySummary /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="monthly_summary" minPlan="starter"><MonthlySummary /></PremiumGate></ModuleGate>} />
               <Route path="/annual-summary"
-                element={<PremiumGate featureKey="annual_summary" minPlan="starter"><AnnualSummary /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="annual_summary" minPlan="starter"><AnnualSummary /></PremiumGate></ModuleGate>} />
               <Route path="/reorder"
-                element={<PremiumGate featureKey="reorder_report" minPlan="starter"><ReorderReport /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="reorder_report" minPlan="starter"><ReorderReport /></PremiumGate></ModuleGate>} />
               <Route path="/vat-report"
-                element={<PremiumGate featureKey="vat_report" minPlan="starter"><VatReport /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="vat_report" minPlan="starter"><VatReport /></PremiumGate></ModuleGate>} />
               <Route path="/non-vat-report"
-                element={<PremiumGate featureKey="non_vat_report" minPlan="starter"><NonVatReport /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="non_vat_report" minPlan="starter"><NonVatReport /></PremiumGate></ModuleGate>} />
               <Route path="/wastage-report"
-                element={<PremiumGate featureKey="wastage_report" minPlan="starter"><WastageReport /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="wastage_report" minPlan="starter"><WastageReport /></PremiumGate></ModuleGate>} />
               <Route path="/settings"
-                element={<PremiumGate featureKey="settings" minPlan="starter"><Settings /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="settings" minPlan="starter"><Settings /></PremiumGate></ModuleGate>} />
 
-              {/* Growth plan — recipes, analytics, operations */}
+              {/* IMS Growth */}
               <Route path="/recipes"
-                element={<PremiumGate featureKey="recipe_costing" minPlan="growth"><Recipes /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="recipe_costing" minPlan="growth"><Recipes /></PremiumGate></ModuleGate>} />
               <Route path="/variance"
-                element={<PremiumGate featureKey="variance_report" minPlan="growth"><Variance /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="variance_report" minPlan="growth"><Variance /></PremiumGate></ModuleGate>} />
               <Route path="/payables"
-                element={<PremiumGate featureKey="outstanding_payables" minPlan="growth"><OutstandingPayables /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="outstanding_payables" minPlan="growth"><OutstandingPayables /></PremiumGate></ModuleGate>} />
               <Route path="/budget"
-                element={<PremiumGate featureKey="budget_vs_actual" minPlan="growth"><BudgetVsActual /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="budget_vs_actual" minPlan="growth"><BudgetVsActual /></PremiumGate></ModuleGate>} />
               <Route path="/requisitions"
-                element={<PremiumGate featureKey="requisitions" minPlan="growth"><Requisitions /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="requisitions" minPlan="growth"><Requisitions /></PremiumGate></ModuleGate>} />
               <Route path="/dead-stock"
-                element={<PremiumGate featureKey="dead_stock" minPlan="growth"><DeadStock /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="dead_stock" minPlan="growth"><DeadStock /></PremiumGate></ModuleGate>} />
               <Route path="/recipe-margin"
-                element={<PremiumGate featureKey="recipe_margin" minPlan="growth"><RecipeMargin /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="recipe_margin" minPlan="growth"><RecipeMargin /></PremiumGate></ModuleGate>} />
               <Route path="/best-sellers"
-                element={<PremiumGate featureKey="best_sellers" minPlan="growth"><BestSellers /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="best_sellers" minPlan="growth"><BestSellers /></PremiumGate></ModuleGate>} />
               <Route path="/purchase-orders"
-                element={<PremiumGate featureKey="purchase_orders" minPlan="growth"><PurchaseOrders /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="purchase_orders" minPlan="growth"><PurchaseOrders /></PremiumGate></ModuleGate>} />
 
-              {/* Pro plan — advanced analytics */}
+              {/* IMS Pro */}
               <Route path="/period-comparison"
-                element={<PremiumGate featureKey="period_comparison" minPlan="pro"><PeriodComparison /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="period_comparison" minPlan="pro"><PeriodComparison /></PremiumGate></ModuleGate>} />
               <Route path="/shrinkage"
-                element={<PremiumGate featureKey="shrinkage_report" minPlan="pro"><ShrinkageReport /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="shrinkage_report" minPlan="pro"><ShrinkageReport /></PremiumGate></ModuleGate>} />
               <Route path="/menu-engineering"
-                element={<PremiumGate featureKey="menu_engineering" minPlan="pro"><MenuEngineering /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="menu_engineering" minPlan="pro"><MenuEngineering /></PremiumGate></ModuleGate>} />
               <Route path="/fifo"
-                element={<PremiumGate featureKey="fifo_report" minPlan="pro"><FifoReport /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="fifo_report" minPlan="pro"><FifoReport /></PremiumGate></ModuleGate>} />
               <Route path="/vendors-report"
-                element={<PremiumGate featureKey="vendor_report" minPlan="pro"><VendorReport /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="vendor_report" minPlan="pro"><VendorReport /></PremiumGate></ModuleGate>} />
               <Route path="/supplier-prices"
-                element={<PremiumGate featureKey="price_tracker" minPlan="pro"><SupplierPriceTracker /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="price_tracker" minPlan="pro"><SupplierPriceTracker /></PremiumGate></ModuleGate>} />
               <Route path="/overheads"
-                element={<PremiumGate featureKey="overheads" minPlan="pro"><Overheads /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="overheads" minPlan="pro"><Overheads /></PremiumGate></ModuleGate>} />
               <Route path="/theoretical-variance"
-                element={<PremiumGate featureKey="theoretical_variance" minPlan="pro"><TheoreticalVariance /></PremiumGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="theoretical_variance" minPlan="pro"><TheoreticalVariance /></PremiumGate></ModuleGate>} />
+
+              {/* Crest HR — gated on hr_enabled */}
+              <Route path="/hr/employees" element={<ModuleGate module="hr"><EmployeeList /></ModuleGate>} />
 
               {/* Admin only */}
               <Route path="/admin/clients"
