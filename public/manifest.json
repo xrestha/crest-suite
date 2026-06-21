@@ -21,7 +21,7 @@
       "purpose": "any maskable"
     }
   ],
-  "start_url": "/",
+  "start_url": "/stock",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
