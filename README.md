@@ -156,8 +156,17 @@ Starter: 1-month free trial. Annual = 25% off monthly.
 - Hard refresh (Ctrl+Shift+R) bypassed cache and loaded correct code
 - Fix: `vercel.json` sets `Cache-Control: no-cache, no-store, must-revalidate` on `/index.html` so it is always fetched fresh; content-hashed JS/CSS assets remain long-cached
 
-**Files:** `src/pages/OutstandingPayables.js`, `vercel.json`  
-**Commits:** `a395b71`, `6b47b97`, `730e016`
+**VAT Report — returns now reflected:**
+- VAT report previously only queried `purchase_entries`; `vendor_returns` were invisible
+- Now fetches `vendor_returns` in parallel, filters to those where `purchase_entries.vat_inclusive = true`
+- Entries tab: new red "VAT-Inclusive Returns" section below purchases with `−qty / −Base / −VAT Reversed / −Total` columns and a net summary row
+- Stat cards updated: Net VAT Purchases, Net Input VAT (Gross − Returns), Net ex-VAT
+- CA Summary tab: Gross / Returned / Net Base / Net Input VAT / Net Total per vendor
+- Excel export: new "VAT Returns" sheet + CA Summary now includes net columns
+- No DB change required
+
+**Files:** `src/pages/OutstandingPayables.js`, `src/pages/VatReport.js`, `vercel.json`  
+**Commits:** `a395b71`, `6b47b97`, `730e016`, `80a5c3e`
 
 ---
 
