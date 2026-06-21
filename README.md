@@ -137,6 +137,20 @@ Starter: 1-month free trial. Annual = 25% off monthly.
 
 ---
 
+### S98 — 2026-06-21 — Plans & Pricing + Help: Title Case Standardisation
+
+**Capitalization audit — all feature list items standardised to Title Case:**
+- `src/pages/Pricing.js`: fixed 20 items across `STARTER_FEATURES`, `GROWTH_EXTRAS`, `PRO_EXTRAS`
+  - Examples: `'Vendor management'` → `'Vendor Management'`, `'Best & Worst Sellers analysis'` → `'Best & Worst Sellers Analysis'`, `'FIFO / expiry tracking'` → `'FIFO / Expiry Tracking'`
+- `src/pages/Help.js`: fixed 33 items across its own `STARTER_FEATURES`, `GROWTH_EXTRAS`, `PRO_EXTRAS` lists
+  - Examples: `'Stock count (opening / closing / wastage / staff meals)'` → `'Stock Count (Opening / Closing / Wastage / Staff Meals)'`, `'Sales entry (bulk or daily)'` → `'Sales Entry (Bulk or Daily)'`
+- Conjunctions and prepositions (vs, with, by, or, to, and) kept lowercase per standard title case rules
+
+**Files:** `src/pages/Pricing.js`, `src/pages/Help.js`  
+**Commits:** `c912f0f` (Pricing.js), `b7ae7c8` (Help.js)
+
+---
+
 ### S97 — 2026-06-21 — PWA Offline Stock Count (IndexedDB + Sync Queue)
 
 **Offline-first stock counting (no DB change):**
