@@ -26,8 +26,13 @@ const MODULES = [
   },
   {
     icon: '⊞', name: 'Stock Count', plan: null, color: '#c9a84c',
-    guide: 'Four tabs: Opening Stock (start of month), Closing Stock (physical count at month end), Wastage (spoilage during the month), and Staff Meals (internal consumption by staff). The Summary tab computes Used = Opening + Net Purchases − Wastage − Staff Meals − Closing. Export the Summary to Excel.',
-    tips: ['Print the Stock Count Sheet and do a physical walk before entering closing stock', 'Enter opening stock before any purchases for accurate COGS', 'Wastage should be recorded as it happens, not estimated at month end', 'Use Staff Meals tab to track food consumed by staff — keeps it separate from wastage']
+    guide: 'Four tabs: Opening Stock (start of month), Closing Stock (physical count at month end), Wastage (spoilage during the month), and Staff Meals (internal consumption by staff). The Summary tab computes Used = Opening + Net Purchases − Wastage − Staff Meals − Closing. Export the Summary to Excel. On mobile, each tab shows a card list with a large number input per item — tap a card, enter the quantity, and it auto-saves when you move to the next item.',
+    tips: ['Print the Stock Count Sheet and do a physical walk before entering closing stock', 'Enter opening stock before any purchases for accurate COGS', 'Wastage should be recorded as it happens, not estimated at month end', 'Use Staff Meals tab to track food consumed by staff — keeps it separate from wastage', 'Install the app on your phone (see Mobile App) to count stock directly from the storeroom or fridge — even without internet']
+  },
+  {
+    icon: '◉', name: 'Mobile App', plan: null, color: '#c9a84c',
+    guide: 'Crest Inventory can be installed on any smartphone as an app — no app store required. On Android, open the app in Chrome and tap "Add to Home Screen" from the browser menu. On iPhone, open in Safari, tap the Share button, and choose "Add to Home Screen". Once installed, the app opens directly to Stock Count in full-screen mode. The app works offline: visit Stock Count once while connected to cache all items and periods to your phone. You can then count stock in the walk-in fridge or storeroom with no signal — entries are saved locally and synced to the server automatically when you return to an area with internet.',
+    tips: ['Open the app online at the start of each shift to refresh the cache before going offline', 'An amber "Offline" banner appears at the top when you have no connection — entries are still being saved locally', 'Cards with a dashed amber border have been saved locally and are waiting to sync', 'The green "Syncing…" banner appears briefly when the app is pushing offline entries to the server', 'Uninstall and reinstall the app after a major update to ensure the latest version is cached']
   },
   // === Starter+ ===
   {
@@ -181,6 +186,7 @@ const STARTER_FEATURES = [
   'Vendor management',
   'Purchases & vendor returns',
   'Stock count (opening / closing / wastage / staff meals)',
+  'Mobile app — installable PWA, offline stock counting',
   'Sales entry (bulk or daily)',
   'Payment summary (Cash / Credit / FonePay)',
   'Monthly summary & COGS by category',
