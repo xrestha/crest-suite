@@ -9,35 +9,35 @@ const CARD   = '#181c27'
 const BORDER = '#2a2f3d'
 
 const STARTER_FEATURES = [
-  'Dashboard & KPI overview',
-  'Item Master with unit conversion',
-  'Vendor management',
-  'BS calendar periods',
-  'Purchases + vendor returns',
-  'Stock count (opening / closing / wastage)',
+  'Dashboard & KPI Overview',
+  'Item Master with Unit Conversion',
+  'Vendor Management',
+  'BS Calendar Periods',
+  'Purchases + Vendor Returns',
+  'Stock Count (Opening / Closing / Wastage)',
 ]
 
 const GROWTH_EXTRAS = [
-  'Sales entry (bulk & daily)',
-  'Recipe costing & live food cost %',
-  'Variance report',
-  'Monthly summary (COGS)',
-  'Payment summary (Cash / Credit / FonePay)',
-  'Reorder report & par levels',
+  'Sales Entry (Bulk & Daily)',
+  'Recipe Costing & Live Food Cost %',
+  'Variance Report',
+  'Monthly Summary (COGS)',
+  'Payment Summary (Cash / Credit / FonePay)',
+  'Reorder Report & Par Levels',
   'Budget vs Actual',
-  'Best & Worst Sellers analysis',
+  'Best & Worst Sellers Analysis',
   'VAT Report',
-  'Purchase Orders (PO → GRN workflow)',
+  'Purchase Orders (PO → GRN Workflow)',
 ]
 
 const PRO_EXTRAS = [
-  'Menu engineering (Star / Puzzle / Plowhorses / Dogs)',
-  'Theoretical vs Actual food cost variance',
-  'FIFO / expiry tracking',
-  'Vendor spend report',
-  'Supplier price tracker',
-  'Overheads & true margin analysis',
-  'Custom branding & settings',
+  'Menu Engineering (Star / Puzzle / Plowhorses / Dogs)',
+  'Theoretical vs Actual Food Cost Variance',
+  'FIFO / Expiry Tracking',
+  'Vendor Spend Report',
+  'Supplier Price Tracker',
+  'Overheads & True Margin Analysis',
+  'Custom Branding & Settings',
 ]
 
 const PLANS = [
