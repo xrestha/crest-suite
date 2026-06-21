@@ -5,6 +5,11 @@ import { useSettings } from '../context/SettingsContext'
 const MODULES = [
   // === All Plans ===
   {
+    icon: '◎', name: 'Dashboard', plan: null, color: '#c9a84c',
+    guide: 'The home screen. Shows KPI cards for the current open period: total purchases, COGS, food cost %, and top wastage. Requires at least one open period with data entered to show meaningful numbers. Figures update live as you add purchases, stock counts, and sales.',
+    tips: ['COGS and FC% are only accurate after closing stock is entered', 'If the period selector shows no open period, go to Periods and create one first', 'Dashboard figures reflect the currently selected period — switch periods from the top-right selector']
+  },
+  {
     icon: '◷', name: 'Periods', plan: null, color: '#c9a84c',
     guide: 'Create one period per BS month. A period must be open before you can enter purchases, stock, or sales. Close a period at month end to lock the data. Closing stock auto-carries to next month opening. Periods older than 12 months are archived by default.',
     tips: ['Always create a new period before the month starts', 'Close the period only after entering closing stock', 'Use "Show Archived" in Periods to access old months']
@@ -74,6 +79,11 @@ const MODULES = [
     icon: '⚠', name: 'Wastage Report', plan: 'Starter+', color: '#9ca3af',
     guide: 'Detailed breakdown of all wastage entered during the period. Shows total value, item count, and top category. Filter by category. Export to Excel or print for management review.',
     tips: ['Sort by value to identify highest-cost wastage items', 'High wastage on the same item repeatedly signals a process or portioning problem']
+  },
+  {
+    icon: '◧', name: 'Settings', plan: 'Starter+', color: '#9ca3af',
+    guide: 'Configure your outlet details — business name, location, logo URL, contact phone, email, and website. These appear on printed sheets and reports. Also set your VAT registration number and default currency display. Changes apply immediately across all pages.',
+    tips: ['Add your logo URL to show your brand on printed stock count sheets', 'Set the correct contact details — they appear in the Help page footer for staff', 'Only admins can change settings for a client account']
   },
   // === Growth+ ===
   {
@@ -194,7 +204,7 @@ const STARTER_FEATURES = [
   'Reorder report & par levels',
   'VAT & Non-VAT reports',
   'Wastage report with Excel export',
-  'Settings & customisation',
+  'Settings & outlet customisation',
 ]
 const GROWTH_EXTRAS = [
   'Recipe costing & live FC%',
