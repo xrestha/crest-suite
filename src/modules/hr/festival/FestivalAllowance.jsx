@@ -163,12 +163,14 @@ export default function FestivalAllowance() {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
             {[
-              { label: 'Total Payout', value: fmt(total), color: '#c9a84c' },
-              { label: 'Employees',    value: rows.length, color: '#e8e0d0' },
-              { label: 'Average',      value: fmt(rows.length ? total / rows.length : 0), color: '#9ca3af' },
+              { label: 'Total Payout', value: fmt(total), color: '#c9a84c', tip: 'Total festival bonus to disburse across all employees in this run.' },
+              { label: 'Employees',    value: rows.length, color: '#e8e0d0', tip: 'Active and probation employees included in this festival run.' },
+              { label: 'Average',      value: fmt(rows.length ? total / rows.length : 0), color: '#9ca3af', tip: 'Average allowance per employee (total ÷ headcount).' },
             ].map(s => (
               <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
-                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.label}</div>
+                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  <Tip text={s.tip} width={240}>{s.label}</Tip>
+                </div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.label === 'Employees' ? s.value : `NPR ${s.value}`}</div>
               </div>
             ))}
@@ -189,11 +191,15 @@ export default function FestivalAllowance() {
                 <thead>
                   <tr>
                     <th>Employee</th>
-                    <th style={{ textAlign: 'right' }}>Basic / Rate</th>
+                    <th style={{ textAlign: 'right' }}>
+                      <Tip text="Monthly basic salary, or the daily/hourly rate for wage staff (snapshot at generation)." width={250}>Basic / Rate</Tip>
+                    </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Full months worked toward this festival (capped at 12). Allowance = basic × months ÷ 12 for monthly staff." width={280}>Months</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: '#c9a84c' }}>Amount</th>
+                    <th style={{ textAlign: 'right', color: '#c9a84c' }}>
+                      <Tip text="Festival bonus. Editable while draft; daily/hourly default to 0 — enter manually." width={250}>Amount</Tip>
+                    </th>
                     <th>Note</th>
                   </tr>
                 </thead>

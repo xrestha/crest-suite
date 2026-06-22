@@ -124,6 +124,19 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S115 — 2026-06-22 — Add-User Duplicate-Email Handling + Festival Tooltips
+
+**Add User (AdminClients):** trying to add a user whose email already exists (e.g. the admin's own email) failed with a raw Supabase error. Root cause is structural — one login = one profile = one `client_id` + role, so an email can't be both the platform admin and a client user. Rather than demote/lock out the admin, the form now:
+- Detects the "already registered" error and shows an actionable message suggesting a **plus-addressed** separate login (e.g. `you+casa@gmail.com` — same inbox, distinct account).
+- Adds an inline hint under the Email field explaining the one-login-one-account rule and the `+name` trick.
+- No edge-function change; admin access is never altered.
+
+**Tooltips:** beefed up the thin coverage on **Festival Allowance** — stat cards (Total Payout / Employees / Average) and the Basic-Rate / Amount column headers now have `Tip` tooltips. Verified Help entries exist for all six HR pages (Employees, Salary, Attendance, Payroll, HR Reports, Festival).
+
+**Files:** `src/pages/AdminClients.js`, `src/modules/hr/festival/FestivalAllowance.jsx`
+
+---
+
 ### S114 — 2026-06-22 — Crest HR: Festival Allowance
 
 The legally-required annual festival bonus (Dashain / पर्व खर्च) — broadly one month's basic, pro-rated for mid-year joiners.

@@ -206,7 +206,16 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
       })
       authData = result?.data
     } catch (err) {
-      setUserError('Could not create user: ' + err.message)
+      const already = /already.*registered|already.*exists|duplicate/i.test(err.message || '')
+      if (already) {
+        const [name, domain] = userForm.email.trim().split('@')
+        const suggestion = name && domain && !name.includes('+')
+          ? ` Try a separate login like ${name}+${client.name.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 8) || 'staff'}@${domain} — it reaches the same inbox but is its own account.`
+          : ''
+        setUserError(`That email already has an account (each login belongs to one account only).${suggestion}`)
+      } else {
+        setUserError('Could not create user: ' + err.message)
+      }
       setSavingUser(false)
       return
     }
@@ -546,6 +555,9 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                       onChange={e => setUserForm({ ...userForm, email: e.target.value })}
                       placeholder="user@restaurant.com"
                     />
+                    <span style={{ fontSize: 11, color: '#6b7280', marginTop: 4, display: 'block' }}>
+                      Each login belongs to one account. To reuse your own inbox for a client login, add <code style={{ color: '#9ca3af' }}>+name</code> before the @ (e.g. you+casa@gmail.com).
+                    </span>
                   </div>
                   <div className="form-field">
                     <label>Password *</label>
