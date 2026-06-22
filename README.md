@@ -124,6 +124,29 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S108 — 2026-06-22 — HR Salary: Pay Basis (Monthly/Daily/Hourly) + Minimum Wage Validation
+
+Researched Nepal minimum wage (FY 2082/83): NPR 19,550/month = 12,170 basic + 7,380 dearness; daily NPR 754; hourly NPR 101 (part-time 107). Found two real bugs and a structural gap.
+
+**Bug 1 — Split helper could produce an illegal basic.** At minimum gross (19,550) a 60% split = 11,730, below the legal minimum basic of 12,170. The 60% relative rule is weaker than the absolute minimum at the low end. Fix: `applySplit` now clamps basic up to `MIN_BASIC_MONTHLY` (12,170) when gross ≥ minimum wage.
+
+**Bug 2 — No absolute minimum-wage check.** S106 only validated the basic ≥ 60% *ratio*, never the *amount*. Added warnings for basic/rate below the statutory minimum and gross below NPR 19,550 (monthly).
+
+**Structural gap — part-time/contract on daily/hourly rates had no home.** The engine assumed everyone is monthly-salaried.
+- New `pay_basis` column on `hr_employees` (`monthly` / `daily` / `hourly`) — **DB migration required** (see below)
+- New shared constants module `src/modules/hr/payrollConstants.js` (SSF rates+cap, minimum wage by basis, 60% rule, `minRateFor()`)
+- EmployeeForm Salary tab: Pay Basis selector at top; basis-aware label (Basic /month vs Rate /day vs /hour); split helper + allowances + deductions + monthly summary shown **only for monthly**; daily/hourly show a rate field + minimum-rate warning + "paid via Payroll from attendance (coming soon)" note
+- SalaryList: daily/hourly rows show a "per day/hour" badge and their rate spanning the numeric columns ("paid via payroll from attendance"); excluded from monthly payroll totals; stat cards/footer now count monthly employees only; Excel export emits rate + note for non-monthly
+
+**DB migration (run in Supabase SQL editor):**
+```sql
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS pay_basis text DEFAULT 'monthly' CHECK(pay_basis IN ('monthly','daily','hourly'));
+```
+
+**Files:** `src/modules/hr/payrollConstants.js` (new), `src/modules/hr/employees/EmployeeForm.jsx`, `src/modules/hr/salary/SalaryList.jsx`
+
+---
+
 ### S107 — 2026-06-22 — HR Salary: "Split from Gross" Helper
 
 Employers hire on a gross/total figure then split it — the form previously forced bottom-up entry from basic. Added a one-shot calculator.

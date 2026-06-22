@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import * as XLSX from 'xlsx'
+import { SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT, PAY_BASES } from '../payrollConstants'
+
+function payUnitOf(emp) {
+  return (PAY_BASES.find(p => p.key === (emp.pay_basis || 'monthly')) || PAY_BASES[0]).unit
+}
 
 const STATUS_COLORS = {
   active:     { color: '#34d399', bg: 'rgba(52,211,153,0.1)',  border: 'rgba(52,211,153,0.2)'  },
@@ -10,9 +15,6 @@ const STATUS_COLORS = {
   resigned:   { color: '#f87171', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' },
   terminated: { color: '#f87171', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' },
 }
-
-// SSF is computed on basic salary capped at NPR 100,000/month (SSF Act).
-const SSF_CAP = 100000
 
 function fmt(n) { return Math.round(n).toLocaleString('en-NP') }
 
@@ -46,43 +48,54 @@ export default function SalaryList() {
 
   const filtered = employees.filter(e => statusFilter === 'all' || e.status === statusFilter)
 
-  // Per-employee computed salary
+  // Per-employee computed salary. Monthly only — daily/hourly pay resolves at payroll.
   function getSalary(emp) {
+    const monthly   = (emp.pay_basis || 'monthly') === 'monthly'
     const basic     = parseFloat(emp.basic_salary) || 0
+    if (!monthly) return { monthly: false, rate: basic, unit: payUnitOf(emp) }
     const comps     = components.filter(c => c.employee_id === emp.id)
     const earnings  = comps.filter(c => c.type === 'earning')
     const deductions = comps.filter(c => c.type === 'deduction')
     const totalAllowances = earnings.reduce((s, c)    => s + calcAmount(c, basic), 0)
     const totalOtherDed   = deductions.reduce((s, c)  => s + calcAmount(c, basic), 0)
     const ssf_base  = Math.min(basic, SSF_CAP)
-    const ssf_emp   = Math.round(ssf_base * 0.11)
-    const ssf_emp_  = Math.round(ssf_base * 0.20)
+    const ssf_emp   = Math.round(ssf_base * SSF_EMPLOYEE_PCT)
+    const ssf_emp_  = Math.round(ssf_base * SSF_EMPLOYER_PCT)
     const gross     = basic + totalAllowances
     const totalDed  = ssf_emp + totalOtherDed
     const net       = gross - totalDed
-    return { basic, totalAllowances, ssf_emp, ssf_employer: ssf_emp_, totalOtherDed, gross, totalDed, net }
+    return { monthly: true, basic, totalAllowances, ssf_emp, ssf_employer: ssf_emp_, totalOtherDed, gross, totalDed, net }
   }
 
-  // Totals
+  // Totals — monthly employees only.
   const totals = filtered.reduce((acc, emp) => {
     const s = getSalary(emp)
+    if (!s.monthly) return acc
     acc.gross       += s.gross
     acc.ssf_emp     += s.ssf_emp
     acc.ssf_employer += s.ssf_employer
     acc.deductions  += s.totalDed
     acc.net         += s.net
+    acc.count       += 1
     return acc
-  }, { gross: 0, ssf_emp: 0, ssf_employer: 0, deductions: 0, net: 0 })
+  }, { gross: 0, ssf_emp: 0, ssf_employer: 0, deductions: 0, net: 0, count: 0 })
 
   function exportExcel() {
     const rows = filtered.map(emp => {
       const s = getSalary(emp)
-      return {
+      const base = {
         'Employee Code': emp.employee_code || '',
         'Name':          emp.full_name,
         'Designation':   emp.designation || '',
         'Department':    emp.department || '',
         'Status':        emp.status,
+        'Pay Basis':     emp.pay_basis || 'monthly',
+      }
+      if (!s.monthly) {
+        return { ...base, [`Rate (NPR / ${s.unit})`]: s.rate, 'Note': 'Pay computed at payroll from attendance' }
+      }
+      return {
+        ...base,
         'Basic (NPR)':   s.basic,
         'Allowances (NPR)': s.totalAllowances,
         'Gross (NPR)':   s.gross,
@@ -126,7 +139,7 @@ export default function SalaryList() {
           <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
             <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.label}</div>
             <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>NPR {s.value}</div>
-            <div style={{ fontSize: 10, color: '#4b5563', marginTop: 3 }}>{filtered.length} employees</div>
+            <div style={{ fontSize: 10, color: '#4b5563', marginTop: 3 }}>{totals.count} monthly employees</div>
           </div>
         ))}
       </div>
@@ -178,26 +191,39 @@ export default function SalaryList() {
                           <span style={{ fontSize: 10, fontWeight: 700, color: st.color, background: st.bg, border: `1px solid ${st.border}`, borderRadius: 8, padding: '1px 6px' }}>
                             {emp.status}
                           </span>
+                          {!s.monthly && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#60a5fa', background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: 8, padding: '1px 6px' }}>
+                              per {s.unit}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td style={{ color: '#6b7280', fontSize: 12 }}>
                         {emp.department || '—'}{emp.designation ? <><br/><span style={{ fontSize: 11, color: '#4b5563' }}>{emp.designation}</span></> : null}
                       </td>
-                      <td style={{ textAlign: 'right', color: '#9ca3af', fontSize: 13 }}>{fmt(s.basic)}</td>
-                      <td style={{ textAlign: 'right', color: s.totalAllowances > 0 ? '#34d399' : '#4b5563', fontSize: 13 }}>
-                        {s.totalAllowances > 0 ? `+${fmt(s.totalAllowances)}` : '—'}
-                      </td>
-                      <td style={{ textAlign: 'right', color: '#e8e0d0', fontSize: 13, fontWeight: 500 }}>{fmt(s.gross)}</td>
-                      <td style={{ textAlign: 'right', color: '#f87171', fontSize: 13 }}>−{fmt(s.totalDed)}</td>
-                      <td style={{ textAlign: 'right', color: '#c9a84c', fontSize: 14, fontWeight: 700 }}>{fmt(s.net)}</td>
-                      <td style={{ textAlign: 'right', color: '#6b7280', fontSize: 12 }}>{fmt(s.ssf_employer)}</td>
+                      {s.monthly ? (
+                        <>
+                          <td style={{ textAlign: 'right', color: '#9ca3af', fontSize: 13 }}>{fmt(s.basic)}</td>
+                          <td style={{ textAlign: 'right', color: s.totalAllowances > 0 ? '#34d399' : '#4b5563', fontSize: 13 }}>
+                            {s.totalAllowances > 0 ? `+${fmt(s.totalAllowances)}` : '—'}
+                          </td>
+                          <td style={{ textAlign: 'right', color: '#e8e0d0', fontSize: 13, fontWeight: 500 }}>{fmt(s.gross)}</td>
+                          <td style={{ textAlign: 'right', color: '#f87171', fontSize: 13 }}>−{fmt(s.totalDed)}</td>
+                          <td style={{ textAlign: 'right', color: '#c9a84c', fontSize: 14, fontWeight: 700 }}>{fmt(s.net)}</td>
+                          <td style={{ textAlign: 'right', color: '#6b7280', fontSize: 12 }}>{fmt(s.ssf_employer)}</td>
+                        </>
+                      ) : (
+                        <td colSpan={6} style={{ textAlign: 'right', color: '#6b7280', fontSize: 12, fontStyle: 'italic' }}>
+                          NPR {fmt(s.rate)} / {s.unit} · paid via payroll from attendance
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
               </tbody>
               <tfoot>
                 <tr style={{ fontWeight: 700, borderTop: '2px solid #2a2f3d' }}>
-                  <td colSpan={2} style={{ color: '#6b7280', fontSize: 12 }}>Total — {filtered.length} employees</td>
+                  <td colSpan={2} style={{ color: '#6b7280', fontSize: 12 }}>Total — {totals.count} monthly employees</td>
                   <td />
                   <td />
                   <td style={{ textAlign: 'right', color: '#e8e0d0' }}>{fmt(totals.gross)}</td>
@@ -211,8 +237,9 @@ export default function SalaryList() {
         )}
       </div>
 
-      <div style={{ marginTop: 12, fontSize: 11, color: '#4b5563' }}>
-        Deductions = SSF Employee (11% of basic) + any additional deductions configured per employee. Employer SSF (20%) is paid by the company and not deducted from net salary.
+      <div style={{ marginTop: 12, fontSize: 11, color: '#4b5563', lineHeight: 1.6 }}>
+        Deductions = SSF Employee (11% of basic, capped at NPR 100,000 basic) + any additional deductions configured per employee. Employer SSF (20%) is paid by the company and not deducted from net salary.
+        Daily/hourly workers show their rate only — their pay is computed each period from attendance in Payroll (coming soon) and is excluded from the monthly payroll totals above.
       </div>
     </div>
   )

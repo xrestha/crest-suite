@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import {
+  SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT,
+  MIN_WAGE_MONTHLY, MIN_BASIC_MONTHLY, MIN_BASIC_PCT_OF_GROSS,
+  PAY_BASES, minRateFor,
+} from '../payrollConstants'
 
 const EMPTY = {
   employee_code: '',
@@ -12,6 +17,7 @@ const EMPTY = {
   designation: '',
   department: '',
   employment_type: 'permanent',
+  pay_basis: 'monthly',
   join_date: '',
   end_date: '',
   status: 'active',
@@ -46,9 +52,6 @@ const inp = {
 const lbl = { fontSize: 11, color: '#6b7280', marginBottom: 4, display: 'block', letterSpacing: '0.02em' }
 const row = { display: 'flex', gap: 12 }
 const col = { flex: 1, display: 'flex', flexDirection: 'column' }
-
-// SSF is computed on basic salary capped at NPR 100,000/month (SSF Act).
-const SSF_CAP = 100000
 
 function calcAmount(comp, basic) {
   const v = parseFloat(comp.value) || 0
@@ -88,7 +91,9 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
     const gross = parseFloat(grossInput) || 0
     if (gross <= 0) return
     const pct = Math.max(60, Math.min(100, parseFloat(basicPct) || 60))
-    const newBasic = Math.round(gross * pct / 100)
+    let newBasic = Math.round(gross * pct / 100)
+    // Never split below the statutory minimum basic when gross meets minimum wage.
+    if (gross >= MIN_WAGE_MONTHLY && newBasic < MIN_BASIC_MONTHLY) newBasic = MIN_BASIC_MONTHLY
     const remainder = gross - newBasic
     set('basic_salary', String(newBasic))
     setComponents(c => {
@@ -187,13 +192,21 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   const totalEarnings   = earnings.reduce((s, c)   => s + calcAmount(c, basic), 0)
   const totalDeductions = deductions.reduce((s, c) => s + calcAmount(c, basic), 0)
   const ssf_base        = Math.min(basic, SSF_CAP)
-  const ssf_employee    = Math.round(ssf_base * 0.11)
-  const ssf_employer    = Math.round(ssf_base * 0.20)
+  const ssf_employee    = Math.round(ssf_base * SSF_EMPLOYEE_PCT)
+  const ssf_employer    = Math.round(ssf_base * SSF_EMPLOYER_PCT)
   const gross    = basic + totalEarnings
   const totalDed = ssf_employee + totalDeductions
   const net      = gross - totalDed
-  // Labour Act: basic salary must be at least 60% of gross.
-  const basicTooLow = gross > 0 && basic < gross * 0.6
+
+  // Pay basis drives which salary UI + which legal minimum applies.
+  const isMonthly = (form.pay_basis || 'monthly') === 'monthly'
+  const payUnit   = (PAY_BASES.find(p => p.key === form.pay_basis) || PAY_BASES[0]).unit
+  const minRate   = minRateFor(form.pay_basis, form.employment_type)
+  // Monthly only: Labour Act basic ≥ 60% of gross.
+  const basicTooLow = isMonthly && gross > 0 && basic < gross * MIN_BASIC_PCT_OF_GROSS
+  // Below the statutory minimum for this pay basis.
+  const belowMinRate  = basic > 0 && basic < minRate
+  const belowMinGross = isMonthly && gross > 0 && gross < MIN_WAGE_MONTHLY
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', justifyContent: 'flex-end' }}>
@@ -349,7 +362,18 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
           {/* ── SALARY ── */}
           {tab === 'salary' && <>
 
-            {/* Quick split from gross */}
+            {/* Pay basis */}
+            <div style={col}>
+              <label style={lbl}>
+                <Tip text="Monthly — fixed salary. Daily / Hourly — paid per day or hour worked; actual pay is computed from attendance in Payroll (coming soon)." width={300}>Pay Basis</Tip>
+              </label>
+              <select style={inp} value={form.pay_basis || 'monthly'} onChange={e => set('pay_basis', e.target.value)}>
+                {PAY_BASES.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+              </select>
+            </div>
+
+            {/* Quick split from gross — monthly only */}
+            {isMonthly && (
             <div style={{ background: '#0f1117', border: '1px solid #2a2f3d', borderRadius: 8, overflow: 'hidden' }}>
               <button
                 onClick={() => setSplitOpen(o => !o)}
@@ -401,21 +425,44 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
                 </div>
               )}
             </div>
+            )}
 
-            {/* Basic salary */}
+            {/* Basic salary / rate */}
             <div style={col}>
               <label style={lbl}>
-                <Tip text="Monthly basic salary in NPR. SSF is computed on basic (capped at NPR 100,000): employee 11%, employer 20%." width={300}>Basic Salary (NPR / month)</Tip>
+                <Tip text={isMonthly
+                  ? 'Monthly basic salary in NPR. SSF is computed on basic (capped at NPR 100,000): employee 11%, employer 20%.'
+                  : `Pay rate per ${payUnit} in NPR. Actual pay is computed from attendance in Payroll (coming soon).`} width={300}>
+                  {isMonthly ? 'Basic Salary (NPR / month)' : `Rate (NPR / ${payUnit})`}
+                </Tip>
               </label>
-              <input type="number" min="0" style={inp} placeholder="e.g. 25000" value={form.basic_salary} onChange={e => set('basic_salary', e.target.value)} />
+              <input type="number" min="0" style={inp} placeholder={isMonthly ? 'e.g. 25000' : payUnit === 'day' ? 'e.g. 800' : 'e.g. 110'} value={form.basic_salary} onChange={e => set('basic_salary', e.target.value)} />
+              {belowMinRate && (
+                <span style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>
+                  ⚠ Below minimum wage — Nepal requires at least NPR {minRate.toLocaleString('en-NP')} / {payUnit}{isMonthly ? ' basic' : ''}.
+                </span>
+              )}
+              {!belowMinRate && belowMinGross && (
+                <span style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>
+                  ⚠ Gross below minimum wage — Nepal requires at least NPR {MIN_WAGE_MONTHLY.toLocaleString('en-NP')} / month for full-time staff.
+                </span>
+              )}
               {basicTooLow && (
                 <span style={{ fontSize: 11, color: '#c9a84c', marginTop: 4 }}>
-                  ⚠ Basic is below 60% of gross (NPR {Math.round(gross * 0.6).toLocaleString('en-NP')}). Labour Act requires basic ≥ 60% of total pay.
+                  ⚠ Basic is below 60% of gross (NPR {Math.round(gross * MIN_BASIC_PCT_OF_GROSS).toLocaleString('en-NP')}). Labour Act requires basic ≥ 60% of total pay.
                 </span>
               )}
             </div>
 
-            {/* ── Allowances ── */}
+            {/* Non-monthly: defer pay computation to payroll */}
+            {!isMonthly && (
+              <div style={{ padding: '14px 16px', background: '#0f1117', borderRadius: 8, border: '1px solid #2a2f3d', fontSize: 12, color: '#6b7280', lineHeight: 1.6 }}>
+                This employee is paid <strong style={{ color: '#e8e0d0' }}>per {payUnit}</strong>. Their actual pay each period is calculated from days/hours worked — that comes from the <strong style={{ color: '#9ca3af' }}>Attendance</strong> and <strong style={{ color: '#9ca3af' }}>Payroll</strong> modules (coming soon). Monthly allowances, deductions, and SSF are not configured here for hourly/daily workers.
+              </div>
+            )}
+
+            {/* ── Allowances (monthly only) ── */}
+            {isMonthly && <>
             <div style={{ borderTop: '1px solid #2a2f3d', paddingTop: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: '#34d399', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Allowances</span>
@@ -571,6 +618,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
                 </div>
               </div>
             )}
+            </>}
           </>}
 
           {/* ── BANK / SSF ── */}
