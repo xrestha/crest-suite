@@ -844,11 +844,21 @@ export default function Purchases() {
             )}
           </div>
 
-          {/* Bottom Add Purchase — saves scrolling back up on long lists */}
-          {!isLocked && purchases.length > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-              <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 14px' }} onClick={openNew} disabled={!selectedPeriod}>+ Add Purchase</button>
-            </div>
+          {/* Floating Add Purchase — always reachable regardless of scroll position.
+              Hidden while the form is open or the period is locked. */}
+          {!isLocked && !showForm && selectedPeriod && (
+            <button
+              className="btn btn-primary"
+              onClick={openNew}
+              title="Add Purchase"
+              style={{
+                position: 'fixed', right: 28, bottom: 28, zIndex: 50,
+                padding: '12px 20px', fontSize: 14, fontWeight: 600,
+                borderRadius: 28, boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
+              }}
+            >
+              + Add Purchase
+            </button>
           )}
         </>
       )}
