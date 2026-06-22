@@ -46,6 +46,7 @@ import ShrinkageReport from './pages/ShrinkageReport'
 import EmployeeList from './modules/hr/employees/EmployeeList'
 import SalaryList from './modules/hr/salary/SalaryList'
 import AttendanceSheet from './modules/hr/attendance/AttendanceSheet'
+import PayrollRun from './modules/hr/payroll/PayrollRun'
 import './components/Layout.css'
 
 export default function App() {
@@ -133,6 +134,7 @@ export default function App() {
               <Route path="/hr/employees" element={<ModuleGate module="hr"><EmployeeList /></ModuleGate>} />
               <Route path="/hr/salary"     element={<ModuleGate module="hr"><SalaryList /></ModuleGate>} />
               <Route path="/hr/attendance" element={<ModuleGate module="hr"><AttendanceSheet /></ModuleGate>} />
+              <Route path="/hr/payroll"    element={<ModuleGate module="hr"><PayrollRun /></ModuleGate>} />
 
               {/* Admin only */}
               <Route path="/admin/clients"

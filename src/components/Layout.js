@@ -325,6 +325,7 @@ export default function Layout() {
                 { to: '/hr/employees',  label: 'Employees',        icon: '👤' },
                 { to: '/hr/salary',     label: 'Salary Structure', icon: '₿'  },
                 { to: '/hr/attendance', label: 'Attendance',       icon: '🗓️' },
+                { to: '/hr/payroll',    label: 'Payroll',          icon: '💵' },
               ].map(renderNavItem)}
             </>
           )}

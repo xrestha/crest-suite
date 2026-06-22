@@ -124,6 +124,64 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S111 — 2026-06-22 — Crest HR: Payroll Module
+
+HR roadmap session 4 — the keystone. Combines salary structure (S105) + pay basis (S108) + SSF/min-wage (S106–S108) + attendance (S110) into actual pay, frozen as payslips.
+
+**DB migration (run in Supabase SQL editor):**
+```sql
+CREATE TABLE IF NOT EXISTS hr_payroll_runs (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  client_id uuid REFERENCES clients(id) ON DELETE CASCADE NOT NULL,
+  period_id uuid REFERENCES monthly_periods(id) ON DELETE CASCADE NOT NULL,
+  status text NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized')),
+  created_at timestamptz DEFAULT now(), finalized_at timestamptz,
+  UNIQUE (client_id, period_id)
+);
+CREATE TABLE IF NOT EXISTS hr_payslips (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  run_id uuid REFERENCES hr_payroll_runs(id) ON DELETE CASCADE NOT NULL,
+  client_id uuid REFERENCES clients(id) ON DELETE CASCADE NOT NULL,
+  employee_id uuid REFERENCES hr_employees(id) ON DELETE CASCADE NOT NULL,
+  pay_basis text, basic numeric(12,2) DEFAULT 0, allowances numeric(12,2) DEFAULT 0,
+  gross numeric(12,2) DEFAULT 0, present_days numeric(5,1) DEFAULT 0, absent_days numeric(5,1) DEFAULT 0,
+  worked_days numeric(5,1) DEFAULT 0, hours_worked numeric(7,2) DEFAULT 0, ot_hours numeric(7,2) DEFAULT 0,
+  ot_amount numeric(12,2) DEFAULT 0, absence_deduction numeric(12,2) DEFAULT 0,
+  ssf_employee numeric(12,2) DEFAULT 0, ssf_employer numeric(12,2) DEFAULT 0,
+  other_deductions numeric(12,2) DEFAULT 0, tds numeric(12,2) DEFAULT 0, net_pay numeric(12,2) DEFAULT 0,
+  created_at timestamptz DEFAULT now(), UNIQUE (run_id, employee_id)
+);
+ALTER TABLE hr_payroll_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE hr_payslips     ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "client_own" ON hr_payroll_runs FOR ALL
+  USING ((SELECT role FROM profiles WHERE id = auth.uid()) = 'admin' OR client_id = (SELECT client_id FROM profiles WHERE id = auth.uid()))
+  WITH CHECK ((SELECT role FROM profiles WHERE id = auth.uid()) = 'admin' OR client_id = (SELECT client_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "client_own" ON hr_payslips FOR ALL
+  USING ((SELECT role FROM profiles WHERE id = auth.uid()) = 'admin' OR client_id = (SELECT client_id FROM profiles WHERE id = auth.uid()))
+  WITH CHECK ((SELECT role FROM profiles WHERE id = auth.uid()) = 'admin' OR client_id = (SELECT client_id FROM profiles WHERE id = auth.uid()));
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_payroll_runs TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_payslips     TO authenticated;
+```
+
+**Computation — `src/modules/hr/payroll/payrollCompute.js` (pure):**
+- `computePayslip(employee, components, attendanceRows, period, tds)` per pay basis:
+  - **Monthly:** gross = basic + allowances; absence deduction = `basic ÷ daysInBsMonth × unpaid days` (unpaid = absent + unpaid_leave + ½·half-day); OT = `otHrs × (basic ÷ (days×8)) × 1.5`; net = gross + OT − absence − SSF − other − TDS
+  - **Daily:** earned = rate × worked days (present + ½·half); OT = `otHrs × (rate÷8) × 1.5`
+  - **Hourly:** earned = rate × hours worked; OT = `otHrs × rate × 1.5`
+  - **SSF only for employees with an `ssf_no`** (11%/20% on capped basic/earned)
+
+**PayrollRun (`/hr/payroll`):**
+- Generate (draft) → review register → Finalize (locks, frozen snapshot). Regenerate recomputes from current salary/attendance; admin can Reopen a finalized run.
+- Stat cards (Total Gross / Deductions / Net Payable / Employer SSF); register table with per-row inline **TDS** edit (draft only) + tfoot totals.
+- Per-employee **printable payslip** (modal + `.print-only` block using existing print CSS); **Excel export**.
+- Nav "Payroll" (💵) under Human Resources; Help HR_FEATURES entry.
+
+**Deferred:** automatic **TDS** (FY 2083/84 slabs + caps — next session; `tds` stays manual), festival allowance run, salary advances, bank-transfer file export.
+
+**Files:** `src/modules/hr/payroll/payrollCompute.js` (new), `src/modules/hr/payroll/PayrollRun.jsx` (new), `src/App.js`, `src/components/Layout.js`, `src/pages/Help.js`
+
+---
+
 ### S110 — 2026-06-22 — Crest HR: Attendance Module
 
 HR roadmap session 3. Builds the daily attendance sheet — the data source the future Payroll module needs to compute pay for daily/hourly staff and apply overtime.
