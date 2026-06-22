@@ -49,6 +49,7 @@ import AttendanceSheet from './modules/hr/attendance/AttendanceSheet'
 import PayrollRun from './modules/hr/payroll/PayrollRun'
 import HrReports from './modules/hr/reports/HrReports'
 import FestivalAllowance from './modules/hr/festival/FestivalAllowance'
+import LeaveManagement from './modules/hr/leave/LeaveManagement'
 import './components/Layout.css'
 
 export default function App() {
@@ -136,6 +137,7 @@ export default function App() {
               <Route path="/hr/employees" element={<ModuleGate module="hr"><EmployeeList /></ModuleGate>} />
               <Route path="/hr/salary"     element={<ModuleGate module="hr"><SalaryList /></ModuleGate>} />
               <Route path="/hr/attendance" element={<ModuleGate module="hr"><AttendanceSheet /></ModuleGate>} />
+              <Route path="/hr/leave"      element={<ModuleGate module="hr"><LeaveManagement /></ModuleGate>} />
               <Route path="/hr/payroll"    element={<ModuleGate module="hr"><PayrollRun /></ModuleGate>} />
               <Route path="/hr/reports"    element={<ModuleGate module="hr"><HrReports /></ModuleGate>} />
               <Route path="/hr/festival"   element={<ModuleGate module="hr"><FestivalAllowance /></ModuleGate>} />

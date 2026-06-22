@@ -106,7 +106,7 @@ Architecture: single React app, single Supabase project, feature flags per clien
 | Module | Status | Routes |
 |---|---|---|
 | Crest IMS | ✅ Live | All existing routes |
-| Crest HR | 🔨 Building | `/hr/employees` (Session 1 done) |
+| Crest HR | 🔨 Building | `/hr/employees`, `/hr/salary`, `/hr/attendance`, `/hr/leave`, `/hr/payroll`, `/hr/reports`, `/hr/festival` |
 | Crest POS | 🔲 Planned | — |
 
 **Suite pricing:**
@@ -123,6 +123,64 @@ Architecture: single React app, single Supabase project, feature flags per clien
 ---
 
 ## Session Log
+
+### S116 — 2026-06-22 — Crest HR: Leave Management
+
+New HR feature `/hr/leave` — leave entitlements, requests, and balances, with automatic Attendance integration. Closes the gap where paid/unpaid leave had to be hand-marked day-by-day in the Attendance sheet.
+
+**Tables (migration — run in Supabase):**
+```sql
+CREATE TABLE IF NOT EXISTS hr_leave_types (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  client_id uuid REFERENCES clients(id) ON DELETE CASCADE NOT NULL,
+  name text NOT NULL, code text NOT NULL,
+  paid boolean NOT NULL DEFAULT true,
+  annual_quota numeric(5,1) NOT NULL DEFAULT 0,
+  carry_forward boolean NOT NULL DEFAULT false,
+  color text DEFAULT '#60a5fa', active boolean NOT NULL DEFAULT true,
+  sort_order integer DEFAULT 0, created_at timestamptz DEFAULT now(),
+  UNIQUE (client_id, code)
+);
+CREATE TABLE IF NOT EXISTS hr_leave_requests (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  client_id uuid REFERENCES clients(id) ON DELETE CASCADE NOT NULL,
+  employee_id uuid REFERENCES hr_employees(id) ON DELETE CASCADE NOT NULL,
+  leave_type_id uuid REFERENCES hr_leave_types(id) ON DELETE SET NULL,
+  start_date date NOT NULL, end_date date NOT NULL,
+  days numeric(5,1) NOT NULL DEFAULT 0, reason text,
+  status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','cancelled')),
+  decided_at timestamptz, note text, created_at timestamptz DEFAULT now()
+);
+ALTER TABLE hr_leave_types ENABLE ROW LEVEL SECURITY;
+ALTER TABLE hr_leave_requests ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  CREATE POLICY "client_own" ON hr_leave_types FOR ALL
+    USING ((SELECT role FROM profiles WHERE id=auth.uid())='admin' OR client_id=(SELECT client_id FROM profiles WHERE id=auth.uid()))
+    WITH CHECK ((SELECT role FROM profiles WHERE id=auth.uid())='admin' OR client_id=(SELECT client_id FROM profiles WHERE id=auth.uid()));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE POLICY "client_own" ON hr_leave_requests FOR ALL
+    USING ((SELECT role FROM profiles WHERE id=auth.uid())='admin' OR client_id=(SELECT client_id FROM profiles WHERE id=auth.uid()))
+    WITH CHECK ((SELECT role FROM profiles WHERE id=auth.uid())='admin' OR client_id=(SELECT client_id FROM profiles WHERE id=auth.uid()));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_leave_types TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_leave_requests TO authenticated;
+```
+
+**Page (`/hr/leave`):** three tabs.
+- **Requests** — apply via BS date pickers (`BsFullDatePicker`); working days counted excluding Saturdays; admin Approve/Reject/Cancel. Per-row remaining balance shown.
+- **Balances** — employee × leave-type grid (used / annual quota) for the selected BS year; Excel export.
+- **Leave Types** (admin) — inline-editable name / paid / quota / carry-forward / active.
+
+**Attendance integration:** approving a request maps the AD range → BS days, finds the matching `monthly_periods`, and upserts `hr_attendance` rows as `paid_leave` / `unpaid_leave` (`onConflict: employee_id,period_id,bs_day`). Reject/cancel of an approved request reverts those days to `present`. Months with no period yet are skipped with a warning. Payroll needed **no change** — `payrollCompute.js` already counts `unpaid_leave` as an unpaid day.
+
+**Seed:** first visit auto-inserts six Nepal Labour Act 2074 leave types (Home/Annual 18, Sick 12, Bereavement 13, Maternity 98, Paternity 15, Unpaid).
+
+**Deferred:** auto-accrual / carry-forward roll-over, holiday calendar, half-day leave, employee self-service.
+
+**Files:** `src/modules/hr/leave/leaveConstants.js` (new), `src/modules/hr/leave/LeaveManagement.jsx` (new), `src/App.js`, `src/components/Layout.js`, `src/pages/Help.js`
+
+---
 
 ### S115 — 2026-06-22 — Add-User Duplicate-Email Handling + Festival Tooltips
 

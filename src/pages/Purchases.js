@@ -836,6 +836,13 @@ export default function Purchases() {
               </div>
             )}
           </div>
+
+          {/* Bottom Add Purchase — saves scrolling back up on long lists */}
+          {!isLocked && purchases.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+              <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 14px' }} onClick={openNew} disabled={!selectedPeriod}>+ Add Purchase</button>
+            </div>
+          )}
         </>
       )}
 
