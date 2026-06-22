@@ -328,8 +328,12 @@ export default function AttendanceSheet() {
                         {d}
                       </th>
                     ))}
-                    <th style={{ textAlign: 'right', borderLeft: '2px solid #2a2f3d' }}>P</th>
-                    <th style={{ textAlign: 'right' }}>A</th>
+                    <th style={{ textAlign: 'right', borderLeft: '2px solid #2a2f3d' }}>
+                      <Tip text="Present days for the month (half-days count as 0.5)." width={230}>P</Tip>
+                    </th>
+                    <th style={{ textAlign: 'right' }}>
+                      <Tip text="Absent days for the month." width={180}>A</Tip>
+                    </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Total overtime hours for the month." width={200}>OT</Tip>
                     </th>
