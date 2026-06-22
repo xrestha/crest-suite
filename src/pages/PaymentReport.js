@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
+import Tip from '../components/Tip'
 import * as XLSX from 'xlsx'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
@@ -128,18 +129,24 @@ export default function PaymentReport() {
       {/* Summary cards */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(5,1fr)', marginBottom: 24 }}>
         <div className="stat-card">
-          <div className="stat-label">Gross Purchases</div>
+          <div className="stat-label">
+            <Tip text="Total purchase spend for the period, before returns. This is money paid to suppliers — not sales revenue." width={260}>Gross Purchases</Tip>
+          </div>
           <div className="stat-value gold" style={{ fontSize: 17 }}>NPR {grandGross.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Total Returns</div>
+          <div className="stat-label">
+            <Tip text="Value of goods returned to suppliers, subtracted from gross to get net spend." width={250}>Total Returns</Tip>
+          </div>
           <div className="stat-value" style={{ fontSize: 17, color: '#f87171' }}>
             {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
           </div>
         </div>
         {summary.map(s => (
           <div key={s.method} className="stat-card">
-            <div className="stat-label">{s.method} (Net)</div>
+            <div className="stat-label">
+              <Tip text={`Net purchase spend paid via ${s.method} (gross − returns) for this period.`} width={240}>{s.method} (Net)</Tip>
+            </div>
             <div className="stat-value" style={{ fontSize: 17, color: METHOD_COLORS[s.method] }}>
               NPR {s.net.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
             </div>
@@ -200,8 +207,12 @@ export default function PaymentReport() {
                   <th>Payment Method</th>
                   <th style={{ textAlign: 'right' }}>Gross Purchases</th>
                   <th style={{ textAlign: 'right', color: '#f87171' }}>Returns</th>
-                  <th style={{ textAlign: 'right' }}>Net Amount</th>
-                  <th style={{ textAlign: 'right' }}>% of Net Total</th>
+                  <th style={{ textAlign: 'right' }}>
+                    <Tip text="Gross purchases − returns for this method." width={220}>Net Amount</Tip>
+                  </th>
+                  <th style={{ textAlign: 'right' }}>
+                    <Tip text="This method's net spend as a share of total net purchases." width={230}>% of Net Total</Tip>
+                  </th>
                   <th style={{ textAlign: 'right' }}>Transactions</th>
                 </tr>
               </thead>

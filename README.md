@@ -143,7 +143,7 @@ Researched Nepal minimum wage (FY 2082/83): NPR 19,550/month = 12,170 basic + 7,
 ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS pay_basis text DEFAULT 'monthly' CHECK(pay_basis IN ('monthly','daily','hourly'));
 ```
 
-**Tooltips:** Added `Tip` tooltips to all four SalaryList stat cards (Total Gross / SSF Employee / SSF Employer / Net Payroll) and all six table column headers (Basic / Allowances / Gross / Deductions / Net / SSF Employer) — the page previously had none.
+**Tooltips:** Added `Tip` tooltips to all four SalaryList stat cards (Total Gross / SSF Employee / SSF Employer / Net Payroll) and all six table column headers (Basic / Allowances / Gross / Deductions / Net / SSF Employer) — the page previously had none. Also audited all IMS + HR pages for tooltip coverage: added tooltips to **PaymentReport** (stat cards + Net/% columns — clarifies it's purchase spend, not sales revenue; previously had none). Settings already uses always-visible inline hints under each threshold field; Vendors is a plain CRUD list — both intentionally left without tooltips. Admin-only pages (AdminClients, AuditLog) and non-data pages (Login, Pricing, Help) are out of scope.
 
 **Files:** `src/modules/hr/payrollConstants.js` (new), `src/modules/hr/employees/EmployeeForm.jsx`, `src/modules/hr/salary/SalaryList.jsx`
 
