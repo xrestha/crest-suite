@@ -124,6 +124,29 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S112 — 2026-06-22 — Crest HR: Automatic TDS (Income Tax)
+
+Replaces the manual TDS field on payslips with an automatic income-tax engine. **No DB migration** — TDS already exists on `hr_payslips` and year-to-date figures are derived from existing columns.
+
+**Tax engine — `src/modules/hr/payroll/tds.js` (pure):**
+- Slab sets: **FY 2083/84** unified (1% ≤10L · 10% 10–15L · 20% 15–25L · 27% 25–40L · 29% >40L) and **FY 2082/83** single-person schedule. `slabsFor(fyStart)` picks by fiscal year.
+- `fiscalYearOf(bsYear, bsMonth)` — Nepal FY runs Shrawan (month 4) → Ashadh; returns `{ fyStart, monthInFy }`.
+- `applySlabs(taxable, slabs, isSsf)` — marginal tax; **SSF contributors get the 1% first slab (SST) waived**.
+- `computeMonthlyTds({ period, monthlyGross, monthlySsf, ytdGross, ytdSsf, ytdWithheld, isSsf })` — **YTD cumulative projection**: annualise (YTD actuals + current-month rate for remaining months), deduct SSF (capped at min 5L or ⅓ income), apply slabs, take the cumulative share due through the current month minus tax already withheld. Self-correcting month to month.
+
+**Decisions (this session):** YTD-projection method; **no insurance** deductions yet; **single schedule only** (no married/single field). So no new employee columns.
+
+**PayrollRun integration:**
+- `fetchYtdMap()` sums `(gross − ssf_employee)` and `tds` from **prior finalized** payslips in the same fiscal year (embedded query `hr_payslips → hr_payroll_runs!inner → monthly_periods!inner`, filtered to finalized + earlier months).
+- `buildRows()` now computes TDS per employee via `computeMonthlyTds` and nets it out. TDS is auto-filled but stays **editable inline as an override** while draft; Regenerate recomputes.
+- Column tooltip + footer note updated; Help Payroll tips updated.
+
+**Deferred:** insurance-premium deductions, married/couple schedule, festival allowance, advances. The YTD method assumes earlier months of the FY are finalized in order.
+
+**Files:** `src/modules/hr/payroll/tds.js` (new), `src/modules/hr/payroll/PayrollRun.jsx`, `src/pages/Help.js`
+
+---
+
 ### S111 — 2026-06-22 — Crest HR: Payroll Module
 
 HR roadmap session 4 — the keystone. Combines salary structure (S105) + pay basis (S108) + SSF/min-wage (S106–S108) + attendance (S110) into actual pay, frozen as payslips.

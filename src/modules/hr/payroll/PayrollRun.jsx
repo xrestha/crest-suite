@@ -5,6 +5,7 @@ import Tip from '../../../components/Tip'
 import * as XLSX from 'xlsx'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { computePayslip } from './payrollCompute'
+import { computeMonthlyTds, fiscalYearOf } from './tds'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
 
@@ -70,22 +71,59 @@ export default function PayrollRun() {
     await loadAll(id); setLoading(false)
   }
 
-  function buildRows(runId) {
+  // Year-to-date taxable per employee: sum of (gross − SSF) and tds from PRIOR
+  // finalized payslips in the same fiscal year (months before the current one).
+  async function fetchYtdMap() {
+    const cur = fiscalYearOf(period.bs_year, period.bs_month)
+    const { data } = await supabase.from('hr_payslips')
+      .select('employee_id, gross, ssf_employee, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+      .eq('client_id', clientId)
+      .eq('hr_payroll_runs.status', 'finalized')
+    const map = {}
+    ;(data || []).forEach(r => {
+      if (r.hr_payroll_runs?.status !== 'finalized') return
+      const mp = r.hr_payroll_runs?.monthly_periods
+      if (!mp) return
+      const fy = fiscalYearOf(mp.bs_year, mp.bs_month)
+      if (fy.fyStart !== cur.fyStart || fy.monthInFy >= cur.monthInFy) return // same FY, earlier month only
+      const e = map[r.employee_id] || { gross: 0, ssf: 0, withheld: 0 }
+      e.gross += r.gross || 0
+      e.ssf   += r.ssf_employee || 0
+      e.withheld += r.tds || 0
+      map[r.employee_id] = e
+    })
+    return map
+  }
+
+  function buildRows(runId, ytdMap) {
     return employees.map(emp => {
       const comps = components.filter(c => c.employee_id === emp.id)
       const att   = attendance.filter(a => a.employee_id === emp.id)
       const slip  = computePayslip(emp, comps, att, period, 0)
-      return { run_id: runId, client_id: clientId, employee_id: emp.id, ...slip }
+      const isSsf = !!(emp.ssf_no && String(emp.ssf_no).trim())
+      const ytd   = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0 }
+      const tds   = computeMonthlyTds({
+        period,
+        monthlyGross: slip.gross,
+        monthlySsf:   slip.ssf_employee,
+        ytdGross:     ytd.gross,
+        ytdSsf:       ytd.ssf,
+        ytdWithheld:  ytd.withheld,
+        isSsf,
+      })
+      const net = slip.net_pay - tds
+      return { run_id: runId, client_id: clientId, employee_id: emp.id, ...slip, tds, net_pay: net }
     })
   }
 
   async function generate() {
     if (!period || employees.length === 0) return
     setBusy(true); setMsg('')
+    const ytdMap = await fetchYtdMap()
     const { data: runRow, error: rErr } = await supabase.from('hr_payroll_runs')
       .insert({ client_id: clientId, period_id: period.id, status: 'draft' }).select().single()
     if (rErr) { setMsg('error:' + rErr.message); setBusy(false); return }
-    const { error: pErr } = await supabase.from('hr_payslips').insert(buildRows(runRow.id))
+    const { error: pErr } = await supabase.from('hr_payslips').insert(buildRows(runRow.id, ytdMap))
     if (pErr) { setMsg('error:' + pErr.message); setBusy(false); return }
     await loadAll(period.id)
     setMsg('ok:Payroll generated'); setBusy(false)
@@ -93,10 +131,11 @@ export default function PayrollRun() {
 
   async function regenerate() {
     if (!run || run.status === 'finalized') return
-    if (!window.confirm('Recompute all payslips from current salary & attendance? Manual TDS edits will be reset.')) return
+    if (!window.confirm('Recompute all payslips from current salary, attendance & tax? Manual TDS overrides will be reset.')) return
     setBusy(true); setMsg('')
+    const ytdMap = await fetchYtdMap()
     await supabase.from('hr_payslips').delete().eq('run_id', run.id)
-    const { error } = await supabase.from('hr_payslips').insert(buildRows(run.id))
+    const { error } = await supabase.from('hr_payslips').insert(buildRows(run.id, ytdMap))
     if (error) { setMsg('error:' + error.message); setBusy(false); return }
     await loadAll(period.id)
     setMsg('ok:Recomputed'); setBusy(false)
@@ -225,7 +264,7 @@ export default function PayrollRun() {
                       <th style={{ textAlign: 'right' }}><Tip text="Pay deducted for unpaid-absence days (basic ÷ days in month × unpaid days)." width={260}>Absence</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="11% SSF — only for employees with an SSF number on file." width={230}>SSF</Tip></th>
                       <th style={{ textAlign: 'right' }}>Other Ded</th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Income tax. Editable while draft; auto-TDS arrives in a later update." width={240}>TDS</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Income tax, computed automatically from FY tax slabs using year-to-date projection. Editable while draft if you need to override." width={270}>TDS</Tip></th>
                       <th style={{ textAlign: 'right', color: '#c9a84c' }}>Net Pay</th>
                       <th></th>
                     </tr>
@@ -277,7 +316,7 @@ export default function PayrollRun() {
               </div>
             </div>
             <div style={{ marginTop: 12, fontSize: 11, color: '#4b5563', lineHeight: 1.6 }}>
-              {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — edit TDS inline, Regenerate to pull the latest salary & attendance, then Finalize to lock.'} SSF is applied only to employees with an SSF number. Income tax (TDS) is entered manually for now; automatic TDS arrives in a later update.
+              {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can override any TDS value inline.'} SSF is applied only to employees with an SSF number. TDS is computed automatically from the fiscal-year tax slabs using year-to-date projection; finalize earlier months first so each month\'s tax builds on the last.
             </div>
           </>
         )}
