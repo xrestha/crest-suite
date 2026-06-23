@@ -35,6 +35,7 @@ export default function Recipes() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const [ingSearch, setIngSearch] = useState('')
   const [printRecipe, setPrintRecipe] = useState(null)
   const filterCat = 'all' // no active UI to change this; filter always passes through
 
@@ -559,10 +560,27 @@ export default function Recipes() {
   const [activeTab, setActiveTab] = useState('all')
 
   // ── Filtered list ─────────────────────────────────────────────
+  // True if a recipe contains an ingredient (item or nested sub-recipe) matching `q`.
+  function recipeHasIngredient(recipe, q, allRecipes, seen = new Set()) {
+    if (!recipe || seen.has(recipe.id)) return false
+    seen.add(recipe.id)
+    return (recipe.recipe_ingredients || []).some(ri => {
+      if (ri.item_id && ri.items) return ri.items.name.toLowerCase().includes(q)
+      if (ri.sub_recipe_id) {
+        const sr = ri.sub_recipe || allRecipes.find(r => r.id === ri.sub_recipe_id)
+        if (sr?.name?.toLowerCase().includes(q)) return true
+        return recipeHasIngredient(sr, q, allRecipes, new Set(seen))
+      }
+      return false
+    })
+  }
+
+  const ingQ = ingSearch.trim().toLowerCase()
   const filtered = recipes.filter(r => {
     const matchSearch = r.name.toLowerCase().includes(search.toLowerCase())
     const matchCat = filterCat === 'all' || r.category === filterCat
-    return matchSearch && matchCat
+    const matchIngredient = !ingQ || recipeHasIngredient(r, ingQ, recipes)
+    return matchSearch && matchCat && matchIngredient
   })
 
   const regularRecipes = filtered.filter(r => r.category !== 'Sub-Recipe')
@@ -607,11 +625,26 @@ export default function Recipes() {
       {view === 'list' && (
         <div className={printRecipe ? 'no-print' : ''}>
           {/* Search bar */}
-          <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
             <input
               style={{ background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: '#e8e0d0', outline: 'none', width: 240 }}
               placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} />
+            <div style={{ marginLeft: 'auto', position: 'relative' }}>
+              <input
+                style={{ background: '#181c27', border: `1px solid ${ingQ ? 'rgba(201,168,76,0.5)' : '#2a2f3d'}`, borderRadius: 6, padding: '8px 12px 8px 30px', fontSize: 13, color: '#e8e0d0', outline: 'none', width: 260 }}
+                placeholder="Find ingredient in recipes…" value={ingSearch} onChange={e => setIngSearch(e.target.value)} />
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: '#6b7280', pointerEvents: 'none' }}>🔍</span>
+              {ingSearch && (
+                <button onClick={() => setIngSearch('')} title="Clear"
+                  style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 4px' }}>×</button>
+              )}
+            </div>
           </div>
+          {ingQ && (
+            <div style={{ fontSize: 12, color: '#c9a84c', margin: '-8px 0 14px' }}>
+              Showing recipes that use an ingredient matching "<strong>{ingSearch}</strong>" ({filtered.length} found).
+            </div>
+          )}
 
           {/* Tab bar */}
           <div style={{ display: 'flex', gap: 2, marginBottom: 0, borderBottom: '1px solid #2a2f3d' }}>

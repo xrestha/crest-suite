@@ -124,6 +124,14 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S124 — 2026-06-23 — Recipe Costing: find-by-ingredient search
+
+Added a second search box (right of the toolbar, 🔍 + clear ×) on the Recipe Costing list that filters recipes **by an ingredient they contain** — distinct from the existing name search. `recipeHasIngredient(recipe, q, allRecipes)` is **recursive** (matches items + nested sub-recipe names/ingredients), so searching "coffee" surfaces a Flat White even when coffee lives in its Doppio sub-recipe. ANDs with the name search + category tabs; shows a "(N found)" helper line and updates tab counts.
+
+**Files:** `src/pages/Recipes.js`
+
+---
+
 ### S123 — 2026-06-23 — Searchable item picker (Purchases)
 
 The native `<select>` for items (218+) was painful to scroll. Added a reusable **`src/components/SearchableSelect.js`** — a type-to-filter combobox: a styled trigger button opens a panel with a search input + filtered list; **↑/↓ to move, Enter to pick, Esc/outside-click to close**, mouse hover highlights. The dropdown is **`position:fixed`** (measured from the trigger's rect, repositioned on scroll/resize) so it's never clipped by the bill modal/table overflow. Drop-in API: `value` / `onChange(value)` / `options=[{value,label}]` / `placeholder`.
