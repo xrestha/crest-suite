@@ -124,6 +124,39 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S120 — 2026-06-23 — Audit log: HR + user-management coverage
+
+Audit logging is **trigger-based** (`audit_<table>` → `log_audit()`; source-agnostic, captures action + old/new JSON). Extended coverage:
+
+- **Fixed:** `vendor_returns` + `wastages` triggers now fire on `UPDATE` too (were INSERT/DELETE only — edits were silently unlogged despite the help text claiming "Edit").
+- **Added (recommended set):** `hr_employees`, `hr_salary_components`, `hr_payroll_runs`, `hr_festival_allowances`, `hr_leave_types`, `hr_leave_requests`, and **`profiles`** (client-login create / reassign / delete).
+- **Left out (high-volume, optional):** `hr_attendance`, `hr_payslips` — would flood the log; the payroll run's draft→finalize is already captured via `hr_payroll_runs`.
+
+`log_audit()` is safe to attach anywhere — it ends with `EXCEPTION WHEN OTHERS THEN RETURN NULL`, so a trigger can never break the underlying write; for non-stock tables it reads `NEW.id` + `NEW.client_id` (all HR tables + profiles have both).
+
+**SQL applied in Supabase:**
+```sql
+-- UPDATE added to the two partial triggers
+DROP TRIGGER IF EXISTS audit_wastages ON public.wastages;
+CREATE TRIGGER audit_wastages AFTER INSERT OR UPDATE OR DELETE ON public.wastages FOR EACH ROW EXECUTE FUNCTION log_audit();
+DROP TRIGGER IF EXISTS audit_vendor_returns ON public.vendor_returns;
+CREATE TRIGGER audit_vendor_returns AFTER INSERT OR UPDATE OR DELETE ON public.vendor_returns FOR EACH ROW EXECUTE FUNCTION log_audit();
+-- HR + user management
+CREATE OR REPLACE TRIGGER audit_hr_employees           AFTER INSERT OR UPDATE OR DELETE ON public.hr_employees           FOR EACH ROW EXECUTE FUNCTION log_audit();
+CREATE OR REPLACE TRIGGER audit_hr_salary_components   AFTER INSERT OR UPDATE OR DELETE ON public.hr_salary_components   FOR EACH ROW EXECUTE FUNCTION log_audit();
+CREATE OR REPLACE TRIGGER audit_hr_payroll_runs        AFTER INSERT OR UPDATE OR DELETE ON public.hr_payroll_runs        FOR EACH ROW EXECUTE FUNCTION log_audit();
+CREATE OR REPLACE TRIGGER audit_hr_festival_allowances AFTER INSERT OR UPDATE OR DELETE ON public.hr_festival_allowances FOR EACH ROW EXECUTE FUNCTION log_audit();
+CREATE OR REPLACE TRIGGER audit_hr_leave_types         AFTER INSERT OR UPDATE OR DELETE ON public.hr_leave_types         FOR EACH ROW EXECUTE FUNCTION log_audit();
+CREATE OR REPLACE TRIGGER audit_hr_leave_requests      AFTER INSERT OR UPDATE OR DELETE ON public.hr_leave_requests      FOR EACH ROW EXECUTE FUNCTION log_audit();
+CREATE OR REPLACE TRIGGER audit_profiles               AFTER INSERT OR UPDATE OR DELETE ON public.profiles               FOR EACH ROW EXECUTE FUNCTION log_audit();
+```
+
+**App (`AuditLog.js`):** added `TABLE_LABELS`, `getSummary` cases, and `HELP_ITEMS` for the HR areas + User, so they appear in the Area filter and render readable summaries (employee name, leave status/days, "role changed / client changed", etc.). Still **not audited:** sales, recipes, vendors, categories, purchase orders, requisitions, budgets, settings.
+
+**Files:** `src/pages/AuditLog.js`
+
+---
+
 ### S119 — 2026-06-23 — Client-user reassignment + orphaned-profile fixes
 
 Admins can now point a client login at any client, and broken/missing profile links self-heal.

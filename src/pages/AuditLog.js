@@ -10,6 +10,17 @@ const TABLE_LABELS = {
   wastages:         'Wastage',
   monthly_periods:  'Period',
   items:            'Item Master',
+  // HR module
+  hr_employees:           'Employee',
+  hr_salary_components:   'Salary',
+  hr_attendance:          'Attendance',
+  hr_payroll_runs:        'Payroll Run',
+  hr_payslips:            'Payslip',
+  hr_festival_allowances: 'Festival',
+  hr_leave_types:         'Leave Type',
+  hr_leave_requests:      'Leave Request',
+  // User management
+  profiles:               'User',
 }
 
 const ACTION_STYLE = {
@@ -48,6 +59,31 @@ function getSummary(log) {
       }
       return `${name} · ${d.uom || ''} · NPR ${parseFloat(d.rate || 0).toLocaleString()}`
     }
+    case 'hr_employees':
+      return `${d.full_name || '—'}${d.designation ? ' · ' + d.designation : ''}${d.status ? ' · ' + d.status : ''}`
+    case 'hr_salary_components':
+      return `${d.name || '—'}: ${d.calc_type === 'percent_of_basic' ? (d.value || 0) + '%' : 'NPR ' + parseFloat(d.value || 0).toLocaleString()}`
+    case 'hr_attendance':
+      return `Day ${d.bs_day}: ${d.status}`
+    case 'hr_payroll_runs':
+      if (log.action === 'UPDATE' && log.old_data && log.new_data) return `${log.old_data.status} → ${log.new_data.status}`
+      return `Status: ${d.status || '—'}`
+    case 'hr_payslips':
+      return `Net: NPR ${parseFloat(d.net_pay || 0).toLocaleString()}`
+    case 'hr_festival_allowances':
+      return `${d.festival_name || 'Festival'} ${d.bs_year || ''}: NPR ${parseFloat(d.amount || 0).toLocaleString()}`
+    case 'hr_leave_types':
+      return `${d.name || '—'}${d.annual_quota ? ' · ' + d.annual_quota + ' days' : ''}`
+    case 'hr_leave_requests':
+      return `${d.status || '—'} · ${d.days || 0} day(s)`
+    case 'profiles':
+      if (log.action === 'UPDATE' && log.old_data && log.new_data) {
+        const parts = []
+        if (log.old_data.role !== log.new_data.role) parts.push(`role: ${log.old_data.role} → ${log.new_data.role}`)
+        if (log.old_data.client_id !== log.new_data.client_id) parts.push('client changed')
+        return `${d.full_name || '—'}${parts.length ? ' · ' + parts.join(' · ') : ''}`
+      }
+      return `${d.full_name || '—'}${d.role ? ' · ' + d.role : ''}`
     default:
       return '—'
   }
@@ -68,6 +104,13 @@ const HELP_ITEMS = [
   { area: 'Wastage',       icon: '✕', ops: 'Add · Edit · Delete', note: 'Wastage entries per period' },
   { area: 'Period',        icon: '◷', ops: 'Status change only',  note: 'Logged when period is opened or closed' },
   { area: 'Item Master',  icon: '≡', ops: 'Add · Edit · Delete', note: 'Item name, UOM, rate — shows what changed on edits' },
+  { area: 'Employee',      icon: '👤', ops: 'Add · Edit · Delete', note: 'HR employee master records' },
+  { area: 'Salary',        icon: '₿',  ops: 'Add · Edit · Delete', note: 'Salary components per employee' },
+  { area: 'Payroll Run',   icon: '💵', ops: 'Status change',       note: 'Payroll run draft / finalize' },
+  { area: 'Festival',      icon: '🎉', ops: 'Add · Edit · Delete', note: 'Festival allowance entries' },
+  { area: 'Leave Type',    icon: '🏖️', ops: 'Add · Edit · Delete', note: 'Leave entitlement definitions' },
+  { area: 'Leave Request', icon: '🗓️', ops: 'Add · Edit · Delete', note: 'Leave applications & approvals' },
+  { area: 'User',          icon: '⊛',  ops: 'Add · Edit · Delete', note: 'Client login created / reassigned / removed' },
 ]
 
 export default function AuditLog() {
@@ -196,7 +239,7 @@ export default function AuditLog() {
             </table>
             </div>
             <div style={{ padding: '10px 14px', borderTop: '1px solid #2a2f3d', color: '#6b7280', fontSize: 12 }}>
-              Logs are written by database triggers — they capture all changes regardless of which user or device made them. Vendors and recipes are not tracked.
+              Logs are written by database triggers — they capture all changes regardless of which user or device made them. HR and client-login changes are tracked; sales, vendors, and recipes are not.
             </div>
           </div>
         )}
