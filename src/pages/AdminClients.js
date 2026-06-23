@@ -38,6 +38,7 @@ const DEFAULT_FLAGS = {
   theoretical_variance: null, annual_summary: null,
   outstanding_payables: null, shrinkage_report: null,
   staff_meals: null, settings: null,
+  nutrition_facts: null,
 }
 
 const FEATURE_GROUPS = [
@@ -71,6 +72,7 @@ const FEATURE_GROUPS = [
     { key: 'recipe_margin',        label: 'Recipe Margin' },
     { key: 'outstanding_payables', label: 'Outstanding Payables' },
     { key: 'staff_meals',          label: 'Staff Meals' },
+    { key: 'nutrition_facts',      label: 'Nutrition Facts' },
   ]},
   { tier: 'pro',     label: 'Pro Plan',         color: '#c9a84c', features: [
     { key: 'menu_engineering',     label: 'Menu Engineering' },

@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
-import logo from '../assets/logo.png'
 import './Login.css'
 
 export default function Login() {
@@ -32,7 +31,7 @@ export default function Login() {
     <div className="login-root">
       <div className="login-card">
         <div className="login-brand">
-          <img src={logo} alt="Crest" style={{ width: 40, height: 40, objectFit: 'contain' }} />
+          <span aria-label="Crest" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, fontSize: 34, lineHeight: 1, color: '#c9a84c' }}>⬢</span>
           <span className="login-brand-name">{settings?.app_name || 'Crest'}</span>
           <span className="login-brand-sub">Inventory</span>
         </div>

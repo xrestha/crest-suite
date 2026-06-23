@@ -100,8 +100,8 @@ const IMS_TIERS = [
     features: [
       {
         icon: '◈', name: 'Recipe Costing',
-        guide: 'Build your menu items with ingredients and qty per portion. Food cost % is calculated live from latest purchase rates. Enter selling price (incl. VAT) to see margin and get a suggested price at your target FC%. Sub-recipes can be nested inside parent recipes.',
-        tips: ['FC% below 30% = excellent, 30–38% = acceptable, above 38% = needs review', 'Update recipes when ingredient prices change significantly', 'Use the overhead panel in each recipe\'s detail view to see true cost after fixed cost allocation']
+        guide: 'Build your menu items with ingredients and qty per portion. Food cost % is calculated live from latest purchase rates. Enter selling price (incl. VAT) to see margin and get a suggested price at your target FC%. Sub-recipes can be nested inside parent recipes. With the Nutrition Facts add-on, each recipe also shows a per-portion nutrition label (energy, protein, carbs, fat, sugar, sodium) plus aggregated allergens.',
+        tips: ['FC% below 30% = excellent, 30–38% = acceptable, above 38% = needs review', 'Update recipes when ingredient prices change significantly', 'Use the overhead panel in each recipe\'s detail view to see true cost after fixed cost allocation', 'Nutrition: while editing a recipe, each ingredient row has a Nutrition button — enter values per 100 GM/ML (or per piece) there, or use ⚡ Suggest from library (USDA / IFCT 2017 / Nepal), or 🔍 Fetch from Open Food Facts for branded/packaged items (search by name or barcode). Entered once per ingredient, it fills every recipe that uses it. Tip: the ⚡ Auto-fill nutrition button (Ingredients header) fills all matching ingredients from the library in one click. The recipe shows a data-coverage count; missing ingredients make the label an underestimate.']
       },
       {
         icon: '△', name: 'Variance Report',

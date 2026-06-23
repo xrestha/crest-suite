@@ -4,12 +4,24 @@ import { useSettings } from '../context/SettingsContext'
 import { supabase } from '../supabaseClient'
 import Tip from '../components/Tip'
 import Fab from '../components/Fab'
+import Modal from '../components/Modal'
+import { NUTRIENTS, EMPTY_NUTRITION, calcRecipeNutrition, calcLiveNutrition, hasNutrition, buildNutritionPayload, defaultBasisUnit } from '../utils/nutrition'
+import { suggestSeeds } from '../data/nutritionSeed'
+
+const UNITS = ['GM', 'ML', 'KG', 'LTR', 'PCS', 'PKT', 'BTL', 'BOX', 'ROLL', 'BUNCH', 'JAR', 'CTN', 'BAG', 'TIN', 'SACHET']
 
 const RECIPE_CATS = ['Food', 'Beverage', 'Dessert', 'Snack', 'Sub-Recipe', 'Other']
+
+// Format one nutrient value for display, e.g. "130 kcal", "2.7 g".
+function fmtNutrient(def, value) {
+  const v = Number(value) || 0
+  return `${v.toFixed(def.dp)} ${def.unit}`
+}
 const EMPTY_RECIPE = { name: '', category: 'Food', selling_price: '', vat_rate: '0.13', yield_qty: '1', yield_uom: 'portion', target_fc_pct: '30' }
 
 export default function Recipes() {
-  const { clientId, isAdmin } = useAuth()
+  const { clientId, isAdmin, hasFeature } = useAuth()
+  const showNutrition = hasFeature('nutrition_facts')
   const { settings } = useSettings()
   const [recipes, setRecipes] = useState([])
   const [overheadData, setOverheadData] = useState(null) // { totalOverheads, totalCovers, openPeriodId } | null
@@ -25,6 +37,19 @@ export default function Recipes() {
   const [printRecipe, setPrintRecipe] = useState(null)
   const filterCat = 'all' // no active UI to change this; filter always passes through
 
+  // ── Inline per-ingredient nutrition editor (saves to items.nutrition) ──
+  const [nutriItemId, setNutriItemId] = useState(null)
+  const [nutriForm, setNutriForm] = useState({ ...EMPTY_NUTRITION })
+  const [nutriMatches, setNutriMatches] = useState([])
+  const [nutriSaving, setNutriSaving] = useState(false)
+  const [nutriError, setNutriError] = useState('')
+  // Open Food Facts lookup (branded/packaged products)
+  const [offQuery, setOffQuery] = useState('')
+  const [offResults, setOffResults] = useState([])
+  const [offBusy, setOffBusy] = useState(false)
+  const [offError, setOffError] = useState('')
+  const [autoFillBusy, setAutoFillBusy] = useState(false)
+
   const init = useCallback(async () => {
     if (!clientId) return
     setLoading(true)
@@ -36,7 +61,7 @@ export default function Recipes() {
     // Fetch ingredients separately — scoped to this client's recipe IDs
     const recipeIds = (r || []).map(x => x.id)
     const { data: ings } = recipeIds.length > 0
-      ? await supabase.from('recipe_ingredients').select('*, items(name, uom, per_uom_rate, item_code, yield_pct)').in('recipe_id', recipeIds)
+      ? await supabase.from('recipe_ingredients').select('*, items(name, uom, per_uom_rate, item_code, yield_pct, nutrition)').in('recipe_id', recipeIds)
       : { data: [] }
 
     // Attach ingredients to recipes
@@ -206,6 +231,195 @@ export default function Recipes() {
     setIngredients(prev => prev.map(r => r._key === key ? { ...r, type, item_id: '', sub_recipe_id: '', qty_per_portion: '' } : r))
   }
 
+  // ── Nutrition editor handlers ─────────────────────────────────
+  const nutriItem = items.find(i => i.id === nutriItemId) || null
+
+  function openNutriEditor(itemId) {
+    const it = items.find(i => i.id === itemId)
+    if (!it) return
+    const n = it.nutrition || {}
+    const form = {
+      basis_qty: n.basis_qty != null ? n.basis_qty : 100,
+      // Default to GM/ML for mass/volume items so per-100g table values drop in directly;
+      // the engine converts the recipe qty (e.g. 0.009 KG) into this unit automatically.
+      basis_unit: n.basis_unit || defaultBasisUnit(it.uom),
+      allergens: n.allergens || '',
+      source: n.source || '',
+    }
+    NUTRIENTS.forEach(d => { form[d.key] = n[d.key] != null ? n[d.key] : '' })
+    setNutriForm(form)
+    setNutriMatches([])
+    setNutriError('')
+    setOffQuery('')
+    setOffResults([])
+    setOffError('')
+    setNutriItemId(itemId)
+  }
+
+  function setNF(val) { setNutriForm(prev => ({ ...prev, ...val })) }
+
+  function findNutriSeeds() {
+    const matches = suggestSeeds(nutriItem?.name || '')
+    setNutriMatches(matches)
+    setNutriError(matches.length === 0 ? `No library match for "${nutriItem?.name}". Enter values manually.` : '')
+  }
+
+  function applyNutriSeed(seed) {
+    setNutriError('')
+    setNutriMatches([])
+    setNutriForm(prev => ({
+      ...prev,
+      basis_qty: 100,
+      basis_unit: seed.unit || nutriItem?.uom || 'GM',
+      energy_kcal: seed.energy_kcal, protein_g: seed.protein_g, carbs_g: seed.carbs_g,
+      fat_g: seed.fat_g, sugar_g: seed.sugar_g, sodium_mg: seed.sodium_mg,
+      allergens: seed.allergens || '', source: seed.source || '',
+    }))
+  }
+
+  // ── Open Food Facts lookup (per 100 g; branded/packaged products) ──
+  function mapOffProduct(p) {
+    const n = p.nutriments || {}
+    const num = v => { const x = parseFloat(v); return Number.isFinite(x) ? x : null }
+    const r0 = v => v == null ? null : Math.round(v)
+    const r1 = v => v == null ? null : Math.round(v * 10) / 10
+
+    let kcal = num(n['energy-kcal_100g'])
+    if (kcal == null && num(n['energy_100g']) != null) kcal = num(n['energy_100g']) / 4.184 // kJ → kcal
+    let sodiumMg = null
+    if (num(n['sodium_100g']) != null) sodiumMg = num(n['sodium_100g']) * 1000
+    else if (num(n['salt_100g']) != null) sodiumMg = (num(n['salt_100g']) / 2.5) * 1000 // salt ≈ 2.5 × sodium
+
+    const vals = {
+      energy_kcal: r0(kcal),
+      protein_g: r1(num(n['proteins_100g'])),
+      carbs_g: r1(num(n['carbohydrates_100g'])),
+      fat_g: r1(num(n['fat_100g'])),
+      sugar_g: r1(num(n['sugars_100g'])),
+      sodium_mg: r0(sodiumMg),
+    }
+    if ([vals.energy_kcal, vals.protein_g, vals.carbs_g, vals.fat_g].every(v => v == null)) return null
+
+    const allergens = (p.allergens_tags || []).map(t => String(t).replace(/^[a-z]{2}:/, '')).join(', ')
+    const name = [p.product_name, p.brands].filter(Boolean).join(' · ') || `Barcode ${p.code || ''}`.trim()
+    return { name, code: p.code, unit: 'GM', source: 'Open Food Facts', allergens, ...vals }
+  }
+
+  async function fetchFromOFF() {
+    const q = offQuery.trim()
+    if (!q) return
+    setOffBusy(true); setOffError(''); setOffResults([])
+    const FIELDS = 'product_name,brands,code,nutriments,allergens_tags'
+    try {
+      const isBarcode = /^\d{6,14}$/.test(q)
+      let products = []
+      if (isBarcode) {
+        const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${q}.json?fields=${FIELDS}`)
+        const j = await res.json()
+        if (j.status === 1 && j.product) products = [j.product]
+      } else {
+        const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=6&fields=${FIELDS}`
+        const res = await fetch(url)
+        const j = await res.json()
+        products = j.products || []
+      }
+      const mapped = products.map(mapOffProduct).filter(Boolean)
+      setOffResults(mapped)
+      if (mapped.length === 0) setOffError('No products with usable nutrition found on Open Food Facts.')
+    } catch (e) {
+      setOffError('Could not reach Open Food Facts — check the connection and try again.')
+    }
+    setOffBusy(false)
+  }
+
+  function applyOffResult(row) {
+    setOffError(''); setOffResults([])
+    setNutriForm(prev => ({
+      ...prev,
+      basis_qty: 100, basis_unit: 'GM',
+      energy_kcal: row.energy_kcal ?? '', protein_g: row.protein_g ?? '', carbs_g: row.carbs_g ?? '',
+      fat_g: row.fat_g ?? '', sugar_g: row.sugar_g ?? '', sodium_mg: row.sodium_mg ?? '',
+      allergens: row.allergens || '', source: 'Open Food Facts',
+    }))
+  }
+
+  // ── Auto-fill all ingredients' nutrition from the static library (best match) ──
+  function seedToNutrition(seed, uom) {
+    const out = {
+      basis_qty: 100, basis_unit: seed.unit || uom || 'GM',
+      energy_kcal: seed.energy_kcal, protein_g: seed.protein_g, carbs_g: seed.carbs_g,
+      fat_g: seed.fat_g, sugar_g: seed.sugar_g, sodium_mg: seed.sodium_mg,
+      source: seed.source,
+    }
+    if (seed.allergens) out.allergens = seed.allergens
+    return out
+  }
+
+  async function autoFillNutrition() {
+    const seen = new Set()
+    const targets = []
+    const unmatched = []
+    ingredients.forEach(ing => {
+      if (ing.type !== 'item' || !ing.item_id || seen.has(ing.item_id)) return
+      seen.add(ing.item_id)
+      const it = items.find(i => i.id === ing.item_id)
+      if (!it || hasNutrition(it.nutrition)) return // already has data → leave it
+      const best = suggestSeeds(it.name)[0]
+      if (best) targets.push({ it, payload: seedToNutrition(best, it.uom) })
+      else unmatched.push(it.name)
+    })
+
+    if (targets.length === 0) {
+      window.alert(unmatched.length
+        ? `No library matches found. Add these manually: ${unmatched.join(', ')}`
+        : 'All ingredients already have nutrition data.')
+      return
+    }
+    const msg = `Auto-fill nutrition for ${targets.length} ingredient(s) from the library (best regional match)?`
+      + (unmatched.length ? `\n\n${unmatched.length} have no library match and will be skipped: ${unmatched.join(', ')}` : '')
+      + `\n\nValues are reference estimates — you can edit any afterward.`
+    if (!window.confirm(msg)) return
+
+    setAutoFillBusy(true)
+    const results = await Promise.all(
+      targets.map(t => supabase.from('items').update({ nutrition: t.payload }).eq('id', t.it.id).then(r => ({ id: t.it.id, payload: t.payload, error: r.error })))
+    )
+    const okMap = {}
+    let failed = 0
+    results.forEach(r => { if (r.error) failed++; else okMap[r.id] = r.payload })
+
+    // Reflect immediately so the label + coverage recompute.
+    setItems(prev => prev.map(i => okMap[i.id] ? { ...i, nutrition: okMap[i.id] } : i))
+    setRecipes(prev => prev.map(r => ({
+      ...r,
+      recipe_ingredients: (r.recipe_ingredients || []).map(ri =>
+        ri.item_id && okMap[ri.item_id] && ri.items ? { ...ri, items: { ...ri.items, nutrition: okMap[ri.item_id] } } : ri)
+    })))
+    setAutoFillBusy(false)
+
+    window.alert(`Filled ${Object.keys(okMap).length} ingredient(s) from the library.`
+      + (failed ? ` ${failed} failed to save.` : '')
+      + (unmatched.length ? `\n\nStill need manual entry (no match): ${unmatched.join(', ')}` : ''))
+  }
+
+  async function saveNutri() {
+    if (!nutriItemId) return
+    setNutriSaving(true)
+    setNutriError('')
+    const payload = buildNutritionPayload(nutriForm, nutriForm.basis_unit)
+    const { error } = await supabase.from('items').update({ nutrition: payload }).eq('id', nutriItemId)
+    if (error) { setNutriError(error.message); setNutriSaving(false); return }
+    // Reflect immediately in local state so the live label + detail panel recompute.
+    setItems(prev => prev.map(i => i.id === nutriItemId ? { ...i, nutrition: payload } : i))
+    setRecipes(prev => prev.map(r => ({
+      ...r,
+      recipe_ingredients: (r.recipe_ingredients || []).map(ri =>
+        ri.item_id === nutriItemId && ri.items ? { ...ri, items: { ...ri.items, nutrition: payload } } : ri)
+    })))
+    setNutriSaving(false)
+    setNutriItemId(null)
+  }
+
   function getNextSubRecipeCode() {
     const SRC_PREFIX = (settings?.sub_recipe_code_prefix || 'SRC').toUpperCase()
     let maxNum = 0
@@ -331,6 +545,7 @@ export default function Recipes() {
   const suggestedPrice = liveCost > 0 && !isSubRecipeForm ? getSuggestedPrice(liveCost, liveVat, liveFcTarget) : null
   const liveYieldQty = parseFloat(recipeForm.yield_qty) || 1
   const liveCostPerUnit = isSubRecipeForm && liveYieldQty > 0 ? liveCost / liveYieldQty : null
+  const liveNutri = showNutrition ? calcLiveNutrition(ingredients, items, recipes) : null
 
   // ── Tab state ─────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState('all')
@@ -684,11 +899,39 @@ export default function Recipes() {
             </div>
           )}
 
+          {/* Live nutrition line */}
+          {liveNutri && liveNutri.coverage.total > 0 && (
+            <div style={{
+              background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.18)',
+              borderRadius: 8, padding: '10px 16px', marginBottom: 20,
+              display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 13
+            }}>
+              <span style={{ color: '#818cf8', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                🍽 {isSubRecipeForm ? 'total batch' : 'per portion'}
+              </span>
+              {NUTRIENTS.map(def => (
+                <span key={def.key} style={{ color: '#e8e0d0' }}>{def.label} <strong>{fmtNutrient(def, liveNutri.perPortion[def.key])}</strong></span>
+              ))}
+              <span style={{ color: liveNutri.coverage.have < liveNutri.coverage.total ? '#c9a84c' : '#6b7280', fontSize: 12 }}>
+                · data {liveNutri.coverage.have}/{liveNutri.coverage.total}
+              </span>
+            </div>
+          )}
+
           {/* Ingredients */}
           <div className="card" style={{ marginBottom: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
               <h3 style={{ margin: 0, fontSize: 14, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Ingredients</h3>
-              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }} onClick={addRow}>+ Add Row</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {showNutrition && (
+                  <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px', color: '#818cf8', borderColor: 'rgba(99,102,241,0.3)' }} onClick={autoFillNutrition} disabled={autoFillBusy}>
+                    <Tip width={280} text="Fills every ingredient that's missing nutrition with its best match from the library (USDA / IFCT / Nepal), in one step. Branded items (Open Food Facts) and unmatched items are left for you to add manually. You can edit any afterward.">
+                      {autoFillBusy ? 'Filling…' : '⚡ Auto-fill nutrition'}
+                    </Tip>
+                  </button>
+                )}
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }} onClick={addRow}>+ Add Row</button>
+              </div>
             </div>
 
             <div className="table-wrap">
@@ -700,6 +943,7 @@ export default function Recipes() {
                   <th style={{ textAlign: 'right', fontSize: 11, color: '#6b7280', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', width: 130 }}>Qty per Portion</th>
                   <th style={{ textAlign: 'left', fontSize: 11, color: '#6b7280', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', width: 70 }}>UOM</th>
                   <th style={{ textAlign: 'right', fontSize: 11, color: '#6b7280', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', width: 110 }}>Cost</th>
+                  {showNutrition && <th style={{ textAlign: 'center', fontSize: 11, color: '#6b7280', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', width: 90 }}>Nutrition</th>}
                   <th style={{ width: 36 }}></th>
                 </tr>
               </thead>
@@ -763,6 +1007,22 @@ export default function Recipes() {
                       <td style={{ padding: '6px 12px', textAlign: 'right', color: '#c9a84c', fontSize: 13, fontWeight: 600 }}>
                         {cost != null ? `NPR ${cost.toFixed(2)}` : '—'}
                       </td>
+                      {showNutrition && (
+                        <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                          {ing.type === 'item' && ing.item_id ? (() => {
+                            const it = items.find(i => i.id === ing.item_id)
+                            const has = hasNutrition(it?.nutrition)
+                            return (
+                              <button onClick={() => openNutriEditor(ing.item_id)}
+                                style={{ background: 'none', border: `1px solid ${has ? 'rgba(52,211,153,0.4)' : '#2a2f3d'}`, borderRadius: 5, padding: '4px 8px', fontSize: 11, color: has ? '#34d399' : '#6b7280', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                {has ? '● Edit' : '+ Add'}
+                              </button>
+                            )
+                          })() : (
+                            <span style={{ color: '#6b7280', fontSize: 11 }}>{ing.type === 'sub_recipe' ? 'auto' : '—'}</span>
+                          )}
+                        </td>
+                      )}
                       <td style={{ padding: '6px 0', textAlign: 'right' }}>
                         <button onClick={() => removeRow(ing._key)}
                           style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>×</button>
@@ -795,6 +1055,11 @@ export default function Recipes() {
         const yieldQty = parseFloat(selectedRecipe.yield_qty) || 1
         const costPerUnit = cost / yieldQty
         const fcColor = fcPct == null ? '#6b7280' : fcPct <= 30 ? '#34d399' : fcPct <= 38 ? '#c9a84c' : '#f87171'
+        const nutri = showNutrition ? calcRecipeNutrition(selectedRecipe, recipes) : null
+        // Sub-recipes show the whole batch (mirrors "Total Batch Cost"); the per-unit value
+        // still rolls up into parent recipes via calcSubRecipeNutritionPerUnit.
+        const nutriLabel = isSubRec ? 'total batch' : 'per portion'
+        const nutriValues = nutri ? nutri.perPortion : null
 
         return (
           <>
@@ -806,7 +1071,7 @@ export default function Recipes() {
               </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px,1fr))', gap: 14, marginBottom: 24 }}>
-              {isSubRec ? [
+              {(isSubRec ? [
                 { label: 'Total Batch Cost', value: `NPR ${cost.toFixed(2)}`, color: '#c9a84c' },
                 { label: `Cost per ${selectedRecipe.yield_uom}`, value: `NPR ${costPerUnit.toFixed(2)}`, color: '#34d399' },
                 { label: 'Yield', value: `${selectedRecipe.yield_qty} ${selectedRecipe.yield_uom}`, color: '#e8e0d0' },
@@ -816,7 +1081,7 @@ export default function Recipes() {
                 { label: 'Selling Price (ex. VAT)', value: price ? `NPR ${price.toFixed(2)}` : '—', color: '#e8e0d0' },
                 { label: `Menu Price (incl. ${(vat*100).toFixed(0)}% VAT)`, value: price ? `NPR ${(price*(1+vat)).toFixed(0)}` : '—', color: '#e8e0d0' },
                 { label: `Suggested @ ${selectedRecipe.target_fc_pct || 30}% FC`, value: `NPR ${getSuggestedPrice(cost, vat, (parseFloat(selectedRecipe.target_fc_pct) || 30) / 100)}`, color: '#34d399' },
-              ].map(s => (
+              ]).map(s => (
                 <div key={s.label} className="stat-card">
                   <div className="stat-label">{s.label}</div>
                   <div className="stat-value" style={{ fontSize: 18, color: s.color }}>{s.value}</div>
@@ -867,6 +1132,46 @@ export default function Recipes() {
                 </div>
               )
             })()}
+
+            {/* Nutrition panel (per portion) */}
+            {nutri && (
+              <div style={{
+                background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)',
+                borderRadius: 8, padding: '16px 20px', marginBottom: 20
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ fontSize: 11, color: '#818cf8', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600 }}>
+                    🍽 Nutrition ({nutriLabel})
+                  </div>
+                  <div style={{ fontSize: 11, color: nutri.coverage.have < nutri.coverage.total ? '#c9a84c' : '#6b7280' }}>
+                    <Tip width={260} text="How many ingredients have nutrition data entered. Missing ingredients contribute 0, so values below 100% are underestimates. Add data on each item's Nutrition tab.">
+                      Data: {nutri.coverage.have}/{nutri.coverage.total} ingredients
+                    </Tip>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px,1fr))', gap: 16 }}>
+                  {NUTRIENTS.map(def => (
+                    <div key={def.key}>
+                      <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>{def.label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#e8e0d0' }}>{fmtNutrient(def, nutriValues[def.key])}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Allergens</span>
+                  {nutri.allergens.length > 0
+                    ? nutri.allergens.map(a => (
+                        <span key={a} className="badge" style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171', textTransform: 'capitalize' }}>{a}</span>
+                      ))
+                    : <span style={{ fontSize: 12, color: '#6b7280' }}>None tagged</span>}
+                </div>
+                {nutri.coverage.have < nutri.coverage.total && (
+                  <div style={{ fontSize: 11, color: '#c9a84c', marginTop: 10 }}>
+                    ⚠ {nutri.coverage.total - nutri.coverage.have} ingredient(s) missing nutrition data — values are estimates.
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="card">
               <div className="table-wrap">
@@ -1038,6 +1343,28 @@ export default function Recipes() {
                 </tbody>
               </table>
 
+              {/* Nutrition strip (print) */}
+              {nutri && (
+                <div style={{ marginTop: 16, padding: '10px 12px', border: '1px solid #ccc', borderRadius: 3 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#555', marginBottom: 8 }}>
+                    Nutrition ({nutriLabel}){nutri.coverage.have < nutri.coverage.total ? ` — estimate, ${nutri.coverage.have}/${nutri.coverage.total} ingredients` : ''}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
+                    {NUTRIENTS.map(def => (
+                      <div key={def.key}>
+                        <div style={{ fontSize: 9, color: '#777', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{def.label}</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#000' }}>{fmtNutrient(def, nutriValues[def.key])}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {nutri.allergens.length > 0 && (
+                    <div style={{ fontSize: 10, color: '#555', marginTop: 8, textTransform: 'capitalize' }}>
+                      Allergens: {nutri.allergens.join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Overhead section */}
               {!isSubRec && overheadData && price > 0 && (() => {
                 const ohPerPortion2 = overheadData.totalOverheads / overheadData.totalCovers
@@ -1085,6 +1412,9 @@ export default function Recipes() {
         const fcPct = price > 0 ? (cost / price) * 100 : null
         const yieldQty = parseFloat(r.yield_qty) || 1
         const costPerUnit = cost / yieldQty
+        const nutri = showNutrition ? calcRecipeNutrition(r, recipes) : null
+        const nutriLabel = isSubRec ? 'total batch' : 'per portion'
+        const nutriValues = nutri ? nutri.perPortion : null
         return (
           <div className="print-only">
             <div style={{ fontFamily: 'Georgia, serif', color: '#000', padding: '20px 24px', maxWidth: 680, margin: '0 auto' }}>
@@ -1157,6 +1487,26 @@ export default function Recipes() {
                   </tr>
                 </tbody>
               </table>
+              {nutri && (
+                <div style={{ marginTop: 16, padding: '10px 12px', border: '1px solid #ccc', borderRadius: 3 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#555', marginBottom: 8 }}>
+                    Nutrition ({nutriLabel}){nutri.coverage.have < nutri.coverage.total ? ` — estimate, ${nutri.coverage.have}/${nutri.coverage.total} ingredients` : ''}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
+                    {NUTRIENTS.map(def => (
+                      <div key={def.key}>
+                        <div style={{ fontSize: 9, color: '#777', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{def.label}</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#000' }}>{fmtNutrient(def, nutriValues[def.key])}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {nutri.allergens.length > 0 && (
+                    <div style={{ fontSize: 10, color: '#555', marginTop: 8, textTransform: 'capitalize' }}>
+                      Allergens: {nutri.allergens.join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
               {!isSubRec && overheadData && price > 0 && (() => {
                 const ohPer = overheadData.totalOverheads / overheadData.totalCovers
                 const trueCost = cost + ohPer
@@ -1189,6 +1539,121 @@ export default function Recipes() {
           </div>
         )
       })()}
+
+      {/* ── INLINE NUTRITION EDITOR (per ingredient) ── */}
+      {nutriItemId && nutriItem && (
+        <Modal onClose={() => setNutriItemId(null)} title={`Nutrition — ${nutriItem.name}`} maxWidth={640}>
+          <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 18px' }}>
+            Enter values <strong style={{ color: '#e8e0d0' }}>per the reference quantity below</strong> (e.g. per {nutriForm.basis_qty} {nutriForm.basis_unit}).
+            {defaultBasisUnit(nutriItem.uom) !== (nutriItem.uom || '').toUpperCase() && (
+              <> This item is used in <strong style={{ color: '#e8e0d0' }}>{nutriItem.uom}</strong> in recipes — that's fine, the conversion to {nutriForm.basis_unit} is automatic.</>
+            )}
+            {' '}Saved to the ingredient, so it fills <strong style={{ color: '#e8e0d0' }}>every recipe</strong> that uses it.
+          </p>
+
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
+            <div className="form-field" style={{ width: 110 }}>
+              <label><Tip width={240} text="Reference amount these values describe. Food tables use 100 (per 100 GM/ML). For counted items use 1 (per piece).">Per (qty)</Tip></label>
+              <input type="number" min="0" step="any" value={nutriForm.basis_qty}
+                onChange={e => setNF({ basis_qty: e.target.value })} placeholder="100" />
+            </div>
+            <div className="form-field" style={{ width: 120 }}>
+              <label>Per (unit)</label>
+              <select value={nutriForm.basis_unit} onChange={e => setNF({ basis_unit: e.target.value })}>
+                {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </div>
+            <button className="btn btn-ghost" style={{ fontSize: 12, marginBottom: 4 }} onClick={findNutriSeeds}>
+              ⚡ Suggest from library
+            </button>
+            {nutriForm.source && (
+              <span style={{ fontSize: 11, color: '#34d399', marginBottom: 8 }}>Source: {nutriForm.source}</span>
+            )}
+          </div>
+
+          {nutriMatches.length > 0 && (
+            <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8 }}>
+              <div style={{ fontSize: 11, color: '#818cf8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+                {nutriMatches.length} match{nutriMatches.length > 1 ? 'es' : ''} — choose a source to fill
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {nutriMatches.map((s, i) => (
+                  <button key={i} className="btn btn-ghost" style={{ fontSize: 12, textAlign: 'left', padding: '7px 11px', lineHeight: 1.35 }} onClick={() => applyNutriSeed(s)}>
+                    <span style={{ display: 'block', color: '#e8e0d0', fontWeight: 600 }}>{s.name}</span>
+                    <span style={{ display: 'block', color: '#6b7280', fontSize: 11 }}>
+                      <span style={{ color: s.source === 'DFTQC Nepal' ? '#34d399' : s.source === 'IFCT 2017' ? '#c9a84c' : '#9ca3af' }}>{s.source}</span>
+                      {' · '}{s.energy_kcal} kcal · P{s.protein_g} C{s.carbs_g} F{s.fat_g} /100{s.unit}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Open Food Facts — branded / packaged products */}
+          <div style={{ marginBottom: 16, padding: '12px 14px', background: 'rgba(52,211,153,0.05)', border: '1px solid rgba(52,211,153,0.18)', borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: '#34d399', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+              <Tip width={280} text="For branded / packaged goods (sauces, drinks, snacks). Search by product name or paste a barcode. Pulls nutrition per 100 g from the Open Food Facts database.">Fetch from Open Food Facts</Tip>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input
+                value={offQuery}
+                onChange={e => setOffQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); fetchFromOFF() } }}
+                placeholder="Product name or barcode…"
+                style={{ flex: 1, minWidth: 180, background: '#0f1117', border: '1px solid #2a2f3d', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: '#e8e0d0', outline: 'none' }}
+              />
+              <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={fetchFromOFF} disabled={offBusy || !offQuery.trim()}>
+                {offBusy ? 'Searching…' : '🔍 Fetch'}
+              </button>
+            </div>
+            {offError && <p style={{ color: '#c9a84c', fontSize: 12, margin: '8px 0 0' }}>{offError}</p>}
+            {offResults.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+                {offResults.map((r, i) => (
+                  <button key={i} className="btn btn-ghost" style={{ fontSize: 12, textAlign: 'left', padding: '7px 11px', lineHeight: 1.35 }} onClick={() => applyOffResult(r)}>
+                    <span style={{ display: 'block', color: '#e8e0d0', fontWeight: 600 }}>{r.name}</span>
+                    <span style={{ display: 'block', color: '#6b7280', fontSize: 11 }}>
+                      {r.energy_kcal ?? '–'} kcal · P{r.protein_g ?? '–'} C{r.carbs_g ?? '–'} F{r.fat_g ?? '–'} /100g
+                      {r.allergens ? ` · ${r.allergens}` : ''}
+                    </span>
+                  </button>
+                ))}
+                <span style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>Data from Open Food Facts (ODbL). Crowd-sourced — verify before relying on it.</span>
+              </div>
+            )}
+          </div>
+
+          <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14 }}>
+            {NUTRIENTS.map(def => (
+              <div className="form-field" key={def.key}>
+                <label>
+                  {def.key === 'sodium_mg'
+                    ? <Tip width={220} text="Sodium is in milligrams (mg), not grams. 1 g salt ≈ 388 mg sodium.">{def.label} ({def.unit})</Tip>
+                    : `${def.label} (${def.unit})`}
+                </label>
+                <input type="number" min="0" step="any" value={nutriForm[def.key]}
+                  onChange={e => setNF({ [def.key]: e.target.value })} placeholder="0" />
+              </div>
+            ))}
+            <div className="form-field" style={{ gridColumn: 'span 2' }}>
+              <label><Tip width={240} text="Comma-separated allergen tags (e.g. dairy, gluten, nuts). Aggregated across the recipe's ingredients.">Allergens</Tip></label>
+              <input value={nutriForm.allergens} onChange={e => setNF({ allergens: e.target.value })} placeholder="e.g. dairy, gluten" />
+            </div>
+          </div>
+
+          <p style={{ fontSize: 11, color: '#9ca3af', margin: '12px 0 0' }}>
+            Library values are reference estimates — verify for branded or prepared items.
+          </p>
+          {nutriError && <p style={{ color: '#f87171', fontSize: 13, margin: '10px 0 0' }}>{nutriError}</p>}
+          <div className="form-actions" style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost" onClick={() => setNutriItemId(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={saveNutri} disabled={nutriSaving}>
+              {nutriSaving ? 'Saving…' : 'Save Nutrition'}
+            </button>
+          </div>
+        </Modal>
+      )}
 
       <Fab onClick={openNew} label="+ New Recipe" show={view === 'list'} />
     </div>

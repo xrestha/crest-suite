@@ -30,6 +30,7 @@ const DEFAULT_FLAGS = {
   price_tracker: false,
   recipe_costing: false,
   menu_engineering: false,
+  nutrition_facts: false,
 }
 
 export function SettingsProvider({ children }) {

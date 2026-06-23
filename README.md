@@ -124,6 +124,39 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S122 — 2026-06-23 — Default brand mark → gold hexagon
+
+Replaced the default `logo.png` Crest brand mark with a gold hexagon glyph (**⬢**, `#c9a84c`) in the two places it rendered: the sidebar brand ([src/components/Layout.js](src/components/Layout.js)) and the login card ([src/pages/Login.js](src/pages/Login.js)). A paying client's own uploaded logo (`settings.logo_url`) still takes priority — only the default fallback changed. Removed the now-unused `logo.png` imports (the asset file remains in `src/assets/`). The logo-upload feature (Admin/Settings) and the favicon/PWA icons are untouched.
+
+**Files:** `src/components/Layout.js`, `src/pages/Login.js`
+
+---
+
+### S121 — 2026-06-23 — Recipe Costing: Nutritional Facts
+
+Per-portion **nutrition label** (energy, protein, carbs, fat, sugar, sodium) + **allergens** on recipes, reusing the recipe cost engine's recursive ingredient/sub-recipe walk.
+
+- **Key principle:** nutrition is the same traversal as cost but **without the yield-pct division** — cost divides by `yield_pct` because you buy more than you serve, but the diner eats exactly `qty_per_portion` (the edible amount). Sub-recipes recurse per yield unit (÷ `yield_qty`), exactly like `calcSubRecipeCostPerUnit`.
+- **Per-item data** is stored on `items.nutrition` (jsonb), expressed *per a reference quantity of the item's own UOM* (default per 100 GM/ML, or per 1 PCS for counted items) — so the math stays unit-agnostic.
+- **Entry lives in Recipe Costing, not Item Master** (data is still stored per-ingredient on `items.nutrition` so it auto-sums; only the *entry point* moved). While editing a recipe, each **item ingredient row** has a Nutrition button (● has data / + add) that opens an inline editor (Modal): per-qty/unit basis + 6 nutrient inputs + Allergens + **⚡ Suggest from library**. Saved once per ingredient → fills every recipe that uses it; local state updates so the per-portion label recomputes immediately. Sub-recipe rows show "auto" (derived from their own ingredients). The Item Master Nutrition tab was removed.
+- **Suggest from library** shows matching candidates with their **source** to pick from (never auto-applied). Multi-source library (124 rows): **USDA**, **IFCT 2017** (Indian Food Composition Tables), **DFTQC Nepal** (Food Composition Table for Nepal) — regional sources listed first; staples (rice, dals, mustard oil, paneer, milk) carry multiple sources, plus Nepal-only items (gundruk, chhurpi, phapar/buckwheat, kodo/millet, chiura, sukuti, buffalo milk/meat). Chosen source is stored in `nutrition.source`. Regional values are transcribed table estimates — verify for branded/prepared items.
+- **Unit-aware** (`convertQty`/`defaultBasisUnit` in nutrition.js): the engine converts the recipe qty (in the item's uom) into the nutrition basis unit across **mass (KG↔GM)** and **volume (LTR↔ML)**. So an item used as `0.009 KG` of coffee with nutrition entered **per 100 GM** computes correctly (9 g → 18 kcal) — no need to change the item's UOM (which would reinterpret purchase/stock history) or recipe quantities. The editor defaults the basis to **GM/ML** for mass/volume items so per-100 g library/OFF/table values drop in directly. Counts (PCS/PKT/BTL) and mismatched dimensions fall back to a same-unit assumption.
+- **⚡ Auto-fill nutrition** (button in the recipe editor's Ingredients header): one click loops every ingredient missing nutrition, applies its **best library match** (regional-first), bulk-saves to `items.nutrition` (parallel updates), and reports which had no match for manual entry. Skips ingredients that already have data; Open Food Facts (branded, ambiguous) stays manual. Confirm dialog lists what will be skipped; everything is editable afterward.
+- **Fetch from Open Food Facts** (in the same editor): for **branded/packaged goods** the static library doesn't cover. Search by product name or paste a barcode → live call to the free OFF REST API (`/api/v2/product/{barcode}.json` for barcodes, `/cgi/search.pl` for names; no key, browser-CORS-friendly) → maps per-100 g nutriments (`energy-kcal_100g`, `proteins/carbohydrates/fat/sugars_100g`, `sodium_100g` or `salt_100g`÷2.5, kJ→kcal fallback, `allergens_tags` stripped of `en:`) → pick a result to fill, stored as `source: "Open Food Facts"`. Attribution + "crowd-sourced, verify" note shown (ODbL). Verified live against the OFF API (Coca-Cola barcode + Wai Wai search).
+- **Recipe detail:** "Nutrition (per portion)" panel with **data coverage** (e.g. 3/4 ingredients) + estimate disclaimer when incomplete; allergen chips aggregated across nested ingredients. Live one-line preview in the edit view. Nutrition strip added to both print cost cards.
+- **Gating:** new `nutrition_facts` flag at **Growth** tier (added to `GROWTH_KEYS`, both `DEFAULT_FLAGS`, and the Growth group in AdminClients `FEATURE_GROUPS`) — individually grantable.
+
+**SQL applied in Supabase:**
+```sql
+ALTER TABLE items ADD COLUMN IF NOT EXISTS nutrition jsonb;
+ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS nutrition_facts boolean DEFAULT false;
+```
+`items.nutrition` shape: `{ basis_qty, basis_unit, energy_kcal, protein_g, carbs_g, fat_g, sugar_g, sodium_mg, allergens }`. NULL = no data (counts against a recipe's coverage). No RLS change (both tables already client-scoped).
+
+**Files:** `src/utils/nutrition.js` (new, pure engine — verified: 150 g item = ×1.5 not yield-adjusted, sub-recipe ÷ yield, coverage count), `src/data/nutritionSeed.js` (new, **124-row multi-source library** USDA/IFCT 2017/DFTQC Nepal + `suggestSeeds`/`suggestSeed`), `src/pages/Recipes.js` (join select + detail/live/print panels + **inline per-ingredient nutrition editor Modal** writing to `items.nutrition`, with **library Suggest** + **Open Food Facts fetch**), `src/context/AuthContext.js`, `src/context/SettingsContext.js`, `src/pages/AdminClients.js`, `src/pages/Help.js`. (`src/pages/Items.js` had a Nutrition tab in the first pass — removed when entry moved to Recipe Costing.)
+
+---
+
 ### S120 — 2026-06-23 — Audit log: HR + user-management coverage
 
 Audit logging is **trigger-based** (`audit_<table>` → `log_audit()`; source-agnostic, captures action + old/new JSON). Extended coverage:
