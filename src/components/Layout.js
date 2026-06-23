@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
@@ -47,6 +47,22 @@ const REPORTS = [
   { to: '/shrinkage',            label: 'Shrinkage Report',     icon: '⚠', featureKey: 'shrinkage_report',    minPlan: 'pro' },
 ]
 
+// Collapsible nav groups for the IMS sidebar (Dashboard stays pinned above; Settings below).
+const IMS_GROUPS = [
+  { key: 'ops',     label: 'Operations', items: NAV.slice(1, 9) }, // Periods … Sales Entry
+  { key: 'costing', label: 'Costing',    items: NAV.slice(9) },    // Recipe Costing, Menu Eng, Overheads
+  { key: 'reports', label: 'Reports',    items: REPORTS },
+]
+const HR_ITEMS = [
+  { to: '/hr/employees',  label: 'Employees',         icon: '👤' },
+  { to: '/hr/salary',     label: 'Salary Structure',  icon: '₿'  },
+  { to: '/hr/attendance', label: 'Attendance',        icon: '🗓️' },
+  { to: '/hr/leave',      label: 'Leave',             icon: '🏖️' },
+  { to: '/hr/payroll',    label: 'Payroll',           icon: '💵' },
+  { to: '/hr/reports',    label: 'HR Reports',        icon: '📊' },
+  { to: '/hr/festival',   label: 'Festival Allowance', icon: '🎉' },
+]
+
 export default function Layout() {
   const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient } = useAuth()
   const { settings } = useSettings()
@@ -57,6 +73,23 @@ export default function Layout() {
   const [allClients, setAllClients] = useState([])
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false)
   const dropdownRef = useRef(null)
+  const location = useLocation()
+
+  // Collapsible nav groups: defaults — Operations/Costing/HR open, Reports collapsed.
+  const [openGroups, setOpenGroups] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('crest_nav_groups')) || {} } catch { return {} }
+  })
+  function groupOpen(key, state = openGroups) {
+    if (state[key] !== undefined) return state[key]
+    return key !== 'reports' // collapsed by default only for the long Reports list
+  }
+  function toggleGroup(key) {
+    setOpenGroups(prev => {
+      const next = { ...prev, [key]: !groupOpen(key, prev) }
+      localStorage.setItem('crest_nav_groups', JSON.stringify(next))
+      return next
+    })
+  }
 
   useEffect(() => {
     if (!clientDropdownOpen) return
@@ -92,6 +125,38 @@ export default function Layout() {
         <span className="sidebar-icon">{item.icon}</span>
         {!collapsed && item.label}
       </NavLink>
+    )
+  }
+
+  // Collapsible group: header (label · count · chevron) + its items. The group containing
+  // the current route is force-open so you always see where you are. In icon-collapsed mode
+  // we skip headers and render items flat.
+  function renderGroup(group) {
+    const items = unlockedItems(group.items)
+    if (items.length === 0) return null
+    if (collapsed) return <div key={group.key}>{items.map(renderNavItem)}</div>
+    const hasActive = items.some(i => location.pathname === i.to || location.pathname.startsWith(i.to + '/'))
+    const open = groupOpen(group.key) || hasActive
+    return (
+      <div key={group.key}>
+        <button
+          onClick={() => toggleGroup(group.key)}
+          className="sidebar-group-header"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
+            background: 'none', border: 'none', cursor: 'pointer', padding: '9px 14px 5px',
+            color: '#6b7280', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+            fontFamily: 'inherit',
+          }}
+        >
+          <span>{group.label}</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ fontSize: 10, color: '#4b5563', fontWeight: 600 }}>{items.length}</span>
+            <span style={{ fontSize: 9, color: '#4b5563', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+          </span>
+        </button>
+        {open && items.map(renderNavItem)}
+      </div>
     )
   }
 
@@ -299,11 +364,7 @@ export default function Layout() {
 
           {clientModules.ims && (!isAdmin || adminViewClientId) && (
             <>
-              {unlockedItems(NAV.slice(1)).map(renderNavItem)}
-
-              <div className="sidebar-divider" />
-              {!collapsed && <div className="sidebar-section-label">Reports</div>}
-              {unlockedItems(REPORTS).map(renderNavItem)}
+              {IMS_GROUPS.map(renderGroup)}
 
               {renderUpgradeTeaser()}
 
@@ -319,16 +380,7 @@ export default function Layout() {
           {clientModules.hr && (!isAdmin || adminViewClientId) && (
             <>
               <div className="sidebar-divider" />
-              {!collapsed && <div className="sidebar-section-label">Human Resources</div>}
-              {[
-                { to: '/hr/employees',  label: 'Employees',        icon: '👤' },
-                { to: '/hr/salary',     label: 'Salary Structure', icon: '₿'  },
-                { to: '/hr/attendance', label: 'Attendance',       icon: '🗓️' },
-                { to: '/hr/leave',      label: 'Leave',            icon: '🏖️' },
-                { to: '/hr/payroll',    label: 'Payroll',          icon: '💵' },
-                { to: '/hr/reports',    label: 'HR Reports',       icon: '📊' },
-                { to: '/hr/festival',   label: 'Festival Allowance', icon: '🎉' },
-              ].map(renderNavItem)}
+              {renderGroup({ key: 'hr', label: 'Human Resources', items: HR_ITEMS })}
             </>
           )}
 

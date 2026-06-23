@@ -124,6 +124,19 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S128 — 2026-06-23 — Collapsible sidebar nav groups
+
+A Pro/admin client had ~33 flat nav links (12 ops + ~20 reports) → constant scrolling. Grouped the IMS nav into **collapsible sections** in [src/components/Layout.js](src/components/Layout.js): **Operations** (Periods…Sales Entry), **Costing** (Recipe Costing/Menu Eng/Overheads), **Reports** (all reports, **collapsed by default** — the big win), plus **Human Resources** as a group. Dashboard stays pinned on top, Settings below; the brand header + user footer were already sticky (`.sidebar-nav` is the only scroll area).
+
+- Group header shows **label · count · chevron**; click toggles, **persisted to localStorage** (`crest_nav_groups`).
+- The group containing the **active route is force-open** so the current page is always visible.
+- `unlockedItems` filters per group (empty groups hide; counts reflect plan/feature access).
+- Icon-collapsed mode unchanged (items render flat, no headers).
+
+**Files:** `src/components/Layout.js`
+
+---
+
 ### S127 — 2026-06-23 — Plan-aware, module-composable client Dashboard
 
 Reworked the **client** dashboard ([src/pages/Dashboard.js](src/pages/Dashboard.js)) to surface what each client can actually use, driven entirely by `hasFeature(key)` (plan tier **+ admin per-client `feature_flags` grants** + admin=all) — never a hardcoded plan name, so admin overrides reshape it live.
