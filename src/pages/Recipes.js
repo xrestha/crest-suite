@@ -591,7 +591,7 @@ export default function Recipes() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          {view !== 'list' && <button className="btn btn-ghost" onClick={() => setView('list')}>← Back</button>}
+          {view === 'edit' && <button className="btn btn-ghost" onClick={() => setView('list')}>← Back</button>}
         </div>
       </div>
 
@@ -1247,6 +1247,7 @@ export default function Recipes() {
               </div>
             </div>
             <div style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setView('list')}>← Back</button>
               <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => window.print()}>🖶 Print Cost Card</button>
               <button className="btn btn-ghost" onClick={() => openEdit(selectedRecipe)}>Edit Recipe</button>
             </div>
