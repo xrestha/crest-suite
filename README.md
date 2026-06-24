@@ -124,6 +124,21 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S136 — 2026-06-24 — Dashboard "Purchases vs Sales" trend + revenue projection
+
+Reworked the Daily Purchase Trend card in [Dashboard.js](src/pages/Dashboard.js) into a dual-line trend with a forecast, designed POS-forward.
+
+- **Sales overlay** — daily revenue line (green) over the purchase line (gold), shared NPR axis, with a legend. Revenue = Σ(`qty_sold` that day × recipe `selling_price`).
+- **Daily-only / graceful degrade** — the sales query now also selects `bs_day`; the sales line is built **only from day-attributed entries (`bs_day > 0`)**. Bulk monthly entries (`bs_day = 0`) have no daily breakdown, so the line is hidden and a hint shows ("Enter daily sales to see the sales trend"). The monthly Food Cost % calc is unchanged.
+- **Month-end projection** — least-squares linear trend on daily revenue, extended (dashed, lighter green) to the last BS day of the month; shown only for the **current open month with ≥5 sales days**. A "Projected month-end revenue: NPR X · trend estimate" figure sits under the chart. Past/closed months show actuals only.
+- **POS-forward** — the chart reads a single `day → revenue` map (`daySalesMap`); when the POS module lands it feeds that same shape with no chart change. The forecast is an isolated least-squares step that can later graduate to weekday-seasonality.
+- **Honesty guardrail** — the gap between the lines is buying-vs-selling cash rhythm, **not** profit (purchases ≠ that day's COGS); no "margin/profit" shading or labels. Lumpy purchase days bridge via `connectNulls`.
+- Verified projection math + trend assembly via node (forecast total, anchor connection, bulk-only suppression, <5-day & past-month guards); `npm run build` clean. Help guide + FAQ updated.
+
+**Files:** `src/pages/Dashboard.js`, `src/pages/Help.js`
+
+---
+
 ### S135 — 2026-06-24 — Bulk recipe import (Excel) + Clone recipe
 
 Line-by-line ingredient entry was tedious for onboarding a whole menu. Added a spreadsheet importer + one-click clone to [Recipes.js](src/pages/Recipes.js).

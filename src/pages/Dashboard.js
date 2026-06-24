@@ -8,7 +8,7 @@ import {
   BarChart, Bar
 } from 'recharts'
 import Tip from '../components/Tip'
-import { getBsToday, BS_MONTHS, adToBs } from '../utils/bsCalendar'
+import { getBsToday, BS_MONTHS, adToBs, daysInBsMonth } from '../utils/bsCalendar'
 import { getSubStatus } from '../utils/subscription'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
 
@@ -25,6 +25,8 @@ export default function Dashboard() {
   const [topVariance, setTopVariance]   = useState([])
   const [categorySpend, setCategorySpend] = useState([])
   const [dailyTrend, setDailyTrend]     = useState([])
+  const [hasDailySales, setHasDailySales] = useState(false)
+  const [salesProjection, setSalesProjection] = useState(null) // { projectedMonthEnd } | null
   const [topItemSpend, setTopItemSpend] = useState([])
   const [reorderItems, setReorderItems]   = useState([])
   const [fcTrend, setFcTrend]             = useState([])
@@ -84,7 +86,7 @@ export default function Dashboard() {
       supabase.from('recipes').select('*', { count: 'exact', head: true }).eq('client_id', effectiveClientId).eq('is_active', true).eq('category', 'Sub-Recipe'),
       period ? supabase.from('purchase_entries').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
-      period ? supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id) : { data: [] },
+      period ? supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day').eq('period_id', period.id) : { data: [] },
       supabase.from('recipes').select('id, name, selling_price').eq('client_id', effectiveClientId),
       supabase.from('recipe_ingredients').select('recipe_id, item_id, qty_per_portion'),
       period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
@@ -157,17 +159,74 @@ export default function Dashboard() {
         .sort((a, b) => b.value - a.value)
     )
 
-    // Daily trend (net)
+    // ── Daily trend: purchases (actual, net) + daily sales revenue + month-end sales projection ──
     const dayGrossMap = {}
     const dayReturnMap = {}
     ;(purchases || []).forEach(p => { dayGrossMap[p.bs_day] = (dayGrossMap[p.bs_day] || 0) + parseFloat(p.qty || 0) * parseFloat(p.rate || 0) })
     ;(returns || []).forEach(r => { dayReturnMap[r.bs_day] = (dayReturnMap[r.bs_day] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0) })
-    const allDays = new Set([...Object.keys(dayGrossMap), ...Object.keys(dayReturnMap)])
-    setDailyTrend(
-      [...allDays]
-        .map(day => ({ day: `Day ${day}`, value: Math.round((dayGrossMap[day] || 0) - (dayReturnMap[day] || 0)) }))
-        .sort((a, b) => parseInt(a.day.replace('Day ', '')) - parseInt(b.day.replace('Day ', '')))
-    )
+    const dayPurchMap = {}
+    new Set([...Object.keys(dayGrossMap), ...Object.keys(dayReturnMap)]).forEach(d => {
+      dayPurchMap[d] = Math.round((dayGrossMap[d] || 0) - (dayReturnMap[d] || 0))
+    })
+
+    // Daily sales revenue — ONLY from day-attributed entries (bs_day > 0). Bulk monthly entries
+    // (bs_day = 0) have no daily breakdown and are skipped. This map is the single source the chart
+    // reads; when the POS ships it can feed this same shape (day → revenue) with no chart change.
+    const priceMap = {}; (recipes || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0 })
+    const daySalesMap = {}
+    ;(salesData || []).forEach(s => {
+      const d = parseInt(s.bs_day)
+      if (!d || d <= 0) return
+      daySalesMap[d] = (daySalesMap[d] || 0) + parseFloat(s.qty_sold || 0) * (priceMap[s.recipe_id] || 0)
+    })
+    const salesDayNums = Object.keys(daySalesMap).map(Number).sort((a, b) => a - b)
+    const dailySalesOn = salesDayNums.length > 0
+    setHasDailySales(dailySalesOn)
+
+    // Projection: current open month + ≥5 sales days only. Least-squares trend on daily revenue,
+    // extended to the last day of the BS month. Past/closed months show actuals only.
+    const bsToday = getBsToday()
+    const isCurrentMonth = !!period && period.bs_year === bsToday.year && period.bs_month === bsToday.month
+    const monthEndDay = period ? daysInBsMonth(period.bs_year, period.bs_month) : 31
+    const projDays = {}
+    let projectedMonthEnd = null
+    if (dailySalesOn && isCurrentMonth && salesDayNums.length >= 5) {
+      const xs = salesDayNums, ys = xs.map(d => daySalesMap[d]), n = xs.length
+      const sumX = xs.reduce((a, b) => a + b, 0), sumY = ys.reduce((a, b) => a + b, 0)
+      const sumXY = xs.reduce((a, x, i) => a + x * ys[i], 0), sumXX = xs.reduce((a, x) => a + x * x, 0)
+      const denom = n * sumXX - sumX * sumX
+      const slope = denom !== 0 ? (n * sumXY - sumX * sumY) / denom : 0
+      const intercept = (sumY - slope * sumX) / n
+      const lastActual = salesDayNums[salesDayNums.length - 1]
+      let projSum = 0
+      for (let d = lastActual + 1; d <= monthEndDay; d++) {
+        const v = Math.max(0, Math.round(slope * d + intercept))
+        projDays[d] = v; projSum += v
+      }
+      projectedMonthEnd = Math.round(sumY + projSum)
+    }
+    setSalesProjection(projectedMonthEnd != null ? { projectedMonthEnd } : null)
+
+    // Build the unified day axis (purchases + sales actuals, then projected days to month-end).
+    const purchDayNums = Object.keys(dayPurchMap).map(Number)
+    const baseDays = [...purchDayNums, ...salesDayNums].filter(d => d > 0)
+    const lastActualSalesDay = salesDayNums.length ? salesDayNums[salesDayNums.length - 1] : null
+    const hasProj = Object.keys(projDays).length > 0
+    const startDay = baseDays.length ? Math.min(...baseDays) : 1
+    const lastDay = hasProj ? monthEndDay : (baseDays.length ? Math.max(...baseDays) : 0)
+    const trend = []
+    for (let d = startDay; d <= lastDay; d++) {
+      const isProj = projDays[d] != null
+      trend.push({
+        day: `Day ${d}`,
+        purchases: dayPurchMap[d] != null ? dayPurchMap[d] : null,
+        sales: dailySalesOn && daySalesMap[d] != null ? daySalesMap[d] : null,
+        // dashed line: anchor at the last actual sales day so it connects, then projected days
+        salesProj: isProj ? projDays[d]
+          : (d === lastActualSalesDay && hasProj ? daySalesMap[d] : null),
+      })
+    }
+    setDailyTrend(trend)
 
     // Top items by net spend
     const itemSpendRows = (items || [])
@@ -899,14 +958,22 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Line — Daily Trend */}
+            {/* Line — Daily Purchases vs Sales */}
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                Daily Purchase Trend
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Daily Purchases vs Sales
+                </div>
+                <div style={{ display: 'flex', gap: 14, fontSize: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: '#c9a84c' }}>●</span> Purchases</span>
+                  {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: '#34d399' }}>●</span> Sales</span>}
+                  {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: '#34d399', letterSpacing: '-2px' }}>┄</span> Projection</span>}
+                  {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
+                </div>
               </div>
               {dailyTrend.length === 0 ? (
                 <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
+                  <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase or sales data</p>
                 </div>
               ) : (
                 <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
@@ -929,16 +996,33 @@ export default function Dashboard() {
                         />
                         <Tooltip
                           contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
-                          formatter={v => [`NPR ${Number(v).toLocaleString()}`, 'Net']}
+                          formatter={(value, name) => [`NPR ${Number(value).toLocaleString()}`, name]}
                           labelFormatter={l => l}
                         />
-                        <Line type="monotone" dataKey="value" stroke="#c9a84c" strokeWidth={2}
+                        <Line type="monotone" dataKey="purchases" name="Purchases" stroke="#c9a84c" strokeWidth={2} connectNulls
                           dot={{ r: 2, fill: '#c9a84c', strokeWidth: 0 }}
                           activeDot={{ r: 4, fill: '#c9a84c' }}
                         />
+                        {hasDailySales && (
+                          <Line type="monotone" dataKey="sales" name="Sales" stroke="#34d399" strokeWidth={2} connectNulls
+                            dot={{ r: 2, fill: '#34d399', strokeWidth: 0 }}
+                            activeDot={{ r: 4, fill: '#34d399' }}
+                          />
+                        )}
+                        {salesProjection && (
+                          <Line type="monotone" dataKey="salesProj" name="Projection" stroke="#34d399" strokeWidth={2}
+                            strokeDasharray="5 4" strokeOpacity={0.65} connectNulls dot={false} activeDot={{ r: 3, fill: '#34d399' }}
+                          />
+                        )}
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
+                </div>
+              )}
+              {salesProjection && (
+                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)' }}>
+                  Projected month-end revenue: <strong style={{ color: 'var(--theme-green)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString()}</strong>
+                  <span style={{ color: 'var(--theme-text3)' }}> · trend estimate</span>
                 </div>
               )}
             </div>
