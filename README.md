@@ -124,6 +124,32 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S132 — 2026-06-24 — Trending theme palettes + sidebar follows theme
+
+Reworked the preset set and made the sidebar theme-aware (it was staying dark on every preset).
+
+- **9 curated palettes** in [src/context/ThemeContext.js](src/context/ThemeContext.js) inspired by trending schemes: **Dark** (gold), **Tokyo Night** (indigo), **Dracula** (purple/pink), **Nord** (frost cyan), **Catppuccin** (mauve pastel), **Latte** (light pastel), **Rosé Dawn** (warm rose light), **Solarized** (cream/blue light), **Light** (warm white). Each has its own `green/red/amber` + a `description` field.
+- **Descriptions fixed** — Settings preset swatches showed "Clean light — professional feel" on everything (hardcoded `key==='dark' ? … : …`); now use `preset.description` ([Settings.js](src/pages/Settings.js)).
+- **Sidebar now follows the theme** — `sidebar` color is theme-appropriate (dark for dark themes, light for light), and ~25 hardcoded sidebar text/border/tint colors in [Layout.css](src/components/Layout.css) (+ the inline group-header & brand-mark colors in [Layout.js](src/components/Layout.js)) were swapped to `var(--theme-text1/2/3 | border | table-hover | focus-ring | accent)`. So sidebar text contrasts correctly on light *and* dark sidebars (it was fixed light-on-dark before, hence "vague"/stuck-dark).
+
+**Still true:** content pages with hardcoded inline colors aren't fully migrated — light themes fully restyle the chrome (sidebar, cards, buttons, Dashboard) but inner page content stays dark-styled until a per-page sweep.
+
+**Files:** `src/context/ThemeContext.js`, `src/pages/Settings.js`, `src/components/Layout.css`, `src/components/Layout.js`
+
+---
+
+### S131 — 2026-06-24 — Theme presets + theme-responsive Dashboard
+
+The theme engine (`ThemeContext` → CSS `--theme-*` vars → Settings → Theme tab swatches) only shipped 2 presets, and the **Dashboard** used hardcoded inline hex so it never recolored. Also the sidebar nav looked "vague."
+
+- **4 new presets** in [src/context/ThemeContext.js](src/context/ThemeContext.js) — **Midnight** (navy/blue), **Slate** (graphite/indigo), **Emerald** (near-black/green), **Plum** (violet) — plus a **refined Light** (better text/border contrast so `.btn-ghost` & secondary text aren't washed out). They auto-appear in the Theme tab (`Object.entries(PRESETS).map`), with live preview, and persist (localStorage `crest_theme`). Dark-family presets recolor the whole app cohesively; light presets fully restyle the chrome (content pages migrate progressively).
+- **Dashboard made theme-responsive** ([src/pages/Dashboard.js](src/pages/Dashboard.js)) — every inline design token swapped to `var(--theme-*)` (card/border/text1-3/accent/green/red/amber). **Recharts SVG props kept as literal hex** (CSS `var()` doesn't resolve in SVG `fill`/`stroke` attributes) — only the HTML tooltip/legend styles use vars.
+- **Sidebar legibility** ([Layout.css](src/components/Layout.css)) — nav links lifted from `rgba(255,255,255,0.45)` → `0.64`; the viewing/brand blues neutralized to white-alpha so they read on any preset's (always-dark) sidebar; group headers lifted too.
+
+**Files:** `src/context/ThemeContext.js`, `src/pages/Dashboard.js`, `src/components/Layout.css`, `src/components/Layout.js`
+
+---
+
 ### S130 — 2026-06-23 — Outstanding Payables: pay by bill (invoice), not per item
 
 Payables tracked payment per **line item** (`payable_payments.purchase_entry_id`), so an 8-item bill showed 8 separate "Pay" rows — but you pay vendors **one amount per invoice**. Reworked [src/pages/OutstandingPayables.js](src/pages/OutstandingPayables.js) to group by **bill** (vendor + invoice ref + period + day):

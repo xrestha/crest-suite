@@ -358,7 +358,7 @@ export default function Dashboard() {
     ]
 
     const statCard = (borderColor) => ({
-      background: '#181c27', border: `1px solid ${borderColor || '#2a2f3d'}`,
+      background: 'var(--theme-card)', border: `1px solid ${borderColor || 'var(--theme-border)'}`,
       borderRadius: 10, padding: '16px 18px'
     })
 
@@ -372,54 +372,54 @@ export default function Dashboard() {
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => navigate('/admin/clients')}>Manage Clients →</button>
         </div>
 
-        {adminLoading ? <p style={{ color: '#6b7280', fontSize: 13 }}>Loading…</p> : (
+        {adminLoading ? <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p> : (
           <>
             {/* Platform KPIs */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 20 }}>
               <div style={statCard()}>
-                <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Active Properties</div>
-                <div style={{ fontSize: 32, fontWeight: 800, color: '#e8e0d0', lineHeight: 1.1 }}>{active.length}</div>
-                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>{inactive.length} inactive · {adminClients.length} total</div>
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #2a2f3d' }}>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Active Properties</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>{active.length}</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>{inactive.length} inactive · {adminClients.length} total</div>
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--theme-border)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: activeTodayClients.length > 0 ? 5 : 0 }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: activeTodayClients.length > 0 ? '#34d399' : '#374151', flexShrink: 0 }} />
-                    <span style={{ fontSize: 11, color: activeTodayClients.length > 0 ? '#34d399' : '#6b7280', fontWeight: activeTodayClients.length > 0 ? 700 : 400 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: activeTodayClients.length > 0 ? 'var(--theme-green)' : '#374151', flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, color: activeTodayClients.length > 0 ? 'var(--theme-green)' : 'var(--theme-text2)', fontWeight: activeTodayClients.length > 0 ? 700 : 400 }}>
                       {activeTodayClients.length} active today
                     </span>
                   </div>
                   {activeTodayClients.map(c => (
-                    <div key={c.id} style={{ fontSize: 11, color: '#9ca3af', paddingLeft: 11, lineHeight: 1.7 }}>· {c.name}</div>
+                    <div key={c.id} style={{ fontSize: 11, color: 'var(--theme-text3)', paddingLeft: 11, lineHeight: 1.7 }}>· {c.name}</div>
                   ))}
                 </div>
               </div>
 
               <div style={statCard(expiring.length > 0 ? 'rgba(217,119,6,0.15)' : undefined)}>
-                <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Expiring Soon</div>
-                <div style={{ fontSize: 32, fontWeight: 800, color: expiring.length > 0 ? '#fbbf24' : '#34d399', lineHeight: 1.1 }}>{expiring.length}</div>
-                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>Within 30 days</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Expiring Soon</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: expiring.length > 0 ? 'var(--theme-amber)' : 'var(--theme-green)', lineHeight: 1.1 }}>{expiring.length}</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Within 30 days</div>
               </div>
 
               <div style={statCard(noPeriod.length > 0 ? 'rgba(248,113,113,0.35)' : undefined)}>
-                <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>No Open Period</div>
-                <div style={{ fontSize: 32, fontWeight: 800, color: noPeriod.length > 0 ? '#f87171' : '#34d399', lineHeight: 1.1 }}>{noPeriod.length}</div>
-                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>Active clients — need setup</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>No Open Period</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: noPeriod.length > 0 ? 'var(--theme-red)' : 'var(--theme-green)', lineHeight: 1.1 }}>{noPeriod.length}</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Active clients — need setup</div>
               </div>
 
               <div style={statCard()}>
-                <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Est. Monthly Revenue</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#c9a84c', lineHeight: 1.1 }}>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Est. Monthly Revenue</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--theme-accent)', lineHeight: 1.1 }}>
                   NPR {estMRR.toLocaleString('en-NP')}
                 </div>
-                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>Paying clients only</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Paying clients only</div>
               </div>
             </div>
 
             {/* Revenue & Billing table */}
             <div className="card" style={{ padding: 0, marginBottom: 20 }}>
-              <div style={{ padding: '14px 20px', borderBottom: '1px solid #2a2f3d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Revenue & Billing</span>
-                <span style={{ fontSize: 12, color: '#9ca3af' }}>
-                  MRR: <span style={{ color: '#c9a84c', fontWeight: 700 }}>NPR {estMRR.toLocaleString('en-NP')}</span>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Revenue & Billing</span>
+                <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+                  MRR: <span style={{ color: 'var(--theme-accent)', fontWeight: 700 }}>NPR {estMRR.toLocaleString('en-NP')}</span>
                   {' '}· {active.filter(c => { const s = getSubStatus(c); return s.days !== null && s.days > 0 && c.subscription_ends_at }).length} paying
                 </span>
               </div>
@@ -450,53 +450,53 @@ export default function Dashboard() {
                       }
 
                       let typeLabel, typeColor
-                      if (!c.is_active)      { typeLabel = 'Inactive';     typeColor = '#9ca3af' }
-                      else if (isPaying)     { typeLabel = 'Subscription'; typeColor = '#34d399' }
-                      else if (isTrial)      { typeLabel = 'Trial';        typeColor = '#c9a84c' }
-                      else if (sub.days !== null && sub.days < 0) { typeLabel = 'Expired'; typeColor = '#f87171' }
-                      else                   { typeLabel = 'No billing';   typeColor = '#9ca3af' }
+                      if (!c.is_active)      { typeLabel = 'Inactive';     typeColor = 'var(--theme-text3)' }
+                      else if (isPaying)     { typeLabel = 'Subscription'; typeColor = 'var(--theme-green)' }
+                      else if (isTrial)      { typeLabel = 'Trial';        typeColor = 'var(--theme-accent)' }
+                      else if (sub.days !== null && sub.days < 0) { typeLabel = 'Expired'; typeColor = 'var(--theme-red)' }
+                      else                   { typeLabel = 'No billing';   typeColor = 'var(--theme-text3)' }
 
                       return (
                         <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45, cursor: 'pointer' }}
                           onClick={() => switchAdminClient(c.id, c.name)}>
                           <td>
-                            <div style={{ fontWeight: 600, color: '#e8e0d0' }}>{c.name}</div>
-                            {c.location && <div style={{ fontSize: 11, color: '#9ca3af' }}>{c.location}</div>}
+                            <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{c.name}</div>
+                            {c.location && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{c.location}</div>}
                           </td>
                           <td>
                             <span style={{
                               fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
-                              color: c.plan === 'pro' ? '#c9a84c' : c.plan === 'growth' ? '#34d399' : '#6b7280',
+                              color: c.plan === 'pro' ? 'var(--theme-accent)' : c.plan === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)',
                               background: c.plan === 'pro' ? 'rgba(201,168,76,0.12)' : c.plan === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)',
                               border: `1px solid ${c.plan === 'pro' ? 'rgba(201,168,76,0.25)' : c.plan === 'growth' ? 'rgba(52,211,153,0.20)' : 'rgba(120,113,108,0.20)'}`,
                             }}>
                               {c.plan === 'pro' ? 'Pro' : c.plan === 'growth' ? 'Growth' : 'Starter'}
                             </span>
                           </td>
-                          <td style={{ fontWeight: isPaying ? 700 : 400, color: isPaying ? '#c9a84c' : '#9ca3af' }}>
+                          <td style={{ fontWeight: isPaying ? 700 : 400, color: isPaying ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>
                             {isPaying ? `NPR ${monthlyVal.toLocaleString('en-NP')}` : '—'}
                           </td>
                           <td>
                             <span style={{ fontSize: 12, color: typeColor }}>{typeLabel}</span>
                           </td>
-                          <td style={{ color: '#6b7280', fontSize: 12 }}>
-                            {expiryBs || <span style={{ color: '#9ca3af' }}>—</span>}
+                          <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>
+                            {expiryBs || <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                           </td>
                           <td>
                             {sub.label
                               ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: sub.color, background: sub.bg, border: `1px solid ${sub.border}` }}>{sub.label}</span>
-                              : <span style={{ color: '#9ca3af', fontSize: 12 }}>—</span>}
+                              : <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>—</span>}
                           </td>
                         </tr>
                       )
                     })}
                   </tbody>
                   <tfoot>
-                    <tr style={{ borderTop: '2px solid #2a2f3d' }}>
-                      <td colSpan={2} style={{ padding: '10px 12px', fontWeight: 600, color: '#6b7280', fontSize: 12 }}>
+                    <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
+                      <td colSpan={2} style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--theme-text2)', fontSize: 12 }}>
                         Total ({active.filter(c => { const s = getSubStatus(c); return s.days !== null && s.days > 0 && c.subscription_ends_at }).length} paying clients)
                       </td>
-                      <td style={{ padding: '10px 12px', fontWeight: 800, color: '#c9a84c', fontSize: 15 }}>
+                      <td style={{ padding: '10px 12px', fontWeight: 800, color: 'var(--theme-accent)', fontSize: 15 }}>
                         NPR {estMRR.toLocaleString('en-NP')}
                       </td>
                       <td colSpan={3} />
@@ -508,8 +508,8 @@ export default function Dashboard() {
 
             {/* Client health table */}
             <div className="card" style={{ padding: 0 }}>
-              <div style={{ padding: '14px 20px', borderBottom: '1px solid #2a2f3d' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--theme-border)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                   Client Health
                 </span>
               </div>
@@ -534,13 +534,13 @@ export default function Dashboard() {
                         <tr key={c.id} style={{ cursor: 'pointer', opacity: c.is_active ? 1 : 0.45 }}
                           onClick={() => switchAdminClient(c.id, c.name)}>
                           <td>
-                            <div style={{ fontWeight: 600, color: '#e8e0d0' }}>{c.name}</div>
-                            {c.location && <div style={{ fontSize: 11, color: '#9ca3af' }}>{c.location}</div>}
+                            <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{c.name}</div>
+                            {c.location && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{c.location}</div>}
                           </td>
                           <td>
                             <span style={{
                               fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
-                              color: c.plan === 'pro' ? '#c9a84c' : c.plan === 'growth' ? '#34d399' : '#6b7280',
+                              color: c.plan === 'pro' ? 'var(--theme-accent)' : c.plan === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)',
                               background: c.plan === 'pro' ? 'rgba(201,168,76,0.12)' : c.plan === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)',
                               border: `1px solid ${c.plan === 'pro' ? 'rgba(201,168,76,0.25)' : c.plan === 'growth' ? 'rgba(52,211,153,0.20)' : 'rgba(120,113,108,0.20)'}`,
                             }}>
@@ -550,21 +550,21 @@ export default function Dashboard() {
                           <td>
                             {sub.label
                               ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: sub.color, background: sub.bg, border: `1px solid ${sub.border}` }}>{sub.label}</span>
-                              : <span style={{ color: '#9ca3af', fontSize: 12 }}>—</span>}
+                              : <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>—</span>}
                           </td>
                           <td>
                             {isOpen ? (
-                              <span style={{ fontSize: 13, color: '#e8e0d0' }}>
+                              <span style={{ fontSize: 13, color: 'var(--theme-text1)' }}>
                                 {BS_MONTHS[period.bs_month - 1]} {period.bs_year}
-                                {' '}<span style={{ fontSize: 11, color: '#34d399', fontWeight: 600 }}>● Open</span>
+                                {' '}<span style={{ fontSize: 11, color: 'var(--theme-green)', fontWeight: 600 }}>● Open</span>
                               </span>
                             ) : period ? (
-                              <span style={{ fontSize: 13, color: '#6b7280' }}>
+                              <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
                                 {BS_MONTHS[period.bs_month - 1]} {period.bs_year}
-                                {' '}<span style={{ fontSize: 11, color: '#6b7280' }}>● Closed</span>
+                                {' '}<span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>● Closed</span>
                               </span>
                             ) : (
-                              <span style={{ fontSize: 12, color: '#f87171', fontWeight: 600 }}>⚠ No period yet</span>
+                              <span style={{ fontSize: 12, color: 'var(--theme-red)', fontWeight: 600 }}>⚠ No period yet</span>
                             )}
                           </td>
                           <td>
@@ -583,7 +583,7 @@ export default function Dashboard() {
                               </button>
                               <button
                                 className="btn btn-ghost"
-                                style={{ fontSize: 11, padding: '4px 10px', color: '#c9a84c', borderColor: 'rgba(201,168,76,0.3)' }}
+                                style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.3)' }}
                                 onClick={() => navigate('/admin/clients')}
                               >
                                 Manage →
@@ -606,7 +606,7 @@ export default function Dashboard() {
   // ── Client financial dashboard ────────────────────────────────────────────
   // Shared mini card style
   const kpiCard = (onClick) => ({
-    background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 10,
+    background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 10,
     padding: '14px 16px', cursor: onClick ? 'pointer' : 'default',
     transition: 'border-color 0.15s'
   })
@@ -621,11 +621,11 @@ export default function Dashboard() {
         borderRadius: 10, padding: '14px 16px', cursor: 'pointer', transition: 'border-color 0.15s'
       }}
     >
-      <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
+      <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
         <span>{label}</span><span>🔒</span>
       </div>
       <div style={{ fontSize: 15, fontWeight: 700, color: '#818cf8', lineHeight: 1.2 }}>Unlock with {tier}</div>
-      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>{blurb} · View plans →</div>
+      <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>{blurb} · View plans →</div>
     </div>
   )
 
@@ -638,7 +638,7 @@ export default function Dashboard() {
   const moduleCount = [showIms, showHr, showPos].filter(Boolean).length
   const showModuleHeaders = moduleCount >= 2
   const moduleHeader = (text) => showModuleHeaders
-    ? <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>{text}</div>
+    ? <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>{text}</div>
     : null
 
   return (
@@ -661,7 +661,7 @@ export default function Dashboard() {
             <p style={{ color: s.color, margin: 0, fontSize: 14, fontWeight: 600 }}>
               {isExpired ? '⚠ Your subscription has expired' : `⚠ Your ${s.label.startsWith('Trial') ? 'trial' : 'subscription'} expires in ${s.days} day${s.days !== 1 ? 's' : ''}`}
             </p>
-            <p style={{ color: '#6b7280', margin: '4px 0 0', fontSize: 12 }}>
+            <p style={{ color: 'var(--theme-text2)', margin: '4px 0 0', fontSize: 12 }}>
               Contact your consultant to renew and keep your data accessible.
             </p>
           </div>
@@ -670,7 +670,7 @@ export default function Dashboard() {
 
       {!activePeriod && !loading && (
         <div className="card" style={{ marginBottom: 20, cursor: 'pointer', borderColor: 'rgba(201,168,76,0.3)' }} onClick={() => navigate('/periods')}>
-          <p style={{ color: '#c9a84c', margin: 0, fontSize: 14 }}>⚠ No open period. Click here to create one in Periods →</p>
+          <p style={{ color: 'var(--theme-accent)', margin: 0, fontSize: 14 }}>⚠ No open period. Click here to create one in Periods →</p>
         </div>
       )}
 
@@ -678,10 +678,10 @@ export default function Dashboard() {
         <div className="card" style={{ marginBottom: 20, borderColor: 'rgba(217,119,6,0.15)', background: 'rgba(217,119,6,0.05)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
             <div>
-              <p style={{ color: '#fbbf24', margin: 0, fontSize: 14, fontWeight: 600 }}>
+              <p style={{ color: 'var(--theme-amber)', margin: 0, fontSize: 14, fontWeight: 600 }}>
                 ◷ {BS_MONTHS[activePeriod.bs_month - 1]} {activePeriod.bs_year} has ended
               </p>
-              <p style={{ color: '#6b7280', margin: '4px 0 0', fontSize: 12 }}>
+              <p style={{ color: 'var(--theme-text2)', margin: '4px 0 0', fontSize: 12 }}>
                 {isAdmin
                   ? `Viewing as admin — go to Periods to close and advance for this property.`
                   : `Finish your month-end stock count, then close this period and open ${BS_MONTHS[nextAdvMonth - 1]}.`}
@@ -692,7 +692,7 @@ export default function Dashboard() {
                 onClick={() => navigate('/periods')}
                 style={{
                   flexShrink: 0, background: 'rgba(251,191,36,0.12)',
-                  border: '1px solid rgba(251,191,36,0.4)', color: '#fbbf24',
+                  border: '1px solid rgba(251,191,36,0.4)', color: 'var(--theme-amber)',
                   borderRadius: 6, padding: '8px 18px', cursor: 'pointer',
                   fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap'
                 }}
@@ -704,7 +704,7 @@ export default function Dashboard() {
                 onClick={closeAndAdvancePeriod}
                 style={{
                   flexShrink: 0, background: 'rgba(251,191,36,0.12)',
-                  border: '1px solid rgba(251,191,36,0.4)', color: '#fbbf24',
+                  border: '1px solid rgba(251,191,36,0.4)', color: 'var(--theme-amber)',
                   borderRadius: 6, padding: '8px 18px', cursor: 'pointer',
                   fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap'
                 }}
@@ -720,8 +720,8 @@ export default function Dashboard() {
       {!showIms && !showHr && !showPos && (
         <div className="card" style={{ textAlign: 'center', padding: '48px 24px' }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>⊛</div>
-          <p style={{ fontSize: 15, color: '#e8e0d0', fontWeight: 600, margin: '0 0 8px' }}>No modules enabled</p>
-          <p style={{ fontSize: 13, color: '#6b7280', margin: 0 }}>Contact your consultant to activate Crest IMS, Crest HR, or Crest POS.</p>
+          <p style={{ fontSize: 15, color: 'var(--theme-text1)', fontWeight: 600, margin: '0 0 8px' }}>No modules enabled</p>
+          <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>Contact your consultant to activate Crest IMS, Crest HR, or Crest POS.</p>
         </div>
       )}
 
@@ -731,37 +731,37 @@ export default function Dashboard() {
 
         {/* Net Purchases */}
         <div style={kpiCard(() => navigate('/purchases'))} onClick={() => navigate('/purchases')}>
-          <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Net Purchases</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#c9a84c', lineHeight: 1.1 }}>
+          <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Net Purchases</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent)', lineHeight: 1.1 }}>
             {loading ? '—' : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
           </div>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>Gross − returns · {periodLabel} →</div>
+          <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Gross − returns · {periodLabel} →</div>
         </div>
 
         {/* Revenue */}
         {canSales ? (
           <div style={kpiCard(() => navigate('/sales'))} onClick={() => navigate('/sales')}>
-            <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Revenue</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: '#34d399', lineHeight: 1.1 }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Revenue</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-green)', lineHeight: 1.1 }}>
               {loading ? '—' : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
             </div>
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>From sales entries →</div>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>From sales entries →</div>
           </div>
         ) : null}
 
         {/* Food Cost % — computable from purchases ÷ revenue, so any sales client sees it */}
         {canSales ? (
           <div style={kpiCard(() => navigate(canVariance ? '/variance' : '/summary'))} onClick={() => navigate(canVariance ? '/variance' : '/summary')}>
-            <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
               <Tip text="Net purchases ÷ revenue × 100. Shows what portion of sales goes to ingredient cost. Healthy range: 28–35% for Nepal F&B." width={240}>Food Cost %</Tip>
             </div>
             <div style={{
               fontSize: 28, fontWeight: 800, lineHeight: 1.1,
-              color: fcPct == null ? '#6b7280' : fcPct <= 35 ? '#34d399' : fcPct <= 45 ? '#c9a84c' : '#f87171'
+              color: fcPct == null ? 'var(--theme-text2)' : fcPct <= 35 ? 'var(--theme-green)' : fcPct <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)'
             }}>
               {loading ? '—' : fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
             </div>
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>
               <Tip text="Industry benchmark for Nepal cafes & restaurants. Green = healthy, yellow = watch, red = investigate immediately." width={240}>Target 28–35%</Tip> →
             </div>
           </div>
@@ -770,16 +770,16 @@ export default function Dashboard() {
         {/* Fixed Costs % (Pro — needs overhead data) */}
         {canOverheads ? (
           <div style={kpiCard(() => navigate('/overheads'))} onClick={() => navigate('/overheads')}>
-            <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
               <Tip text="All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Target: under 60% combined. See Overheads page for the full breakdown." width={250}>Fixed Costs % of Revenue</Tip>
             </div>
             <div style={{
               fontSize: 28, fontWeight: 800, lineHeight: 1.1,
-              color: ohPct == null ? '#6b7280' : ohPct <= 50 ? '#34d399' : ohPct <= 65 ? '#c9a84c' : '#f87171'
+              color: ohPct == null ? 'var(--theme-text2)' : ohPct <= 50 ? 'var(--theme-green)' : ohPct <= 65 ? 'var(--theme-accent)' : 'var(--theme-red)'
             }}>
               {loading ? '—' : ohPct != null ? `${ohPct.toFixed(1)}%` : '—'}
             </div>
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>
               {stats?.overheadTotal ? `NPR ${stats.overheadTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })} total →` : 'No overhead data'}
             </div>
           </div>
@@ -790,16 +790,16 @@ export default function Dashboard() {
         {/* Est. Net Margin % (Pro — only meaningful with overhead data) */}
         {canOverheads && (
           <div style={kpiCard(null)}>
-            <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
               <Tip text="Revenue minus food cost and overheads, as a % of revenue. This is what the business keeps after ingredient and fixed costs. Healthy Nepal F&B target: ≥20%." width={260}>Est. Net Margin %</Tip>
             </div>
             <div style={{
               fontSize: 28, fontWeight: 800, lineHeight: 1.1,
-              color: netMarginPct == null ? '#6b7280' : netMarginPct >= 20 ? '#34d399' : netMarginPct >= 10 ? '#c9a84c' : '#f87171'
+              color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green)' : netMarginPct >= 10 ? 'var(--theme-accent)' : 'var(--theme-red)'
             }}>
               {loading ? '—' : netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
             </div>
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>After food & overheads · target ≥20%</div>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>After food & overheads · target ≥20%</div>
           </div>
         )}
       </div>}
@@ -808,30 +808,30 @@ export default function Dashboard() {
       {showIms && <><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 20 }}>
 
         <div style={kpiCard(null)}>
-          <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Active Period</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#e8e0d0' }}>{loading ? '—' : periodLabel}</div>
-          <div style={{ fontSize: 11, marginTop: 4, color: activePeriod ? '#34d399' : '#f87171' }}>
+          <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Active Period</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }}>{loading ? '—' : periodLabel}</div>
+          <div style={{ fontSize: 11, marginTop: 4, color: activePeriod ? 'var(--theme-green)' : 'var(--theme-red)' }}>
             {activePeriod ? '● Open' : '● No open period'}
           </div>
         </div>
 
         <div style={kpiCard(() => navigate('/items'))} onClick={() => navigate('/items')}>
-          <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Items in Master</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#e8e0d0' }}>{loading ? '—' : stats?.itemCount}</div>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>Active ingredients →</div>
+          <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Items in Master</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{loading ? '—' : stats?.itemCount}</div>
+          <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Active ingredients →</div>
         </div>
 
         <div style={kpiCard(() => navigate('/vendors'))} onClick={() => navigate('/vendors')}>
-          <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Vendors</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#e8e0d0' }}>{loading ? '—' : stats?.vendorCount}</div>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>Active suppliers →</div>
+          <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Vendors</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{loading ? '—' : stats?.vendorCount}</div>
+          <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Active suppliers →</div>
         </div>
 
         {canRecipes ? (
           <div style={kpiCard(() => navigate('/recipes'))} onClick={() => navigate('/recipes')}>
-            <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Costed Recipes</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: '#e8e0d0' }}>{loading ? '—' : stats?.recipeCount}</div>
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Costed Recipes</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{loading ? '—' : stats?.recipeCount}</div>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
               {stats?.subRecipeCount > 0 ? `+ ${stats.subRecipeCount} sub-recipes →` : 'Active menu items →'}
             </div>
           </div>
@@ -840,13 +840,13 @@ export default function Dashboard() {
         )}
 
         <div style={kpiCard(() => navigate('/wastage-report'))} onClick={() => navigate('/wastage-report')}>
-          <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
+          <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
             <Tip text="Total NPR value of wastage recorded this period — qty wasted × unit rate per item." width={220}>Wastage Value</Tip>
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: stats?.wastageValueTotal > 0 ? '#f87171' : '#e8e0d0' }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: stats?.wastageValueTotal > 0 ? 'var(--theme-red)' : 'var(--theme-text1)' }}>
             {loading ? '—' : `NPR ${Math.round(stats?.wastageValueTotal || 0).toLocaleString('en-NP')}`}
           </div>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>This period →</div>
+          <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>This period →</div>
         </div>
       </div>
 
@@ -857,12 +857,12 @@ export default function Dashboard() {
 
             {/* Pie — Category Spend */}
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Spend by Category
               </div>
               {categorySpend.length === 0 ? (
                 <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <p style={{ color: '#9ca3af', fontSize: 12 }}>No purchase data</p>
+                  <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
                 </div>
               ) : (
                 <>
@@ -876,7 +876,7 @@ export default function Dashboard() {
                         {categorySpend.map((entry, i) => <Cell key={entry.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                       </Pie>
                       <Tooltip
-                        contentStyle={{ background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 6, fontSize: 11 }}
+                        contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
                         formatter={v => [`NPR ${Number(v).toLocaleString()}`, '']}
                         labelFormatter={name => name}
                       />
@@ -889,8 +889,8 @@ export default function Dashboard() {
                       return (
                         <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                           <div style={{ width: 8, height: 8, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
-                          <span style={{ fontSize: 10, color: '#6b7280' }}>{entry.name}</span>
-                          <span style={{ fontSize: 10, color: '#6b7280' }}>{total > 0 ? `${((entry.value / total) * 100).toFixed(0)}%` : ''}</span>
+                          <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{entry.name}</span>
+                          <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{total > 0 ? `${((entry.value / total) * 100).toFixed(0)}%` : ''}</span>
                         </div>
                       )
                     })}
@@ -901,12 +901,12 @@ export default function Dashboard() {
 
             {/* Line — Daily Trend */}
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Daily Purchase Trend
               </div>
               {dailyTrend.length === 0 ? (
                 <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <p style={{ color: '#9ca3af', fontSize: 12 }}>No purchase data</p>
+                  <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={160}>
@@ -923,7 +923,7 @@ export default function Dashboard() {
                       tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={32}
                     />
                     <Tooltip
-                      contentStyle={{ background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 6, fontSize: 11 }}
+                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
                       formatter={v => [`NPR ${Number(v).toLocaleString()}`, 'Net']}
                       labelFormatter={l => l}
                     />
@@ -938,12 +938,12 @@ export default function Dashboard() {
 
             {/* Bar — Top Items */}
             <div className="card" style={{ padding: '14px 16px' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Top Items by Spend
               </div>
               {topItemSpend.length === 0 ? (
                 <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <p style={{ color: '#9ca3af', fontSize: 12 }}>No purchase data</p>
+                  <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={160}>
@@ -954,11 +954,11 @@ export default function Dashboard() {
                     <XAxis type="number" hide />
                     <YAxis
                       type="category" dataKey="name"
-                      tick={{ fill: '#6b7280', fontSize: 9 }} tickLine={false} axisLine={false}
+                      tick={{ fill: '#9ca3af', fontSize: 9 }} tickLine={false} axisLine={false}
                       width={90}
                     />
                     <Tooltip
-                      contentStyle={{ background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 6, fontSize: 11 }}
+                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
                       formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}`, p.payload.fullName || n]}
                       labelFormatter={() => ''}
                     />
@@ -976,7 +976,7 @@ export default function Dashboard() {
           {/* ── FC% Trend ── */}
           {fcTrend.length >= 2 && canSales && (
             <div className="card" style={{ padding: '14px 16px', marginBottom: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Food Cost % — Monthly Trend
               </div>
               <ResponsiveContainer width="100%" height={160}>
@@ -992,9 +992,9 @@ export default function Dashboard() {
                   <ReferenceLine y={45} stroke="#f87171" strokeDasharray="4 3" strokeOpacity={0.5}
                     label={{ value: '45%', fill: '#f87171', fontSize: 9, position: 'right' }} />
                   <Tooltip
-                    contentStyle={{ background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 6, fontSize: 11, color: '#e8e0d0' }}
-                    labelStyle={{ color: '#e8e0d0' }}
-                    itemStyle={{ color: '#e8e0d0' }}
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
+                    labelStyle={{ color: 'var(--theme-text1)' }}
+                    itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={(v, _n, props) => {
                       const p = props.payload
                       const lines = [`${v}%`]
@@ -1016,10 +1016,10 @@ export default function Dashboard() {
                 </LineChart>
               </ResponsiveContainer>
               <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10 }}>
-                <span style={{ color: '#34d399' }}>● ≤35% Good</span>
-                <span style={{ color: '#c9a84c' }}>● 35–45% Watch</span>
-                <span style={{ color: '#f87171' }}>● &gt;45% High</span>
-                <span style={{ marginLeft: 'auto', color: '#6b7280' }}>⊙ = current open period</span>
+                <span style={{ color: 'var(--theme-green)' }}>● ≤35% Good</span>
+                <span style={{ color: 'var(--theme-accent)' }}>● 35–45% Watch</span>
+                <span style={{ color: 'var(--theme-red)' }}>● &gt;45% High</span>
+                <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period</span>
               </div>
             </div>
           )}
@@ -1031,11 +1031,11 @@ export default function Dashboard() {
             {canVariance ? (
               <div className="card" style={{ padding: '14px 16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Top Variance Items</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Top Variance Items</div>
                   <button className="btn btn-ghost" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => navigate('/variance')}>Full Report →</button>
                 </div>
                 {topVariance.length === 0 ? (
-                  <p style={{ color: '#9ca3af', fontSize: 12, margin: '16px 0' }}>
+                  <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
                     Complete stock count + add sales to see variance.
                   </p>
                 ) : (
@@ -1043,21 +1043,21 @@ export default function Dashboard() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
                       <tr>
-                        <th style={{ color: '#6b7280', fontWeight: 500, textAlign: 'left', paddingBottom: 6, borderBottom: '1px solid #2a2f3d' }}>Item</th>
-                        <th style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid #2a2f3d' }}>
+                        <th style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'left', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>Item</th>
+                        <th style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>
                           <Tip text="Qty used above what recipes predict — indicates waste, theft, or over-portioning.">Over-used</Tip>
                         </th>
-                        <th style={{ color: '#6b7280', fontWeight: 500, textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid #2a2f3d' }}>
+                        <th style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>
                           <Tip text="Over-used qty × item rate. The NPR cost of unaccounted usage this period." width={200}>Value at Risk</Tip>
                         </th>
                       </tr>
                     </thead>
                     <tbody>
                       {topVariance.map((row, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid #0f1117' }}>
-                          <td style={{ padding: '5px 0', fontWeight: 600, color: '#e8e0d0' }}>{row.name}</td>
-                          <td style={{ padding: '5px 0', textAlign: 'right', color: '#f87171' }}>+{Number(row.variance.toFixed(1)).toLocaleString()} {row.uom}</td>
-                          <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 700, color: '#f87171' }}>NPR {Number(row.value.toFixed(0)).toLocaleString()}</td>
+                        <tr key={i} style={{ borderBottom: '1px solid var(--theme-bg)' }}>
+                          <td style={{ padding: '5px 0', fontWeight: 600, color: 'var(--theme-text1)' }}>{row.name}</td>
+                          <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--theme-red)' }}>+{Number(row.variance.toFixed(1)).toLocaleString()} {row.uom}</td>
+                          <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)' }}>NPR {Number(row.value.toFixed(0)).toLocaleString()}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1073,25 +1073,25 @@ export default function Dashboard() {
             {canReorder ? (
               <div className="card" style={{ padding: '14px 16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Items to Reorder</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Items to Reorder</div>
                   <button className="btn btn-ghost" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => navigate('/reorder')}>Full Report →</button>
                 </div>
                 {reorderItems.length === 0 ? (
-                  <p style={{ color: '#9ca3af', fontSize: 12, margin: '16px 0' }}>
+                  <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
                     No items below par.{' '}
-                    <span style={{ color: '#c9a84c', cursor: 'pointer' }} onClick={() => navigate('/reorder')}>Set par levels →</span>
+                    <span style={{ color: 'var(--theme-accent)', cursor: 'pointer' }} onClick={() => navigate('/reorder')}>Set par levels →</span>
                   </p>
                 ) : (
                   <div>
                     {reorderItems.map((item, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: i < reorderItems.length - 1 ? '1px solid #0f1117' : 'none' }}>
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: i < reorderItems.length - 1 ? '1px solid var(--theme-bg)' : 'none' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: '#e8e0d0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</div>
-                          <div style={{ fontSize: 10, color: '#6b7280' }}>Stock: {item.currentStock} · Par: {item.par} {item.uom}</div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</div>
+                          <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>Stock: {item.currentStock} · Par: {item.par} {item.uom}</div>
                         </div>
                         <div style={{ textAlign: 'right', marginLeft: 12, flexShrink: 0 }}>
-                          <div style={{ fontSize: 11, color: '#f87171', fontWeight: 700 }}>↓ {item.shortfall} {item.uom}</div>
-                          <div style={{ fontSize: 10, color: '#9ca3af' }}>NPR {item.estValue.toLocaleString()}</div>
+                          <div style={{ fontSize: 11, color: 'var(--theme-red)', fontWeight: 700 }}>↓ {item.shortfall} {item.uom}</div>
+                          <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>NPR {item.estValue.toLocaleString()}</div>
                         </div>
                       </div>
                     ))}
@@ -1110,25 +1110,25 @@ export default function Dashboard() {
           {moduleHeader('Human Resources')}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
             <div style={kpiCard(() => navigate('/hr/employees'))} onClick={() => navigate('/hr/employees')}>
-              <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Total Employees</div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: '#e8e0d0', lineHeight: 1.1 }}>{hrStats.total}</div>
-              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>All statuses →</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Total Employees</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>{hrStats.total}</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>All statuses →</div>
             </div>
             <div style={kpiCard(() => navigate('/hr/employees'))} onClick={() => navigate('/hr/employees')}>
-              <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Active</div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: '#34d399', lineHeight: 1.1 }}>{hrStats.active}</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Active</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--theme-green)', lineHeight: 1.1 }}>{hrStats.active}</div>
               {hrStats.probation > 0 && (
-                <div style={{ fontSize: 11, color: '#c9a84c', marginTop: 5 }}>{hrStats.probation} on probation</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-accent)', marginTop: 5 }}>{hrStats.probation} on probation</div>
               )}
             </div>
             <div style={kpiCard(null)}>
-              <div style={{ fontSize: 11, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
                 <Tip text="Sum of basic salary for active and probation employees. Full payroll with allowances, SSF and TDS is computed during payroll run." width={260}>Basic Payroll / Month</Tip>
               </div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: '#c9a84c', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-accent)', lineHeight: 1.1 }}>
                 NPR {Math.round(hrStats.payroll).toLocaleString('en-NP')}
               </div>
-              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 5 }}>Basic salary only</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Basic salary only</div>
             </div>
           </div>
         </div>
@@ -1137,7 +1137,7 @@ export default function Dashboard() {
       {showHr && !hrStats && (
         <div style={{ marginBottom: 20 }}>
           {moduleHeader('Human Resources')}
-          <div className="card"><p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>Loading HR data…</p></div>
+          <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading HR data…</p></div>
         </div>
       )}
 
@@ -1147,8 +1147,8 @@ export default function Dashboard() {
           {moduleHeader('Point of Sale')}
           <div className="card" style={{ textAlign: 'center', padding: '28px 24px' }}>
             <div style={{ fontSize: 26, marginBottom: 8 }}>🧾</div>
-            <p style={{ fontSize: 14, color: '#e8e0d0', fontWeight: 600, margin: '0 0 4px' }}>Crest POS — coming soon</p>
-            <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>Your POS module is enabled. Live sales, table & billing dashboards will appear here once it launches.</p>
+            <p style={{ fontSize: 14, color: 'var(--theme-text1)', fontWeight: 600, margin: '0 0 4px' }}>Crest POS — coming soon</p>
+            <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0 }}>Your POS module is enabled. Live sales, table & billing dashboards will appear here once it launches.</p>
           </div>
         </div>
       )}

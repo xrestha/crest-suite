@@ -525,7 +525,7 @@ export default function Settings() {
                   <div style={{ textAlign: 'left' }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: themeKey === key ? colors.accent : '#e8e0d0' }}>{preset.name}</div>
                     <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
-                      {key === 'dark' ? 'Classic dark — easy on the eyes' : 'Clean light — professional feel'}
+                      {preset.description || ''}
                     </div>
                   </div>
                   {themeKey === key && (

@@ -146,14 +146,14 @@ export default function Layout() {
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
             background: 'none', border: 'none', cursor: 'pointer', padding: '9px 14px 5px',
-            color: '#6b7280', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+            color: 'var(--theme-text3)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
             fontFamily: 'inherit',
           }}
         >
           <span>{group.label}</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ fontSize: 10, color: '#4b5563', fontWeight: 600 }}>{items.length}</span>
-            <span style={{ fontSize: 9, color: '#4b5563', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+            <span style={{ fontSize: 10, color: 'var(--theme-text3)', fontWeight: 600 }}>{items.length}</span>
+            <span style={{ fontSize: 9, color: 'var(--theme-text3)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
           </span>
         </button>
         {open && items.map(renderNavItem)}
@@ -217,7 +217,7 @@ export default function Layout() {
         <div className="sidebar-brand">
           {settings?.logo_url
             ? <img src={settings.logo_url} alt="logo" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />
-            : <span aria-label="Crest" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, fontSize: 26, lineHeight: 1, color: '#c9a84c', flexShrink: 0 }}>⬢</span>
+            : <span aria-label="Crest" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, fontSize: 26, lineHeight: 1, color: 'var(--theme-accent)', flexShrink: 0 }}>⬢</span>
           }
           {!collapsed && (
             <div style={{ flex: 1 }}>
