@@ -169,7 +169,7 @@ const IMS_TIERS = [
         tips: ['Consistent shrinkage on a high-value item over 3+ periods is a serious red flag', 'Use alongside the Variance Report for a complete picture of stock losses']
       },
       {
-        icon: '⬡', name: 'Menu Engineering',
+        icon: '⬢', name: 'Menu Engineering',
         guide: 'Classifies menu items into Star / Puzzle / Plowhouse / Dog based on profitability and popularity. FC% cutoff is 35%; volume cutoff is median qty sold. Sub-recipes are excluded from this analysis.',
         tips: ['Stars = high margin + high volume → protect and promote', 'Dogs = low margin + low volume → consider removing from the menu']
       },
@@ -309,7 +309,7 @@ const PRO_EXTRAS = [
 const PRICE_PLANS = [
   { name: 'Starter', icon: '◎', color: 'var(--theme-accent)', badge: '1 Month Free', badgeBg: 'var(--theme-accent)',               monthly: 5000,  annual: 3750, features: STARTER_FEATURES, highlight: false, cta: 'Start Free Trial' },
   { name: 'Growth',  icon: '◈', color: 'var(--theme-green)', badge: 'Most Popular',   badgeBg: 'rgba(52,211,153,0.9)', monthly: 8000,  annual: 6000, features: GROWTH_EXTRAS,   highlight: true,  cta: 'Get Growth' },
-  { name: 'Pro',     icon: '⬡', color: '#818cf8', badge: 'Full Suite',     badgeBg: '#818cf8',               monthly: 12000, annual: 9000, features: PRO_EXTRAS,      highlight: false, cta: 'Get Pro' },
+  { name: 'Pro',     icon: '⬢', color: '#818cf8', badge: 'Full Suite',     badgeBg: '#818cf8',               monthly: 12000, annual: 9000, features: PRO_EXTRAS,      highlight: false, cta: 'Get Pro' },
 ]
 
 const FAQ = [
@@ -417,7 +417,7 @@ export default function Help() {
         <div>
           <div className="card" style={{ marginBottom: 16, background: 'rgba(201,168,76,0.03)', borderColor: 'rgba(201,168,76,0.2)' }}>
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⬡</span>
+              <span style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⬢</span>
               <div>
                 <h3 style={{ margin: '0 0 8px', fontSize: 15, color: 'var(--theme-text1)' }}>Welcome to Crest Inventory</h3>
                 <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>

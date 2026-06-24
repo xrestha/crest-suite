@@ -899,7 +899,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                     <div style={{ width: 64, height: 64, borderRadius: 8, border: '1px solid var(--theme-border)', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       {clientSettings.logo_url
                         ? <img src={clientSettings.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 6 }} />
-                        : <span style={{ fontSize: 26, color: 'var(--theme-accent)' }}>⬡</span>
+                        : <span style={{ fontSize: 26, color: 'var(--theme-accent)' }}>⬢</span>
                       }
                     </div>
                     <div style={{ flex: 1 }}>

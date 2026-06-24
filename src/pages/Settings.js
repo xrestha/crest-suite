@@ -196,7 +196,7 @@ export default function Settings() {
         <div className="card" style={{ marginBottom: 20, display: 'flex', gap: 18, alignItems: 'center' }}>
           {settings.logo_url
             ? <img src={settings.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 8, flexShrink: 0 }} />
-            : <span style={{ fontSize: 36, color: 'var(--theme-accent)', flexShrink: 0 }}>⬡</span>
+            : <span style={{ fontSize: 36, color: 'var(--theme-accent)', flexShrink: 0 }}>⬢</span>
           }
           <div>
             <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{settings.app_name || '—'}</div>
@@ -253,7 +253,7 @@ export default function Settings() {
               <div style={{ width: 64, height: 64, borderRadius: 8, border: '1px solid var(--theme-border)', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {form.logo_url
                   ? <img src={form.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 6 }} />
-                  : <span style={{ fontSize: 26, color: 'var(--theme-accent)' }}>⬡</span>
+                  : <span style={{ fontSize: 26, color: 'var(--theme-accent)' }}>⬢</span>
                 }
               </div>
               <div>
@@ -284,7 +284,7 @@ export default function Settings() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               {form.logo_url
                 ? <img src={form.logo_url} alt="logo" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4 }} />
-                : <span style={{ fontSize: 20, color: 'var(--theme-accent)' }}>⬡</span>
+                : <span style={{ fontSize: 20, color: 'var(--theme-accent)' }}>⬢</span>
               }
               <div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{form.app_name || 'App Name'}</div>
