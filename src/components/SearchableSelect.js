@@ -23,7 +23,19 @@ export default function SearchableSelect({ value, onChange, options, placeholder
 
   function measure() {
     const r = rootRef.current?.getBoundingClientRect()
-    if (r) setCoords({ top: r.bottom + 4, left: r.left, width: r.width })
+    if (!r) return
+    const margin = 4, inputH = 40
+    const spaceBelow = window.innerHeight - r.bottom - margin
+    const spaceAbove = r.top - margin
+    // Flip the panel above the field when there isn't enough room below (e.g. a row near the
+    // bottom of the screen) and there's more room above — keeps the list on-screen, no scrolling.
+    const openUp = spaceBelow < 220 && spaceAbove > spaceBelow
+    const listMax = Math.max(120, Math.min(260, (openUp ? spaceAbove : spaceBelow) - inputH - 8))
+    if (openUp) {
+      setCoords({ up: true, bottom: window.innerHeight - r.top + margin, left: r.left, width: r.width, listMax })
+    } else {
+      setCoords({ up: false, top: r.bottom + margin, left: r.left, width: r.width, listMax })
+    }
   }
 
   function openIt() { setQuery(''); setHighlight(0); measure(); setOpen(true) }
@@ -80,7 +92,9 @@ export default function SearchableSelect({ value, onChange, options, placeholder
 
       {open && coords && (
         <div style={{
-          position: 'fixed', top: coords.top, left: coords.left, width: coords.width, zIndex: 1000,
+          position: 'fixed',
+          ...(coords.up ? { bottom: coords.bottom } : { top: coords.top }),
+          left: coords.left, width: coords.width, zIndex: 1000,
           background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 6,
           boxShadow: '0 10px 30px rgba(0,0,0,0.5)', overflow: 'hidden',
         }}>
@@ -96,7 +110,7 @@ export default function SearchableSelect({ value, onChange, options, placeholder
               outline: 'none', fontFamily: 'inherit',
             }}
           />
-          <div ref={listRef} style={{ maxHeight: 260, overflowY: 'auto' }}>
+          <div ref={listRef} style={{ maxHeight: coords.listMax, overflowY: 'auto' }}>
             {filtered.length === 0 ? (
               <div style={{ padding: '12px', fontSize: 12, color: '#6b7280' }}>No matches</div>
             ) : filtered.map((opt, i) => (
