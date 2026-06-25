@@ -124,6 +124,20 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S153 — 2026-06-25 — HR: surface supervisor + retirement (list, reports, retiring-soon flag)
+
+Built on S152 — exposes the new `supervisor_id` / `retirement_date` fields across the HR module.
+
+- **Employee List** (`EmployeeList.jsx`) — added **Supervisor** and **Retirement** columns, a **Retiring Soon** stat card (active/probation retiring ≤180 days, click to filter), row chips ("Retiring soon" amber / "Retired" red), a **supervisor filter** `<select>` (incl. "No supervisor"), and a "Retiring soon" toggle pill. Supervisor names resolved from the in-memory employee list (`nameById`).
+- **HR Reports** (`HrReports.jsx`) — new **Roster** tab: full employee directory (Code, Name, Department, Designation, **Supervisor**, Join Date, **Retirement** + flag, Status) with retiring-soon count, "Retiring soon" toggle, and Excel export. Employee master now loads independently of a payroll run, and the run-gate was restructured so Roster works even before any payroll is generated (the 4 payroll tabs stay gated).
+- Shared 180-day `retireInfo()` helper (retired/soon/none) inlined in both files; threshold `RETIRE_SOON_DAYS = 180`.
+
+No DB change (uses S152 columns). Build clean. Service worker cache `crest-v10` → `crest-v11`.
+
+**Files:** `src/modules/hr/employees/EmployeeList.jsx`, `src/modules/hr/reports/HrReports.jsx`, `public/service-worker.js`
+
+---
+
 ### S152 — 2026-06-25 — HR employee: family, structured address, supervisor, retirement
 
 Expanded the Add/Edit Employee form (`EmployeeForm.jsx`) to match Nepal HR norms (researched against Nimble HRMS + Nepal govt/PAN employee forms). Two new tabs + two Employment fields, all flat columns on `hr_employees`.

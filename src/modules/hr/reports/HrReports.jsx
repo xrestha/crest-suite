@@ -8,6 +8,19 @@ import { fiscalYearOf } from '../payroll/tds'
 import { SSF_CAP } from '../payrollConstants'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
+const fmtDate = d => d ? new Date(d).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+
+const RETIRE_SOON_DAYS = 180
+// Retirement status from a retirement_date (AD): retired (past) / soon (≤180d) / null.
+function retireInfo(dateStr) {
+  if (!dateStr) return null
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const d = new Date(dateStr); d.setHours(0, 0, 0, 0)
+  const days = Math.round((d - today) / 86400000)
+  if (days < 0)               return { retired: true, label: 'Retired',       color: '#f87171', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' }
+  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: '#c9a84c', bg: 'rgba(201,168,76,0.1)', border: 'rgba(201,168,76,0.2)' }
+  return null
+}
 
 export default function HrReports() {
   const { clientId } = useAuth()
@@ -19,8 +32,10 @@ export default function HrReports() {
   const [ytdTds,    setYtdTds]    = useState({})   // employee_id -> YTD tds (incl this period)
   const [loading,   setLoading]   = useState(true)
   const [tab,       setTab]       = useState('summary')
+  const [rosterRetiringOnly, setRosterRetiringOnly] = useState(false)
 
   const empMap = Object.fromEntries(employees.map(e => [e.id, e]))
+  const nameById = Object.fromEntries(employees.map(e => [e.id, e.full_name]))
 
   useEffect(() => {
     if (!clientId) return
@@ -29,6 +44,11 @@ export default function HrReports() {
       const { data: p } = await supabase.from('monthly_periods').select('*').eq('client_id', clientId)
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       setPeriods(p || [])
+      // Employee master loads independently of any payroll run (powers the Roster tab).
+      const { data: emps } = await supabase.from('hr_employees')
+        .select('id, full_name, employee_code, department, designation, employment_type, supervisor_id, retirement_date, join_date, pay_basis, bank_name, bank_account_no, bank_branch, ssf_no, pan_no, status')
+        .eq('client_id', clientId).order('full_name')
+      setEmployees(emps || [])
       const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
       if (open) { setPeriod(open); await loadAll(open.id, open) }
       setLoading(false)
@@ -37,12 +57,7 @@ export default function HrReports() {
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadAll(periodId, p) {
-    const [{ data: runRow }, { data: emps }] = await Promise.all([
-      supabase.from('hr_payroll_runs').select('*').eq('client_id', clientId).eq('period_id', periodId).maybeSingle(),
-      supabase.from('hr_employees').select('id, full_name, employee_code, department, designation, pay_basis, bank_name, bank_account_no, bank_branch, ssf_no, pan_no, status')
-        .eq('client_id', clientId).order('full_name'),
-    ])
-    setEmployees(emps || [])
+    const { data: runRow } = await supabase.from('hr_payroll_runs').select('*').eq('client_id', clientId).eq('period_id', periodId).maybeSingle()
     setRun(runRow || null)
     if (runRow) {
       const { data: slips } = await supabase.from('hr_payslips').select('*').eq('run_id', runRow.id)
@@ -122,11 +137,19 @@ export default function HrReports() {
   }, { base: 0, emp: 0, empr: 0, total: 0 })
 
   const TABS = [
+    { id: 'roster',   label: 'Roster' },
     { id: 'summary',  label: 'Payroll Summary' },
     { id: 'ssf',      label: 'SSF Challan' },
     { id: 'bank',     label: 'Bank Transfer' },
     { id: 'tds',      label: 'TDS Report' },
   ]
+
+  // Roster = employee master directory (independent of any payroll run).
+  const rosterRows = (rosterRetiringOnly
+    ? employees.filter(e => !!retireInfo(e.retirement_date))
+    : employees)
+  const retiringCount = employees.filter(e =>
+    (e.status === 'active' || e.status === 'probation') && retireInfo(e.retirement_date)?.soon).length
 
   return (
     <div>
@@ -145,25 +168,84 @@ export default function HrReports() {
 
       {loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: '#6b7280' }}>Loading…</div>
-      ) : !run ? (
-        <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-          <div style={{ fontSize: 28, marginBottom: 12 }}>📊</div>
-          <div style={{ fontSize: 14, color: '#e8e0d0', marginBottom: 6 }}>No payroll run for {periodLabel}</div>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>Generate and finalize payroll in HR → Payroll first, then its reports appear here.</div>
-        </div>
       ) : (
         <>
-          {!finalized && (
-            <div className="no-print" style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 8, fontSize: 12, color: '#c9a84c' }}>
-              ⚠ This payroll is still a draft — figures may change. Finalize it in Payroll before filing or paying.
-            </div>
-          )}
-
           <div className="tab-bar no-print" style={{ marginBottom: 18 }}>
             {TABS.map(t => (
               <button key={t.id} className={`tab-btn${tab === t.id ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
             ))}
           </div>
+
+          {/* ── ROSTER (employee master — independent of payroll run) ── */}
+          {tab === 'roster' && (
+            <div className="card" style={{ padding: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid #2a2f3d', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#e8e0d0' }}>Employee Roster</span>
+                  <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                    {employees.length} employee{employees.length !== 1 ? 's' : ''}
+                    {retiringCount > 0 && <span> · <span style={{ color: '#c9a84c' }}>{retiringCount} retiring within 180 days</span></span>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} className="no-print">
+                  <button className={`tab-btn${rosterRetiringOnly ? ' tab-btn--active' : ''}`} onClick={() => setRosterRetiringOnly(v => !v)}>Retiring soon</button>
+                  <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => downloadSheet(
+                    rosterRows.map(e => ({
+                      Code: e.employee_code || '', Name: e.full_name, Department: e.department || '', Designation: e.designation || '',
+                      Supervisor: e.supervisor_id ? (nameById[e.supervisor_id] || '') : '',
+                      'Join Date': fmtDate(e.join_date), 'Retirement Date': e.retirement_date ? fmtDate(e.retirement_date) : '', Status: e.status,
+                    })), 'Roster')}>⬇ Export</button>
+                </div>
+              </div>
+              {rosterRows.length === 0 ? (
+                <div style={{ padding: 28, textAlign: 'center', color: '#6b7280', fontSize: 13 }}>No employees{rosterRetiringOnly ? ' retiring soon' : ''}.</div>
+              ) : (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead><tr><th>Code</th><th>Name</th><th>Department</th><th>Designation</th><th>Supervisor</th><th>Join Date</th><th>Retirement</th><th style={{ textAlign: 'center' }}>Status</th></tr></thead>
+                    <tbody>
+                      {rosterRows.map(e => {
+                        const r = retireInfo(e.retirement_date)
+                        return (
+                          <tr key={e.id}>
+                            <td style={{ color: '#c9a84c', fontWeight: 700, fontSize: 12 }}>{e.employee_code || '—'}</td>
+                            <td style={{ color: '#e8e0d0', fontWeight: 600 }}>{e.full_name}</td>
+                            <td style={{ color: '#9ca3af' }}>{e.department || '—'}</td>
+                            <td style={{ color: '#9ca3af' }}>{e.designation || '—'}</td>
+                            <td style={{ color: '#9ca3af', fontSize: 12 }}>{e.supervisor_id ? (nameById[e.supervisor_id] || '—') : '—'}</td>
+                            <td style={{ color: '#6b7280', fontSize: 12 }}>{fmtDate(e.join_date)}</td>
+                            <td style={{ fontSize: 12 }}>
+                              {e.retirement_date ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ color: '#6b7280' }}>{fmtDate(e.retirement_date)}</span>
+                                  {r && <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, color: r.color, background: r.bg, border: `1px solid ${r.border}` }}>{r.label}</span>}
+                                </span>
+                              ) : <span style={{ color: '#4b5563' }}>—</span>}
+                            </td>
+                            <td style={{ textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>{e.status.charAt(0).toUpperCase() + e.status.slice(1)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab !== 'roster' && (!run ? (
+            <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+              <div style={{ fontSize: 28, marginBottom: 12 }}>📊</div>
+              <div style={{ fontSize: 14, color: '#e8e0d0', marginBottom: 6 }}>No payroll run for {periodLabel}</div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>Generate and finalize payroll in HR → Payroll first, then its reports appear here.</div>
+            </div>
+          ) : (
+            <>
+              {!finalized && (
+                <div className="no-print" style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 8, fontSize: 12, color: '#c9a84c' }}>
+                  ⚠ This payroll is still a draft — figures may change. Finalize it in Payroll before filing or paying.
+                </div>
+              )}
 
           {/* ── SUMMARY ── */}
           {tab === 'summary' && (
@@ -334,6 +416,8 @@ export default function HrReports() {
               </div>
             </div>
           )}
+            </>
+          ))}
         </>
       )}
     </div>
