@@ -1171,6 +1171,7 @@ export default function Recipes() {
                   <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', width: 130 }}>Qty per Portion</th>
                   <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--theme-text2)', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', width: 70 }}>UOM</th>
                   <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', width: 110 }}>Cost</th>
+                  <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', width: 70 }}>% of Total</th>
                   {showNutrition && <th style={{ textAlign: 'center', fontSize: 11, color: 'var(--theme-text2)', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', width: 90 }}>Nutrition</th>}
                   <th style={{ width: 36 }}></th>
                 </tr>
@@ -1234,6 +1235,9 @@ export default function Recipes() {
                       <td style={{ padding: '6px 12px', color: ing.type === 'sub_recipe' ? 'var(--theme-accent)' : 'var(--theme-text2)', fontSize: 13 }}>{uomLabel}</td>
                       <td style={{ padding: '6px 12px', textAlign: 'right', color: 'var(--theme-accent)', fontSize: 13, fontWeight: 600 }}>
                         {cost != null ? `NPR ${cost.toFixed(2)}` : '—'}
+                      </td>
+                      <td style={{ padding: '6px 12px', textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
+                        {cost != null && liveCost > 0 ? `${((cost / liveCost) * 100).toFixed(1)}%` : '—'}
                       </td>
                       {showNutrition && (
                         <td style={{ padding: '6px 8px', textAlign: 'center' }}>

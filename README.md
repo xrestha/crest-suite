@@ -124,6 +124,16 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S141 — 2026-06-25 — Recipes: % of Total column in ingredient edit form
+
+Added a **% of Total** column to the ingredients table inside the recipe edit form (between Cost and Nutrition). Each ingredient row now shows its share of the total recipe cost (`ingredient cost ÷ liveCost × 100`). Rows with no cost show `—`. The column was already present in the read/detail view; this brings it into the edit view as well.
+
+No DB change. Build clean.
+
+**Files:** `src/pages/Recipes.js`
+
+---
+
 ### S140 — 2026-06-25 — Recipes: remove Clone button + fix stale-data bug on save
 
 Two fixes to Recipe Costing:
