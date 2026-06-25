@@ -765,7 +765,7 @@ export default function Recipes() {
   const isSubRecipeForm = recipeForm.category === 'Sub-Recipe'
   const liveCost = calcLiveCost(ingredients, items, recipes)
   const livePrice = parseFloat(recipeForm.selling_price) || 0
-  const liveVat = parseFloat(recipeForm.vat_rate) || 0.13
+  const liveVat = (recipeForm.vat_rate === '' || recipeForm.vat_rate == null) ? 0.13 : parseFloat(recipeForm.vat_rate)
   const liveFcPct = livePrice > 0 ? (liveCost / livePrice) * 100 : null
   const livePriceWithVat = livePrice * (1 + liveVat)
   const liveFcTarget = (parseFloat(recipeForm.target_fc_pct) || 30) / 100
@@ -1110,17 +1110,17 @@ export default function Recipes() {
               ) : (
                 <>
                   <div className="form-field">
-                    <label><Tip text="Enter the VAT-inclusive menu price. The system strips VAT and stores the ex-VAT price for accurate food cost calculation." width={280}>Menu Price (NPR, incl. 13% VAT)</Tip></label>
+                    <label><Tip text="Enter the menu price. The system strips VAT and stores the ex-VAT price for accurate food cost calculation." width={280}>Menu Price (NPR{liveVat > 0 ? `, incl. ${(liveVat * 100).toFixed(0)}% VAT` : ', no VAT'})</Tip></label>
                     <div style={{ position: 'relative' }}>
                       <input
                         type="number"
-                        key={recipeForm.selling_price ? 'has-price' : 'no-price'}
-                        defaultValue={recipeForm.selling_price ? (parseFloat(recipeForm.selling_price) * (1 + (parseFloat(recipeForm.vat_rate) || 0.13))).toFixed(2) : ''}
+                        key={`${recipeForm.selling_price ? 'has-price' : 'no-price'}-vat${recipeForm.vat_rate}`}
+                        defaultValue={recipeForm.selling_price ? (parseFloat(recipeForm.selling_price) * (1 + liveVat)).toFixed(2) : ''}
                         onBlur={e => {
                           const rawPrice = parseFloat(e.target.value) || 0
                           const menuPrice = rawPrice > 0 ? Math.round(rawPrice) : 0
                           if (menuPrice !== rawPrice && e.target) e.target.value = menuPrice || ''
-                          const vatRate = parseFloat(recipeForm.vat_rate) || 0.13
+                          const vatRate = (recipeForm.vat_rate === '' || recipeForm.vat_rate == null) ? 0.13 : parseFloat(recipeForm.vat_rate)
                           const exVat = menuPrice > 0 ? (menuPrice / (1 + vatRate)).toFixed(4) : ''
                           setRecipeForm(f => ({ ...f, selling_price: exVat }))
                         }}
@@ -1128,7 +1128,7 @@ export default function Recipes() {
                       />
                       {recipeForm.selling_price && (
                         <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4 }}>
-                          Ex-VAT stored: NPR {parseFloat(recipeForm.selling_price).toFixed(2)}
+                          {liveVat > 0 ? 'Ex-VAT stored' : 'Stored'}: NPR {parseFloat(recipeForm.selling_price).toFixed(2)}
                         </div>
                       )}
                     </div>
@@ -1218,7 +1218,7 @@ export default function Recipes() {
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Suggested @ {recipeForm.target_fc_pct || 30}% FC</div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-green)' }}>NPR {suggestedPrice}</div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>incl. {(liveVat*100).toFixed(0)}% VAT, rounded</div>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{liveVat > 0 ? `incl. ${(liveVat*100).toFixed(0)}% VAT, ` : ''}rounded</div>
                 </div>
               )}
             </div>
