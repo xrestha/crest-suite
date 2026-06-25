@@ -7,6 +7,7 @@ import Fab from '../components/Fab'
 import Modal from '../components/Modal'
 import SearchableSelect from '../components/SearchableSelect'
 import { NUTRIENTS, EMPTY_NUTRITION, calcRecipeNutrition, calcLiveNutrition, hasNutrition, buildNutritionPayload, defaultBasisUnit, convertQty } from '../utils/nutrition'
+import { getSuggestedPrice } from '../utils/recipeCost'
 import { suggestSeeds } from '../data/nutritionSeed'
 import { fetchUsdaNutrition } from '../utils/usdaNutrition'
 import * as XLSX from 'xlsx'
@@ -181,11 +182,6 @@ export default function Recipes() {
         return sum + parseFloat(ing.qty_per_portion) * costPerUnit
       }
     }, 0)
-  }
-
-  function getSuggestedPrice(cost, vatRate = 0.13, targetFcPct = 0.30) {
-    const basePrice = cost / targetFcPct
-    return Math.ceil((basePrice * (1 + vatRate)) / 5) * 5
   }
 
   // Sub-recipes available as ingredients (all recipes with category Sub-Recipe)

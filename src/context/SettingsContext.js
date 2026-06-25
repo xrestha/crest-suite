@@ -33,6 +33,7 @@ const DEFAULT_FLAGS = {
   recipe_costing: false,
   menu_engineering: false,
   nutrition_facts: false,
+  menu_repricing: false,
   stock_report: false,
 }
 

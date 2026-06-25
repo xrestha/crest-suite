@@ -39,6 +39,7 @@ const DEFAULT_FLAGS = {
   outstanding_payables: null, shrinkage_report: null,
   staff_meals: null, settings: null,
   nutrition_facts: null, stock_report: null,
+  menu_repricing: null,
 }
 
 const FEATURE_GROUPS = [
@@ -74,6 +75,7 @@ const FEATURE_GROUPS = [
     { key: 'outstanding_payables', label: 'Outstanding Payables' },
     { key: 'staff_meals',          label: 'Staff Meals' },
     { key: 'nutrition_facts',      label: 'Nutrition Facts' },
+    { key: 'menu_repricing',       label: 'Menu Repricing' },
   ]},
   { tier: 'pro',     label: 'Pro Plan',         color: 'var(--theme-accent)', features: [
     { key: 'menu_engineering',     label: 'Menu Engineering' },

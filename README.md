@@ -124,6 +124,27 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S150 — 2026-06-25 — Menu Repricing report + Dashboard "Menu Health" card
+
+New owner-facing report (the gap industry sources rank #1: "Menu Price Analysis"). Surfaces, in one prioritized list, **which dishes are priced below their target food-cost % and how much margin that leaks per month** — and the exact price to charge to fix it. All inputs already existed (`target_fc_pct`, `getSuggestedPrice`, sales qty); nothing was being aggregated this way.
+
+- **New page** `src/pages/MenuRepricing.js` (`/menu-repricing`, Growth, feature key `menu_repricing`), modeled on `RecipeMargin.js`. Columns: Qty Sold, Food Cost/Portion, Current Price (ex-VAT), Current FC%, Target FC%, Suggested Menu Price (incl VAT, rounded), Price Gap (ex-VAT), Monthly Opportunity (gap × qty). Sort by Opportunity / Price Gap / Most-over-target; filters for "Only underpriced" + "Only with sales" + category. Print + Excel export. Stat cards: Underpriced Dishes, Monthly Opportunity, Biggest Leak.
+- **Math (ex-VAT, matching app-wide FC%):** `suggestedExVat = cost / (target/100)`, `gap = max(0, suggestedExVat − price)`, `monthly = gap × qtySold`. Underpriced when `currentFcPct > target`. The displayed Suggested Menu Price is VAT-inclusive (via shared `getSuggestedPrice`) and clearly labeled so it isn't conflated with the ex-VAT gap.
+- **Shared util:** extracted `getSuggestedPrice` out of `Recipes.js` into `src/utils/recipeCost.js`, imported by both the Recipes page and the new report (no duplicated formula).
+- **Dashboard "Menu Health" card** (gated on `menu_repricing`): "N of M dishes under target" + "NPR X/mo opportunity →", links to the report. Computed in the existing IMS fetch (added `target_fc_pct`/`category`/`is_active` to the recipes select and `items(per_uom_rate)` to the ingredient join; reuses the period sales map) so the card and report match exactly.
+- Wired the feature flag across `AuthContext` (GROWTH_KEYS), `SettingsContext`, `AdminClients` (Growth group), `App.js` route, `Layout.js` REPORTS nav, and `Help.js`.
+
+**DB migration required:**
+```sql
+ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS menu_repricing boolean;
+```
+
+Service worker cache bumped `crest-v7` → `crest-v8`. Build clean.
+
+**Files:** `src/pages/MenuRepricing.js`, `src/utils/recipeCost.js`, `src/pages/Recipes.js`, `src/pages/Dashboard.js`, `src/context/AuthContext.js`, `src/context/SettingsContext.js`, `src/pages/AdminClients.js`, `src/App.js`, `src/components/Layout.js`, `src/pages/Help.js`, `public/service-worker.js`
+
+---
+
 ### S149 — 2026-06-25 — UI: stop mouse wheel from changing focused number inputs
 
 A focused `type="number"` input treats the mouse wheel as increment/decrement. When entering daily sales, scrolling the page to continue silently nudged the qty-sold value up/down, so the wrong number got stored on "Save Day".

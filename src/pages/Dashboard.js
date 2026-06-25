@@ -49,6 +49,7 @@ export default function Dashboard() {
   const canSales    = hasFeature('sales_entry')
   const canVariance = hasFeature('variance_report')
   const canRecipes  = hasFeature('recipe_costing')
+  const canMenuReprice = hasFeature('menu_repricing')
   const canReorder  = hasFeature('reorder_report')
   const canOverheads = hasFeature('overheads')
 
@@ -87,8 +88,8 @@ export default function Dashboard() {
       period ? supabase.from('purchase_entries').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day').eq('period_id', period.id) : { data: [] },
-      supabase.from('recipes').select('id, name, selling_price').eq('client_id', effectiveClientId),
-      supabase.from('recipe_ingredients').select('recipe_id, item_id, qty_per_portion'),
+      supabase.from('recipes').select('id, name, selling_price, category, is_active, target_fc_pct').eq('client_id', effectiveClientId),
+      supabase.from('recipe_ingredients').select('recipe_id, item_id, qty_per_portion, items(per_uom_rate)'),
       period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id) : { data: [] },
       supabase.from('items').select('id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('client_id', effectiveClientId).eq('is_active', true).eq('is_sub_recipe', false),
@@ -116,6 +117,27 @@ export default function Dashboard() {
       const sold = soldMap[ri.recipe_id] || 0
       const yieldFactor = yieldMap[ri.item_id] || 1
       if (sold > 0) theoreticalMap[ri.item_id] = (theoreticalMap[ri.item_id] || 0) + sold * parseFloat(ri.qty_per_portion) / yieldFactor
+    })
+
+    // Menu Health — dishes priced below their target FC% (mirrors the Menu Repricing report).
+    const recipeCostMap = {}
+    ;(recipeIngs || []).filter(ri => clientRecipeIdSet.has(ri.recipe_id)).forEach(ri => {
+      const c = parseFloat(ri.qty_per_portion || 0) * parseFloat(ri.items?.per_uom_rate || 0)
+      recipeCostMap[ri.recipe_id] = (recipeCostMap[ri.recipe_id] || 0) + c
+    })
+    let underpricedCount = 0, costedPricedCount = 0, menuOpportunityTotal = 0
+    ;(recipes || []).forEach(r => {
+      const price = parseFloat(r.selling_price) || 0
+      if (r.category === 'Sub-Recipe' || r.is_active === false || price <= 0) return
+      costedPricedCount++
+      const cost = recipeCostMap[r.id] || 0
+      const targetPct = parseFloat(r.target_fc_pct) || 30
+      const currentFcPct = (cost / price) * 100
+      if (currentFcPct > targetPct) {
+        underpricedCount++
+        const suggestedExVat = targetPct > 0 ? cost / (targetPct / 100) : 0
+        menuOpportunityTotal += Math.max(0, suggestedExVat - price) * (soldMap[r.id] || 0)
+      }
     })
 
     // PATCHED: purchMap net of returns
@@ -274,7 +296,7 @@ export default function Dashboard() {
     ;(items || []).forEach(i => { itemRateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
     const wastageValueTotal = (wastagesData || []).reduce((s, w) => s + parseFloat(w.qty || 0) * (itemRateMap[w.item_id] || 0), 0)
 
-    setStats({ itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, wastageValueTotal })
+    setStats({ itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
     setLoading(false)
     const fcPctNow = revenueTotal > 0 ? (purchaseTotal / revenueTotal) * 100 : null
     loadFcTrend(period, fcPctNow)
@@ -901,6 +923,25 @@ export default function Dashboard() {
           </div>
         ) : (
           <UpsellCard label="Costed Recipes" tier="Growth" blurb="Cost every dish & protect margins" />
+        )}
+
+        {canMenuReprice ? (
+          <div style={kpiCard(() => navigate('/menu-repricing'))} onClick={() => navigate('/menu-repricing')}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
+              <Tip text="Dishes whose current food-cost % is above their target — priced too low to hit the margin you set. Open the Menu Repricing report for the prices to charge." width={300}>Menu Health</Tip>
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: stats?.underpricedCount > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+              {loading ? '—' : `${stats?.underpricedCount || 0} of ${stats?.costedPricedCount || 0}`}
+            </div>
+            <div style={{ fontSize: 11, color: stats?.menuOpportunityTotal > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)', marginTop: 4 }}>
+              {loading ? 'under target →'
+                : stats?.menuOpportunityTotal > 0
+                  ? `NPR ${Math.round(stats.menuOpportunityTotal).toLocaleString('en-NP')}/mo opportunity →`
+                  : 'dishes under target →'}
+            </div>
+          </div>
+        ) : (
+          <UpsellCard label="Menu Health" tier="Growth" blurb="Spot underpriced dishes & lost margin" />
         )}
 
         <div style={kpiCard(() => navigate('/wastage-report'))} onClick={() => navigate('/wastage-report')}>

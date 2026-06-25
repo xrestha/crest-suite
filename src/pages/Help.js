@@ -139,6 +139,11 @@ const IMS_TIERS = [
         tips: ['Focus on high-volume items with low contribution — they hurt profitability most', 'Weighted avg FC% at the bottom reflects your true blended food cost']
       },
       {
+        icon: '↗', name: 'Menu Repricing',
+        guide: 'Finds dishes priced below their target food-cost %, and the price to charge to fix it. For each dish: current FC% vs Target FC%, the Suggested Menu Price (VAT-inclusive, rounded), the per-portion Price Gap, and the Monthly Opportunity (gap × qty sold). Sort by Monthly Opportunity, Price Gap, or "Most over target". The Dashboard "Menu Health" card summarises it.',
+        tips: ['Reprice the biggest Monthly Opportunity items first — same cost, higher margin', 'Set each dish\'s Target FC% in Recipe Costing; the suggested price aims to hit it', 'Suggested Menu Price is VAT-inclusive (what you print); the Price Gap is ex-VAT']
+      },
+      {
         icon: '★', name: 'Best Sellers',
         guide: 'Ranks menu items by revenue, volume, or margin. Shows Top 10 and Bottom 10 tables plus a bar chart. Filter by category. Helps identify what to promote and what to reconsider.',
         tips: ['Use "By Margin" view to find items that sell well but contribute less profit', 'Bottom 10 by volume with high FC% = candidates for menu removal']
