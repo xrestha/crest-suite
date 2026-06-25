@@ -21,6 +21,9 @@ function fmtNutrient(def, value) {
 }
 const EMPTY_RECIPE = { name: '', category: 'Food', selling_price: '', vat_rate: '0.13', yield_qty: '1', yield_uom: 'portion', target_fc_pct: '30' }
 
+// vat_rate may be 0 (No VAT); don't use `|| 0.13` — parseFloat(0) is falsy and would coerce 0% back to 13%.
+const vatOf = rec => (rec?.vat_rate === null || rec?.vat_rate === undefined) ? 0.13 : parseFloat(rec.vat_rate)
+
 export default function Recipes() {
   const { clientId, hasFeature } = useAuth()
   const showNutrition = hasFeature('nutrition_facts')
@@ -212,7 +215,7 @@ export default function Recipes() {
       name: recipe.name,
       category: recipe.category || 'Food',
       selling_price: recipe.selling_price || '',
-      vat_rate: recipe.vat_rate || '0.13',
+      vat_rate: (recipe.vat_rate === null || recipe.vat_rate === undefined) ? '0.13' : String(recipe.vat_rate),
       yield_qty: recipe.yield_qty || '1',
       yield_uom: recipe.yield_uom || 'portion',
       target_fc_pct: fcVal
@@ -508,7 +511,7 @@ export default function Recipes() {
       name: recipeForm.name.trim(),
       category: recipeForm.category,
       selling_price: !isSubRecipe && recipeForm.selling_price ? parseFloat(recipeForm.selling_price) : null,
-      vat_rate: parseFloat(recipeForm.vat_rate) || 0.13,
+      vat_rate: (recipeForm.vat_rate === '' || recipeForm.vat_rate == null) ? 0.13 : parseFloat(recipeForm.vat_rate),
       yield_qty: parseFloat(recipeForm.yield_qty) || 1,
       yield_uom: recipeForm.yield_uom || 'portion',
       target_fc_pct: parseFloat(recipeForm.target_fc_pct) || 30,
@@ -1379,7 +1382,7 @@ export default function Recipes() {
         const isSubRec = selectedRecipe.category === 'Sub-Recipe'
         const cost = calcRecipeCost(selectedRecipe, recipes)
         const price = parseFloat(selectedRecipe.selling_price) || 0
-        const vat = parseFloat(selectedRecipe.vat_rate) || 0.13
+        const vat = vatOf(selectedRecipe)
         const fcPct = price > 0 ? (cost / price) * 100 : null
         const yieldQty = parseFloat(selectedRecipe.yield_qty) || 1
         const costPerUnit = cost / yieldQty
@@ -1423,7 +1426,7 @@ export default function Recipes() {
               const ohPerPortion = overheadData.totalOverheads / overheadData.totalCovers
               const trueCost = cost + ohPerPortion
               const trueNetMargin = price > 0 ? ((price - trueCost) / price) * 100 : null
-              const vat = parseFloat(selectedRecipe.vat_rate) || 0.13
+              const vat = vatOf(selectedRecipe)
               const suggestedRaw = trueCost / 0.20
               const suggestedVat = Math.ceil((suggestedRaw * (1 + vat)) / 5) * 5
               return (
@@ -1738,7 +1741,7 @@ export default function Recipes() {
         const isSubRec = r.category === 'Sub-Recipe'
         const cost = calcRecipeCost(r, recipes)
         const price = parseFloat(r.selling_price) || 0
-        const vat = parseFloat(r.vat_rate) || 0.13
+        const vat = vatOf(r)
         const fcPct = price > 0 ? (cost / price) * 100 : null
         const yieldQty = parseFloat(r.yield_qty) || 1
         const costPerUnit = cost / yieldQty
