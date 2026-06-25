@@ -274,12 +274,13 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   const belowMinGross = isMonthly && gross > 0 && gross < MIN_WAGE_MONTHLY
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', justifyContent: 'flex-end' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)' }} onClick={onClose} />
       <div style={{
-        position: 'relative', width: 520, maxWidth: '100vw',
-        background: '#141820', borderLeft: '1px solid #2a2f3d',
-        display: 'flex', flexDirection: 'column',
+        position: 'relative', width: 560, maxWidth: '100%', maxHeight: '90vh',
+        background: '#141820', border: '1px solid #2a2f3d', borderRadius: 12,
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
       }}>
 
         {/* Header */}

@@ -124,6 +124,16 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S154 — 2026-06-25 — HR: Employee form as centered modal (was right drawer)
+
+The Add/Edit Employee form (`EmployeeForm.jsx`) opened as a right-side slide-in drawer. Converted it to a **centered floating modal** — outer container now `justify/align center` with padding; the panel is `560px`, `maxHeight 90vh`, `borderRadius 12`, full border + drop shadow, `overflow hidden`. The existing header/footer stay fixed and the body scrolls inside (already `flex:1; overflow-y:auto`). Backdrop-click close unchanged.
+
+No DB change. Build clean. Service worker cache `crest-v11` → `crest-v12`.
+
+**Files:** `src/modules/hr/employees/EmployeeForm.jsx`, `public/service-worker.js`
+
+---
+
 ### S153 — 2026-06-25 — HR: surface supervisor + retirement (list, reports, retiring-soon flag)
 
 Built on S152 — exposes the new `supervisor_id` / `retirement_date` fields across the HR module.
