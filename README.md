@@ -124,6 +124,20 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S149 — 2026-06-25 — UI: stop mouse wheel from changing focused number inputs
+
+A focused `type="number"` input treats the mouse wheel as increment/decrement. When entering daily sales, scrolling the page to continue silently nudged the qty-sold value up/down, so the wrong number got stored on "Save Day".
+
+- Global passive `wheel` listener in `index.js` blurs the focused number input on scroll — the page still scrolls, but the entered value stays as typed
+- One place, covers every number field (Sales, Requisitions, recipe forms, etc.)
+- Service worker cache bumped `crest-v6` → `crest-v7`
+
+No DB change. Build clean.
+
+**Files:** `src/index.js`, `public/service-worker.js`
+
+---
+
 ### S148 — 2026-06-25 — UI: remove number-input spinner arrows app-wide
 
 Hid the up/down stepper arrows on all `type="number"` inputs (qty boxes in Sales, Requisitions, recipe forms, etc.) for a cleaner look. Inputs stay true number fields — mobile numeric keypad and `min`/`max` validation are preserved.
