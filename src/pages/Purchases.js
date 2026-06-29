@@ -667,27 +667,21 @@ export default function Purchases() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 14, gap: 16 }}>
                 <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 14px' }} onClick={addBillLine}>+ Add Item</button>
                 {(() => {
-                  const subTotal   = billLines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0)
-                  const vatTotal   = billLines.filter(l => l.vat_inclusive).reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0) * 0.13, 0)
-                  const grossTotal = subTotal + vatTotal
-                  const discount   = parseFloat(billHeader.discount) || 0
-                  const grandTotal = grossTotal - discount
+                  const subTotal    = billLines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0)
+                  const vatSubtotal = billLines.filter(l => l.vat_inclusive).reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0)
+                  const discount    = parseFloat(billHeader.discount) || 0
+                  // Discount reduces the taxable base (applied before VAT, per Nepal IRD practice)
+                  const vatTaxable  = subTotal > 0 ? vatSubtotal * (1 - discount / subTotal) : 0
+                  const vatTotal    = vatTaxable * 0.13
+                  const grandTotal  = (subTotal - discount) + vatTotal
                   if (subTotal === 0) return null
                   return (
                     <div style={{ textAlign: 'right', fontSize: 13, minWidth: 280 }}>
                       <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
                         Subtotal (ex-VAT): <span style={{ color: 'var(--theme-text1)', fontWeight: 600, marginLeft: 8 }}>NPR {subTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
-                      {vatTotal > 0 && (
-                        <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
-                          VAT (13%): <span style={{ color: 'var(--theme-amber)', fontWeight: 600, marginLeft: 8 }}>NPR {vatTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                      )}
-                      <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
-                        Gross Total: <span style={{ color: 'var(--theme-text1)', fontWeight: 600, marginLeft: 8 }}>NPR {grossTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 6 }}>
-                        <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}><Tip text="Promo or trade discount given by the vendor on the total bill. Stored against all items on this bill." width={240}>Discount (NPR):</Tip></span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: discount > 0 ? 3 : 6 }}>
+                        <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}><Tip text="Promo or trade discount given by the vendor on the total bill. Discount is applied before VAT — VAT is levied only on the net taxable amount." width={260}>Discount (NPR):</Tip></span>
                         <span style={{ color: 'var(--theme-red)', fontSize: 12 }}>−</span>
                         <input
                           type="number" min="0" step="any"
@@ -697,6 +691,16 @@ export default function Purchases() {
                           style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '5px 8px', fontSize: 12, color: 'var(--theme-red)', outline: 'none', width: 90, textAlign: 'right' }}
                         />
                       </div>
+                      {discount > 0 && vatTotal > 0 && (
+                        <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
+                          Taxable: <span style={{ color: 'var(--theme-text1)', fontWeight: 600, marginLeft: 8 }}>NPR {(subTotal - discount).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
+                      {vatTotal > 0 && (
+                        <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
+                          VAT (13%): <span style={{ color: 'var(--theme-amber)', fontWeight: 600, marginLeft: 8 }}>NPR {vatTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
                       <div style={{ color: 'var(--theme-accent)', fontWeight: 700, fontSize: 14, borderTop: '1px solid var(--theme-border)', paddingTop: 6 }}>
                         Grand Total: NPR {grandTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
@@ -784,9 +788,12 @@ export default function Purchases() {
                       return groupIds.flatMap((gid, gIdx) => {
                         const groupEntries = dayGroupsObj[gid]
                         const first = groupEntries[0]
-                        const groupTotal   = groupEntries.reduce((s, e) => s + e.qty * e.rate, 0)
-                        const vatAmount    = groupEntries.filter(e => e.vat_inclusive).reduce((s, e) => s + e.qty * e.rate * 0.13, 0)
-                        const discountAmt  = parseFloat(first.discount_amount) || 0
+                        const groupTotal    = groupEntries.reduce((s, e) => s + e.qty * e.rate, 0)
+                        const vatSubtotalG  = groupEntries.filter(e => e.vat_inclusive).reduce((s, e) => s + e.qty * e.rate, 0)
+                        const discountAmt   = parseFloat(first.discount_amount) || 0
+                        const vatTaxableG   = groupTotal > 0 ? vatSubtotalG * (1 - discountAmt / groupTotal) : 0
+                        const vatAmount     = vatTaxableG * 0.13
+                        const groupGrand    = (groupTotal - discountAmt) + vatAmount
                         return [
                           // Group header row
                           <tr key={`gh-${gid}`} style={{ background: 'rgba(201,168,76,0.04)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
@@ -809,7 +816,7 @@ export default function Purchases() {
                             </td>
                             <td colSpan={3}></td>
                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 13, verticalAlign: 'middle' }}>
-                              {(groupTotal + vatAmount - discountAmt).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {groupGrand.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               {vatAmount > 0 && <div style={{ fontSize: 10, color: 'var(--theme-amber)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                               {discountAmt > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                             </td>

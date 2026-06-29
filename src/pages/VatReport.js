@@ -11,21 +11,34 @@ function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-function buildVendorSummary(entries, returns) {
+function buildVendorSummary(vatEntries, returns, billGroups) {
   const map = {}
-  entries.forEach(e => {
+  vatEntries.forEach(e => {
     const key  = e.vendor_id || '__unknown__'
     const name = e.vendors?.name || 'Unknown Vendor'
     const pan  = e.vendors?.pan_vat_no || ''
-    if (!map[key]) map[key] = { name, pan, count: 0, gross: 0, returned: 0 }
+    if (!map[key]) map[key] = { name, pan, count: 0, gross: 0, discount: 0, returned: 0 }
     map[key].count += 1
     map[key].gross += e.qty * e.rate
+  })
+  // Prorate bill-level discount to each VAT entry's vendor
+  Object.values(billGroups).forEach(bill => {
+    if (!bill.disc) return
+    const billTotal = bill.all.reduce((s, e) => s + e.qty * e.rate, 0)
+    const vatItems  = bill.all.filter(e => e.vat_inclusive)
+    const vatBase   = vatItems.reduce((s, e) => s + e.qty * e.rate, 0)
+    const vatDisc   = billTotal > 0 ? bill.disc * (vatBase / billTotal) : 0
+    vatItems.forEach(e => {
+      const key = e.vendor_id || '__unknown__'
+      if (!map[key]) return
+      map[key].discount += vatBase > 0 ? vatDisc * ((e.qty * e.rate) / vatBase) : 0
+    })
   })
   returns.forEach(r => {
     const key  = r.vendor_id || '__unknown__'
     const name = r.vendors?.name || 'Unknown Vendor'
     const pan  = r.vendors?.pan_vat_no || ''
-    if (!map[key]) map[key] = { name, pan, count: 0, gross: 0, returned: 0 }
+    if (!map[key]) map[key] = { name, pan, count: 0, gross: 0, discount: 0, returned: 0 }
     map[key].returned += r.qty * r.rate
   })
   return Object.values(map).sort((a, b) => (b.gross - b.returned) - (a.gross - a.returned))
@@ -79,9 +92,24 @@ export default function VatReport() {
   const vatEntries    = entries.filter(e => e.vat_inclusive)
   const nonVatEntries = entries.filter(e => !e.vat_inclusive)
 
-  // Purchases
+  // Bill groups — needed to prorate bill-level discount to VAT entries
+  const billGroups = {}
+  entries.forEach(e => {
+    const gid = e.purchase_group_id || e.id
+    if (!billGroups[gid]) billGroups[gid] = { all: [], disc: parseFloat(e.discount_amount) || 0 }
+    billGroups[gid].all.push(e)
+  })
+  const totalVatDiscount = Object.values(billGroups).reduce((sum, bill) => {
+    if (!bill.disc) return sum
+    const billTotal = bill.all.reduce((s, e) => s + e.qty * e.rate, 0)
+    const vatBase   = bill.all.filter(e => e.vat_inclusive).reduce((s, e) => s + e.qty * e.rate, 0)
+    return sum + (billTotal > 0 ? bill.disc * (vatBase / billTotal) : 0)
+  }, 0)
+
+  // Purchases — discount applied before VAT (per Nepal IRD: VAT is on net taxable amount)
   const nonVatTotal    = nonVatEntries.reduce((s, e) => s + e.qty * e.rate, 0)
-  const vatBaseGross   = vatEntries.reduce((s, e) => s + e.qty * e.rate, 0)
+  const vatBaseList    = vatEntries.reduce((s, e) => s + e.qty * e.rate, 0)   // list price, pre-discount
+  const vatBaseGross   = vatBaseList - totalVatDiscount                        // taxable base after discount
   const vatAmtGross    = vatBaseGross * VAT_RATE
   const vatTotalGross  = vatBaseGross * (1 + VAT_RATE)
 
@@ -96,7 +124,7 @@ export default function VatReport() {
   const netVatTotal    = netVatBase * (1 + VAT_RATE)
   const totalNet       = nonVatTotal + netVatTotal
 
-  const vendorRows  = buildVendorSummary(vatEntries, vatReturns)
+  const vendorRows  = buildVendorSummary(vatEntries, vatReturns, billGroups)
   const periodLabel = (p) => p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : ''
 
   function exportExcel() {
@@ -146,16 +174,20 @@ export default function VatReport() {
 
     // CA Summary sheet
     const caRows = vendorRows.map(v => {
-      const grossBase = v.gross
-      const retBase   = v.returned
-      const netBase   = grossBase - retBase
+      const grossBase  = v.gross
+      const discBase   = v.discount || 0
+      const taxBase    = grossBase - discBase
+      const retBase    = v.returned
+      const netBase    = taxBase - retBase
       return {
         'Vendor':                    v.name,
         'PAN/VAT No.':               v.pan,
         '# Bills':                   v.count,
         'Gross Base (ex-VAT)':       Number(grossBase.toFixed(2)),
+        'Trade Discount':            discBase > 0 ? Number((-discBase).toFixed(2)) : 0,
+        'Taxable Base (ex-VAT)':     Number(taxBase.toFixed(2)),
         'Returned Base (ex-VAT)':    Number(retBase.toFixed(2)),
-        'Net Base (ex-VAT)':         Number(netBase.toFixed(2)),
+        'Net Taxable (ex-VAT)':      Number(netBase.toFixed(2)),
         'Net Input VAT (13%)':       Number((netBase * VAT_RATE).toFixed(2)),
         'Net Total (incl. VAT)':     Number((netBase * (1 + VAT_RATE)).toFixed(2)),
       }
@@ -282,11 +314,27 @@ export default function VatReport() {
                     })}
                     <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
                       <td colSpan={6} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>GROSS TOTALS</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatBaseGross)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-amber)' }}>{fmtNPR(vatAmtGross)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{fmtNPR(vatTotalGross)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatBaseList)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-amber)' }}>{fmtNPR(vatBaseList * VAT_RATE)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{fmtNPR(vatBaseList * (1 + VAT_RATE))}</td>
                       <td></td>
                     </tr>
+                    {totalVatDiscount > 0 && <>
+                      <tr>
+                        <td colSpan={6} style={{ color: 'var(--theme-red)', fontSize: 12 }}>Trade Discount</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>−{fmtNPR(totalVatDiscount)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>−{fmtNPR(totalVatDiscount * VAT_RATE)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>−{fmtNPR(totalVatDiscount * (1 + VAT_RATE))}</td>
+                        <td></td>
+                      </tr>
+                      <tr style={{ fontWeight: 700, background: 'rgba(201,168,76,0.05)' }}>
+                        <td colSpan={6} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>TAXABLE TOTALS</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatBaseGross)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-amber)' }}>{fmtNPR(vatAmtGross)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{fmtNPR(vatTotalGross)}</td>
+                        <td></td>
+                      </tr>
+                    </>}
                   </tbody>
                 </table>
               </div>
@@ -401,16 +449,20 @@ export default function VatReport() {
                     <th>Vendor</th>
                     <th><Tip text="PAN or VAT registration number of the supplier — add it in Vendors if missing.">PAN / VAT No.</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Number of VAT-inclusive purchase entries from this vendor."># Bills</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Gross purchases before deducting returns, ex-VAT.">Gross Base</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Gross purchases at list price before trade discount, ex-VAT.">Gross Base</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}><Tip text="Trade/promo discount from the vendor, prorated to VAT items. Reduces the taxable base." width={260}>Discount</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Taxable base = Gross − Discount. VAT is levied on this amount per Nepal IRD." width={240}>Taxable Base</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}><Tip text="Base amount of VAT-inclusive goods returned to this vendor." width={230}>Returned</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Net base = Gross purchases − Returns, ex-VAT.">Net Base</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-amber)' }}><Tip text="Net claimable input VAT = Net Base × 13%. Use for IRD VAT return." width={230}>Net Input VAT</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Net amount paid to this vendor including VAT, after returns.">Net Total</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Net taxable = Taxable Base − Returns, ex-VAT.">Net Taxable</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-amber)' }}><Tip text="Net claimable input VAT = Net Taxable × 13%. Use for IRD VAT return." width={230}>Net Input VAT</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Net amount paid to this vendor including VAT, after discount and returns.">Net Total</Tip></th>
                   </tr>
                 </thead>
                 <tbody>
                   {vendorRows.map((v, i) => {
-                    const netBase  = v.gross - v.returned
+                    const disc     = v.discount || 0
+                    const taxBase  = v.gross - disc
+                    const netBase  = taxBase - v.returned
                     const netVat   = netBase * VAT_RATE
                     const netTotal = netBase * (1 + VAT_RATE)
                     return (
@@ -421,6 +473,10 @@ export default function VatReport() {
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{v.count}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(v.gross)}</td>
+                        <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>
+                          {disc > 0 ? `−${fmtNPR(disc)}` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(taxBase)}</td>
                         <td style={{ textAlign: 'right', color: v.returned > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>
                           {v.returned > 0 ? `−${fmtNPR(v.returned)}` : '—'}
                         </td>
@@ -432,6 +488,10 @@ export default function VatReport() {
                   })}
                   <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
                     <td colSpan={3} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>PERIOD NET</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(vatBaseList)}</td>
+                    <td style={{ textAlign: 'right', color: totalVatDiscount > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>
+                      {totalVatDiscount > 0 ? `−${fmtNPR(totalVatDiscount)}` : '—'}
+                    </td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(vatBaseGross)}</td>
                     <td style={{ textAlign: 'right', color: retBaseTotal > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>
                       {retBaseTotal > 0 ? `−${fmtNPR(retBaseTotal)}` : '—'}

@@ -124,6 +124,28 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S158 — 2026-06-29 — Purchases: discount before VAT; Vendor Report discounts tab + combobox
+
+**Discount-before-VAT fix (correct Nepal IRD treatment):**
+
+Previously the purchase bill footer computed `Subtotal + VAT − Discount`. Corrected to `Subtotal − Discount = Taxable → +VAT(13%) = Grand Total`, matching vendor invoices and Nepal IRD practice (VAT is levied on net taxable value, not list price).
+
+- **`src/pages/Purchases.js`** — bill entry form: discount input moved above VAT line; Taxable row shown when discount > 0; VAT now computed on `vatSubtotal × (1 − discount/billTotal)`. List view group header also corrected.
+- **`src/pages/VatReport.js`** — input VAT now computed on discount-adjusted taxable base. Entry table footer adds Trade Discount and Taxable Totals rows when discount exists. CA Summary table gains Discount and Taxable Base columns. Excel CA Summary sheet updated. `buildVendorSummary` updated to track per-vendor discount.
+
+**Vendor Report enhancements:**
+
+- **Discount Received tab** — new third tab showing vendor-level discount summary (# bills, total discount, avg %) and bill-by-bill detail (Day, Vendor, Invoice, Bill Total, Discount, Disc %, VAT, Grand Total, Payment). Excel export gains a "Discounts Received" sheet when discounts exist.
+- **Vendor Summary** — now deducts bill-level discounts from Net Spend. New Discount column added to the table. `grandNet` and all derived figures (%, Avg/Day, payment splits) reflect the corrected net. Grand Total stat card similarly corrected.
+- **Spend split legend** — bar segments are now clean color blocks; percentages for every vendor (including small ones) shown in the color-coded legend below.
+- **Vendor search** — replaced plain input with a combobox dropdown: click/type to open vendor list with net spend on the right, click to filter, × to clear.
+
+No DB change. Build clean.
+
+**Files:** `src/pages/Purchases.js`, `src/pages/VatReport.js`, `src/pages/VendorReport.js`
+
+---
+
 ### S157 — 2026-06-26 — Tooltip audit: add missing Tip tooltips across all pages
 
 Full audit of every page and module for missing `<Tip>` tooltips on non-obvious column headers. 18 tooltips added across 6 files.
