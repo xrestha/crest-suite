@@ -124,6 +124,24 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S171 — 2026-06-29 — Admin dashboard rebuild + ESLint fixes + login page polish
+
+**ESLint fixes (`src/pages/AdminClients.js`):**
+- `[posEndsAt]` — removed unused setter from destructure (POS has no billing UI yet; state initialises from DB)
+- `toggleImsEnabled` / `toggleHrEnabled` — deleted both; dead code, duplicates of the wired-up `handleToggleIms` / `handleToggleHr`
+
+**Admin dashboard rebuild (`src/pages/Dashboard.js`):**
+- Query extended to include `ims_enabled`, `hr_enabled`, `is_trial`, `subscribe_requested`, `trial_expires_at`
+- **6 KPI cards** (was 4): Active Properties (with IMS/HR/POS module adoption pills) · Active Today (own card, green pulse, names listed) · Expiring ≤30 Days (turns red + "X critical ≤7 days" when churn risk detected) · No Open Period · MRR + ARR · Trial Signups
+- MRR now sums IMS + HR billing (`ims_ends_at || subscription_ends_at` + `hr_ends_at`); ARR = MRR × 12 shown as sub-line
+- **Two tables merged into one** "All Properties" table: Property (green active-today dot) · Modules (IMS/HR pills) · Plan (+ HR plan if different) · Monthly Value (IMS+HR combined) · Billing type (+ "HR exp. Xd" warning if HR expiring separately) · Expires (BS) · Sub Status badge · Period · Actions
+- Trial Signups card: amber border when trials exist, red border + pulsing dot when any trial user clicked "Subscribe"; clicking navigates to `/admin/clients`
+
+**Login page (`src/pages/Login.css`):**
+- Modal widened: `max-width` 840px → 1020px (more rectangular landscape shape)
+- All font sizes +1pt (10→11, 11→12, 12→13, 13→14, 16→17, 20→21, 22→23)
+- Height reduced: panel padding 32px → 22px, brand/pitch/highlights/form gaps and margins all tightened
+
 ### S170 — 2026-06-29 — Crest HR: Phase 2 Compliance — married TDS, festival TDS, gratuity tracker, final settlement
 
 **TDS engine (`src/modules/hr/payroll/tds.js`):**

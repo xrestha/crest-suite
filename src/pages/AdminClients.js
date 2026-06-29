@@ -148,7 +148,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
   const _legacyEnd = client.subscription_ends_at ? formatAd(new Date(client.subscription_ends_at)) : ''
   const [imsEndsAt, setImsEndsAt] = useState(client.ims_ends_at ? formatAd(new Date(client.ims_ends_at)) : _legacyEnd)
   const [hrEndsAt,  setHrEndsAt]  = useState(client.hr_ends_at  ? formatAd(new Date(client.hr_ends_at))  : '')
-  const [posEndsAt, setPosEndsAt] = useState(client.pos_ends_at ? formatAd(new Date(client.pos_ends_at)) : '')
+  const [posEndsAt] = useState(client.pos_ends_at ? formatAd(new Date(client.pos_ends_at)) : '')
   const [billingCycle, setBillingCycle] = useState(client.billing_cycle || 'monthly')
   const [savingSub, setSavingSub] = useState(false)
   const [subMsg, setSubMsg]       = useState('')
@@ -1316,29 +1316,6 @@ export default function AdminClients() {
     if (activeDrawer?.id === client.id) setActiveDrawer(prev => ({ ...prev, is_active: !prev.is_active }))
   }
 
-  async function toggleImsEnabled(client, e) {
-    e.stopPropagation()
-    if (client.ims_enabled !== false) {
-      const ok = window.confirm(
-        `Disable Crest IMS for "${client.name}"?\n\n` +
-        `The client will immediately lose access to all IMS pages — dashboard, items, purchases, stock, recipes, and reports.\n\n` +
-        `No data is deleted. Re-enabling restores full access instantly.`
-      )
-      if (!ok) return
-    }
-    await supabase.from('clients').update({ ims_enabled: client.ims_enabled !== false ? false : true }).eq('id', client.id)
-    loadClients()
-  }
-
-  async function toggleHrEnabled(client, e) {
-    e.stopPropagation()
-    const newVal = !client.hr_enabled
-    await supabase.from('clients').update({
-      hr_enabled: newVal,
-      hr_plan: newVal ? (client.hr_plan || 'starter') : null,
-    }).eq('id', client.id)
-    loadClients()
-  }
 
   return (
     <div>
