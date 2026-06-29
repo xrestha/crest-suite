@@ -15,14 +15,79 @@ Deno.serve(async (req) => {
     })
 
   try {
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) return json({ error: 'Unauthorized' }, 401)
-
     const url  = Deno.env.get('SUPABASE_URL')!
     const anon = Deno.env.get('SUPABASE_ANON_KEY')!
     const svc  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-    // Verify caller is admin using their own JWT
+    // Service-role client used for all privileged writes
+    const admin = createClient(url, svc, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+
+    const body = await req.json()
+    const { action, ...params } = body
+
+    // ── Self-service trial signup — no admin auth required ────────────────────
+    if (action === 'register_trial') {
+      const { business_name, email, password, full_name } = params
+      if (!business_name || !email || !password) {
+        return json({ error: 'business_name, email and password are required' }, 400)
+      }
+
+      const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: full_name || business_name },
+      })
+      if (authErr || !authData?.user) {
+        return json({ error: authErr?.message || 'Failed to create user' }, 400)
+      }
+
+      const now          = new Date()
+      const trialExpires = new Date(now.getTime() + 7  * 24 * 60 * 60 * 1000) // +7 days
+      const trialPurge   = new Date(now.getTime() + 22 * 24 * 60 * 60 * 1000) // +7+15 days
+
+      const { data: client, error: clientErr } = await admin
+        .from('clients')
+        .insert({
+          name:              business_name,
+          plan:              'starter',
+          is_trial:          true,
+          trial_start_date:  now.toISOString(),
+          trial_expires_at:  trialExpires.toISOString(),
+          trial_purge_at:    trialPurge.toISOString(),
+          ims_enabled:       true,
+          hr_enabled:        false,
+        })
+        .select('id')
+        .single()
+
+      if (clientErr || !client) {
+        await admin.auth.admin.deleteUser(authData.user.id)
+        return json({ error: clientErr?.message || 'Failed to create client' }, 400)
+      }
+
+      const { error: profileErr } = await admin.from('profiles').insert({
+        id:        authData.user.id,
+        full_name: full_name || business_name,
+        role:      'client',
+        client_id: client.id,
+      })
+
+      if (profileErr) {
+        await admin.auth.admin.deleteUser(authData.user.id)
+        await admin.from('clients').delete().eq('id', client.id)
+        return json({ error: profileErr.message }, 400)
+      }
+
+      return json({ success: true })
+    }
+
+    // ── All other actions require admin auth ──────────────────────────────────
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) return json({ error: 'Unauthorized' }, 401)
+
     const caller = createClient(url, anon, {
       global: { headers: { Authorization: authHeader } },
     })
@@ -32,13 +97,6 @@ Deno.serve(async (req) => {
     const { data: profile } = await caller
       .from('profiles').select('role').eq('id', user.id).single()
     if (profile?.role !== 'admin') return json({ error: 'Forbidden' }, 403)
-
-    // Caller verified as admin — perform operation with service role
-    const admin = createClient(url, svc, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-
-    const { action, ...params } = await req.json()
 
     if (action === 'getUser') {
       const result = await admin.auth.admin.getUserById(params.userId)
@@ -64,13 +122,11 @@ Deno.serve(async (req) => {
       const { clientId } = params
       if (!clientId) return json({ error: 'clientId is required' }, 400)
 
-      // Helper — throws on any Supabase error so failures surface immediately
       async function del(query: Promise<{ error: unknown }>, label: string) {
         const { error } = await query
         if (error) throw new Error(`Failed to delete ${label}: ${(error as { message?: string }).message ?? String(error)}`)
       }
 
-      // ── Step 1: collect IDs we need for child lookups ──────────────────
       const { data: periods } = await admin.from('monthly_periods').select('id').eq('client_id', clientId)
       const periodIds = (periods || []).map((p: { id: string }) => p.id)
 
@@ -83,7 +139,6 @@ Deno.serve(async (req) => {
       const { data: reqRows } = await admin.from('requisitions').select('id').eq('client_id', clientId)
       const reqIds = (reqRows || []).map((r: { id: string }) => r.id)
 
-      // ── Step 2: delete deepest children first (FK → other tables in list) ──
       if (recipeIds.length > 0) {
         await del(admin.from('recipe_ingredients').delete().in('recipe_id', recipeIds), 'recipe_ingredients')
       }
@@ -94,7 +149,6 @@ Deno.serve(async (req) => {
         await del(admin.from('requisition_lines').delete().in('requisition_id', reqIds), 'requisition_lines')
       }
 
-      // ── Step 3: period-keyed tables (all reference monthly_periods.id) ──
       if (periodIds.length > 0) {
         await del(admin.from('purchase_entries').delete().in('period_id', periodIds), 'purchase_entries')
         await del(admin.from('vendor_returns').delete().in('period_id', periodIds), 'vendor_returns')
@@ -105,12 +159,8 @@ Deno.serve(async (req) => {
         await del(admin.from('budgets').delete().in('period_id', periodIds), 'budgets')
       }
 
-      // purchase_orders and requisitions have both period_id and client_id —
-      // delete by client_id to catch any without a period too
       await del(admin.from('purchase_orders').delete().eq('client_id', clientId), 'purchase_orders')
       await del(admin.from('requisitions').delete().eq('client_id', clientId), 'requisitions')
-
-      // ── Step 4: client-keyed root tables ───────────────────────────────
       await del(admin.from('overheads').delete().eq('client_id', clientId), 'overheads')
       await del(admin.from('par_levels').delete().eq('client_id', clientId), 'par_levels')
       await del(admin.from('monthly_periods').delete().eq('client_id', clientId), 'monthly_periods')
@@ -124,8 +174,6 @@ Deno.serve(async (req) => {
 
     return json({ error: `Unknown action: ${action}` }, 400)
   } catch (err) {
-    // Always return 200 so supabase-js forwards the body — non-2xx responses
-    // are swallowed by the client and the actual message is lost.
     return json({ error: (err as Error).message })
   }
 })

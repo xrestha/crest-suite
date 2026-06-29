@@ -79,7 +79,7 @@ export function AuthProvider({ children }) {
       if (data?.client_id) {
         const { data: client } = await supabase
           .from('clients')
-          .select('id, name, location, is_premium, plan, trial_ends_at, subscription_ends_at, ims_enabled, hr_enabled, hr_plan')
+          .select('id, name, location, is_premium, plan, trial_ends_at, subscription_ends_at, ims_enabled, hr_enabled, hr_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
           .eq('id', data.client_id)
           .single()
         if (mounted) data.clients = client
@@ -174,6 +174,25 @@ export function AuthProvider({ children }) {
   const trialEndsAt = profile?.clients?.trial_ends_at || null
   const isTrialing  = plan === 'starter' && !!trialEndsAt && new Date(trialEndsAt) > new Date()
 
+  // Self-service 7-day free trial fields
+  const _now              = new Date()
+  const isTrial           = !isAdmin && !!(profile?.clients?.is_trial)
+  const _trialExpiresAt   = profile?.clients?.trial_expires_at ? new Date(profile.clients.trial_expires_at) : null
+  const _trialPurgeAt     = profile?.clients?.trial_purge_at   ? new Date(profile.clients.trial_purge_at)   : null
+  const trialExpired      = isTrial && !!_trialExpiresAt && _trialExpiresAt < _now
+  const trialDaysLeft     = isTrial && !!_trialExpiresAt && !trialExpired
+                              ? Math.ceil((_trialExpiresAt - _now) / 86400000)
+                              : 0
+  const trialPurgeInDays  = isTrial && trialExpired && !!_trialPurgeAt
+                              ? Math.ceil((_trialPurgeAt - _now) / 86400000)
+                              : null
+  const subscribeRequested = !!(profile?.clients?.subscribe_requested)
+
+  async function requestSubscription() {
+    await supabase.rpc('request_subscription')
+    if (session?.user?.id) fetchProfile(session.user.id)
+  }
+
   function hasFeature(featureKey) {
     if (isAdmin) return true
     const flagVal = featureFlags[featureKey]
@@ -191,6 +210,7 @@ export function AuthProvider({ children }) {
       signIn, signOut,
       clientId, isAdmin, isPremium,
       plan, isTrialing, trialEndsAt,
+      isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
       featureFlags, hasFeature,
       imsEnabled: isAdmin || (profile?.clients?.ims_enabled ?? true),
       hrEnabled: isAdmin || (profile?.clients?.hr_enabled ?? false),

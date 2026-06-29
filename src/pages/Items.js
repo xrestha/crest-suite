@@ -42,6 +42,7 @@ export default function Items() {
   const [sortConvFirst, setSortConvFirst] = useState(false)
   const [initingCats, setInitingCats] = useState(false)
   const [usageMap, setUsageMap] = useState({})
+  const [filterUsage, setFilterUsage] = useState('all')
 
   const effectiveClientId = clientId
 
@@ -311,7 +312,13 @@ export default function Items() {
     const matchCat = filterCat === 'all' || item.category_id === filterCat
     const s = search.toLowerCase()
     const matchSearch = item.name.toLowerCase().includes(s) || (item.item_code || '').toLowerCase().includes(s)
-    return matchCat && matchSearch
+    const usage = usageMap[item.id] || []
+    const matchUsage =
+      filterUsage === 'all'    ? true :
+      filterUsage === 'unused' ? usage.length === 0 :
+      filterUsage === 'stock'  ? (usage.includes('OS') || usage.includes('CS')) :
+      usage.includes(filterUsage)
+    return matchCat && matchSearch && matchUsage
   }).sort((a, b) => {
     if (!sortConvFirst) return 0
     const aHas = !!(a.purchase_unit && a.conversion_factor > 1)
@@ -576,6 +583,22 @@ export default function Items() {
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
+        {/* Used-In filter chips */}
+        {[
+          { key: 'all',    label: 'All' },
+          { key: 'R',      label: '🍽 Recipes' },
+          { key: 'P',      label: '📦 Purchases' },
+          { key: 'stock',  label: '📊 Stock' },
+          { key: 'unused', label: '○ Unused' },
+        ].map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setFilterUsage(key)}
+            className={filterUsage === key ? 'tab-btn tab-btn--active' : 'tab-btn'}
+          >
+            {label}
+          </button>
+        ))}
         <button
           onClick={() => setSortConvFirst(v => !v)}
           style={{
@@ -593,10 +616,18 @@ export default function Items() {
       {/* Category tabs */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--theme-border)', marginBottom: 0, flexWrap: 'wrap' }}>
         {[{ id: 'all', name: 'All Items' }, ...catsWithItems].map(tab => {
-          const count = items.filter(i =>
-            (tab.id === 'all' || i.category_id === tab.id) &&
-            (i.name.toLowerCase().includes(search.toLowerCase()) || (i.item_code || '').toLowerCase().includes(search.toLowerCase()))
-          ).length
+          const count = items.filter(i => {
+            const matchCat = tab.id === 'all' || i.category_id === tab.id
+            const s = search.toLowerCase()
+            const matchSearch = i.name.toLowerCase().includes(s) || (i.item_code || '').toLowerCase().includes(s)
+            const usage = usageMap[i.id] || []
+            const matchUsage =
+              filterUsage === 'all'    ? true :
+              filterUsage === 'unused' ? usage.length === 0 :
+              filterUsage === 'stock'  ? (usage.includes('OS') || usage.includes('CS')) :
+              usage.includes(filterUsage)
+            return matchCat && matchSearch && matchUsage
+          }).length
           const active = filterCat === tab.id
           return (
             <button key={tab.id} onClick={() => setFilterCat(tab.id)} style={{

@@ -66,7 +66,8 @@ const HR_ITEMS = [
 ]
 
 export default function Layout() {
-  const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient } = useAuth()
+  const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient,
+          isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
   const clientName = profile?.clients?.name
@@ -74,6 +75,8 @@ export default function Layout() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [allClients, setAllClients] = useState([])
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false)
+  const [pendingTrialCount, setPendingTrialCount] = useState(0)
+  const [subscribing, setSubscribing] = useState(false)
   const dropdownRef = useRef(null)
   const location = useLocation()
 
@@ -106,7 +109,13 @@ export default function Layout() {
 
   useEffect(() => {
     if (!isAdmin) return
-    supabase.from('clients').select('id, name, trial_ends_at, subscription_ends_at').order('name').then(({ data }) => setAllClients(data || []))
+    supabase.from('clients')
+      .select('id, name, trial_ends_at, subscription_ends_at, is_trial, trial_expires_at, subscribe_requested')
+      .order('name')
+      .then(({ data }) => {
+        setAllClients(data || [])
+        setPendingTrialCount((data || []).filter(c => c.subscribe_requested).length)
+      })
   }, [isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSignOut() {
@@ -336,8 +345,28 @@ export default function Layout() {
                 className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
                 title={collapsed ? 'Clients' : undefined}
                 onClick={() => setMobileSidebarOpen(false)}>
-                <span className="sidebar-icon">⊛</span>
-                {!collapsed && 'Clients'}
+                <span className="sidebar-icon" style={{ position: 'relative' }}>
+                  ⊛
+                  {pendingTrialCount > 0 && (
+                    <span style={{
+                      position: 'absolute', top: -4, right: -4,
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: '#f87171',
+                      boxShadow: '0 0 0 0 rgba(248,113,113,0.7)',
+                      animation: 'pulse-dot 1.5s infinite',
+                    }} />
+                  )}
+                </span>
+                {!collapsed && (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+                    Clients
+                    {pendingTrialCount > 0 && (
+                      <span style={{ fontSize: 10, fontWeight: 800, background: '#f87171', color: '#fff', borderRadius: 10, padding: '1px 6px', lineHeight: 1.4 }}>
+                        {pendingTrialCount}
+                      </span>
+                    )}
+                  </span>
+                )}
               </NavLink>
               <NavLink to="/periods"
                 className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
@@ -425,6 +454,77 @@ export default function Layout() {
 
       <main className={`main-content${collapsed ? ' main-content--collapsed' : ''}`}>
         <button className="mobile-hamburger" onClick={() => setMobileSidebarOpen(true)}>☰</button>
+
+        {/* Trial banners — shown from day 4 onwards and after expiry */}
+        {isTrial && !trialExpired && trialDaysLeft <= 4 && (
+          <div style={{
+            background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.35)',
+            borderRadius: 8, padding: '12px 16px', marginBottom: 20,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+          }}>
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>
+                ⏳ {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 10 }}>
+                Subscribe to keep your data after the trial ends.
+              </span>
+            </div>
+            {!subscribeRequested ? (
+              <button
+                onClick={async () => { setSubscribing(true); await requestSubscription(); setSubscribing(false) }}
+                disabled={subscribing}
+                style={{ background: '#f59e0b', border: 'none', color: '#0f1117', padding: '7px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                {subscribing ? 'Sending…' : 'I Want to Subscribe →'}
+              </button>
+            ) : (
+              <span style={{ fontSize: 12, color: '#f59e0b', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
+            )}
+          </div>
+        )}
+
+        {isTrial && trialExpired && trialPurgeInDays !== null && trialPurgeInDays > 0 && (
+          <div style={{
+            background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.4)',
+            borderRadius: 8, padding: '12px 16px', marginBottom: 20,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+          }}>
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#f87171' }}>
+                🔒 Trial ended — your data is retained for {trialPurgeInDays} more day{trialPurgeInDays !== 1 ? 's' : ''}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 10 }}>
+                Subscribe before the deadline to keep your data permanently.
+              </span>
+            </div>
+            {!subscribeRequested ? (
+              <button
+                onClick={async () => { setSubscribing(true); await requestSubscription(); setSubscribing(false) }}
+                disabled={subscribing}
+                style={{ background: '#f87171', border: 'none', color: '#fff', padding: '7px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                {subscribing ? 'Sending…' : 'Subscribe Now →'}
+              </button>
+            ) : (
+              <span style={{ fontSize: 12, color: '#f87171', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
+            )}
+          </div>
+        )}
+
+        {isTrial && trialExpired && (trialPurgeInDays === null || trialPurgeInDays <= 0) && (
+          <div style={{
+            background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.5)',
+            borderRadius: 8, padding: '14px 18px', marginBottom: 20,
+            textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#f87171', marginBottom: 4 }}>
+              Your free trial has ended and the data retention period has expired.
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+              Contact us to discuss reactivation.
+            </div>
+          </div>
+        )}
+
         <Outlet />
       </main>
     </div>

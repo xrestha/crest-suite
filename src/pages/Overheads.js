@@ -222,6 +222,22 @@ export default function Overheads() {
       color: netProfit != null && netProfit >= 0 ? 'var(--theme-green)' : 'var(--theme-red)' },
   ] : null
 
+  // Cross-bucket ranked pivot — all line items with amount > 0, sorted by spend
+  const allLineItems = useMemo(() => {
+    return Object.entries(rows).flatMap(([bucket, bucketRows]) =>
+      bucketRows
+        .filter(r => parseFloat(r.amount) > 0)
+        .map(r => ({
+          bucket,
+          category:    r.category || '—',
+          description: r.description || '',
+          amount:      parseFloat(r.amount),
+          pctOfTotal:  totalFixed > 0 ? (parseFloat(r.amount) / totalFixed) * 100 : 0,
+          pctOfRev:    revenue    > 0 ? (parseFloat(r.amount) / revenue)    * 100 : null,
+        }))
+    ).sort((a, b) => b.amount - a.amount)
+  }, [rows, totalFixed, revenue])
+
   // Break-even
   const avgTicket = covers > 0 ? revenue / covers : 0
   const fcPct     = revenue > 0 ? foodCost / revenue : 0.30
@@ -502,6 +518,172 @@ export default function Overheads() {
         </div>
       )}
 
+      {/* Charts — cost stack + bucket breakdown + pivot */}
+      {totalFixed > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: '0 0 20px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Cost Visualisation</h3>
+
+          {/* Revenue cost stack — only when sales data available */}
+          {hasSales && (() => {
+            const fc  = { key: 'food',     label: 'Food Cost', color: '#c9a84c', amount: foodCost,        pct: pct(foodCost,        revenue) || 0 }
+            const lb  = { key: 'labor',    label: 'Labor',     color: '#60a5fa', amount: totals.labor,    pct: pct(totals.labor,    revenue) || 0 }
+            const oh  = { key: 'overhead', label: 'Overhead',  color: '#34d399', amount: totals.overhead, pct: pct(totals.overhead, revenue) || 0 }
+            const tx  = { key: 'tax',      label: 'Tax & Fees',color: '#a78bfa', amount: totals.tax_fees, pct: pct(totals.tax_fees, revenue) || 0 }
+            const prPct = netProfit != null ? pct(netProfit, revenue) : null
+            const pr  = { key: 'profit',   label: prPct != null && prPct < 0 ? 'Loss' : 'Net Profit',
+                          color: prPct != null && prPct < 0 ? '#f87171' : '#4ade80',
+                          amount: netProfit, pct: prPct || 0 }
+            const segments = [fc, lb, oh, tx, pr].filter(s => s.amount != null && s.pct > 0.2)
+            return (
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 10 }}>
+                  Where each rupee of revenue goes &nbsp;·&nbsp; <span style={{ color: 'var(--theme-accent)', fontWeight: 600 }}>Revenue {fmt(revenue)}</span>
+                </div>
+                {/* Stacked bar */}
+                <div style={{ display: 'flex', height: 36, borderRadius: 8, overflow: 'hidden', gap: 2, marginBottom: 10 }}>
+                  {segments.map(s => (
+                    <div key={s.key} title={`${s.label}: ${fmt(s.amount)} (${s.pct.toFixed(1)}%)`} style={{
+                      width: `${Math.min(s.pct, 100)}%`, minWidth: s.pct > 4 ? 2 : 0,
+                      background: s.color, display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', overflow: 'hidden', cursor: 'default',
+                    }}>
+                      {s.pct > 7 && (
+                        <span style={{ fontSize: 10, fontWeight: 800, color: '#0f1117', whiteSpace: 'nowrap' }}>
+                          {s.pct.toFixed(0)}%
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {/* Legend */}
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  {segments.map(s => (
+                    <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: s.color, display: 'inline-block', flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{s.label}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: s.color }}>{s.pct.toFixed(1)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Per-bucket category breakdown */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+            {Object.entries(BUCKET_CONFIG).map(([key, cfg]) => {
+              const bucketRows = rows[key].filter(r => parseFloat(r.amount) > 0)
+              const total = totals[key]
+              return (
+                <div key={key} style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 8, padding: '14px', border: '1px solid var(--theme-border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: cfg.color }}>{cfg.label}</span>
+                    <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{fmt(total)}</span>
+                  </div>
+                  {total === 0 ? (
+                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>No entries yet.</p>
+                  ) : bucketRows.length === 0 ? (
+                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>Nothing entered.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                      {bucketRows.sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount)).map((row, i) => {
+                        const rowPct = total > 0 ? (parseFloat(row.amount) / total) * 100 : 0
+                        return (
+                          <div key={i}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                              <span style={{ fontSize: 11, color: 'var(--theme-text1)', fontWeight: 500 }}>{row.category}</span>
+                              <span style={{ fontSize: 11, color: cfg.color, fontWeight: 700 }}>{rowPct.toFixed(0)}%</span>
+                            </div>
+                            <div style={{ height: 5, background: 'var(--theme-border)', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{ width: `${rowPct}%`, height: '100%', background: cfg.color, opacity: 0.75, borderRadius: 3 }} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* All line items pivot — cross-bucket ranked by spend */}
+          {allLineItems.length > 0 && (
+            <>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>
+                All Cost Lines — Ranked by Spend
+              </div>
+              <div className="table-wrap">
+                <table className="data-table" style={{ fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th>Bucket</th>
+                      <th>Category</th>
+                      <th>Description</th>
+                      <th style={{ textAlign: 'right' }}>Amount (NPR)</th>
+                      <th style={{ textAlign: 'right' }}>
+                        <Tip text="This line item's share of your total fixed costs (overheads + labor + tax combined)." width={220}>% of Total Cost</Tip>
+                      </th>
+                      {revenue > 0 && (
+                        <th style={{ textAlign: 'right' }}>
+                          <Tip text="This line item as a percentage of period revenue. Helps see which costs eat into margin most." width={220}>% of Revenue</Tip>
+                        </th>
+                      )}
+                      <th style={{ minWidth: 100 }}>
+                        <Tip text="Visual share of total fixed costs." width={160}>Share</Tip>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allLineItems.map((item, i) => {
+                      const cfg = BUCKET_CONFIG[item.bucket]
+                      return (
+                        <tr key={i}>
+                          <td>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: cfg?.color, background: 'rgba(255,255,255,0.05)', borderRadius: 4, padding: '2px 7px', whiteSpace: 'nowrap' }}>
+                              {cfg?.label || item.bucket}
+                            </span>
+                          </td>
+                          <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.category}</td>
+                          <td style={{ color: 'var(--theme-text2)', maxWidth: 220 }}>{item.description || '—'}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{item.amount.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{item.pctOfTotal.toFixed(1)}%</td>
+                          {revenue > 0 && (
+                            <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
+                              {item.pctOfRev != null ? `${item.pctOfRev.toFixed(1)}%` : '—'}
+                            </td>
+                          )}
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={{ flex: 1, height: 6, background: 'var(--theme-border)', borderRadius: 3, overflow: 'hidden', minWidth: 60 }}>
+                                <div style={{ width: `${item.pctOfTotal}%`, height: '100%', background: cfg?.color || 'var(--theme-accent)', borderRadius: 3 }} />
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
+                      <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 10, fontSize: 12 }}>TOTAL FIXED COSTS</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 10 }}>{totalFixed.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 10 }}>100%</td>
+                      {revenue > 0 && (
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 10 }}>
+                          {fmtPct(totalFixed, revenue)}
+                        </td>
+                      )}
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Break-even + Overhead per cover */}
       {hasSales && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
@@ -540,7 +722,11 @@ export default function Overheads() {
                 ? `✓ Above break-even by ${fmt(revenue - breakEvenRev)}`
                 : breakEvenRev
                   ? `✗ Below break-even by ${fmt(breakEvenRev - revenue)}`
-                  : 'Enter cost data to calculate'}
+                  : contribMargin <= 0
+                    ? `✗ Purchase cost (${(fcPct * 100).toFixed(1)}% FC) exceeds revenue — break-even is undefined`
+                    : totalFixed === 0
+                      ? 'Enter overhead costs above and save to calculate'
+                      : 'Unable to calculate'}
             </div>
             <p style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 10, marginBottom: 0, lineHeight: 1.6 }}>
               Formula: Total Fixed Costs ÷ (1 − FC%) &nbsp;·&nbsp;

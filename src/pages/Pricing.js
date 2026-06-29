@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+// ── Change this to the contact email when ready ──────────────────────────────
+const CONTACT_EMAIL = 'hello@cresthospitality.com'
+
 const GOLD   = 'var(--theme-accent)'
 const GREEN  = 'var(--theme-green)'
 const INDIGO = '#4a6fa3'
@@ -106,7 +109,8 @@ const FAQS = [
 ]
 
 export default function Pricing() {
-  const [annual, setAnnual] = useState(false)
+  const [annual, setAnnual]   = useState(false)
+  const [showFaq, setShowFaq] = useState(false)
   const navigate = useNavigate()
 
   return (
@@ -128,7 +132,7 @@ export default function Pricing() {
       {/* Hero */}
       <div style={{ textAlign: 'center', padding: '72px 32px 52px' }}>
         <div style={{ display: 'inline-block', background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 20, padding: '5px 18px', fontSize: 12, color: GREEN, marginBottom: 24, letterSpacing: '0.06em', fontWeight: 600 }}>
-          1-month free Starter trial · No credit card required
+          1-week free trial · No credit card required
         </div>
         <h1 style={{ fontSize: 44, fontWeight: 800, margin: '0 0 16px', fontFamily: 'Georgia, serif', lineHeight: 1.15, color: 'var(--theme-text1)' }}>
           Simple, honest pricing
@@ -203,7 +207,7 @@ export default function Pricing() {
             </div>
 
             <button
-              onClick={() => navigate('/login')}
+              onClick={() => plan.name === 'Starter' ? navigate('/login?trial=1') : navigate('/login')}
               style={{ background: plan.highlight ? GOLD : 'rgba(201,168,76,0.08)', border: `1px solid ${plan.highlight ? GOLD : 'rgba(201,168,76,0.25)'}`, color: plan.highlight ? 'var(--theme-bg)' : GOLD, padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
               {plan.cta} →
             </button>
@@ -227,18 +231,36 @@ export default function Pricing() {
         ))}
       </div>
 
-      {/* FAQ */}
-      <div style={{ maxWidth: 700, margin: '0 auto', padding: '0 24px 80px' }}>
-        <h2 style={{ textAlign: 'center', fontSize: 24, marginBottom: 36, fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>
-          Common questions
-        </h2>
-        {FAQS.map((faq, i) => (
-          <div key={i} style={{ padding: '20px 0', borderBottom: `1px solid ${BORDER}` }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 8 }}>{faq.q}</div>
-            <div style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>{faq.a}</div>
-          </div>
-        ))}
+      {/* FAQ button */}
+      <div style={{ textAlign: 'center', padding: '0 24px 80px' }}>
+        <button
+          onClick={() => setShowFaq(true)}
+          style={{ background: 'rgba(201,168,76,0.08)', border: `1px solid rgba(201,168,76,0.25)`, color: GOLD, padding: '11px 28px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+          FAQ — Common Questions
+        </button>
       </div>
+
+      {/* FAQ modal */}
+      {showFaq && (
+        <div
+          onClick={() => setShowFaq(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, width: '100%', maxWidth: 640, maxHeight: '80vh', overflow: 'auto', padding: '36px 32px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>
+              <h2 style={{ margin: 0, fontSize: 22, fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>Common Questions</h2>
+              <button onClick={() => setShowFaq(false)} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
+            </div>
+            {FAQS.map((faq, i) => (
+              <div key={i} style={{ padding: '18px 0', borderBottom: `1px solid ${BORDER}` }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 7 }}>{faq.q}</div>
+                <div style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>{faq.a}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Footer CTA */}
       <div style={{ background: CARD, borderTop: `1px solid ${BORDER}`, padding: '64px 32px', textAlign: 'center' }}>
@@ -255,12 +277,12 @@ export default function Pricing() {
             ← Back
           </button>
           <button
-            onClick={() => navigate('/login')}
+            onClick={() => navigate('/login?trial=1')}
             style={{ background: GOLD, border: 'none', color: 'var(--theme-bg)', padding: '13px 32px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
             Start Free Trial →
           </button>
           <a
-            href="mailto:info@cresthospitality.com"
+            href={`mailto:${CONTACT_EMAIL}`}
             style={{ background: 'none', border: `1px solid ${BORDER}`, color: 'var(--theme-text2)', padding: '13px 28px', borderRadius: 7, textDecoration: 'none', fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             ✉ Email us
           </a>

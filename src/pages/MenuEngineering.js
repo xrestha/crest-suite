@@ -2,6 +2,11 @@ import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import Tip from '../components/Tip'
+import {
+  ScatterChart, Scatter, XAxis, YAxis, CartesianGrid,
+  Tooltip as RTooltip, ReferenceLine, ResponsiveContainer,
+  Cell, BarChart, Bar,
+} from 'recharts'
 
 const QUADRANTS = {
   Star:      { color: 'var(--theme-green)', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.30)', icon: '★', desc: 'High profit · High popularity' },
@@ -11,6 +16,42 @@ const QUADRANTS = {
 }
 
 const FC_CUTOFF = 35 // %
+
+// Hex colors for Recharts SVG (CSS vars don't resolve inside SVG presentation attributes)
+const Q_HEX = { Star: '#34d399', Plowhouse: '#60a5fa', Puzzle: '#f59e0b', Dog: '#f87171' }
+
+function ScatterDot({ cx, cy, payload }) {
+  const color = Q_HEX[payload.quadrant] || '#888'
+  return <circle cx={cx} cy={cy} r={5} fill={color} fillOpacity={0.85} stroke={color} strokeWidth={1} />
+}
+
+function ScatterTooltipContent({ active, payload }) {
+  if (!active || !payload?.length) return null
+  const d = payload[0]?.payload
+  if (!d) return null
+  const q = QUADRANTS[d.quadrant]
+  return (
+    <div style={{
+      background: '#1e2130', border: `1px solid ${q.border}`,
+      borderRadius: 8, padding: '10px 14px', fontSize: 12, minWidth: 160
+    }}>
+      <div style={{ fontWeight: 700, color: Q_HEX[d.quadrant], marginBottom: 6 }}>{q.icon} {d.name}</div>
+      <div style={{ color: '#9ca3af' }}>FC%: <span style={{ fontWeight: 600, color: d.fcPct > FC_CUTOFF ? '#f87171' : '#34d399' }}>{d.sellingPrice > 0 ? d.fcPct.toFixed(1) + '%' : '—'}</span></div>
+      <div style={{ color: '#9ca3af' }}>Qty Sold: <span style={{ fontWeight: 600, color: '#e5e7eb' }}>{d.qtySold}</span></div>
+      <div style={{ color: '#9ca3af' }}>Revenue: <span style={{ fontWeight: 600, color: '#e5e7eb' }}>NPR {d.revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+    </div>
+  )
+}
+
+function BarTooltipContent({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{ background: '#1e2130', border: '1px solid #374151', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+      <div style={{ fontWeight: 600, color: '#e5e7eb', marginBottom: 4 }}>{label}</div>
+      <div style={{ color: '#9ca3af' }}>Revenue: <span style={{ fontWeight: 600, color: '#c9a84c' }}>NPR {(payload[0]?.value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+    </div>
+  )
+}
 
 function classify(fcPct, qtySold, medianQty) {
   const highProfit = fcPct <= FC_CUTOFF
@@ -153,6 +194,35 @@ export default function MenuEngineering() {
     return map
   }, [filtered])
 
+  // Charts — always use all items (full picture regardless of filter)
+  const scatterData = useMemo(() =>
+    items.map(r => ({
+      x: r.qtySold,
+      y: parseFloat((100 - r.fcPct).toFixed(1)), // higher = more profitable
+      name: r.name, fcPct: r.fcPct, qtySold: r.qtySold,
+      revenue: r.revenue, quadrant: r.quadrant, sellingPrice: r.sellingPrice,
+    }))
+  , [items])
+
+  const topItems = useMemo(() =>
+    [...items]
+      .filter(r => r.revenue > 0)
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10)
+      .map(r => ({ name: r.name.length > 22 ? r.name.slice(0, 20) + '…' : r.name, revenue: Math.round(r.revenue), quadrant: r.quadrant }))
+  , [items])
+
+  const categoryPivot = useMemo(() => {
+    const map = {}
+    items.forEach(r => {
+      const cat = r.category || 'Uncategorized'
+      if (!map[cat]) map[cat] = { Star: 0, Plowhouse: 0, Puzzle: 0, Dog: 0, total: 0 }
+      map[cat][r.quadrant]++
+      map[cat].total++
+    })
+    return Object.entries(map).sort((a, b) => b[1].total - a[1].total)
+  }, [items])
+
   return (
     <div>
       {/* Header */}
@@ -171,6 +241,7 @@ export default function MenuEngineering() {
           <div className="tab-bar">
             <button className={`tab-btn${viewMode === 'table'  ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('table')}>☰ Table</button>
             <button className={`tab-btn${viewMode === 'matrix' ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('matrix')}>⊞ Matrix</button>
+            <button className={`tab-btn${viewMode === 'charts' ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('charts')}>◉ Charts</button>
           </div>
         </div>
       </div>
@@ -224,6 +295,139 @@ export default function MenuEngineering() {
           <div className="empty-state">
             <div className="empty-state-icon">◎</div>
             <p className="empty-state-text">No menu items found. Add recipes with selling prices and record sales to see the matrix.</p>
+          </div>
+        </div>
+      ) : viewMode === 'charts' ? (
+        /* CHARTS VIEW */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Scatter chart — FC% Profitability vs Qty Sold */}
+          <div className="card" style={{ padding: '20px 20px 12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+              <div>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Popularity vs Profitability</span>
+                <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 10 }}>Each dot = one menu item</span>
+              </div>
+              <div style={{ display: 'flex', gap: 16 }}>
+                {Object.entries(Q_HEX).map(([name, hex]) => (
+                  <span key={name} style={{ fontSize: 11, color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: hex, display: 'inline-block' }} />
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={320}>
+              <ScatterChart margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2d3240" />
+                <XAxis
+                  type="number" dataKey="x" name="Qty Sold"
+                  label={{ value: 'Qty Sold →', position: 'insideBottom', offset: -16, fill: '#6b7280', fontSize: 11 }}
+                  tick={{ fill: '#6b7280', fontSize: 11 }}
+                />
+                <YAxis
+                  type="number" dataKey="y" name="Profitability"
+                  domain={[0, 100]}
+                  label={{ value: 'Profitability % →', angle: -90, position: 'insideLeft', offset: 10, fill: '#6b7280', fontSize: 11 }}
+                  tick={{ fill: '#6b7280', fontSize: 11 }}
+                  tickFormatter={v => `${v}%`}
+                />
+                {/* Quadrant divider lines */}
+                <ReferenceLine x={medianQty} stroke="#4b5563" strokeDasharray="5 4" label={{ value: `median ${medianQty.toFixed(0)}`, position: 'top', fill: '#6b7280', fontSize: 10 }} />
+                <ReferenceLine y={100 - FC_CUTOFF} stroke="#4b5563" strokeDasharray="5 4" label={{ value: `FC ${FC_CUTOFF}%`, position: 'right', fill: '#6b7280', fontSize: 10 }} />
+                {/* Quadrant labels */}
+                <ReferenceLine x={0} stroke="none" label={{ value: '★ STARS', position: 'insideTopRight', fill: '#34d399', fontSize: 9, offset: 8 }} />
+                <RTooltip content={<ScatterTooltipContent />} cursor={{ strokeDasharray: '3 3' }} />
+                <Scatter data={scatterData} shape={<ScatterDot />} />
+              </ScatterChart>
+            </ResponsiveContainer>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginTop: 4 }}>
+              {[
+                { q: 'Star',      pos: 'right + top (high qty, low FC%)',   hint: 'Keep, feature prominently' },
+                { q: 'Plowhouse', pos: 'left + top (low qty, low FC%)',     hint: 'Good margin — promote harder' },
+                { q: 'Puzzle',    pos: 'right + bottom (high qty, high FC%)', hint: 'Popular — review recipe cost' },
+                { q: 'Dog',       pos: 'left + bottom (low qty, high FC%)', hint: 'Consider redesign or removal' },
+              ].map(({ q, pos, hint }) => (
+                <div key={q} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 6, padding: '8px 10px', borderLeft: `3px solid ${Q_HEX[q]}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: Q_HEX[q] }}>{QUADRANTS[q].icon} {q}</div>
+                  <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>{pos}</div>
+                  <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>{hint}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Bottom row: Top Revenue Items + Category Pivot */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+
+            {/* Top 10 by Revenue */}
+            <div className="card" style={{ padding: '16px 16px 8px' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 12 }}>Top Items by Revenue</div>
+              {topItems.length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--theme-text3)' }}>No sales recorded this period.</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={topItems.length * 32 + 20}>
+                  <BarChart data={topItems} layout="vertical" margin={{ top: 0, right: 40, bottom: 0, left: 0 }}>
+                    <XAxis type="number" hide />
+                    <YAxis type="category" dataKey="name" width={140} tick={{ fill: '#9ca3af', fontSize: 11 }} />
+                    <RTooltip content={<BarTooltipContent />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+                    <Bar dataKey="revenue" radius={[0, 4, 4, 0]}>
+                      {topItems.map((entry, i) => (
+                        <Cell key={i} fill={Q_HEX[entry.quadrant] || '#c9a84c'} fillOpacity={0.8} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            {/* Category Pivot */}
+            <div className="card" style={{ padding: '16px' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 12 }}>
+                Category Breakdown
+                <Tip text="How each menu category distributes across the four quadrants. A category heavy in Dogs or Puzzles may need a pricing or cost review." width={240}>
+                  <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)', cursor: 'default' }}>?</span>
+                </Tip>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', color: '#6b7280', fontWeight: 600, padding: '4px 8px 8px 0', borderBottom: '1px solid #2d3240' }}>Category</th>
+                      {Object.entries(Q_HEX).map(([name, hex]) => (
+                        <th key={name} style={{ textAlign: 'center', color: hex, fontWeight: 700, padding: '4px 6px 8px', borderBottom: '1px solid #2d3240', fontSize: 11 }}>
+                          {QUADRANTS[name].icon}<br />{name}
+                        </th>
+                      ))}
+                      <th style={{ textAlign: 'right', color: '#6b7280', fontWeight: 600, padding: '4px 0 8px 6px', borderBottom: '1px solid #2d3240' }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {categoryPivot.map(([cat, counts]) => (
+                      <tr key={cat} style={{ borderBottom: '1px solid #1e2130' }}>
+                        <td style={{ padding: '7px 8px 7px 0', color: '#e5e7eb', fontWeight: 500 }}>{cat}</td>
+                        {Object.keys(Q_HEX).map(q => (
+                          <td key={q} style={{ textAlign: 'center', padding: '7px 6px', color: counts[q] > 0 ? Q_HEX[q] : '#374151', fontWeight: counts[q] > 0 ? 700 : 400 }}>
+                            {counts[q] > 0 ? counts[q] : '—'}
+                          </td>
+                        ))}
+                        <td style={{ textAlign: 'right', padding: '7px 0 7px 6px', color: '#9ca3af' }}>{counts.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ borderTop: '2px solid #2d3240' }}>
+                      <td style={{ padding: '8px 8px 4px 0', color: '#6b7280', fontWeight: 600, fontSize: 11 }}>TOTAL</td>
+                      {Object.keys(Q_HEX).map(q => (
+                        <td key={q} style={{ textAlign: 'center', padding: '8px 6px 4px', fontWeight: 700, color: Q_HEX[q] }}>{summary[q]}</td>
+                      ))}
+                      <td style={{ textAlign: 'right', padding: '8px 0 4px 6px', color: '#9ca3af', fontWeight: 600 }}>{items.length}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
           </div>
         </div>
       ) : viewMode === 'table' ? (

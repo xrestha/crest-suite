@@ -1393,6 +1393,34 @@ export default function AdminClients() {
     loadClients()
   }
 
+  async function extendTrial(client) {
+    const current = client.trial_expires_at ? new Date(client.trial_expires_at) : new Date()
+    const base    = current > new Date() ? current : new Date()
+    const newExp  = new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000)
+    const newPurge= new Date(newExp.getTime() + 15 * 24 * 60 * 60 * 1000)
+    await supabase.from('clients').update({
+      trial_expires_at: newExp.toISOString(),
+      trial_purge_at:   newPurge.toISOString(),
+    }).eq('id', client.id)
+    loadClients()
+  }
+
+  async function convertTrialToPaid(client) {
+    // Clear trial flags; admin sets plan/sub dates in the drawer
+    await supabase.from('clients').update({
+      is_trial:            false,
+      subscribe_requested: false,
+      subscribe_requested_at: null,
+    }).eq('id', client.id)
+    loadClients()
+    setActiveDrawer({ ...client, is_trial: false, subscribe_requested: false })
+  }
+
+  async function dismissSubscribeRequest(client) {
+    await supabase.from('clients').update({ subscribe_requested: false, subscribe_requested_at: null }).eq('id', client.id)
+    loadClients()
+  }
+
   async function toggleActive(client, e) {
     e.stopPropagation()
     await supabase.from('clients').update({ is_active: !client.is_active }).eq('id', client.id)
@@ -1463,6 +1491,111 @@ export default function AdminClients() {
           </div>
         </div>
       )}
+
+      {/* ── Trial Accounts ── */}
+      {(() => {
+        const trialClients = clients.filter(c => c.is_trial)
+        if (trialClients.length === 0) return null
+        const now = new Date()
+        return (
+          <div style={{ marginBottom: 28, border: '2px solid #f87171', borderRadius: 12, overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ background: 'linear-gradient(135deg, #450a0a 0%, #7f1d1d 100%)', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 18 }}>🧪</span>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#fecaca', letterSpacing: 0.3 }}>
+                  Trial Accounts
+                  <span style={{ marginLeft: 8, background: '#f87171', color: '#fff', borderRadius: 12, padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
+                </div>
+                <div style={{ fontSize: 11, color: '#fca5a5', marginTop: 2 }}>
+                  {trialClients.filter(c => c.subscribe_requested).length > 0
+                    ? `${trialClients.filter(c => c.subscribe_requested).length} requesting to subscribe`
+                    : 'Free trial users — 7 days · Starter plan'}
+                </div>
+              </div>
+            </div>
+            {/* Rows */}
+            <div style={{ background: 'rgba(239,68,68,0.04)' }}>
+              {trialClients.map(c => {
+                const expAt   = c.trial_expires_at ? new Date(c.trial_expires_at) : null
+                const purgeAt = c.trial_purge_at   ? new Date(c.trial_purge_at)   : null
+                const expired = expAt && expAt < now
+                const daysLeft= expAt && !expired ? Math.ceil((expAt - now) / 86400000) : null
+                const purgeDays = purgeAt && expired ? Math.ceil((purgeAt - now) / 86400000) : null
+                const wantsToSub = c.subscribe_requested
+                return (
+                  <div key={c.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px',
+                    borderBottom: '1px solid rgba(239,68,68,0.12)',
+                    background: wantsToSub ? 'rgba(239,68,68,0.06)' : 'transparent',
+                  }}>
+                    {/* Subscribe badge */}
+                    {wantsToSub && (
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#f87171', boxShadow: '0 0 0 0 rgba(248,113,113,0.5)', animation: 'pulse-dot 1.5s infinite' }} />
+                      </div>
+                    )}
+                    {/* Info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</span>
+                        {wantsToSub && (
+                          <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: '#fff', background: '#ef4444', borderRadius: 8, padding: '2px 7px' }}>
+                            Wants to Subscribe
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>
+                        {expired
+                          ? <span style={{ color: '#f87171', fontWeight: 600 }}>
+                              Trial expired{purgeDays != null && purgeDays > 0 ? ` · data purge in ${purgeDays}d` : ' · purge imminent'}
+                            </span>
+                          : daysLeft != null
+                            ? <span style={{ color: daysLeft <= 2 ? '#f59e0b' : 'var(--theme-text2)' }}>
+                                {daysLeft === 0 ? 'Expires today' : `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`}
+                                {expAt ? ` · expires ${expAt.toLocaleDateString()}` : ''}
+                              </span>
+                            : 'No expiry set'}
+                      </div>
+                    </div>
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      {wantsToSub && (
+                        <button
+                          className="btn btn-ghost"
+                          style={{ fontSize: 11, padding: '4px 8px', color: 'var(--theme-text2)' }}
+                          onClick={() => dismissSubscribeRequest(c)}
+                          title="Mark as handled">
+                          ✓ Dismiss
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 11, padding: '4px 8px' }}
+                        onClick={() => extendTrial(c)}
+                        title="Add 7 more days to the trial">
+                        +7 Days
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        style={{ fontSize: 11, padding: '4px 10px' }}
+                        onClick={() => convertTrialToPaid(c)}>
+                        Convert to Paid
+                      </button>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 11, padding: '4px 8px', color: 'var(--theme-red)' }}
+                        onClick={() => setActiveDrawer(c)}>
+                        Manage
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Client cards */}
       {loading ? (
