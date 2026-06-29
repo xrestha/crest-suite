@@ -151,6 +151,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [trialEndsAt, setTrialEndsAt] = useState(client.trial_ends_at || '')
   const [settingTrial, setSettingTrial] = useState(false)
   const [subEndsAt, setSubEndsAt] = useState(client.subscription_ends_at || '')
+  const [billingCycle, setBillingCycle] = useState(client.billing_cycle || 'monthly')
   const [savingSub, setSavingSub] = useState(false)
   const [subMsg, setSubMsg]       = useState('')
 
@@ -376,6 +377,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
     const { error } = await supabase.from('clients').update({
       subscription_ends_at: subEndsAt || null,
       plan: currentPlan,
+      billing_cycle: billingCycle,
     }).eq('id', client.id)
     if (error) { setSubMsg('error:' + error.message) }
     else { setSubMsg('ok:Subscription saved.'); onClientUpdated() }
@@ -820,34 +822,52 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                   {subEndsAt ? 'Extend Subscription' : 'Activate Subscription'}
                 </p>
 
+                {/* Billing cycle toggle */}
+                <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Billing Cycle</p>
+                <div style={{ display: 'flex', gap: 0, marginBottom: 16, background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)', padding: 4, width: 'fit-content' }}>
+                  {[{ key: 'monthly', label: 'Monthly' }, { key: 'annual', label: 'Annual · Save 25%' }].map(opt => (
+                    <button key={opt.key} onClick={() => setBillingCycle(opt.key)} style={{
+                      padding: '5px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, border: 'none',
+                      background: billingCycle === opt.key ? (opt.key === 'annual' ? 'var(--theme-accent)' : 'var(--theme-card)') : 'transparent',
+                      color: billingCycle === opt.key ? (opt.key === 'annual' ? '#000' : 'var(--theme-text1)') : 'var(--theme-text3)',
+                      boxShadow: billingCycle === opt.key ? '0 1px 4px rgba(0,0,0,0.18)' : 'none',
+                      transition: 'all 0.15s',
+                    }}>{opt.label}</button>
+                  ))}
+                </div>
+
                 {/* Plan selector */}
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Plan</p>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
                   {[
-                    { key: 'starter', label: 'Starter', monthly: 'NPR 8,000', annual: 'NPR 5,000' },
-                    { key: 'growth',  label: 'Growth',  monthly: 'NPR 18,000', annual: 'NPR 10,000' },
-                    { key: 'pro',     label: 'Pro',     monthly: 'NPR 25,000', annual: 'NPR 15,000' },
-                  ].map(p => (
-                    <button key={p.key} onClick={() => setCurrentPlan(p.key)} style={{
-                      flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                      border: currentPlan === p.key
-                        ? `1px solid ${p.key === 'pro' ? 'var(--theme-accent)' : p.key === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)'}`
-                        : '1px solid var(--theme-border)',
-                      background: currentPlan === p.key
-                        ? p.key === 'pro' ? 'rgba(201,168,76,0.12)' : p.key === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)'
-                        : 'none',
-                      color: currentPlan === p.key
-                        ? p.key === 'pro' ? 'var(--theme-accent)' : p.key === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)'
-                        : 'var(--theme-text3)',
-                      lineHeight: 1.4,
-                    }}>
-                      <div>{p.label}</div>
-                      <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.8 }}>{p.monthly}/mo</div>
-                    </button>
-                  ))}
+                    { key: 'starter', label: 'Starter', monthly: 5000, annual: 3750 },
+                    { key: 'growth',  label: 'Growth',  monthly: 8000, annual: 6000 },
+                    { key: 'pro',     label: 'Pro',     monthly: 12000, annual: 9000 },
+                  ].map(p => {
+                    const price = billingCycle === 'annual' ? p.annual : p.monthly
+                    const active = currentPlan === p.key
+                    const accentColor = p.key === 'pro' ? 'var(--theme-accent)' : p.key === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)'
+                    return (
+                      <button key={p.key} onClick={() => setCurrentPlan(p.key)} style={{
+                        flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                        border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
+                        background: active ? (p.key === 'pro' ? 'rgba(201,168,76,0.12)' : p.key === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)') : 'none',
+                        color: active ? accentColor : 'var(--theme-text3)',
+                        lineHeight: 1.4,
+                      }}>
+                        <div>{p.label}</div>
+                        <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>
+                          NPR {price.toLocaleString('en-NP')}/mo
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
                 <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 16px' }}>
-                  Annual rate: {currentPlan === 'pro' ? 'NPR 15,000' : currentPlan === 'growth' ? 'NPR 10,000' : 'NPR 5,000'}/mo · Quick-extend buttons apply annual pricing
+                  {billingCycle === 'annual'
+                    ? `Annual billing · NPR ${{ starter: 3750, growth: 6000, pro: 9000 }[currentPlan].toLocaleString('en-NP')}/mo × 12 = NPR ${{ starter: 45000, growth: 72000, pro: 108000 }[currentPlan].toLocaleString('en-NP')}/yr`
+                    : `Monthly billing · NPR ${{ starter: 5000, growth: 8000, pro: 12000 }[currentPlan].toLocaleString('en-NP')}/mo`
+                  }
                 </p>
 
                 {/* Date picker */}
@@ -1654,7 +1674,12 @@ export default function AdminClients() {
                       {[c.location, c.contact_person, c.contact_phone].filter(Boolean).join(' · ') || '—'}
                     </div>
                   </div>
-                  <SubBadge client={c} />
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                    {c.billing_cycle === 'annual' && c.subscription_ends_at && (
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4, color: '#000', background: 'var(--theme-accent)', whiteSpace: 'nowrap' }}>Annual</span>
+                    )}
+                    <SubBadge client={c} />
+                  </div>
                 </div>
 
                 {/* Module strip */}

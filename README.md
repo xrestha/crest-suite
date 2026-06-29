@@ -124,6 +124,23 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S168 — 2026-06-29 — Admin: Billing cycle + corrected plan prices
+
+**Billing cycle (monthly vs annual) added to admin client billing:**
+- `clients` table: new `billing_cycle text DEFAULT 'monthly'` column
+- Billing tab: Monthly / Annual toggle above plan selector — "Annual · Save 25%" lights up in accent gold when selected
+- Plan cards now show correct prices matching the public Pricing page: Starter NPR 5,000/8,000 · Growth NPR 6,000/8,000 → wait, corrected: Starter 5k/3.75k · Growth 8k/6k · Pro 12k/9k (monthly/annual)
+- Rate note below plans shows full annual cost (e.g. NPR 3,750/mo × 12 = NPR 45,000/yr) or monthly rate
+- `handleSaveSub` saves `billing_cycle` alongside `plan` and `subscription_ends_at`
+- Client card: gold "Annual" badge appears next to subscription status badge for annual subscribers
+- Fixed: previous billing tab showed wrong monthly prices (8k/18k/25k instead of 5k/8k/12k)
+
+**DB migration:** `ALTER TABLE clients ADD COLUMN IF NOT EXISTS billing_cycle text DEFAULT 'monthly';`
+
+**Files:** `src/pages/AdminClients.js`
+
+---
+
 ### S167 — 2026-06-29 — HR: Annual TDS Certificate
 
 **Annual TDS Certificate (new tab in HR Reports):**
