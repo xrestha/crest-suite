@@ -124,6 +124,53 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S159 — 2026-06-29 — Items filter chips; Menu Engineering + Overheads charts; break-even fix; free trial system
+
+**Item Master filter chips:**
+Usage filter row added above the table — All / Recipes (R) / Purchases (P) / Stock (OS/CS) / Unused. Reads from existing `usageMap` badge data; category tab counts also respect the active usage filter.
+
+**Menu Engineering — Charts view tab:**
+Third view tab (Table | Matrix | Charts) with: scatter plot (FC% vs Qty Sold, quadrant reference lines at median qty and FC_CUTOFF=35%, per-quadrant hex colours for Star/Plowhouse/Puzzle/Dog); top-10 items by revenue (horizontal bar chart); category breakdown pivot table (count per quadrant per category). Charts always use all items regardless of the search/filter.
+
+**Overheads — Cost Visualisation card:**
+Inserted between P&L and break-even: revenue cost stack bar (CSS flexbox, segments coloured by category % of revenue), per-bucket mini bars, and a cross-bucket all-items ranked table (amount + % of total + % of revenue).
+
+**Break-even message fix:**
+Previously "Enter cost data to calculate" appeared for both zero overheads AND negative contribution margin (FC% > 100%). Now: FC > revenue → "Purchase cost X% FC exceeds revenue — break-even is undefined"; no overheads → "Enter overhead costs above and save to calculate".
+
+**Free trial system (full implementation):**
+- **Pricing page** (`src/pages/Pricing.js`) — FAQ button/modal, Starter CTA → `/login?trial=1`, `CONTACT_EMAIL` constant for easy swap, footer email link.
+- **Login page** (`src/pages/Login.js`) — rewritten: detects `?trial=1`, shows two-tab layout (Start Free Trial | Sign In); trial form (Business Name, Your Name optional, Email, Password); calls `register_trial` Edge Function then auto-signs in.
+- **Edge Function** (`supabase/functions/admin-user-ops/index.ts`) — `register_trial` action handled before admin JWT check: creates auth user → client (`is_trial=true`, `plan='starter'`, `trial_expires_at=+7d`, `trial_purge_at=+22d`) → profile; rolls back on partial failure. All other actions still require admin role.
+- **AuthContext** (`src/context/AuthContext.js`) — reads `is_trial, trial_expires_at, trial_purge_at, subscribe_requested`; computes `isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested`; exposes `requestSubscription()` via `request_subscription` RPC (SECURITY DEFINER).
+- **Layout** (`src/components/Layout.js`) — amber banner (≤4 days left, not expired): shows days left + "I Want to Subscribe" button; red banner (expired, purge pending): retention countdown + "Subscribe Now"; pulsing red dot + count badge on Clients nav item when `pendingTrialCount > 0`.
+- **AdminClients** (`src/pages/AdminClients.js`) — "Trial Accounts" panel (red border, dark-red gradient header, count badge); per-row: business name, days left/expired, purge deadline, pulsing dot for subscribe_requested; actions: "Convert to Paid" (clears trial flags, opens drawer), "+7 Days" (extends both timestamps), "✓ Dismiss" (clears subscribe flag), "Manage" (opens drawer).
+
+**DB migration required (run in Supabase SQL editor):**
+```sql
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS is_trial boolean DEFAULT false;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS trial_start_date date;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS trial_expires_at timestamptz;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS trial_purge_at timestamptz;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS subscribe_requested boolean DEFAULT false;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS subscribe_requested_at timestamptz;
+
+CREATE OR REPLACE FUNCTION request_subscription()
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  UPDATE clients
+  SET subscribe_requested = true, subscribe_requested_at = now()
+  WHERE id = (SELECT client_id FROM profiles WHERE id = auth.uid());
+END;
+$$;
+```
+
+No other DB change. Build clean.
+
+**Files:** `src/pages/Items.js`, `src/pages/MenuEngineering.js`, `src/pages/Overheads.js`, `src/pages/Pricing.js`, `src/pages/Login.js`, `src/context/AuthContext.js`, `src/components/Layout.js`, `src/components/Layout.css`, `src/pages/AdminClients.js`, `supabase/functions/admin-user-ops/index.ts`
+
+---
+
 ### S158 — 2026-06-29 — Purchases: discount before VAT; Vendor Report discounts tab + combobox
 
 **Discount-before-VAT fix (correct Nepal IRD treatment):**
