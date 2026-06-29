@@ -97,7 +97,6 @@ export default function Login() {
         <div className="login-brand">
           <span aria-label="Crest" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, fontSize: 34, lineHeight: 1, color: 'var(--theme-accent)' }}>⬢</span>
           <span className="login-brand-name">{settings?.app_name || 'Crest'}</span>
-          <span className="login-brand-sub">Inventory</span>
         </div>
 
         {/* Tab switcher — always rendered; trial tab is reachable from the CTA banner */}
