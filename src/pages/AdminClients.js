@@ -1556,6 +1556,11 @@ export default function AdminClients() {
                                 {expAt ? ` · expires ${expAt.toLocaleDateString()}` : ''}
                               </span>
                             : 'No expiry set'}
+                        {c.contact_phone && (
+                          <span style={{ marginLeft: 8, color: 'var(--theme-text3)' }}>
+                            · 📱 <a href={`https://wa.me/977${c.contact_phone.replace(/^0/, '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--theme-green)', textDecoration: 'none' }}>{c.contact_phone}</a>
+                          </span>
+                        )}
                       </div>
                     </div>
                     {/* Actions */}

@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
 
     // ── Self-service trial signup — no admin auth required ────────────────────
     if (action === 'register_trial') {
-      const { business_name, email, password, full_name } = params
+      const { business_name, email, password, full_name, phone } = params
       if (!business_name || !email || !password) {
         return json({ error: 'business_name, email and password are required' }, 400)
       }
@@ -52,6 +52,7 @@ Deno.serve(async (req) => {
         .from('clients')
         .insert({
           name:              business_name,
+          contact_phone:     phone || null,
           plan:              'starter',
           is_trial:          true,
           trial_start_date:  now.toISOString(),

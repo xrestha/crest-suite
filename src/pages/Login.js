@@ -35,6 +35,7 @@ export default function Login() {
   // Trial signup state
   const [tBiz, setTBiz]             = useState('')
   const [tName, setTName]           = useState('')
+  const [tPhone, setTPhone]         = useState('')
   const [tEmail, setTEmail]         = useState('')
   const [tPass, setTPass]           = useState('')
   const [tShowPass, setTShowPass]   = useState(false)
@@ -62,6 +63,7 @@ export default function Login() {
     e.preventDefault()
     setTError('')
     if (!tBiz.trim()) { setTError('Business name is required.'); return }
+    if (!tPhone.trim()) { setTError('Phone number is required.'); return }
     if (!tEmail.trim()) { setTError('Email is required.'); return }
     if (tPass.length < 6) { setTError('Password must be at least 6 characters.'); return }
     setTLoading(true)
@@ -69,6 +71,7 @@ export default function Login() {
       await edgeOp('register_trial', {
         business_name: tBiz.trim(),
         full_name:     tName.trim() || tBiz.trim(),
+        phone:         tPhone.trim(),
         email:         tEmail.trim().toLowerCase(),
         password:      tPass,
       })
@@ -132,6 +135,10 @@ export default function Login() {
               <div className="login-field">
                 <label>Your Name <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>(optional)</span></label>
                 <input value={tName} onChange={e => setTName(e.target.value)} placeholder="e.g. Ramesh Shrestha" />
+              </div>
+              <div className="login-field">
+                <label>Phone *</label>
+                <input type="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="e.g. 98XXXXXXXX" required />
               </div>
               <div className="login-field">
                 <label>Email *</label>
