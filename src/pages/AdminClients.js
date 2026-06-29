@@ -145,8 +145,6 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [hrPlan, setHrPlan]         = useState(client.hr_plan || 'starter')
 
   // Billing tab state
-  const [trialEndsAt, setTrialEndsAt] = useState(client.trial_ends_at || '')
-  const [settingTrial, setSettingTrial] = useState(false)
   const [subEndsAt, setSubEndsAt] = useState(client.subscription_ends_at || '')
   const [billingCycle, setBillingCycle] = useState(client.billing_cycle || 'monthly')
   const [savingSub, setSavingSub] = useState(false)
@@ -349,16 +347,6 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
 
   // ── Billing ──
-  async function handleSetTrial() {
-    setSettingTrial(true)
-    const d = new Date()
-    d.setDate(d.getDate() + 30)
-    const iso = d.toISOString()
-    const { error } = await supabase.from('clients').update({ trial_ends_at: iso }).eq('id', client.id)
-    if (!error) { setTrialEndsAt(iso); onClientUpdated() }
-    setSettingTrial(false)
-  }
-
   function extendSub(days) {
     const d = new Date()
     d.setDate(d.getDate() + days)
@@ -649,58 +637,31 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
 
           {/* ── BILLING TAB ── */}
           {activeTab === 'billing' && (() => {
-            const trialDays = trialEndsAt
-              ? Math.ceil((new Date(trialEndsAt) - Date.now()) / 86400000)
-              : null
             const subStatus = getSubStatus(client)
             return (
               <div>
                 {/* ── Modules ── */}
                 <div style={{ marginBottom: 24 }}>
-                  <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
+                  <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
                     Modules
                   </p>
-                  <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
-                    Toggle on/off. Plan for each module is saved with the subscription below.
-                  </p>
-
-                  {/* IMS row */}
                   {[
-                    { key: 'ims', label: 'Crest IMS', sub: 'Inventory Management', enabled: imsEnabled, toggle: handleToggleIms, plan: currentPlan, setPlan: setCurrentPlan },
-                    { key: 'hr',  label: 'Crest HR',  sub: 'Human Resources',      enabled: hrEnabled,  toggle: handleToggleHr,  plan: hrPlan,      setPlan: setHrPlan },
+                    { key: 'ims', label: 'Crest IMS', sub: 'Inventory Management', enabled: imsEnabled, toggle: handleToggleIms },
+                    { key: 'hr',  label: 'Crest HR',  sub: 'Human Resources',      enabled: hrEnabled,  toggle: handleToggleHr  },
                   ].map(mod => (
                     <div key={mod.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
-                      <div style={{ minWidth: 110 }}>
+                      <div>
                         <p style={{ margin: '0 0 1px', fontSize: 13, fontWeight: 700, color: mod.enabled ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{mod.label}</p>
                         <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text2)' }}>{mod.sub}</p>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        <div style={{ display: 'flex', gap: 4, opacity: mod.enabled ? 1 : 0.3, transition: 'opacity 0.2s' }}>
-                          {['starter','growth','pro'].map(p => {
-                            const active = mod.plan === p
-                            const color = p === 'pro' ? 'var(--theme-accent)' : p === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)'
-                            return (
-                              <button key={p} onClick={() => mod.enabled && mod.setPlan(p)} style={{
-                                padding: '3px 10px', borderRadius: 4, cursor: mod.enabled ? 'pointer' : 'not-allowed',
-                                fontSize: 10, fontWeight: 700, border: active ? `1px solid ${color}` : '1px solid var(--theme-border)',
-                                background: active ? (p === 'pro' ? 'rgba(201,168,76,0.12)' : p === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)') : 'none',
-                                color: active ? color : 'var(--theme-text3)',
-                              }}>
-                                {p.charAt(0).toUpperCase() + p.slice(1)}
-                              </button>
-                            )
-                          })}
-                        </div>
-                        <div onClick={mod.toggle} style={{ position: 'relative', width: 38, height: 22, borderRadius: 11, cursor: 'pointer', flexShrink: 0, background: mod.enabled ? 'var(--theme-accent)' : '#374151', transition: 'background 0.2s' }}>
-                          <div style={{ position: 'absolute', top: 3, left: mod.enabled ? 19 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.35)' }} />
-                        </div>
+                      <div onClick={mod.toggle} style={{ position: 'relative', width: 38, height: 22, borderRadius: 11, cursor: 'pointer', flexShrink: 0, background: mod.enabled ? 'var(--theme-accent)' : '#374151', transition: 'background 0.2s' }}>
+                        <div style={{ position: 'absolute', top: 3, left: mod.enabled ? 19 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.35)' }} />
                       </div>
                     </div>
                   ))}
-
-                  {/* POS row — coming soon */}
+                  {/* POS — coming soon */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0' }}>
-                    <div style={{ minWidth: 110 }}>
+                    <div>
                       <p style={{ margin: '0 0 1px', fontSize: 13, fontWeight: 700, color: 'var(--theme-text3)' }}>Crest POS</p>
                       <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text2)' }}>Point of Sale · coming soon</p>
                     </div>
@@ -710,34 +671,6 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                       </div>
                     </div>
                   </div>
-                </div>
-
-                {/* Trial info */}
-                <div style={{ marginBottom: 24, padding: '14px 16px', background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)' }}>
-                  <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>Free Trial (1 month)</p>
-                  {trialEndsAt ? (
-                    <p style={{ fontSize: 13, color: 'var(--theme-text1)', margin: 0 }}>
-                      Ends {new Date(trialEndsAt).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      {' · '}
-                      <span style={{ fontWeight: 700, color: trialDays > 0 ? 'var(--theme-accent)' : 'var(--theme-red)' }}>
-                        {trialDays > 0 ? `${trialDays} days left` : `expired ${Math.abs(trialDays)} days ago`}
-                      </span>
-                    </p>
-                  ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <p style={{ fontSize: 13, color: 'var(--theme-text3)', margin: 0 }}>No trial set.</p>
-                      {!subEndsAt && (
-                        <button
-                          className="btn btn-ghost"
-                          style={{ fontSize: 12 }}
-                          onClick={handleSetTrial}
-                          disabled={settingTrial}
-                        >
-                          {settingTrial ? 'Setting…' : 'Start 30-day trial'}
-                        </button>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {/* Current subscription status */}
@@ -787,7 +720,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                 </div>
 
                 {/* Plan selector */}
-                <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Plan</p>
+                <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 4px' }}>Crest IMS Plan</p>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
                   {[
                     { key: 'starter', label: 'Starter', monthly: 5000, annual: 3750 },
@@ -819,6 +752,29 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                     : `Monthly billing · NPR ${{ starter: 5000, growth: 8000, pro: 12000 }[currentPlan].toLocaleString('en-NP')}/mo`
                   }
                 </p>
+
+                {/* HR plan selector */}
+                {hrEnabled && (
+                  <>
+                    <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 4px' }}>Crest HR Plan</p>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                      {['starter', 'growth', 'pro'].map(p => {
+                        const active = hrPlan === p
+                        const accentColor = p === 'pro' ? 'var(--theme-accent)' : p === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)'
+                        return (
+                          <button key={p} onClick={() => setHrPlan(p)} style={{
+                            flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                            border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
+                            background: active ? (p === 'pro' ? 'rgba(201,168,76,0.12)' : p === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)') : 'none',
+                            color: active ? accentColor : 'var(--theme-text3)',
+                          }}>
+                            {p.charAt(0).toUpperCase() + p.slice(1)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
 
                 {/* Date picker */}
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Subscription end date</p>
