@@ -79,7 +79,7 @@ export function AuthProvider({ children }) {
       if (data?.client_id) {
         const { data: client } = await supabase
           .from('clients')
-          .select('id, name, location, is_premium, plan, trial_ends_at, subscription_ends_at, ims_enabled, hr_enabled, hr_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
+          .select('id, name, location, is_premium, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, ims_enabled, hr_enabled, hr_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
           .eq('id', data.client_id)
           .single()
         if (mounted) data.clients = client

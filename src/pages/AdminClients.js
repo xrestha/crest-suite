@@ -3,7 +3,7 @@ import { supabase } from '../supabaseClient'
 import { useSettings } from '../context/SettingsContext'
 import { getBsToday, formatAd } from '../utils/bsCalendar'
 import BsCalendarPicker from '../components/BsCalendarPicker'
-import { getSubStatus } from '../utils/subscription'
+import { getSubStatus, getDateStatus } from '../utils/subscription'
 
 // All auth-admin operations go through an Edge Function — service role key stays server-side
 async function adminOp(action, params = {}) {
@@ -144,8 +144,11 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [hrEnabled,  setHrEnabled]  = useState(!!client.hr_enabled)
   const [hrPlan, setHrPlan]         = useState(client.hr_plan || 'starter')
 
-  // Billing tab state
-  const [subEndsAt, setSubEndsAt] = useState(client.subscription_ends_at || '')
+  // Billing tab state — per-module end dates; fall back to legacy subscription_ends_at for IMS
+  const _legacyEnd = client.subscription_ends_at ? formatAd(new Date(client.subscription_ends_at)) : ''
+  const [imsEndsAt, setImsEndsAt] = useState(client.ims_ends_at ? formatAd(new Date(client.ims_ends_at)) : _legacyEnd)
+  const [hrEndsAt,  setHrEndsAt]  = useState(client.hr_ends_at  ? formatAd(new Date(client.hr_ends_at))  : '')
+  const [posEndsAt, setPosEndsAt] = useState(client.pos_ends_at ? formatAd(new Date(client.pos_ends_at)) : '')
   const [billingCycle, setBillingCycle] = useState(client.billing_cycle || 'monthly')
   const [savingSub, setSavingSub] = useState(false)
   const [subMsg, setSubMsg]       = useState('')
@@ -347,18 +350,20 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
 
   // ── Billing ──
-  function extendSub(days) {
+  function extendModule(setter, days) {
     const d = new Date()
     d.setDate(d.getDate() + days)
-    setSubEndsAt(formatAd(d))
+    setter(formatAd(d))
   }
 
   async function handleSaveSub() {
     setSavingSub(true); setSubMsg('')
     const { error } = await supabase.from('clients').update({
-      subscription_ends_at: subEndsAt || null,
-      plan: currentPlan,
-      hr_plan: hrPlan,
+      ims_ends_at:   imsEndsAt || null,
+      hr_ends_at:    hrEndsAt  || null,
+      pos_ends_at:   posEndsAt || null,
+      plan:          currentPlan,
+      hr_plan:       hrPlan,
       billing_cycle: billingCycle,
     }).eq('id', client.id)
     if (error) { setSubMsg('error:' + error.message) }
@@ -637,7 +642,6 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
 
           {/* ── BILLING TAB ── */}
           {activeTab === 'billing' && (() => {
-            const subStatus = getSubStatus(client)
             return (
               <div>
                 {/* ── Modules ── */}
@@ -673,41 +677,9 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                   </div>
                 </div>
 
-                {/* Current subscription status */}
-                <div style={{ marginBottom: 20, padding: '14px 16px', background: 'var(--theme-bg)', borderRadius: 8, border: `1px solid ${subStatus.border || 'var(--theme-border)'}` }}>
-                  <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>Paid Subscription</p>
-                  {subEndsAt ? (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                      <p style={{ fontSize: 13, color: 'var(--theme-text1)', margin: 0 }}>
-                        Expires {new Date(subEndsAt).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' })}
-                        {' · '}
-                        <span style={{ fontWeight: 700, color: subStatus.color }}>{subStatus.label}</span>
-                      </p>
-                      <button
-                        className="btn btn-ghost"
-                        style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)', whiteSpace: 'nowrap', flexShrink: 0 }}
-                        onClick={async () => {
-                          if (!window.confirm('Cancel subscription for ' + client.name + '?\n\nThey will fall back to their trial period (if active), otherwise be deactivated on next page load.')) return
-                          const { error } = await supabase.from('clients').update({ subscription_ends_at: null }).eq('id', client.id)
-                          if (!error) { setSubEndsAt(''); setSubMsg('Subscription cancelled.'); onClientUpdated() }
-                        }}
-                      >
-                        Cancel subscription
-                      </button>
-                    </div>
-                  ) : (
-                    <p style={{ fontSize: 13, color: 'var(--theme-text3)', margin: 0 }}>No paid subscription set.</p>
-                  )}
-                </div>
-
-                {/* Activate / extend subscription */}
-                <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 10px' }}>
-                  {subEndsAt ? 'Extend Subscription' : 'Activate Subscription'}
-                </p>
-
                 {/* Billing cycle toggle */}
-                <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Billing Cycle</p>
-                <div style={{ display: 'flex', gap: 0, marginBottom: 16, background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)', padding: 4, width: 'fit-content' }}>
+                <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>Billing Cycle</p>
+                <div style={{ display: 'flex', gap: 0, marginBottom: 24, background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)', padding: 4, width: 'fit-content' }}>
                   {[{ key: 'monthly', label: 'Monthly' }, { key: 'annual', label: 'Annual · Save 25%' }].map(opt => (
                     <button key={opt.key} onClick={() => setBillingCycle(opt.key)} style={{
                       padding: '5px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, border: 'none',
@@ -719,103 +691,79 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                   ))}
                 </div>
 
-                {/* Plan selector */}
-                <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 4px' }}>Crest IMS Plan</p>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-                  {[
-                    { key: 'starter', label: 'Starter', monthly: 5000, annual: 3750 },
-                    { key: 'growth',  label: 'Growth',  monthly: 8000, annual: 6000 },
+                {/* Per-module subscription sections */}
+                {[
+                  { key: 'ims', label: 'Crest IMS', enabled: imsEnabled, plan: currentPlan, setPlan: setCurrentPlan, endsAt: imsEndsAt, setEndsAt: setImsEndsAt },
+                  { key: 'hr',  label: 'Crest HR',  enabled: hrEnabled,  plan: hrPlan,      setPlan: setHrPlan,      endsAt: hrEndsAt,  setEndsAt: setHrEndsAt  },
+                ].map(mod => {
+                  if (!mod.enabled) return null
+                  const s = getDateStatus(mod.endsAt)
+                  const PLANS = [
+                    { key: 'starter', label: 'Starter', monthly: 5000,  annual: 3750 },
+                    { key: 'growth',  label: 'Growth',  monthly: 8000,  annual: 6000 },
                     { key: 'pro',     label: 'Pro',     monthly: 12000, annual: 9000 },
-                  ].map(p => {
-                    const price = billingCycle === 'annual' ? p.annual : p.monthly
-                    const active = currentPlan === p.key
-                    const accentColor = p.key === 'pro' ? 'var(--theme-accent)' : p.key === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)'
-                    return (
-                      <button key={p.key} onClick={() => setCurrentPlan(p.key)} style={{
-                        flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                        border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
-                        background: active ? (p.key === 'pro' ? 'rgba(201,168,76,0.12)' : p.key === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)') : 'none',
-                        color: active ? accentColor : 'var(--theme-text3)',
-                        lineHeight: 1.4,
-                      }}>
-                        <div>{p.label}</div>
-                        <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>
-                          NPR {price.toLocaleString('en-NP')}/mo
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 16px' }}>
-                  {billingCycle === 'annual'
-                    ? `Annual billing · NPR ${{ starter: 3750, growth: 6000, pro: 9000 }[currentPlan].toLocaleString('en-NP')}/mo × 12 = NPR ${{ starter: 45000, growth: 72000, pro: 108000 }[currentPlan].toLocaleString('en-NP')}/yr`
-                    : `Monthly billing · NPR ${{ starter: 5000, growth: 8000, pro: 12000 }[currentPlan].toLocaleString('en-NP')}/mo`
-                  }
-                </p>
-
-                {/* HR plan selector */}
-                {hrEnabled && (
-                  <>
-                    <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 4px' }}>Crest HR Plan</p>
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                      {[
-                        { key: 'starter', label: 'Starter', monthly: 5000, annual: 3750 },
-                        { key: 'growth',  label: 'Growth',  monthly: 8000, annual: 6000 },
-                        { key: 'pro',     label: 'Pro',     monthly: 12000, annual: 9000 },
-                      ].map(p => {
-                        const price = billingCycle === 'annual' ? p.annual : p.monthly
-                        const active = hrPlan === p.key
-                        const accentColor = p.key === 'pro' ? 'var(--theme-accent)' : p.key === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)'
-                        return (
-                          <button key={p.key} onClick={() => setHrPlan(p.key)} style={{
-                            flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                            border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
-                            background: active ? (p.key === 'pro' ? 'rgba(201,168,76,0.12)' : p.key === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)') : 'none',
-                            color: active ? accentColor : 'var(--theme-text3)',
-                            lineHeight: 1.4,
-                          }}>
-                            <div>{p.label}</div>
-                            <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>
-                              NPR {price.toLocaleString('en-NP')}/mo
-                            </div>
-                          </button>
-                        )
-                      })}
+                  ]
+                  return (
+                    <div key={mod.key} style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)' }}>
+                      {/* Header */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{mod.label}</p>
+                        {s.label && (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 3, color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
+                            {s.label}
+                          </span>
+                        )}
+                      </div>
+                      {/* Plan cards */}
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                        {PLANS.map(p => {
+                          const price = billingCycle === 'annual' ? p.annual : p.monthly
+                          const active = mod.plan === p.key
+                          const accentColor = p.key === 'pro' ? 'var(--theme-accent)' : p.key === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)'
+                          return (
+                            <button key={p.key} onClick={() => mod.setPlan(p.key)} style={{
+                              flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
+                              border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
+                              background: active ? (p.key === 'pro' ? 'rgba(201,168,76,0.12)' : p.key === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)') : 'none',
+                              color: active ? accentColor : 'var(--theme-text3)',
+                            }}>
+                              <div>{p.label}</div>
+                              <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>NPR {price.toLocaleString('en-NP')}/mo</div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
+                        {billingCycle === 'annual'
+                          ? `Annual · NPR ${{ starter: 3750, growth: 6000, pro: 9000 }[mod.plan].toLocaleString('en-NP')}/mo × 12 = NPR ${{ starter: 45000, growth: 72000, pro: 108000 }[mod.plan].toLocaleString('en-NP')}/yr`
+                          : `Monthly · NPR ${{ starter: 5000, growth: 8000, pro: 12000 }[mod.plan].toLocaleString('en-NP')}/mo`
+                        }
+                      </p>
+                      {/* Date picker */}
+                      <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 6px' }}>Subscription end date</p>
+                      <div style={{ marginBottom: 8 }}>
+                        <BsCalendarPicker value={mod.endsAt} onChange={mod.setEndsAt} clearable />
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {[{ label: '+7 Days', days: 7 }, { label: '+1 Month', days: 30 }, { label: '+3 Months', days: 90 }, { label: '+1 Year', days: 365 }].map(({ label, days }) => (
+                          <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(mod.setEndsAt, days)}>{label}</button>
+                        ))}
+                        {mod.endsAt && (
+                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} onClick={() => mod.setEndsAt('')}>Clear</button>
+                        )}
+                      </div>
                     </div>
-                  </>
-                )}
-
-                {/* Date picker */}
-                <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Subscription end date</p>
-                <div style={{ marginBottom: 12 }}>
-                  <BsCalendarPicker value={subEndsAt} onChange={setSubEndsAt} clearable />
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Quick extend from today:</p>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-                  {[{ label: '+1 Month', days: 30 }, { label: '+3 Months', days: 90 }, { label: '+1 Year', days: 365 }].map(({ label, days }) => (
-                    <button key={label} className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => extendSub(days)}>{label}</button>
-                  ))}
-                </div>
+                  )
+                })}
 
                 {subMsg && (
                   <p style={{ fontSize: 12, margin: '0 0 12px', color: subMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
                     {subMsg.replace(/^(ok|error):/, '')}
                   </p>
                 )}
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={handleSaveSub} disabled={savingSub}>
-                    {savingSub ? 'Saving…' : 'Save Subscription'}
-                  </button>
-                  {subEndsAt && (
-                    <button
-                      className="btn btn-ghost"
-                      style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)' }}
-                      onClick={() => { setSubEndsAt(''); setSubMsg('') }}
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
+                <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={handleSaveSub} disabled={savingSub}>
+                  {savingSub ? 'Saving…' : 'Save Subscription'}
+                </button>
               </div>
             )
           })()}
@@ -1272,12 +1220,17 @@ export default function AdminClients() {
     setLoading(true)
     const { data } = await supabase.from('clients').select('*').order('name')
     const now = new Date().toISOString()
-    const expired = (data || []).filter(c =>
-      c.is_active && (
-        (c.subscription_ends_at && c.subscription_ends_at < now) ||
-        (!c.subscription_ends_at && c.trial_ends_at && c.trial_ends_at < now)
-      )
-    )
+    const expired = (data || []).filter(c => {
+      if (!c.is_active) return false
+      // Check module-specific dates; fall back to legacy subscription_ends_at
+      const moduleDates = [c.ims_ends_at, c.hr_ends_at, c.pos_ends_at].filter(Boolean)
+      if (moduleDates.length > 0) {
+        // Active if ANY module still has time remaining
+        return moduleDates.every(d => d < now)
+      }
+      if (c.subscription_ends_at) return c.subscription_ends_at < now
+      return !!(c.trial_ends_at && c.trial_ends_at < now)
+    })
     if (expired.length > 0) {
       await Promise.all(expired.map(c =>
         supabase.from('clients').update({ is_active: false }).eq('id', c.id)

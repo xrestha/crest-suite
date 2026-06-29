@@ -111,7 +111,7 @@ export default function Layout() {
   useEffect(() => {
     if (!isAdmin) return
     supabase.from('clients')
-      .select('id, name, trial_ends_at, subscription_ends_at, is_trial, trial_expires_at, subscribe_requested')
+      .select('id, name, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, is_trial, trial_expires_at, subscribe_requested')
       .order('name')
       .then(({ data }) => {
         setAllClients(data || [])
