@@ -6,7 +6,8 @@ import Tip from '../components/Tip'
 import SearchableSelect from '../components/SearchableSelect'
 import './Stock.css'
 import { cacheItems, getCachedItems, cacheCategories, getCachedCategories, cachePeriods, getCachedPeriods, cacheStockData, getCachedStockData, enqueue, getQueue, dequeue } from '../utils/offlineQueue'
-import { daysInBsMonth, bsToAd, formatAd, getBsToday } from '../utils/bsCalendar'
+import { getBsToday } from '../utils/bsCalendar'
+import BsCalendarPicker from '../components/BsCalendarPicker'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const WASTAGE_REASONS = ['Spoilage', 'Expiry', 'Over-prep', 'Breakage', 'Spillage', 'Customer return', 'Other']
@@ -728,9 +729,6 @@ export default function Stock() {
           return <div className="card" style={{ padding: 28, textAlign: 'center', color: 'var(--theme-text2)' }}>No period selected.</div>
         }
         const winp = { background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', fontFamily: 'inherit' }
-        const dayCount = daysInBsMonth(selectedPeriod.bs_year, selectedPeriod.bs_month)
-        const days = Array.from({ length: dayCount }, (_, i) => i + 1)
-        const adLabel = d => { try { return formatAd(bsToAd(selectedPeriod.bs_year, selectedPeriod.bs_month, d)) } catch { return '' } }
         const valOf = r => (parseFloat(r.qty) || 0) * parseFloat(r.items?.per_uom_rate || 0)
         const dayEntries = dailyRows.filter(r => r.bs_day === wDay).sort((a, b) => valOf(b) - valOf(a))
         const dayQty = dayEntries.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0)
@@ -749,9 +747,15 @@ export default function Stock() {
             <div className="card" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Day</span>
-                <select style={winp} value={wDay} onChange={e => setWDay(parseInt(e.target.value, 10))}>
-                  {days.map(d => <option key={d} value={d}>{d} · {adLabel(d)}</option>)}
-                </select>
+                <div style={{ width: 160 }}>
+                  <BsCalendarPicker
+                    lockYear={selectedPeriod?.bs_year}
+                    lockMonth={selectedPeriod?.bs_month}
+                    value={wDay}
+                    onChange={v => setWDay(parseInt(v, 10))}
+                    placeholder="Pick day"
+                  />
+                </div>
               </div>
               <div style={{ flex: 1 }} />
               <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>

@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import { getBsToday, daysInBsMonth } from '../utils/bsCalendar'
 import Tip from '../components/Tip'
+import BsCalendarPicker from '../components/BsCalendarPicker'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -409,15 +410,15 @@ export default function Sales() {
                               onClick={() => setSelectedDay(d => Math.max(1, d - 1))}
                               style={{ padding: '4px 10px', fontSize: 14 }}
                             >‹</button>
-                            <select
-                              value={selectedDay}
-                              onChange={e => setSelectedDay(Number(e.target.value))}
-                              style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '6px 10px', fontSize: 13, color: 'var(--theme-accent)', fontWeight: 700, outline: 'none' }}
-                            >
-                              {Array.from({ length: dayCount }, (_, i) => i + 1).map(d => (
-                                <option key={d} value={d}>{d}</option>
-                              ))}
-                            </select>
+                            <div style={{ width: 150 }}>
+                              <BsCalendarPicker
+                                lockYear={selectedPeriod?.bs_year}
+                                lockMonth={selectedPeriod?.bs_month}
+                                value={selectedDay}
+                                onChange={v => setSelectedDay(Number(v))}
+                                placeholder="Pick day"
+                              />
+                            </div>
                             <button
                               className="btn btn-ghost"
                               disabled={selectedDay >= dayCount}

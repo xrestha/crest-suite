@@ -5,24 +5,47 @@ import { daysInBsMonth, getBsToday, bsToAd, adToBs, formatAd, BS_MONTHS } from '
 const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
 /**
- * Visual BS calendar picker.
- * value:    AD ISO string "YYYY-MM-DD" or ""
- * onChange: called with "YYYY-MM-DD"
+ * Visual BS calendar picker — two modes:
+ *
+ * FREE mode (default):
+ *   value:    AD ISO string "YYYY-MM-DD" or ""
+ *   onChange: called with "YYYY-MM-DD"
+ *   Month navigation enabled.
+ *
+ * PERIOD-LOCKED mode (pass lockYear + lockMonth):
+ *   value:    day number within the locked BS month (string/number) or ""
+ *   onChange: called with the day number as a string
+ *   No month navigation — the grid is pinned to the locked period.
  */
-export default function BsCalendarPicker({ value, onChange, placeholder = 'Select BS date', disabled = false, clearable = false }) {
-  const today    = getBsToday()
-  const selected = value ? adToBs(new Date(value + 'T00:00:00')) : null
+export default function BsCalendarPicker({
+  value, onChange,
+  lockYear, lockMonth,
+  placeholder = 'Select BS date',
+  disabled = false, clearable = false,
+}) {
+  const locked = lockYear != null && lockMonth != null
+  const today  = getBsToday()
 
-  const [navYear,  setNavYear]  = useState(selected?.year  || today.year)
-  const [navMonth, setNavMonth] = useState(selected?.month || today.month)
+  // Resolve the currently-selected BS date from value, per mode
+  const selected = locked
+    ? (value ? { year: lockYear, month: lockMonth, day: parseInt(value) } : null)
+    : (value ? adToBs(new Date(value + 'T00:00:00')) : null)
+
+  const [navYear,  setNavYear]  = useState(selected?.year  || lockYear  || today.year)
+  const [navMonth, setNavMonth] = useState(selected?.month || lockMonth || today.month)
   const [open,     setOpen]     = useState(false)
   const [pos,      setPos]      = useState({ top: 0, left: 0, width: 0, above: false })
 
   const triggerRef = useRef(null)
 
-  // When picker opens, navigate to the selected date (or today)
+  // Keep nav pinned to the locked period whenever it changes
   useEffect(() => {
-    if (!open) return
+    if (locked) { setNavYear(lockYear); setNavMonth(lockMonth) }
+  }, [locked, lockYear, lockMonth])
+
+  // When picker opens (free mode), navigate to the selected date (or today)
+  useEffect(() => {
+    if (!open || locked) return
     if (selected) { setNavYear(selected.year); setNavMonth(selected.month) }
     else          { setNavYear(today.year);    setNavMonth(today.month) }
   }, [open]) // eslint-disable-line
@@ -30,11 +53,11 @@ export default function BsCalendarPicker({ value, onChange, placeholder = 'Selec
   // Position the dropdown
   useEffect(() => {
     if (!open || !triggerRef.current) return
-    const rect      = triggerRef.current.getBoundingClientRect()
+    const rect       = triggerRef.current.getBoundingClientRect()
     const spaceBelow = window.innerHeight - rect.bottom
-    const above     = spaceBelow < 320
+    const above      = spaceBelow < 320
     setPos({
-      top:   above ? rect.top  : rect.bottom + 4,
+      top:   above ? rect.top : rect.bottom + 4,
       left:  rect.left,
       width: Math.max(rect.width, 280),
       above,
@@ -50,30 +73,41 @@ export default function BsCalendarPicker({ value, onChange, placeholder = 'Selec
   }, [open])
 
   function prevMonth() {
+    if (locked) return
     if (navMonth === 1) { setNavYear(y => y - 1); setNavMonth(12) }
     else setNavMonth(m => m - 1)
   }
   function nextMonth() {
+    if (locked) return
     if (navMonth === 12) { setNavYear(y => y + 1); setNavMonth(1) }
     else setNavMonth(m => m + 1)
   }
 
   function selectDay(day) {
-    onChange(formatAd(bsToAd(navYear, navMonth, day)))
+    onChange(locked ? String(day) : formatAd(bsToAd(navYear, navMonth, day)))
     setOpen(false)
   }
 
+  // "Today" — in locked mode only valid when the locked period is the current BS month
+  const todayInView = locked
+    ? (lockYear === today.year && lockMonth === today.month)
+    : true
+
   function goToday() {
-    setNavYear(today.year)
-    setNavMonth(today.month)
-    onChange(formatAd(bsToAd(today.year, today.month, today.day)))
+    if (locked) {
+      onChange(String(today.day))
+    } else {
+      setNavYear(today.year)
+      setNavMonth(today.month)
+      onChange(formatAd(bsToAd(today.year, today.month, today.day)))
+    }
     setOpen(false)
   }
 
   // Build calendar grid cells: null = blank padding, number = day
-  const firstDow   = bsToAd(navYear, navMonth, 1).getDay()
-  const daysCount  = daysInBsMonth(navYear, navMonth)
-  const cells      = []
+  const firstDow  = bsToAd(navYear, navMonth, 1).getDay()
+  const daysCount = daysInBsMonth(navYear, navMonth)
+  const cells     = []
   for (let i = 0; i < firstDow; i++) cells.push(null)
   for (let d = 1; d <= daysCount; d++) cells.push(d)
   while (cells.length % 7 !== 0) cells.push(null)
@@ -82,11 +116,13 @@ export default function BsCalendarPicker({ value, onChange, placeholder = 'Selec
     ? `${selected.day} ${BS_MONTHS[selected.month - 1]} ${selected.year}`
     : ''
 
-  const navBtn = {
-    background: 'none', border: 'none', cursor: 'pointer',
-    color: 'var(--theme-text2)', fontSize: 18, lineHeight: 1,
-    padding: '2px 8px', borderRadius: 4, fontFamily: 'inherit',
-  }
+  const navBtn = (enabled) => ({
+    background: 'none', border: 'none',
+    cursor: enabled ? 'pointer' : 'default',
+    color: enabled ? 'var(--theme-text2)' : 'transparent',
+    fontSize: 18, lineHeight: 1, padding: '2px 8px',
+    borderRadius: 4, fontFamily: 'inherit',
+  })
 
   const popover = open ? createPortal(
     <div
@@ -106,15 +142,13 @@ export default function BsCalendarPicker({ value, onChange, placeholder = 'Selec
         padding:   '12px 12px 8px',
       }}
     >
-      {/* Month navigation */}
+      {/* Month navigation (arrows hidden in locked mode) */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <button style={navBtn} onClick={prevMonth}>‹</button>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
-            {BS_MONTHS[navMonth - 1]} {navYear}
-          </div>
+        <button style={navBtn(!locked)} onClick={prevMonth} disabled={locked}>‹</button>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
+          {BS_MONTHS[navMonth - 1]} {navYear}
         </div>
-        <button style={navBtn} onClick={nextMonth}>›</button>
+        <button style={navBtn(!locked)} onClick={nextMonth} disabled={locked}>›</button>
       </div>
 
       {/* Day-of-week headers */}
@@ -166,13 +200,15 @@ export default function BsCalendarPicker({ value, onChange, placeholder = 'Selec
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--theme-border)',
       }}>
-        <button
-          type="button"
-          onClick={goToday}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--theme-accent)', fontWeight: 600, padding: '2px 4px', fontFamily: 'inherit' }}
-        >
-          Today
-        </button>
+        {todayInView ? (
+          <button
+            type="button"
+            onClick={goToday}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--theme-accent)', fontWeight: 600, padding: '2px 4px', fontFamily: 'inherit' }}
+          >
+            Today
+          </button>
+        ) : <span />}
         {clearable && value && (
           <button
             type="button"

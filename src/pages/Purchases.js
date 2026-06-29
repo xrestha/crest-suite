@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import { bsToAd, formatAd, daysInBsMonth } from '../utils/bsCalendar'
-import BsDatePicker from '../components/BsDatePicker'
+import BsCalendarPicker from '../components/BsCalendarPicker'
 import Tip from '../components/Tip'
 import Fab from '../components/Fab'
 import Modal from '../components/Modal'
@@ -556,7 +556,7 @@ export default function Purchases() {
                 </div>
                 <div className="form-field">
                   <label>Day (BS) *</label>
-                  <BsDatePicker bsYear={selectedPeriod?.bs_year} bsMonth={selectedPeriod?.bs_month} value={billHeader.bs_day} onChange={handleHeaderDayChange} />
+                  <BsCalendarPicker lockYear={selectedPeriod?.bs_year} lockMonth={selectedPeriod?.bs_month} value={billHeader.bs_day} onChange={handleHeaderDayChange} placeholder="Pick day" />
                 </div>
                 <div className="form-field">
                   <label><Tip text="Vendor's invoice or bill number. Shared across all items on this bill." width={240}>Invoice Ref</Tip></label>

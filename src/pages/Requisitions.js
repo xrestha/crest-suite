@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
-import BsDatePicker from '../components/BsDatePicker'
+import BsCalendarPicker from '../components/BsCalendarPicker'
 import { getBsToday } from '../utils/bsCalendar'
 import Tip from '../components/Tip'
 import Fab from '../components/Fab'
@@ -275,11 +275,12 @@ export default function Requisitions() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
               <div className="form-field">
                 <label>Day *</label>
-                <BsDatePicker
-                  bsYear={selectedPeriod?.bs_year}
-                  bsMonth={selectedPeriod?.bs_month}
+                <BsCalendarPicker
+                  lockYear={selectedPeriod?.bs_year}
+                  lockMonth={selectedPeriod?.bs_month}
                   value={formDay}
                   onChange={setFormDay}
+                  placeholder="Pick day"
                 />
               </div>
               <div className="form-field">
