@@ -19,7 +19,7 @@ async function edgeOp(action, params = {}) {
 }
 
 const HIGHLIGHTS = [
-  { icon: '📊', text: 'Cost every recipe — know your exact FC%' },
+  { icon: '📊', text: 'Recipe FC% recalculates on every purchase — always see your real food cost' },
   { icon: '📦', text: 'Track stock & catch variance before it hurts' },
   { icon: '📅', text: 'Bikram Sambat calendar · NPR · Supplier tracking' },
   { icon: '📈', text: 'Menu engineering, reports & food cost trends' },
