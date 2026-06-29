@@ -90,28 +90,28 @@ export default function Login() {
 
   return (
     <div className="login-root">
-      <div className="login-card" style={{ maxWidth: isTrial ? 420 : 360 }}>
+      <div className="login-card" style={{ maxWidth: tab === 'trial' ? 420 : 360 }}>
         <div className="login-brand">
           <span aria-label="Crest" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, fontSize: 34, lineHeight: 1, color: 'var(--theme-accent)' }}>⬢</span>
           <span className="login-brand-name">{settings?.app_name || 'Crest'}</span>
           <span className="login-brand-sub">Inventory</span>
         </div>
 
-        {/* Tab switcher — only shown when ?trial=1 is in the URL */}
-        {isTrial && (
+        {/* Tab switcher — always rendered; trial tab is reachable from the CTA banner */}
+        {tab === 'trial' && (
           <div style={{ display: 'flex', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: 3, gap: 3, marginBottom: 24 }}>
             <button
               onClick={() => setTab('trial')}
               style={{ flex: 1, padding: '8px 0', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
-                background: tab === 'trial' ? 'var(--theme-accent)' : 'transparent',
-                color: tab === 'trial' ? 'var(--theme-bg)' : 'var(--theme-text2)' }}>
+                background: 'var(--theme-accent)',
+                color: 'var(--theme-bg)' }}>
               Start Free Trial
             </button>
             <button
               onClick={() => setTab('signin')}
               style={{ flex: 1, padding: '8px 0', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                background: tab === 'signin' ? 'rgba(255,255,255,0.07)' : 'transparent',
-                color: tab === 'signin' ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
+                background: 'transparent',
+                color: 'var(--theme-text2)' }}>
               Sign In
             </button>
           </div>
@@ -188,6 +188,18 @@ export default function Login() {
                 {loading ? 'Signing in…' : 'Sign in'}
               </button>
             </form>
+            {!isTrial && (
+              <div
+                onClick={() => setTab('trial')}
+                style={{ marginTop: 16, padding: '12px 16px', background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-green)' }}>New to Crest?</div>
+                  <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>Start your 7-day free trial — no credit card needed.</div>
+                </div>
+                <span style={{ fontSize: 18, color: 'var(--theme-green)', flexShrink: 0 }}>→</span>
+              </div>
+            )}
           </>
         )}
       </div>
