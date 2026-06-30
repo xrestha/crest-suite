@@ -58,6 +58,9 @@ const IMS_GROUPS = [
 const HR_DASHBOARD = { to: '/hr/dashboard', label: 'HR Dashboard', icon: '▦' }
 
 const POS_GROUPS = [
+  { key: 'pos-setup', label: null, items: [
+    { to: '/pos', label: 'POS Setup', icon: '⊡', minPosRole: 'manager' },
+  ]},
   { key: 'pos-floor', label: 'Floor', items: [
     { to: '/pos/tables', label: 'Tables', icon: '⊞', minPosRole: 'supervisor' },
   ]},

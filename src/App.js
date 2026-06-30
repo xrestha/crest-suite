@@ -62,7 +62,13 @@ import HrDashboard from './modules/hr/dashboard/HrDashboard'
 import Pos from './modules/pos/Pos'
 import PosTableManagement from './modules/pos/tables/PosTableManagement'
 import PosStaff from './modules/pos/staff/PosStaff'
+import PosLogin from './modules/pos/login/PosLogin'
 import './components/Layout.css'
+
+function RootRedirect() {
+  if (localStorage.getItem('pos_device_client_id')) return <Navigate to="/pos/login" replace />
+  return <Navigate to="/dashboard" replace />
+}
 
 export default function App() {
   return (
@@ -71,9 +77,10 @@ export default function App() {
       <SettingsProvider>
         <BrowserRouter>
           <Routes>
-            <Route path="/login"   element={<Login />} />
-            <Route path="/pricing" element={<Pricing />} />
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/login"     element={<Login />} />
+            <Route path="/pricing"   element={<Pricing />} />
+            <Route path="/pos/login" element={<PosLogin />} />
+            <Route path="/" element={<RootRedirect />} />
             <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
 
               {/* Universal — all authenticated users regardless of module */}

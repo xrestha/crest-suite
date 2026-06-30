@@ -98,8 +98,86 @@ Deno.serve(async (req) => {
     const { data: { user }, error: authErr } = await caller.auth.getUser()
     if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
 
-    const { data: profile } = await caller
-      .from('profiles').select('role').eq('id', user.id).single()
+    // Use service-role client to fetch profile — RLS on profiles can block anon+JWT reads;
+    // identity is already verified above via caller.auth.getUser()
+    const { data: profile } = await admin
+      .from('profiles').select('role, pos_role, client_id').eq('id', user.id).single()
+
+    // ── POS manager-accessible actions (before admin-only guard) ─────────────
+    const isCallerAdmin   = profile?.role === 'admin'
+    const isCallerManager = profile?.pos_role === 'manager'
+    const isPosPrivileged = isCallerAdmin || isCallerManager
+
+    if (action === 'create_pos_staff' || action === 'reset_pos_pin') {
+      if (!isPosPrivileged) return json({ error: 'Forbidden' }, 403)
+    }
+
+    // ── Create a POS staff member — name + PIN, auto-generated email ──────────
+    if (action === 'create_pos_staff') {
+      const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
+      if (!targetClientId) return json({ error: 'client_id required' }, 400)
+
+      const { full_name, pin, pos_role } = params
+      if (!full_name || !pin) return json({ error: 'full_name and pin are required' }, 400)
+      if (!/^\d{4,6}$/.test(pin)) return json({ error: 'PIN must be 4–6 digits' }, 400)
+
+      const validRoles = ['staff', 'supervisor', 'manager']
+      if (pos_role && !validRoles.includes(pos_role)) return json({ error: 'Invalid pos_role' }, 400)
+
+      // Generate a stable internal email — staff never see or type this
+      const slug   = full_name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12)
+      const suffix = Math.random().toString(36).slice(2, 7)
+      const email  = `${slug}_${suffix}@pos.internal`
+
+      const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+        email,
+        password:      pin,
+        email_confirm: true,
+        user_metadata: { full_name },
+      })
+      if (authErr || !authData?.user) {
+        return json({ error: authErr?.message || 'Failed to create user' }, 400)
+      }
+
+      const { error: profileErr } = await admin.from('profiles').upsert({
+        id:        authData.user.id,
+        full_name,
+        role:      'client',
+        client_id: targetClientId,
+        pos_role:  pos_role || null,
+        pos_email: email,
+      }, { onConflict: 'id' })
+
+      if (profileErr) {
+        await admin.auth.admin.deleteUser(authData.user.id)
+        return json({ error: profileErr.message }, 400)
+      }
+
+      return json({ success: true, userId: authData.user.id })
+    }
+
+    // ── Reset a POS staff PIN ─────────────────────────────────────────────────
+    if (action === 'reset_pos_pin') {
+      const { userId, pin } = params
+      if (!userId || !pin) return json({ error: 'userId and pin are required' }, 400)
+      if (!/^\d{4,6}$/.test(pin)) return json({ error: 'PIN must be 4–6 digits' }, 400)
+
+      // Verify the target user belongs to the same client (managers can't reset other clients' pins)
+      if (!isCallerAdmin) {
+        const { data: targetProfile } = await admin
+          .from('profiles').select('client_id').eq('id', userId).single()
+        if (targetProfile?.client_id !== profile?.client_id) {
+          return json({ error: 'Forbidden' }, 403)
+        }
+      }
+
+      const { error: updateErr } = await admin.auth.admin.updateUserById(userId, { password: pin })
+      if (updateErr) return json({ error: updateErr.message }, 400)
+
+      return json({ success: true })
+    }
+
+    // ── All remaining actions require admin role ──────────────────────────────
     if (profile?.role !== 'admin') return json({ error: 'Forbidden' }, 403)
 
     if (action === 'getUser') {

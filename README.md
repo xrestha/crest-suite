@@ -107,7 +107,7 @@ Architecture: single React app, single Supabase project, feature flags per clien
 |---|---|---|
 | Crest IMS | ✅ Live | All existing routes |
 | Crest HR | ✅ Live | `/hr/dashboard`, `/hr/employees`, `/hr/pay-setup`, `/hr/attendance`, `/hr/leave`, `/hr/holidays`, `/hr/overtime`, `/hr/payroll`, `/hr/reports`, `/hr/festival`, `/hr/advances`, `/hr/gratuity`, `/hr/settlement`, `/hr/roster` |
-| Crest POS | 🔧 Building | `/pos/tables` (supervisor+), `/pos/staff` (manager+); Orders, KOT, Billing, Shifts next |
+| Crest POS | 🔧 Building | `/pos` (setup/activation, manager+), `/pos/login` (public PIN picker), `/pos/tables` (supervisor+), `/pos/staff` (manager+); Orders, KOT, Billing, Shifts next |
 
 **Suite pricing:**
 | Suite Plan | Monthly | Annual /mo |
@@ -124,6 +124,64 @@ Architecture: single React app, single Supabase project, feature flags per clien
 ---
 
 ## Session Log
+
+### S196 — 2026-06-30 — POS Staff Creation + Device Activation + PIN Login
+
+**POS Add Staff (name + PIN only):**
+
+Manager can now create staff accounts directly from POS Staff → "+ Add Staff". No email required — staff log in with name + PIN only. Auto-generated internal email (`slug_xxxxx@pos.internal`) is stored in `profiles.pos_email` and never shown to staff.
+
+**`supabase/functions/admin-user-ops/index.ts`:**
+- `create_pos_staff` action: accepts `{ full_name, pin, pos_role, client_id }`, auto-generates internal email, creates Supabase Auth user, upserts profile with `pos_email` stored
+- `reset_pos_pin` action: manager can reset any same-client staff PIN; cross-checks `client_id` to prevent cross-client resets
+- Profile fetch changed to use service-role (`admin`) client — anon+JWT fetch was returning null due to RLS, causing "client_id required" error
+- Admin callers must pass `client_id` in request body; manager callers use `profile.client_id` server-side
+
+**`src/modules/pos/staff/PosStaff.jsx`:**
+- "+ Add Staff" button (manager only) opens modal: Full Name + PIN (4–6 digits, masked) + POS Role
+- PIN input strips non-digits, max 6 chars
+- "Reset PIN" column added to staff table — opens modal to set a new PIN for any staff member
+- `client_id` now passed in edge function call body (fixes admin-viewing-as-client case)
+
+**DB (run in Supabase):**
+```sql
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS pos_email text;
+
+CREATE OR REPLACE FUNCTION get_pos_staff(p_client_id uuid)
+RETURNS TABLE(id uuid, full_name text, pos_role text, pos_email text)
+LANGUAGE sql SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT id, full_name, pos_role, pos_email FROM profiles
+  WHERE client_id = p_client_id AND pos_role IS NOT NULL AND pos_email IS NOT NULL
+  ORDER BY full_name;
+$$;
+
+GRANT EXECUTE ON FUNCTION get_pos_staff(uuid) TO anon;
+```
+
+**Device activation (`src/modules/pos/Pos.js` — rewritten):**
+- Manager sees "Activate for [Client Name]" card on `/pos`
+- On click: saves `pos_device_client_id` + `pos_device_client_name` to `localStorage`
+- Activated state shows "Device activated · Bound to: X" with "Open POS Login Screen" + "Deactivate Device" buttons
+- Only visible to managers; Staff/Supervisor see Coming Soon text only
+
+**POS PIN login screen (`src/modules/pos/login/PosLogin.jsx` — new):**
+- Public route (`/pos/login`) — no auth required
+- Reads `pos_device_client_id` from `localStorage`; redirects to `/login` if not set
+- Calls `supabase.rpc('get_pos_staff', { p_client_id })` to fetch staff list without auth (SECURITY DEFINER + anon grant)
+- Staff picker: name cards in a responsive grid
+- On tap: PIN numpad (3×4 grid, 0–9 + ⌫) with dot indicators; keyboard also supported
+- On confirm: `supabase.auth.signInWithPassword({ email: staff.pos_email, password: pin })`; wrong PIN clears and shows error
+- Footer links: "Deactivate device" (clears localStorage) · "Manager login" (goes to `/login`)
+
+**`src/App.js`:**
+- Added `import PosLogin` + `<Route path="/pos/login" element={<PosLogin />} />` as public route (outside ProtectedRoute)
+- `RootRedirect` component: checks `localStorage` for `pos_device_client_id` — bound devices go to `/pos/login`, others go to `/dashboard`
+
+**`src/components/Layout.js`:**
+- Added `pos-setup` group to `POS_GROUPS`: "POS Setup" link → `/pos` (manager+)
+
+---
 
 ### S195 — 2026-06-30 — POS Role System + Bug Fixes
 
