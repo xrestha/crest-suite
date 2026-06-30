@@ -507,6 +507,10 @@ export default function Roster() {
     }
   }
 
+  const colChunks = viewMode === 'monthly'
+    ? [columns.slice(0, 16), columns.slice(16)]
+    : [columns]
+
   const shiftMap     = Object.fromEntries(shiftTypes.map(s => [s.id, s]))
   const depts        = ['All', ...Array.from(new Set(employees.map(e => e.department).filter(Boolean))).sort()]
   const filteredEmps = deptFilter === 'All' ? employees : employees.filter(e => e.department === deptFilter)
@@ -672,150 +676,162 @@ export default function Roster() {
               </div>
             </div>
           ) : (
-            <div className="card roster-board" style={{ padding: 0 }}>
-              <div className="table-wrap roster-wrap">
-                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
-                  <colgroup>
-                    <col style={{ minWidth: 160 }} />
-                    {columns.map((_, i) => (
-                      <col key={i} style={{ minWidth: viewMode === 'weekly' ? 116 : 38 }} />
-                    ))}
-                    <col style={{ minWidth: 52 }} />
-                  </colgroup>
+            <>
+              {colChunks.map((cols, chunkIdx) => {
+                const isLast = chunkIdx === colChunks.length - 1
+                return (
+                  <div key={chunkIdx} className="card roster-board"
+                    style={{ padding: 0, marginBottom: !isLast ? 12 : 0 }}>
+                    <div className="table-wrap roster-wrap">
+                      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+                        <colgroup>
+                          <col style={{ minWidth: 160 }} />
+                          {cols.map((_, i) => (
+                            <col key={i} style={{ minWidth: viewMode === 'weekly' ? 116 : 38 }} />
+                          ))}
+                          {isLast && <col style={{ minWidth: 52 }} />}
+                        </colgroup>
 
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--theme-border)' }}>
-                      <th className={STICKY_CLS} style={{ ...stickyCol, padding: '10px 14px', textAlign: 'left',
-                        color: 'var(--theme-text2)', fontSize: 11, textTransform: 'uppercase',
-                        letterSpacing: '0.05em', fontWeight: 600,
-                        borderRight: '2px solid var(--theme-border)' }}>
-                        Staff
-                      </th>
-                      {columns.map((col, i) => (
-                        <th key={i} style={{
-                          padding: viewMode === 'weekly' ? '8px 4px' : '6px 2px',
-                          textAlign: 'center',
-                          color:      col.isSat ? 'var(--theme-amber)' : 'var(--theme-text3)',
-                          background: col.isSat ? 'rgba(245,158,11,0.06)' : 'inherit',
-                          borderRight: '1px solid var(--theme-border-lt)',
-                          fontWeight: 500,
-                        }}>
-                          <div style={{ fontSize: viewMode === 'weekly' ? 12 : 11, color: 'var(--theme-text2)' }}>{col.label}</div>
-                          <div style={{ fontSize: 10, color: col.isSat ? 'var(--theme-amber)' : 'var(--theme-text3)' }}>{col.sublabel}</div>
-                        </th>
-                      ))}
-                      <th style={{ padding: '8px 8px', textAlign: 'right', color: 'var(--theme-text3)', fontSize: 11, fontWeight: 500 }}>
-                        Hrs
-                      </th>
-                    </tr>
-                  </thead>
+                        <thead>
+                          <tr style={{ borderBottom: '2px solid var(--theme-border)' }}>
+                            <th className={STICKY_CLS} style={{ ...stickyCol, padding: '10px 14px', textAlign: 'left',
+                              color: 'var(--theme-text2)', fontSize: 11, textTransform: 'uppercase',
+                              letterSpacing: '0.05em', fontWeight: 600,
+                              borderRight: '2px solid var(--theme-border)' }}>
+                              Staff
+                            </th>
+                            {cols.map((col, i) => (
+                              <th key={i} style={{
+                                padding: viewMode === 'weekly' ? '8px 4px' : '6px 2px',
+                                textAlign: 'center',
+                                color:      col.isSat ? 'var(--theme-amber)' : 'var(--theme-text3)',
+                                background: col.isSat ? 'rgba(245,158,11,0.06)' : 'inherit',
+                                borderRight: '1px solid var(--theme-border-lt)',
+                                fontWeight: 500,
+                              }}>
+                                <div style={{ fontSize: viewMode === 'weekly' ? 12 : 11, color: 'var(--theme-text2)' }}>{col.label}</div>
+                                <div style={{ fontSize: 10, color: col.isSat ? 'var(--theme-amber)' : 'var(--theme-text3)' }}>{col.sublabel}</div>
+                              </th>
+                            ))}
+                            {isLast && (
+                              <th style={{ padding: '8px 8px', textAlign: 'right', color: 'var(--theme-text3)', fontSize: 11, fontWeight: 500 }}>
+                                Hrs
+                              </th>
+                            )}
+                          </tr>
+                        </thead>
 
-                  <tbody>
-                    {filteredEmps.map(emp => (
-                      <tr key={emp.id} style={{ borderBottom: '1px solid var(--theme-border-lt)' }}>
-                        <td className={STICKY_CLS} style={{ ...stickyCol, padding: '8px 14px', borderRight: '2px solid var(--theme-border)' }}>
-                          <div style={{ fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', fontSize: 13 }}>
-                            {emp.full_name}
-                          </div>
-                          {emp.department && (
-                            <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{emp.department}</div>
-                          )}
-                        </td>
-
-                        {columns.map((col, ci) => {
-                          const key   = rKey(col.bsYear, col.bsMonth, col.bsDay, emp.id)
-                          const entry = roster[key]
-                          const shift = entry ? shiftMap[entry.shift_type_id] : null
-                          const hrs   = shift ? (shift.hours ?? calcHours(shift.start_time, shift.end_time)) : null
-                          const isAct = activeCell?.empId === emp.id &&
-                                        activeCell?.year  === col.bsYear &&
-                                        activeCell?.month === col.bsMonth &&
-                                        activeCell?.day   === col.bsDay
-
-                          return (
-                            <td key={ci} style={{
-                              padding: 3,
-                              background: col.isSat ? 'rgba(245,158,11,0.04)' : 'inherit',
-                              borderRight: '1px solid var(--theme-border-lt)',
-                            }}>
-                              <button
-                                className={`roster-cell${shift ? ' filled' : ''}`}
-                                title={shift
-                                  ? `${shift.name}${hrs != null ? ` · ${hrs}h` : ''}${shift.start_time ? ` · ${fmtTime(shift.start_time)}–${fmtTime(shift.end_time)}` : ''}`
-                                  : 'Assign shift'}
-                                onClick={e => {
-                                  if (isAct) { setActiveCell(null); return }
-                                  anchorRef.current = e.currentTarget
-                                  setActiveCell({ year: col.bsYear, month: col.bsMonth, day: col.bsDay, empId: emp.id })
-                                }}
-                                style={{
-                                  width: '100%',
-                                  minHeight: viewMode === 'weekly' ? 56 : 30,
-                                  background: shift ? shift.color + '22' : 'transparent',
-                                  border:     shift ? `1px solid ${shift.color}55` : '1px dashed var(--theme-border)',
-                                  borderRadius: 6, cursor: 'pointer',
-                                  padding: viewMode === 'weekly' ? '6px 6px' : '2px',
-                                  display: 'flex', flexDirection: 'column',
-                                  alignItems: 'center', justifyContent: 'center', gap: 1,
-                                  outline: isAct ? '2px solid var(--theme-accent)' : 'none',
-                                  outlineOffset: -1,
-                                }}
-                              >
-                                {shift ? (
-                                  <>
-                                    <span style={{ fontSize: viewMode === 'weekly' ? 11 : 9, fontWeight: 700, color: shift.color, lineHeight: 1.2 }}>
-                                      {viewMode === 'weekly' ? shift.name : shift.name.slice(0, 2).toUpperCase()}
-                                    </span>
-                                    {viewMode === 'weekly' && shift.start_time && (
-                                      <span style={{ fontSize: 9, color: 'var(--theme-text3)', lineHeight: 1 }}>
-                                        {fmtTime(shift.start_time)}–{fmtTime(shift.end_time)}
-                                      </span>
-                                    )}
-                                    {hrs != null && (
-                                      <span style={{ fontSize: 9, color: 'var(--theme-text3)', lineHeight: 1 }}>{hrs}h</span>
-                                    )}
-                                  </>
-                                ) : (
-                                  <span style={{ fontSize: 16, color: 'var(--theme-border)', lineHeight: 1 }}>+</span>
+                        <tbody>
+                          {filteredEmps.map(emp => (
+                            <tr key={emp.id} style={{ borderBottom: '1px solid var(--theme-border-lt)' }}>
+                              <td className={STICKY_CLS} style={{ ...stickyCol, padding: '8px 14px', borderRight: '2px solid var(--theme-border)' }}>
+                                <div style={{ fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', fontSize: 13 }}>
+                                  {emp.full_name}
+                                </div>
+                                {emp.department && (
+                                  <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{emp.department}</div>
                                 )}
-                              </button>
+                              </td>
+
+                              {cols.map((col, ci) => {
+                                const key   = rKey(col.bsYear, col.bsMonth, col.bsDay, emp.id)
+                                const entry = roster[key]
+                                const shift = entry ? shiftMap[entry.shift_type_id] : null
+                                const hrs   = shift ? (shift.hours ?? calcHours(shift.start_time, shift.end_time)) : null
+                                const isAct = activeCell?.empId === emp.id &&
+                                              activeCell?.year  === col.bsYear &&
+                                              activeCell?.month === col.bsMonth &&
+                                              activeCell?.day   === col.bsDay
+
+                                return (
+                                  <td key={ci} style={{
+                                    padding: 3,
+                                    background: col.isSat ? 'rgba(245,158,11,0.04)' : 'inherit',
+                                    borderRight: '1px solid var(--theme-border-lt)',
+                                  }}>
+                                    <button
+                                      className={`roster-cell${shift ? ' filled' : ''}`}
+                                      title={shift
+                                        ? `${shift.name}${hrs != null ? ` · ${hrs}h` : ''}${shift.start_time ? ` · ${fmtTime(shift.start_time)}–${fmtTime(shift.end_time)}` : ''}`
+                                        : 'Assign shift'}
+                                      onClick={e => {
+                                        if (isAct) { setActiveCell(null); return }
+                                        anchorRef.current = e.currentTarget
+                                        setActiveCell({ year: col.bsYear, month: col.bsMonth, day: col.bsDay, empId: emp.id })
+                                      }}
+                                      style={{
+                                        width: '100%',
+                                        minHeight: viewMode === 'weekly' ? 56 : 30,
+                                        background: shift ? shift.color + '22' : 'transparent',
+                                        border:     shift ? `1px solid ${shift.color}55` : '1px dashed var(--theme-border)',
+                                        borderRadius: 6, cursor: 'pointer',
+                                        padding: viewMode === 'weekly' ? '6px 6px' : '2px',
+                                        display: 'flex', flexDirection: 'column',
+                                        alignItems: 'center', justifyContent: 'center', gap: 1,
+                                        outline: isAct ? '2px solid var(--theme-accent)' : 'none',
+                                        outlineOffset: -1,
+                                      }}
+                                    >
+                                      {shift ? (
+                                        <>
+                                          <span style={{ fontSize: viewMode === 'weekly' ? 11 : 9, fontWeight: 700, color: shift.color, lineHeight: 1.2 }}>
+                                            {viewMode === 'weekly' ? shift.name : shift.name.slice(0, 2).toUpperCase()}
+                                          </span>
+                                          {viewMode === 'weekly' && shift.start_time && (
+                                            <span style={{ fontSize: 9, color: 'var(--theme-text3)', lineHeight: 1 }}>
+                                              {fmtTime(shift.start_time)}–{fmtTime(shift.end_time)}
+                                            </span>
+                                          )}
+                                          {hrs != null && (
+                                            <span style={{ fontSize: 9, color: 'var(--theme-text3)', lineHeight: 1 }}>{hrs}h</span>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <span style={{ fontSize: 16, color: 'var(--theme-border)', lineHeight: 1 }}>+</span>
+                                      )}
+                                    </button>
+                                  </td>
+                                )
+                              })}
+
+                              {isLast && (
+                                <td style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 600, fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
+                                  {(() => { const h = empHrs(emp.id); return h > 0 ? `${h}h` : '—' })()}
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+
+                        <tfoot>
+                          <tr style={{ borderTop: '2px solid var(--theme-border)', background: 'var(--theme-bg)' }}>
+                            <td className={STICKY_CLS} style={{ ...stickyCol, background: 'var(--theme-bg)', padding: '8px 14px',
+                              fontSize: 11, color: 'var(--theme-text3)', fontWeight: 600,
+                              borderRight: '2px solid var(--theme-border)' }}>
+                              Total hrs/day
                             </td>
-                          )
-                        })}
-
-                        <td style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 600, fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
-                          {(() => { const h = empHrs(emp.id); return h > 0 ? `${h}h` : '—' })()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-
-                  <tfoot>
-                    <tr style={{ borderTop: '2px solid var(--theme-border)', background: 'var(--theme-bg)' }}>
-                      <td className={STICKY_CLS} style={{ ...stickyCol, background: 'var(--theme-bg)', padding: '8px 14px',
-                        fontSize: 11, color: 'var(--theme-text3)', fontWeight: 600,
-                        borderRight: '2px solid var(--theme-border)' }}>
-                        Total hrs/day
-                      </td>
-                      {columns.map((col, i) => {
-                        const h = dayHrs(col)
-                        return (
-                          <td key={i} style={{
-                            textAlign: 'center', padding: '8px 2px', fontSize: 11,
-                            color:      h > 0 ? 'var(--theme-text2)' : 'var(--theme-border)',
-                            fontWeight: h > 0 ? 600 : 400,
-                            borderRight: '1px solid var(--theme-border-lt)',
-                          }}>
-                            {h > 0 ? `${h}h` : '—'}
-                          </td>
-                        )
-                      })}
-                      <td />
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
+                            {cols.map((col, i) => {
+                              const h = dayHrs(col)
+                              return (
+                                <td key={i} style={{
+                                  textAlign: 'center', padding: '8px 2px', fontSize: 11,
+                                  color:      h > 0 ? 'var(--theme-text2)' : 'var(--theme-border)',
+                                  fontWeight: h > 0 ? 600 : 400,
+                                  borderRight: '1px solid var(--theme-border-lt)',
+                                }}>
+                                  {h > 0 ? `${h}h` : '—'}
+                                </td>
+                              )
+                            })}
+                            {isLast && <td />}
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })}
+            </>
           )}
 
           {/* Shift picker dropdown */}
