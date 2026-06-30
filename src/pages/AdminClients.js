@@ -4,6 +4,7 @@ import { useSettings } from '../context/SettingsContext'
 import { getBsToday, formatAd } from '../utils/bsCalendar'
 import BsCalendarPicker from '../components/BsCalendarPicker'
 import { getSubStatus, getDateStatus } from '../utils/subscription'
+import Tip from '../components/Tip'
 
 // All auth-admin operations go through an Edge Function — service role key stays server-side
 async function adminOp(action, params = {}) {
@@ -955,42 +956,48 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
               )}
 
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button
-                  onClick={handleClearConversions}
-                  disabled={deleting}
-                  style={{
-                    background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.15)',
-                    color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
-                    cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
-                    opacity: deleting ? 0.6 : 1
-                  }}
-                >
-                  {deleting ? 'Working…' : 'Clear All Conversions'}
-                </button>
-                <button
-                  onClick={handleDeleteClientData}
-                  disabled={deleting}
-                  style={{
-                    background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.20)',
-                    color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
-                    cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
-                    opacity: deleting ? 0.6 : 1
-                  }}
-                >
-                  {deleting ? 'Working…' : 'Clear Client Data'}
-                </button>
-                <button
-                  onClick={handleDeleteClient}
-                  disabled={deleting}
-                  style={{
-                    background: 'rgba(248,113,113,0.18)', border: '1px solid rgba(248,113,113,0.40)',
-                    color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
-                    cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700,
-                    opacity: deleting ? 0.6 : 1
-                  }}
-                >
-                  {deleting ? 'Working…' : 'Delete Client'}
-                </button>
+                <Tip text="Removes purchase unit conversions from all items (e.g. carton → pcs). Items and stock data are kept. Use this to reset unit setup without losing any transactions.">
+                  <button
+                    onClick={handleClearConversions}
+                    disabled={deleting}
+                    style={{
+                      background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.15)',
+                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
+                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
+                      opacity: deleting ? 0.6 : 1
+                    }}
+                  >
+                    {deleting ? 'Working…' : 'Clear All Conversions'}
+                  </button>
+                </Tip>
+                <Tip text="Permanently deletes all operational data: categories, items, vendors, recipes, purchases, stock, sales, overheads, and periods. The client account, users, and settings are kept. Cannot be undone.">
+                  <button
+                    onClick={handleDeleteClientData}
+                    disabled={deleting}
+                    style={{
+                      background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.20)',
+                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
+                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
+                      opacity: deleting ? 0.6 : 1
+                    }}
+                  >
+                    {deleting ? 'Working…' : 'Clear Client Data'}
+                  </button>
+                </Tip>
+                <Tip text="Permanently deletes everything: all operational data, user accounts, feature flags, settings, and the client record itself. The email is freed for re-registration. Cannot be undone.">
+                  <button
+                    onClick={handleDeleteClient}
+                    disabled={deleting}
+                    style={{
+                      background: 'rgba(248,113,113,0.18)', border: '1px solid rgba(248,113,113,0.40)',
+                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
+                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700,
+                      opacity: deleting ? 0.6 : 1
+                    }}
+                  >
+                    {deleting ? 'Working…' : 'Delete Client'}
+                  </button>
+                </Tip>
               </div>
             </div>
           )}
