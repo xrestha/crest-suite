@@ -70,22 +70,19 @@ Deno.serve(async (req) => {
         return json({ error: clientErr?.message || 'Failed to create client' }, 400)
       }
 
-      const { error: profileErr } = await admin.from('profiles').insert({
+      // handle_new_user trigger may have already inserted a bare profile row;
+      // upsert ensures we always write our values regardless
+      const { error: profileErr } = await admin.from('profiles').upsert({
         id:        authData.user.id,
         full_name: full_name || business_name,
         role:      'client',
         client_id: client.id,
-      })
+      }, { onConflict: 'id' })
 
       if (profileErr) {
         await admin.auth.admin.deleteUser(authData.user.id)
         await admin.from('clients').delete().eq('id', client.id)
-        const isDuplicate = profileErr.code === '23505' || profileErr.message?.includes('profiles_pkey')
-        return json({
-          error: isDuplicate
-            ? 'An account with this email already exists. Please sign in instead.'
-            : profileErr.message
-        }, 400)
+        return json({ error: profileErr.message }, 400)
       }
 
       return json({ success: true })
