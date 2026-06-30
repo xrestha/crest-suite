@@ -88,7 +88,11 @@ export default function Login() {
         navigate('/dashboard')
       }
     } catch (err) {
-      setTError(err.message || 'Something went wrong. Please try again.')
+      const msg = err.message || 'Something went wrong. Please try again.'
+      const isAlreadyRegistered = msg.includes('already exists') || msg.includes('already registered') || msg.includes('profiles_pkey')
+      setTError(isAlreadyRegistered
+        ? 'An account with this email already exists. Use the sign-in form above.'
+        : msg)
     } finally {
       setTLoading(false)
     }

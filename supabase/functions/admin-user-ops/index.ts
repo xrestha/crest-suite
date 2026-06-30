@@ -80,7 +80,12 @@ Deno.serve(async (req) => {
       if (profileErr) {
         await admin.auth.admin.deleteUser(authData.user.id)
         await admin.from('clients').delete().eq('id', client.id)
-        return json({ error: profileErr.message }, 400)
+        const isDuplicate = profileErr.code === '23505' || profileErr.message?.includes('profiles_pkey')
+        return json({
+          error: isDuplicate
+            ? 'An account with this email already exists. Please sign in instead.'
+            : profileErr.message
+        }, 400)
       }
 
       return json({ success: true })
