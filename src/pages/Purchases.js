@@ -615,80 +615,85 @@ export default function Purchases() {
                       const inputUnit = cf > 1 ? selItem.purchase_unit : (selItem?.uom || '')
                       const lineBase = (parseFloat(line.qty) || 0) * (parseFloat(line.rate) || 0)
                       const lineAmount = line.vat_inclusive ? lineBase * 1.13 : lineBase
+                      const cellInput = { background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }
                       return (
-                        <tr key={line._key} style={{ borderBottom: '1px solid var(--theme-card)' }}>
-                          <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
-                            <SearchableSelect
-                              value={line.item_id}
-                              onChange={v => updateBillLine(line._key, 'item_id', v)}
-                              options={itemOptions}
-                              placeholder="— Select item —"
-                            />
-                            <div style={{ display: 'flex', gap: 6, marginTop: 5, alignItems: 'center' }}>
-                              <span style={{ fontSize: 10, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>Expiry</span>
-                              <input type="date" value={line.expiry_date}
-                                onChange={e => updateBillLine(line._key, 'expiry_date', e.target.value)}
-                                style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 4, padding: '3px 6px', fontSize: 11, color: line.expiry_date ? 'var(--theme-text3)' : 'var(--theme-text3)', outline: 'none', flex: 1 }} />
-                              <span style={{ fontSize: 10, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>Shelf life</span>
-                              <input type="number" min="0" value={line.shelf_life} placeholder="days"
-                                onChange={e => updateBillLine(line._key, 'shelf_life', e.target.value)}
-                                title="Enter days to auto-fill expiry date"
-                                style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 4, padding: '3px 6px', fontSize: 11, color: 'var(--theme-text3)', outline: 'none', width: 52, textAlign: 'right' }} />
-                            </div>
-                          </td>
-                          <td style={{ padding: '6px 8px', verticalAlign: 'top' }}>
-                            <input type="number" min="0" step="any" value={line.qty} placeholder="0"
-                              onChange={e => updateBillLine(line._key, 'qty', e.target.value)}
-                              style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }} />
-                            {inputUnit && <div style={{ fontSize: 10, color: 'var(--theme-text2)', textAlign: 'right', marginTop: 2 }}>{inputUnit}</div>}
-                            {cf > 1 && line.qty && <div style={{ fontSize: 10, color: 'var(--theme-text3)', textAlign: 'right' }}>= {(parseFloat(line.qty) * cf).toLocaleString()} {selItem?.uom}</div>}
-                          </td>
-                          <td style={{ padding: '6px 8px', verticalAlign: 'top' }}>
-                            <input type="number" min="0" step="any" value={line.rate} placeholder="0"
-                              onChange={e => updateBillLine(line._key, 'rate', e.target.value)}
-                              style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }} />
-                            <button
-                              type="button"
-                              onClick={() => updateBillLine(line._key, 'vat_inclusive', !line.vat_inclusive)}
-                              style={{
-                                marginTop: 5, width: '100%', cursor: 'pointer', fontFamily: 'inherit',
-                                background: line.vat_inclusive ? 'rgba(251,191,36,0.12)' : 'transparent',
-                                border: `1px solid ${line.vat_inclusive ? '#f59e0b' : 'var(--theme-border)'}`,
-                                borderRadius: 4, padding: '4px 0', fontSize: 11, fontWeight: line.vat_inclusive ? 700 : 400,
-                                color: line.vat_inclusive ? '#f59e0b' : 'var(--theme-text3)', letterSpacing: '0.04em',
-                              }}
-                            >
-                              {line.vat_inclusive ? '✓ VAT 13%' : '+ VAT'}
-                            </button>
-                          </td>
-                          <td style={{ padding: '6px 8px', verticalAlign: 'top' }}>
-                            <input
-                              type="number" min="0" step="any"
-                              value={line._amtDraft}
-                              placeholder={lineAmount > 0 ? lineAmount.toFixed(2) : ''}
-                              onChange={e => setLineTotal(line._key, e.target.value)}
-                              style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }}
-                            />
-                          </td>
-                          <td style={{ padding: '6px 8px', verticalAlign: 'top', textAlign: 'right' }}>
-                            {lineAmount > 0 && (
-                              <>
-                                <div style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600, paddingTop: 7 }}>
-                                  {lineAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </div>
-                                {line.vat_inclusive && parseFloat(line.rate) > 0 && (
-                                  <div style={{ fontSize: 10, color: 'var(--theme-amber)', marginTop: 2 }}>
-                                    +VAT {(parseFloat(line.rate) * 0.13 * (parseFloat(line.qty) || 1)).toFixed(2)}
+                        <>
+                          <tr key={line._key}>
+                            <td style={{ padding: '6px 8px 4px 0', verticalAlign: 'middle' }}>
+                              <SearchableSelect
+                                value={line.item_id}
+                                onChange={v => updateBillLine(line._key, 'item_id', v)}
+                                options={itemOptions}
+                                placeholder="— Select item —"
+                              />
+                            </td>
+                            <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
+                              <input type="number" min="0" step="any" value={line.qty} placeholder="0"
+                                onChange={e => updateBillLine(line._key, 'qty', e.target.value)}
+                                style={cellInput} />
+                              {inputUnit && <div style={{ fontSize: 10, color: 'var(--theme-text2)', textAlign: 'right', marginTop: 2 }}>{inputUnit}</div>}
+                              {cf > 1 && line.qty && <div style={{ fontSize: 10, color: 'var(--theme-text3)', textAlign: 'right' }}>= {(parseFloat(line.qty) * cf).toLocaleString()} {selItem?.uom}</div>}
+                            </td>
+                            <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
+                              <input type="number" min="0" step="any" value={line.rate} placeholder="0"
+                                onChange={e => updateBillLine(line._key, 'rate', e.target.value)}
+                                style={cellInput} />
+                              <button
+                                type="button"
+                                onClick={() => updateBillLine(line._key, 'vat_inclusive', !line.vat_inclusive)}
+                                style={{
+                                  marginTop: 4, width: '100%', cursor: 'pointer', fontFamily: 'inherit',
+                                  background: line.vat_inclusive ? 'rgba(251,191,36,0.12)' : 'transparent',
+                                  border: `1px solid ${line.vat_inclusive ? '#f59e0b' : 'var(--theme-border)'}`,
+                                  borderRadius: 4, padding: '4px 0', fontSize: 11, fontWeight: line.vat_inclusive ? 700 : 400,
+                                  color: line.vat_inclusive ? '#f59e0b' : 'var(--theme-text3)', letterSpacing: '0.04em',
+                                }}
+                              >
+                                {line.vat_inclusive ? '✓ VAT 13%' : '+ VAT'}
+                              </button>
+                            </td>
+                            <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
+                              <input
+                                type="number" min="0" step="any"
+                                value={line._amtDraft}
+                                placeholder={lineAmount > 0 ? lineAmount.toFixed(2) : ''}
+                                onChange={e => setLineTotal(line._key, e.target.value)}
+                                style={cellInput}
+                              />
+                            </td>
+                            <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle', textAlign: 'right' }}>
+                              {lineAmount > 0 && (
+                                <>
+                                  <div style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600, paddingTop: 7 }}>
+                                    {lineAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </div>
-                                )}
-                              </>
-                            )}
-                          </td>
-                          <td style={{ padding: '6px 0', verticalAlign: 'top', textAlign: 'right' }}>
-                            <button onClick={() => removeBillLine(line._key)}
-                              style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', cursor: 'pointer', fontSize: 18, padding: '4px', lineHeight: 1 }}>×</button>
-                          </td>
-                        </tr>
+                                  {line.vat_inclusive && parseFloat(line.rate) > 0 && (
+                                    <div style={{ fontSize: 10, color: 'var(--theme-amber)', marginTop: 2 }}>
+                                      +VAT {(parseFloat(line.rate) * 0.13 * (parseFloat(line.qty) || 1)).toFixed(2)}
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </td>
+                            <td style={{ padding: '6px 0 4px', verticalAlign: 'middle', textAlign: 'right' }}>
+                              <button onClick={() => removeBillLine(line._key)}
+                                style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', cursor: 'pointer', fontSize: 18, padding: '4px', lineHeight: 1 }}>×</button>
+                            </td>
+                          </tr>
+                          <tr key={`${line._key}-sub`} style={{ borderBottom: '1px solid var(--theme-card)' }}>
+                            <td colSpan={6} style={{ padding: '0 8px 8px 0' }}>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <input type="date" value={line.expiry_date}
+                                  onChange={e => updateBillLine(line._key, 'expiry_date', e.target.value)}
+                                  style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text2)', outline: 'none', width: 170 }} />
+                                <input type="number" min="0" value={line.shelf_life} placeholder="Shelf life (days)"
+                                  onChange={e => updateBillLine(line._key, 'shelf_life', e.target.value)}
+                                  title="Enter days to auto-fill expiry date"
+                                  style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text2)', outline: 'none', width: 160, textAlign: 'right' }} />
+                              </div>
+                            </td>
+                          </tr>
+                        </>
                       )
                     })}
                   </tbody>
