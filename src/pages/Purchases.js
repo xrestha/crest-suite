@@ -595,15 +595,15 @@ export default function Purchases() {
                       <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px 0', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                         <Tip text="Select the item. Expiry date and shelf-life days appear below the dropdown." width={230}>Item *</Tip>
                       </th>
-                      <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 100 }}>Qty *</th>
-                      <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 120 }}>
-                        <Tip text="Enter the ex-VAT rate per unit (NetRate on the vendor bill). For VAT items the amount column will show the VAT-inclusive total." width={260}>Rate (NPR) *</Tip>
+                      <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 90 }}>Qty *</th>
+                      <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 115 }}>
+                        <Tip text="Enter the ex-VAT rate per unit. Toggle VAT below if this item attracts 13% VAT." width={250}>Rate (NPR) *</Tip>
                       </th>
-                      <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 120 }}>
+                      <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 115 }}>
+                        <Tip text="Enter total paid for this line — Rate is back-calculated automatically." width={230}>Total (NPR)</Tip>
+                      </th>
+                      <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 115 }}>
                         <Tip text="Amount = Qty × Rate. For VAT items: Qty × Rate × 1.13 (what you actually pay)." width={240}>Amount</Tip>
-                      </th>
-                      <th style={{ textAlign: 'center', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 50 }}>
-                        <Tip text="Tick if this item attracts 13% VAT. Enter the ex-VAT NetRate — the Amount column will show what you pay including VAT." width={250}>VAT</Tip>
                       </th>
                       <th style={{ width: 32 }}></th>
                     </tr>
@@ -647,38 +647,42 @@ export default function Purchases() {
                             <input type="number" min="0" step="any" value={line.rate} placeholder="0"
                               onChange={e => updateBillLine(line._key, 'rate', e.target.value)}
                               style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }} />
-                            {line.vat_inclusive && parseFloat(line.rate) > 0 && (
-                              <div style={{ fontSize: 10, color: 'var(--theme-amber)', textAlign: 'right', marginTop: 2 }}>
-                                +VAT: {(parseFloat(line.rate) * 0.13).toFixed(2)} → {(parseFloat(line.rate) * 1.13).toFixed(2)}
-                              </div>
-                            )}
-                            <div style={{ marginTop: 5 }}>
-                              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 3 }}>
-                                <Tip text="Enter the total amount you paid for this line. The Rate will be back-calculated automatically." width={220}>Total</Tip>
-                              </div>
-                              <input
-                                type="number" min="0" step="any"
-                                value={line._amtDraft}
-                                placeholder={lineAmount > 0 ? lineAmount.toFixed(2) : ''}
-                                onChange={e => setLineTotal(line._key, e.target.value)}
-                                style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }}
-                              />
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => updateBillLine(line._key, 'vat_inclusive', !line.vat_inclusive)}
+                              style={{
+                                marginTop: 5, width: '100%', cursor: 'pointer', fontFamily: 'inherit',
+                                background: line.vat_inclusive ? 'rgba(251,191,36,0.12)' : 'transparent',
+                                border: `1px solid ${line.vat_inclusive ? '#f59e0b' : 'var(--theme-border)'}`,
+                                borderRadius: 4, padding: '4px 0', fontSize: 11, fontWeight: line.vat_inclusive ? 700 : 400,
+                                color: line.vat_inclusive ? '#f59e0b' : 'var(--theme-text3)', letterSpacing: '0.04em',
+                              }}
+                            >
+                              {line.vat_inclusive ? '✓ VAT 13%' : '+ VAT'}
+                            </button>
+                          </td>
+                          <td style={{ padding: '6px 8px', verticalAlign: 'top' }}>
+                            <input
+                              type="number" min="0" step="any"
+                              value={line._amtDraft}
+                              placeholder={lineAmount > 0 ? lineAmount.toFixed(2) : ''}
+                              onChange={e => setLineTotal(line._key, e.target.value)}
+                              style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }}
+                            />
                           </td>
                           <td style={{ padding: '6px 8px', verticalAlign: 'top', textAlign: 'right' }}>
                             {lineAmount > 0 && (
                               <>
-                                <div style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600 }}>
+                                <div style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600, paddingTop: 7 }}>
                                   {lineAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
-                                {line.vat_inclusive && <div style={{ fontSize: 10, color: 'var(--theme-amber)', marginTop: 1 }}>incl. VAT</div>}
+                                {line.vat_inclusive && parseFloat(line.rate) > 0 && (
+                                  <div style={{ fontSize: 10, color: 'var(--theme-amber)', marginTop: 2 }}>
+                                    +VAT {(parseFloat(line.rate) * 0.13 * (parseFloat(line.qty) || 1)).toFixed(2)}
+                                  </div>
+                                )}
                               </>
                             )}
-                          </td>
-                          <td style={{ padding: '6px 8px', verticalAlign: 'top', textAlign: 'center' }}>
-                            <input type="checkbox" checked={line.vat_inclusive}
-                              onChange={e => updateBillLine(line._key, 'vat_inclusive', e.target.checked)}
-                              style={{ width: 16, height: 16, accentColor: 'var(--theme-accent)', cursor: 'pointer', marginTop: 10 }} />
                           </td>
                           <td style={{ padding: '6px 0', verticalAlign: 'top', textAlign: 'right' }}>
                             <button onClick={() => removeBillLine(line._key)}
