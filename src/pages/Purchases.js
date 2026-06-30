@@ -641,15 +641,14 @@ export default function Purchases() {
                               <button
                                 type="button"
                                 onClick={() => updateBillLine(line._key, 'vat_inclusive', !line.vat_inclusive)}
-                                style={{
-                                  marginTop: 4, width: '100%', cursor: 'pointer', fontFamily: 'inherit',
-                                  background: line.vat_inclusive ? 'rgba(251,191,36,0.12)' : 'transparent',
-                                  border: `1px solid ${line.vat_inclusive ? '#f59e0b' : 'var(--theme-border)'}`,
-                                  borderRadius: 4, padding: '4px 0', fontSize: 11, fontWeight: line.vat_inclusive ? 700 : 400,
-                                  color: line.vat_inclusive ? '#f59e0b' : 'var(--theme-text3)', letterSpacing: '0.04em',
-                                }}
+                                style={{ marginTop: 5, width: '100%', cursor: 'pointer', background: 'none', border: 'none', padding: '2px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                               >
-                                {line.vat_inclusive ? '✓ VAT 13%' : '+ VAT'}
+                                <div style={{ width: 34, height: 18, borderRadius: 9, background: line.vat_inclusive ? '#f59e0b' : 'var(--theme-border)', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}>
+                                  <div style={{ position: 'absolute', top: 3, left: line.vat_inclusive ? 17 : 3, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+                                </div>
+                                <span style={{ fontSize: 11, fontWeight: line.vat_inclusive ? 700 : 400, color: line.vat_inclusive ? '#f59e0b' : 'var(--theme-text3)', letterSpacing: '0.04em' }}>
+                                  {line.vat_inclusive ? 'VAT 13%' : 'VAT'}
+                                </span>
                               </button>
                             </td>
                             <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
