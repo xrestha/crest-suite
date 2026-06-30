@@ -58,6 +58,7 @@ const IMS_GROUPS = [
 const HR_ITEMS = [
   { to: '/hr/employees',  label: 'Employees',         icon: '👤' },
   { to: '/hr/pay-setup',  label: 'Pay Setup',         icon: '⚙'  },
+  { to: '/hr/roster',     label: 'Staff Roster',      icon: '📅' },
   { to: '/hr/attendance', label: 'Attendance',        icon: '🗓️' },
   { to: '/hr/leave',      label: 'Leave',             icon: '🏖️' },
   { to: '/hr/payroll',    label: 'Payroll',           icon: '💵' },

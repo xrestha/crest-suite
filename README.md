@@ -124,6 +124,66 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S173 — 2026-06-30 — Staff Roster + customizable shift types
+
+**New page — `src/modules/hr/roster/Roster.jsx`** (`/hr/roster`, HR module gate):
+
+**Roster Board tab:**
+- Weekly view (Sun–Sat, week starts Sunday) + Monthly view (full BS month, like Attendance Sheet)
+- Navigation: prev/next week or month with "Today / This Month" shortcut
+- Department filter dropdown (auto-hidden when no departments defined)
+- Grid: employees as rows, days as columns; Saturday columns highlighted amber
+- Each cell: click → `createPortal` dropdown to assign a shift or clear (Day Off); optimistic update on select
+- Weekly cell shows: shift name + time range + hours. Monthly cell shows: 2-char abbreviation
+- Footer row: total scheduled hours per day; right column: total hours per employee for the period
+- Print button (🖨 Print) → `window.print()`; A4 landscape, forced B&W (white background, #111 text, shift cells print as light gray `#e8e8e8`); print-only header shows period label + full shift legend with times
+
+**Shift Types tab (per-client, fully customizable):**
+- Table of shift templates: color (color picker), name, start time, end time, hours
+- Hours auto-hint computes from start/end in real time; enter manually for flexible (Split) shifts
+- Overnight shifts (e.g. Night 21:00–07:00) handled correctly (next-day wrap in `calcHours`)
+- Add / inline-edit / active toggle / delete
+- Default shifts seeded on first visit: Morning 7–3 (8h), Afternoon 1–9 (8h), Evening 5–1am (8h), Night 9–7am (8h), Full Day 9–6 (9h), Split (manual hours)
+
+**DB tables required (run in Supabase SQL editor):**
+```sql
+-- hr_shift_types: per-client shift templates
+CREATE TABLE hr_shift_types (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  name text NOT NULL, color text NOT NULL DEFAULT '#6B7280',
+  start_time text, end_time text, hours numeric,
+  sort_order int NOT NULL DEFAULT 0, active boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE hr_shift_types ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "client_access" ON hr_shift_types FOR ALL USING (
+  (SELECT role FROM profiles WHERE id = auth.uid()) = 'admin'
+  OR client_id = (SELECT client_id FROM profiles WHERE id = auth.uid()));
+GRANT ALL ON hr_shift_types TO authenticated;
+
+-- hr_roster: one row per employee per BS day
+CREATE TABLE hr_roster (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  employee_id uuid NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  shift_type_id uuid REFERENCES hr_shift_types(id) ON DELETE SET NULL,
+  bs_year int NOT NULL, bs_month int NOT NULL, bs_day int NOT NULL,
+  note text, created_at timestamptz DEFAULT now(),
+  UNIQUE (client_id, employee_id, bs_year, bs_month, bs_day)
+);
+ALTER TABLE hr_roster ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "client_access" ON hr_roster FOR ALL USING (
+  (SELECT role FROM profiles WHERE id = auth.uid()) = 'admin'
+  OR client_id = (SELECT client_id FROM profiles WHERE id = auth.uid()));
+GRANT ALL ON hr_roster TO authenticated;
+```
+
+**Other changes:**
+- `src/shared/constants/shiftTypes.js` — now superseded by DB-driven `hr_shift_types` (file kept but unused)
+- Route `/hr/roster` added to `src/App.js`
+- Nav entry "📅 Staff Roster" added between Employees and Attendance in `src/components/Layout.js`
+
 ### S172 — 2026-06-29 — Chart expand modals + daily trend 10-day window
 
 **New component — `src/components/ChartCard.js`:**
