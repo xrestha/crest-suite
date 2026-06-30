@@ -124,6 +124,41 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S178 — 2026-06-30 — Festival Allowance: TDS reconciliation with payroll YTD
+
+**Updated `src/modules/hr/festival/FestivalAllowance.jsx`:**
+
+**Core change — YTD-based TDS instead of salary × 12 estimate:**
+- `load()` now fetches all finalized payslips for the current FY (`hr_payslips` + `hr_payroll_runs!inner` + `monthly_periods!inner`) and builds a `ytdMap` (employee_id → `{ gross, ssf, months }`)
+- New `calcFestivalTds({ emp, amount, ytd, fyStart })` helper: projects annual income as `ytdGross + basic × remainingMonths`, deducts SSF + insurance caps (NPR 40k life / NPR 20k health), then applies `computeBonusTds()` at the resulting `annualTaxable`. Falls back to salary projection if no finalized payroll months exist.
+- Shows **"YTD"** badge on the TDS KPI card and column header when real payslip data was used; tooltip explains the source.
+
+**TDS saved to DB (new column):**
+- `hr_festival_allowances.tds integer not null default 0` — run SQL migration below
+- `buildRows()` includes computed `tds` in the upsert
+- `updateAmount()` recomputes + saves both `amount` and `tds` on blur
+- `updateTds()` allows manual TDS override (same pattern as PayrollRun); TDS input uses `key={r.tds}` so it re-mounts with the new computed value when amount changes
+
+**UI additions:**
+- TDS column is now an editable input (while draft) — allows CA override
+- New **Net** column in table = gross − TDS (the bank transfer amount)
+- KPI cards: TDS Withheld + Net Payout now reflect saved `r.tds` values from state
+- Bank export (Excel/CSV) now includes Gross, TDS, Net Transfer columns
+
+**Also fixed:** removed unused `fiscalYearOf` import from `src/modules/hr/overtime/Overtime.jsx` (caused ESLint build failure)
+
+**DB migration (run in Supabase SQL editor):**
+```sql
+alter table hr_festival_allowances
+  add column if not exists tds integer not null default 0;
+
+grant select, insert, update, delete on hr_festival_allowances to authenticated, anon;
+```
+
+Existing rows default to `tds = 0`; hit **Regenerate** on any existing festival run to compute and save accurate TDS.
+
+---
+
 ### S177 — 2026-06-30 — HR Dashboard
 
 **New page — `src/modules/hr/dashboard/HrDashboard.jsx`** (`/hr/dashboard`, HR module gate, top of HR sidebar):
