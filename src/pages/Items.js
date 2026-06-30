@@ -489,7 +489,7 @@ export default function Items() {
               </div>
               {form.purchase_qty && form.rate && (
                 <p style={{ fontSize: 12, color: 'var(--theme-accent)', margin: '10px 0 0' }}>
-                  Per {form.uom} rate: NPR {perUom(form.purchase_qty, form.rate)}
+                  Per {form.uom} rate: NPR {amtDraft ? form.rate : perUom(form.purchase_qty, form.rate)}
                 </p>
               )}
             </>
