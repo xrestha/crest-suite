@@ -278,10 +278,14 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
     try {
       await adminOp('deleteUser', { userId: user.id })
     } catch (err) {
-      // Don't delete the profile if the auth login survived — that would orphan it
-      // and keep the email locked. Surface the failure instead.
-      setUserError('Could not delete the login (email stays in use): ' + err.message)
-      return
+      const alreadyGone = /not found/i.test(err.message)
+      if (!alreadyGone) {
+        // Auth user still exists but deletion failed — don't remove the profile
+        // or the email stays locked with no way to clean it up.
+        setUserError('Could not delete the login (email stays in use): ' + err.message)
+        return
+      }
+      // Auth user was already deleted — fall through and clean up the orphaned profile
     }
     await supabase.from('profiles').delete().eq('id', user.id)
     setUserSuccess('✓ User deleted and email freed.')
