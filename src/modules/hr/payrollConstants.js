@@ -34,7 +34,8 @@ export function minRateFor(payBasis, employmentType) {
 
 // ── Attendance ────────────────────────────────────────────────────────────────
 export const STANDARD_HOURS_PER_DAY = 8     // Nepal Labour Act standard working day
-export const OT_MULTIPLIER          = 1.5   // overtime paid at 1.5× normal hourly rate
+export const OT_MULTIPLIER          = 1.5   // overtime paid at 1.5× normal hourly rate (weekday)
+export const OT_HOLIDAY_MULTIPLIER  = 2.0   // overtime on a gazetted public holiday (Nepal Labour Act)
 export const WEEKLY_OFF_WEEKDAY     = 6     // Saturday (JS Date.getDay(): 0=Sun … 6=Sat)
 
 export const ATTENDANCE_STATUSES = [

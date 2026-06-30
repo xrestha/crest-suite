@@ -106,7 +106,7 @@ Architecture: single React app, single Supabase project, feature flags per clien
 | Module | Status | Routes |
 |---|---|---|
 | Crest IMS | ✅ Live | All existing routes |
-| Crest HR | ✅ Live | `/hr/employees`, `/hr/pay-setup`, `/hr/attendance`, `/hr/leave`, `/hr/holidays`, `/hr/payroll`, `/hr/reports`, `/hr/festival`, `/hr/advances`, `/hr/gratuity`, `/hr/settlement`, `/hr/roster` |
+| Crest HR | ✅ Live | `/hr/employees`, `/hr/pay-setup`, `/hr/attendance`, `/hr/leave`, `/hr/holidays`, `/hr/overtime`, `/hr/payroll`, `/hr/reports`, `/hr/festival`, `/hr/advances`, `/hr/gratuity`, `/hr/settlement`, `/hr/roster` |
 | Crest POS | 🔲 Planned | — |
 
 **Suite pricing:**
@@ -123,6 +123,54 @@ Architecture: single React app, single Supabase project, feature flags per clien
 ---
 
 ## Session Log
+
+### S176 — 2026-06-30 — Overtime Management
+
+**New page — `src/modules/hr/overtime/Overtime.jsx`** (`/hr/overtime`, HR module gate):
+- Log OT entries per employee per BS date with an approval flow: Pending → Approved / Rejected
+- Two OT rates (Nepal Labour Act): Weekday = 1.5×, Public Holiday = 2×
+- Date auto-detects holiday type from `hr_holiday_calendar` — pre-selects "Public Holiday (2×)" when date matches a gazetted holiday
+- "Undo" button reverts Approved/Rejected entries back to Pending
+- Stat cards: Pending count, Approved count + total hours, Total OT hours approved
+- Status filter tabs: All / Pending / Approved / Rejected
+- Note on page: only Approved entries feed into payroll; Regenerate payroll after approving
+
+**Payroll integration (`src/modules/hr/payroll/`):**
+- `payrollConstants.js` — added `OT_HOLIDAY_MULTIPLIER = 2.0`
+- `payrollCompute.js` — refactored to accept `approvedOtEntries[]` as 6th param; entry OT computed at end: weekday hours × 1.5× + holiday hours × 2× of employee's hourly rate; stacks on top of attendance OT; backward-compatible (empty array = no change)
+- `PayrollRun.jsx` — `loadAll()` now accepts `bsYear, bsMonth`; fetches approved `hr_overtime_entries` for the period; passes per-employee entries to `computePayslip`
+
+**DB migration required:**
+```sql
+create table hr_overtime_entries (
+  id uuid default gen_random_uuid() primary key,
+  client_id uuid not null references clients(id) on delete cascade,
+  employee_id uuid not null references hr_employees(id) on delete cascade,
+  bs_year int not null,
+  bs_month int not null check (bs_month between 1 and 12),
+  bs_day int not null check (bs_day between 1 and 32),
+  ot_hours numeric not null check (ot_hours > 0),
+  ot_type text not null default 'weekday' check (ot_type in ('weekday', 'holiday')),
+  reason text,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  created_at timestamptz default now()
+);
+create index on hr_overtime_entries(client_id, bs_year, bs_month);
+create index on hr_overtime_entries(employee_id);
+alter table hr_overtime_entries enable row level security;
+create policy "client_rw" on hr_overtime_entries
+  using (
+    (select role from profiles where id = auth.uid()) = 'admin'
+    or client_id = (select client_id from profiles where id = auth.uid())
+  )
+  with check (
+    (select role from profiles where id = auth.uid()) = 'admin'
+    or client_id = (select client_id from profiles where id = auth.uid())
+  );
+grant select, insert, update, delete on hr_overtime_entries to authenticated, anon;
+```
+
+---
 
 ### S175 — 2026-06-30 — Holiday Calendar
 

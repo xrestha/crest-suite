@@ -57,6 +57,7 @@ import GratuityTracker from './modules/hr/gratuity/GratuityTracker'
 import FinalSettlement from './modules/hr/settlement/FinalSettlement'
 import Roster from './modules/hr/roster/Roster'
 import HolidayCalendar from './modules/hr/holidays/HolidayCalendar'
+import Overtime from './modules/hr/overtime/Overtime'
 import './components/Layout.css'
 
 export default function App() {
@@ -157,6 +158,7 @@ export default function App() {
               <Route path="/hr/settlement" element={<ModuleGate module="hr"><FinalSettlement /></ModuleGate>} />
               <Route path="/hr/roster"     element={<ModuleGate module="hr"><Roster /></ModuleGate>} />
               <Route path="/hr/holidays"   element={<ModuleGate module="hr"><HolidayCalendar /></ModuleGate>} />
+              <Route path="/hr/overtime"   element={<ModuleGate module="hr"><Overtime /></ModuleGate>} />
 
               {/* Admin only */}
               <Route path="/admin/clients"

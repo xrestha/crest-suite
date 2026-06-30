@@ -62,6 +62,7 @@ const HR_ITEMS = [
   { to: '/hr/attendance', label: 'Attendance',        icon: '🗓️' },
   { to: '/hr/leave',      label: 'Leave',             icon: '🏖️' },
   { to: '/hr/holidays',   label: 'Holiday Calendar',  icon: '📆' },
+  { to: '/hr/overtime',   label: 'Overtime',          icon: '⏱'  },
   { to: '/hr/payroll',    label: 'Payroll',           icon: '💵' },
   { to: '/hr/reports',    label: 'HR Reports',        icon: '📊' },
   { to: '/hr/festival',   label: 'Festival Allowance', icon: '🎉' },

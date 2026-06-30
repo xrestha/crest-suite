@@ -23,6 +23,7 @@ export default function PayrollRun() {
   const [employees,  setEmployees]  = useState([])
   const [components, setComponents] = useState([])
   const [attendance, setAttendance] = useState([])
+  const [otEntries,  setOtEntries]  = useState([])
   const [loading,    setLoading]    = useState(true)
   const [busy,       setBusy]       = useState(false)
   const [msg,        setMsg]        = useState('')
@@ -39,23 +40,26 @@ export default function PayrollRun() {
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       setPeriods(p || [])
       const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
-      if (open) { setPeriod(open); await loadAll(open.id) }
+      if (open) { setPeriod(open); await loadAll(open.id, open.bs_year, open.bs_month) }
       setLoading(false)
     }
     init()
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadAll(periodId) {
-    const [{ data: runRow }, { data: emps }, { data: comps }, { data: att }] = await Promise.all([
+  async function loadAll(periodId, bsYear, bsMonth) {
+    const [{ data: runRow }, { data: emps }, { data: comps }, { data: att }, { data: ot }] = await Promise.all([
       supabase.from('hr_payroll_runs').select('*').eq('client_id', clientId).eq('period_id', periodId).maybeSingle(),
       supabase.from('hr_employees').select('id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status')
         .eq('client_id', clientId).in('status', ['active', 'probation']).order('full_name'),
       supabase.from('hr_salary_components').select('*').eq('client_id', clientId),
       supabase.from('hr_attendance').select('*').eq('period_id', periodId),
+      supabase.from('hr_overtime_entries').select('employee_id, ot_hours, ot_type')
+        .eq('client_id', clientId).eq('bs_year', bsYear).eq('bs_month', bsMonth).eq('status', 'approved'),
     ])
     setEmployees(emps || [])
     setComponents(comps || [])
     setAttendance(att || [])
+    setOtEntries(ot || [])
     setRun(runRow || null)
     if (runRow) {
       const { data: slips } = await supabase.from('hr_payslips').select('*').eq('run_id', runRow.id)
@@ -68,7 +72,7 @@ export default function PayrollRun() {
   async function handlePeriodChange(id) {
     const p = periods.find(x => x.id === id); if (!p) return
     setPeriod(p); setMsg(''); setLoading(true)
-    await loadAll(id); setLoading(false)
+    await loadAll(id, p.bs_year, p.bs_month); setLoading(false)
   }
 
   // Year-to-date taxable per employee: sum of (gross − SSF) and tds from PRIOR
@@ -97,9 +101,10 @@ export default function PayrollRun() {
 
   function buildRows(runId, ytdMap) {
     return employees.map(emp => {
-      const comps = components.filter(c => c.employee_id === emp.id)
-      const att   = attendance.filter(a => a.employee_id === emp.id)
-      const slip  = computePayslip(emp, comps, att, period, 0)
+      const comps      = components.filter(c => c.employee_id === emp.id)
+      const att        = attendance.filter(a => a.employee_id === emp.id)
+      const empOtEntries = otEntries.filter(e => e.employee_id === emp.id)
+      const slip       = computePayslip(emp, comps, att, period, 0, empOtEntries)
       const isSsf    = !!(emp.ssf_enrolled)
       const isMarried = emp.marital_status === 'married'
       const ytd   = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0 }
@@ -141,7 +146,7 @@ export default function PayrollRun() {
     await supabase.from('hr_payslips').delete().eq('run_id', run.id)
     const { error } = await supabase.from('hr_payslips').insert(buildRows(run.id, ytdMap))
     if (error) { setMsg('error:' + error.message); setBusy(false); return }
-    await loadAll(period.id)
+    await loadAll(period.id, period.bs_year, period.bs_month)
     setMsg('ok:Recomputed'); setBusy(false)
   }
 
@@ -158,7 +163,7 @@ export default function PayrollRun() {
     if (!window.confirm('Finalize this payroll? Payslips will be locked as a permanent record.')) return
     setBusy(true)
     await supabase.from('hr_payroll_runs').update({ status: 'finalized', finalized_at: new Date().toISOString() }).eq('id', run.id)
-    await loadAll(period.id); setMsg('ok:Finalized'); setBusy(false)
+    await loadAll(period.id, period.bs_year, period.bs_month); setMsg('ok:Finalized'); setBusy(false)
   }
 
   async function reopen() {
@@ -166,7 +171,7 @@ export default function PayrollRun() {
     if (!window.confirm('Reopen this payroll for editing? It will return to draft.')) return
     setBusy(true)
     await supabase.from('hr_payroll_runs').update({ status: 'draft', finalized_at: null }).eq('id', run.id)
-    await loadAll(period.id); setMsg('ok:Reopened'); setBusy(false)
+    await loadAll(period.id, period.bs_year, period.bs_month); setMsg('ok:Reopened'); setBusy(false)
   }
 
   function printPayslip(slip, emp) {

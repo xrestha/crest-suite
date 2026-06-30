@@ -241,6 +241,18 @@ const HR_FEATURES = [
     ]
   },
   {
+    icon: '⏱', name: 'Overtime',
+    guide: 'Log, approve, and track employee overtime — approved entries feed directly into the payroll run at the correct rate. Two rates apply under the Nepal Labour Act: Weekday OT at 1.5× the employee\'s normal hourly rate, and Public Holiday OT at 2×. When you log an OT entry and select the date, the system automatically detects whether that date is in your Holiday Calendar (gazetted public holidays) and pre-selects the correct type. Each entry goes through an approval flow: Pending → Approved (or Rejected). Only Approved entries are included when you Generate or Regenerate payroll — so you can log everything and approve only what is confirmed. An "Undo" button on any approved or rejected entry returns it to Pending.',
+    tips: [
+      'Log OT entries first, then approve after confirming with the employee and manager — only Approved entries flow into payroll',
+      'Date auto-detects holiday type: if the date matches a gazetted public holiday in HR → Holiday Calendar, "Public Holiday (2×)" is pre-selected — you can still override manually',
+      'After approving new OT entries, go to Payroll → Regenerate to include them in the current payroll run',
+      'Attendance OT (captured in Attendance Sheet → OT Hours column) and Overtime entries are both included in payroll — they stack. Use OT entries for the formal approval trail; attendance OT for quick daily capture.',
+      'The Pending Approval stat card is clickable — click it to filter the list to pending entries only',
+      'Rejected entries are kept for the audit trail — they are NOT included in payroll and cannot be undone without clicking Undo first',
+    ]
+  },
+  {
     icon: '💵', name: 'Payroll',
     guide: 'Runs monthly payroll for a BS period by combining each employee\'s salary structure with their attendance. Click Generate Payroll to create a draft register: monthly staff get basic + allowances minus SSF, unpaid-absence deductions, and other deductions; daily/hourly staff are paid for actual days/hours worked; everyone gets overtime at 1.5×. Edit TDS (income tax) inline while the run is a draft, Regenerate to pull the latest salary and attendance, then Finalize to lock the payslips as a permanent record. Each employee has a printable payslip, and the whole register exports to Excel.',
     tips: ['Mark attendance for the period first — payroll reads present days, hours, and overtime from it', 'A run is Draft until you Finalize it — finalized payslips are frozen even if you later change a salary', 'SSF (11% employee / 20% employer) is applied only to employees who have an SSF number on file', 'Unpaid-absence deduction = basic ÷ days in the BS month × unpaid days', 'TDS (income tax) is computed automatically from the fiscal-year tax slabs using year-to-date projection — finalize earlier months first so each month builds on the last; you can still override a value while the run is a draft', 'SSF contributors get the 1% first-slab social security tax waived, so most staff under roughly NPR 83,000/month gross pay zero income tax', 'Use the Payslip button on any row to view and print an individual payslip']
