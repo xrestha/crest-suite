@@ -417,6 +417,21 @@ export default function Items() {
                   </select>
                 </div>
                 <div className="form-field">
+                  <label>
+                    <Tip width={260} text="The usable percentage of an ingredient after trimming, cleaning, or cooking. e.g. Whole chicken = 70% (bones & skin removed), Spinach = 60% (wilts down), Onion = 85% (skin & root removed). Leave at 100 if you buy and use in the same form.">
+                      Yield %
+                    </Tip>
+                  </label>
+                  <input
+                    type="number"
+                    min="1" max="100"
+                    value={form.yield_pct}
+                    onChange={e => setForm(f({ yield_pct: e.target.value }))}
+                    placeholder="100"
+                  />
+                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Usable % after trim/prep. 100 = no loss</span>
+                </div>
+                <div className="form-field">
                   <label>UOM (base unit)</label>
                   <select value={form.uom} onChange={e => setForm(f({ uom: e.target.value }))}>
                     {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
@@ -465,21 +480,6 @@ export default function Items() {
                     }
                     onChange={e => setTotalAmount(e.target.value)}
                   />
-                </div>
-                <div className="form-field">
-                  <label>
-                    <Tip width={260} text="The usable percentage of an ingredient after trimming, cleaning, or cooking. e.g. Whole chicken = 70% (bones & skin removed), Spinach = 60% (wilts down), Onion = 85% (skin & root removed). Leave at 100 if you buy and use in the same form.">
-                      Yield %
-                    </Tip>
-                  </label>
-                  <input
-                    type="number"
-                    min="1" max="100"
-                    value={form.yield_pct}
-                    onChange={e => setForm(f({ yield_pct: e.target.value }))}
-                    placeholder="100"
-                  />
-                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Usable % after trim/prep. 100 = no loss</span>
                 </div>
               </div>
               {form.purchase_qty && form.rate && (
