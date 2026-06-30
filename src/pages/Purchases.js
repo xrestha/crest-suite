@@ -754,7 +754,7 @@ export default function Purchases() {
               <div className="form-actions" style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
                 <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingGroupId(null) }} style={{ justifySelf: 'start' }}>Cancel</button>
                 <button className="btn" onClick={addBillLine}
-                  style={{ background: 'var(--theme-amber)', color: '#fff', borderColor: 'var(--theme-amber)' }}>
+                  style={{ background: 'var(--theme-amber)', color: '#000', borderColor: 'var(--theme-amber)' }}>
                   + Add Item
                 </button>
                 <button className="btn btn-primary" onClick={saveBill} disabled={saving} style={{ justifySelf: 'end' }}>
