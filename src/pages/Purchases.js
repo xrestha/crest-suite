@@ -652,20 +652,18 @@ export default function Purchases() {
                                 +VAT: {(parseFloat(line.rate) * 0.13).toFixed(2)} → {(parseFloat(line.rate) * 1.13).toFixed(2)}
                               </div>
                             )}
-                            {parseFloat(line.qty) > 0 && (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                                <span style={{ fontSize: 10, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>
-                                  <Tip text="Enter the total amount you paid for this line. The Rate will be back-calculated automatically." width={220}>Total</Tip>
-                                </span>
-                                <input
-                                  type="number" min="0" step="any"
-                                  value={line._amtDraft}
-                                  placeholder={lineAmount > 0 ? lineAmount.toFixed(2) : ''}
-                                  onChange={e => setLineTotal(line._key, e.target.value)}
-                                  style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 4, padding: '3px 6px', fontSize: 11, color: 'var(--theme-text2)', outline: 'none', flex: 1, textAlign: 'right', minWidth: 0 }}
-                                />
+                            <div style={{ marginTop: 5 }}>
+                              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 3 }}>
+                                <Tip text="Enter the total amount you paid for this line. The Rate will be back-calculated automatically." width={220}>Total</Tip>
                               </div>
-                            )}
+                              <input
+                                type="number" min="0" step="any"
+                                value={line._amtDraft}
+                                placeholder={lineAmount > 0 ? lineAmount.toFixed(2) : ''}
+                                onChange={e => setLineTotal(line._key, e.target.value)}
+                                style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }}
+                              />
+                            </div>
                           </td>
                           <td style={{ padding: '6px 8px', verticalAlign: 'top', textAlign: 'right' }}>
                             {lineAmount > 0 && (

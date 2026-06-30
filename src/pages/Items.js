@@ -450,28 +450,21 @@ export default function Items() {
                     onChange={e => { setAmtDraft(''); setForm(f({ rate: e.target.value })) }}
                     placeholder="500"
                   />
-                  {parseFloat(form.purchase_qty) > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
-                      <span style={{ fontSize: 11, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>
-                        <Tip text="Enter the total amount paid. Rate will be back-calculated as Total ÷ Purchase Qty." width={220}>Total</Tip>
-                      </span>
-                      <input
-                        type="number" min="0" step="any"
-                        value={amtDraft}
-                        placeholder={
-                          parseFloat(form.rate) > 0 && parseFloat(form.purchase_qty) > 0
-                            ? (parseFloat(form.rate) * parseFloat(form.purchase_qty)).toFixed(2)
-                            : ''
-                        }
-                        onChange={e => setTotalAmount(e.target.value)}
-                        style={{
-                          background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-                          borderRadius: 4, padding: '4px 7px', fontSize: 12,
-                          color: 'var(--theme-text2)', outline: 'none', width: '100%', textAlign: 'right'
-                        }}
-                      />
-                    </div>
-                  )}
+                  <div style={{ marginTop: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
+                      <Tip text="Enter the total amount paid. Rate will be back-calculated as Total ÷ Purchase Qty." width={220}>Total (NPR)</Tip>
+                    </span>
+                    <input
+                      type="number" min="0" step="any"
+                      value={amtDraft}
+                      placeholder={
+                        parseFloat(form.rate) > 0 && parseFloat(form.purchase_qty) > 0
+                          ? (parseFloat(form.rate) * parseFloat(form.purchase_qty)).toFixed(2)
+                          : ''
+                      }
+                      onChange={e => setTotalAmount(e.target.value)}
+                    />
+                  </div>
                 </div>
                 <div className="form-field">
                   <label>
