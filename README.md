@@ -106,7 +106,7 @@ Architecture: single React app, single Supabase project, feature flags per clien
 | Module | Status | Routes |
 |---|---|---|
 | Crest IMS | ✅ Live | All existing routes |
-| Crest HR | 🔨 Building | `/hr/employees`, `/hr/salary`, `/hr/attendance`, `/hr/leave`, `/hr/payroll`, `/hr/reports`, `/hr/festival`, `/hr/advances`, `/hr/gratuity`, `/hr/settlement` |
+| Crest HR | ✅ Live | `/hr/employees`, `/hr/salary`, `/hr/attendance`, `/hr/leave`, `/hr/payroll`, `/hr/reports`, `/hr/festival`, `/hr/advances`, `/hr/gratuity`, `/hr/settlement`, `/hr/roster` |
 | Crest POS | 🔲 Planned | — |
 
 **Suite pricing:**
@@ -123,6 +123,40 @@ Architecture: single React app, single Supabase project, feature flags per clien
 ---
 
 ## Session Log
+
+### S174 — 2026-06-30 — Monthly roster split, duplicate shift fix, employee joining print form
+
+**Monthly roster — two-half split (`src/modules/hr/roster/Roster.jsx`):**
+- Monthly board now renders two stacked tables: days 1–16 (top) + days 17–end (bottom)
+- Fixes overflow — all 28–32 BS days visible on screen and in print without horizontal scroll
+- Weekly view unchanged (single-table). "Hrs" total column appears only on second-half table (monthly total = sum over all days via full `columns` array)
+- `colChunks` computed from `columns` before render; `isLast` flag controls Hrs th/td and colgroup extra col
+
+**Duplicate shift types auto-heal (`src/modules/hr/roster/Roster.jsx`):**
+- Bug: React 18 Strict Mode double-invokes effects in dev → two concurrent seed inserts when `hr_shift_types` is empty → 12 rows (6 duplicates)
+- Fix: on load, deduplicate by `name` (keep first per name), delete extras from DB via `.delete().in('id', toDelete)`
+- Self-healing: runs once on next page load; no migration or manual cleanup needed
+
+**Employee Joining Form — new printable physical form:**
+- New file: `src/modules/hr/employees/EmployeeJoiningForm.jsx`
+- Button: "🖨 Print Joining Form" in Employees page header; opens full-screen preview → Print / Save PDF → `window.print()`
+- A4 portrait, forced B&W via `@media print`; dark theme fully overridden
+- 7 sections matching the Add Employee tabs:
+  1. **Personal** — Employee Code, Full Name, Gender (checkboxes), DOB (BS+AD), NID/Citizenship, PAN (if applicable), Phone, Email, Emergency Contact — with passport photo box (3.5×4.5 cm)
+  2. **Employment** — Designation, Department, Employment Type (checkboxes), Join Date (BS+AD), Contract End Date, Reporting Supervisor, Status checkboxes, Notes
+  3. **Address** — Permanent: Province (all 7 checkboxes), District, Municipality/VDC, Ward, Tole + same-as-permanent tick + Current Address (same fields)
+  4. **Family** — Marital Status (checkboxes), No. of Children, Spouse Name, Father's Name, Mother's Name, Grandfather's Name
+  5. **Nominee** — Nominee Name, Relationship, Phone (for SSF/Gratuity/Final Settlement)
+  6. **Bank & SSF** — Bank Name, Branch, Account No., Account Holder Name, SSF No., SSF Enrolled? (Yes/No checkboxes)
+  7. **Pay Details** — Pay Basis (Monthly/Daily/Hourly checkboxes), Basic Salary/Rate
+  8. **Declaration** — pre-printed declaration text + 3 signature blocks (Employee / HR & Admin / Authorised By) each with date line
+- Org name reads from `profile.clients.name` (client user) or `adminViewClientName` (admin viewing-as-client) — updates when client is switched
+- Retirement date excluded (HR computes from DOB via ↻ Age 60 button; not employee-supplied)
+- NID / Citizenship No. appears before PAN No. (PAN marked "if applicable")
+
+**No DB migration required for S174.**
+
+---
 
 ### S173 — 2026-06-30 — Staff Roster + customizable shift types
 
