@@ -1488,7 +1488,7 @@ export default function AdminClients() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {clients.map(c => {
+          {clients.filter(c => !c.is_trial).map(c => {
             const rel      = relativeTime(lastSeenMap[c.id])
             const isRecent = lastSeenMap[c.id] && Date.now() - new Date(lastSeenMap[c.id]).getTime() < 86400000
             const lastUser = lastUserMap[c.id]
