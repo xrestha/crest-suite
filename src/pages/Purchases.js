@@ -752,7 +752,7 @@ export default function Purchases() {
 
               {error && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
               <div className="form-actions" style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
-                <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingGroupId(null) }}>Cancel</button>
+                <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditingGroupId(null) }} style={{ justifySelf: 'start' }}>Cancel</button>
                 <button className="btn" onClick={addBillLine}
                   style={{ background: 'var(--theme-amber)', color: '#fff', borderColor: 'var(--theme-amber)' }}>
                   + Add Item
