@@ -124,6 +124,18 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S183 — 2026-06-30 — Items + Purchases: UI polish — Total field, VAT toggle, layout cleanup
+
+**Item Master (`src/pages/Items.js`):**
+- Total (NPR) always visible (removed qty > 0 condition); promoted to standalone grid field beside Rate
+- Form field order changed: Item Name → Category → Yield % → UOM → Purchase Qty → Rate → Total
+- Per-UOM rate display: dynamic decimal precision — up to 6 dp for values < 0.01 (fixes "NPR 0.00" for small rates)
+
+**Add Purchase Bill (`src/pages/Purchases.js`):**
+- Total (NPR) always visible (removed qty > 0 condition); given its own column
+- VAT checkbox replaced with a pill toggle button below Rate (`+ VAT` / `✓ VAT 13%`); VAT column removed
+- Each bill line split into two `<tr>` rows: main inputs on row 1; Expiry date + Shelf life on row 2 — same input height/font as all other fields
+
 ### S182 — 2026-06-30 — Item Master: Total-amount back-calculate Rate
 
 **Add/Edit Item modal — "Total" sub-input below Rate field:**
