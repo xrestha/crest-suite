@@ -485,14 +485,14 @@ export default function PosOrders() {
 
           <button
             className="btn btn-primary"
-            style={{ width: '100%', padding: '12px 0', fontSize: 15, marginBottom: 10 }}
+            style={{ width: '100%', padding: '12px 0', fontSize: 15, marginBottom: 10, textAlign: 'center' }}
             onClick={confirmCovers}
           >
             Open Order
           </button>
           <button
             className="btn btn-ghost"
-            style={{ width: '100%', padding: '8px 0', fontSize: 13 }}
+            style={{ width: '100%', padding: '8px 0', fontSize: 13, textAlign: 'center' }}
             onClick={() => { setCoversModal(false); setPendingTable(null) }}
           >
             Cancel
