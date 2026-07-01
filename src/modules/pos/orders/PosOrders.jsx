@@ -411,7 +411,7 @@ export default function PosOrders() {
 
             <button
               className="btn btn-primary"
-              style={{ width: '100%', padding: '12px 0', fontSize: 16, marginBottom: 8 }}
+              style={{ width: '100%', padding: '12px 0', fontSize: 16, marginBottom: 8, textAlign: 'center' }}
               onClick={saveOrder}
               disabled={saving || orderItems.length === 0}
             >
