@@ -476,7 +476,7 @@ export default function Layout() {
             </>
           )}
 
-          {clientModules.pos && (!isAdmin || adminViewClientId) && (isAdmin || posRole) && (
+          {clientModules.pos && (!isAdmin || adminViewClientId) && (isAdmin || posRole || isOwner) && (
             <>
               <div className="sidebar-divider" />
               {POS_GROUPS.map(group => renderGroup({
