@@ -33,9 +33,9 @@ export default function PosOrders() {
   const [floorLoad,   setFloorLoad]   = useState(true)
 
   /* ── covers modal (new table only) ── */
-  const [coversModal,   setCoversModal]   = useState(false)
-  const [pendingTable,  setPendingTable]  = useState(null)
-  const [pendingCovers, setPendingCovers] = useState(1)
+  const [coversModal,    setCoversModal]    = useState(false)
+  const [pendingTable,   setPendingTable]   = useState(null)
+  const [pendingCoversStr, setPendingCoversStr] = useState('')
 
   /* ── order screen ── */
   const [activeTable, setActiveTable] = useState(null)
@@ -112,16 +112,26 @@ export default function PosOrders() {
     } else {
       // New order — ask for covers first
       setPendingTable(table)
-      setPendingCovers(1)
+      setPendingCoversStr('')
       setCoversModal(true)
       loadMenu()
     }
   }
 
+  function numpadPress(d) {
+    setPendingCoversStr(prev => {
+      const next = prev + d
+      return parseInt(next) > 99 ? prev : next.replace(/^0+(\d)/, '$1')
+    })
+  }
+  function numpadBackspace() { setPendingCoversStr(prev => prev.slice(0, -1)) }
+  function numpadClear()     { setPendingCoversStr('') }
+
   function confirmCovers() {
+    const n = Math.max(1, parseInt(pendingCoversStr) || 1)
     setActiveTable(pendingTable)
     setOrderId(null); setOrderItems([])
-    setCovers(pendingCovers)
+    setCovers(n)
     setMsg(''); setCoversModal(false); setPendingTable(null)
     setView('order')
   }
@@ -451,19 +461,27 @@ export default function PosOrders() {
             {pendingTable.capacity} seat{pendingTable.capacity !== 1 ? 's' : ''}
           </p>
 
-          <p style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 600, color: 'var(--theme-text2)' }}>How many covers?</p>
+          <p style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 600, color: 'var(--theme-text2)' }}>How many covers?</p>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20, marginBottom: 28 }}>
-            <button
-              onClick={() => setPendingCovers(c => Math.max(1, c - 1))}
-              style={{ width: 44, height: 44, borderRadius: 10, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text1)', fontSize: 24, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >−</button>
-            <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--theme-text1)', minWidth: 48 }}>{pendingCovers}</span>
-            <button
-              onClick={() => setPendingCovers(c => c + 1)}
-              style={{ width: 44, height: 44, borderRadius: 10, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text1)', fontSize: 24, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >+</button>
+          {/* Display */}
+          <div style={{ fontSize: 48, fontWeight: 700, color: pendingCoversStr ? 'var(--theme-text1)' : 'var(--theme-text3)', letterSpacing: 4, marginBottom: 16, minHeight: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {pendingCoversStr || '—'}
           </div>
+
+          {/* Numpad */}
+          {(() => {
+            const pad = { width: 72, height: 52, borderRadius: 10, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text1)', fontSize: 20, fontWeight: 600, cursor: 'pointer' }
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 20 }}>
+                {[1,2,3,4,5,6,7,8,9].map(d => (
+                  <button key={d} onClick={() => numpadPress(String(d))} style={pad}>{d}</button>
+                ))}
+                <button onClick={numpadClear} style={{ ...pad, color: 'var(--theme-red)', fontSize: 14, fontWeight: 700 }}>CLR</button>
+                <button onClick={() => numpadPress('0')} style={pad}>0</button>
+                <button onClick={numpadBackspace} style={{ ...pad, fontSize: 18 }}>⌫</button>
+              </div>
+            )
+          })()}
 
           <button
             className="btn btn-primary"
