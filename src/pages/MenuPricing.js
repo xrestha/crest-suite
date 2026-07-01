@@ -26,24 +26,36 @@ export default function MenuPricing() {
   const load = useCallback(async () => {
     if (!effectiveClientId) return
     setLoading(true)
-    const { data } = await supabase
+
+    const { data: recipeData } = await supabase
       .from('recipes')
-      .select('id, name, category, selling_price, vat_rate, recipe_ingredients(qty_per_portion, items(per_uom_rate, yield_pct))')
+      .select('id, name, category, selling_price, vat_rate')
       .eq('client_id', effectiveClientId)
       .eq('is_active', true)
       .neq('category', 'Sub-Recipe')
       .order('name')
 
-    const processed = (data || []).map(r => {
-      const cost = (r.recipe_ingredients || []).reduce((sum, ri) => {
-        const rate = parseFloat(ri.items?.per_uom_rate || 0)
-        const yf   = (parseFloat(ri.items?.yield_pct) || 100) / 100
-        return sum + (parseFloat(ri.qty_per_portion || 0) / yf) * rate
-      }, 0)
-      const vat       = vatOf(r)
-      const exVat     = parseFloat(r.selling_price || 0)
-      const inclVat   = exVat > 0 ? exVat * (1 + vat) : 0
-      const fcPct     = exVat > 0 ? (cost / exVat) * 100 : 0
+    const recipeIds = (recipeData || []).map(r => r.id)
+    const { data: ingData } = recipeIds.length > 0
+      ? await supabase
+          .from('recipe_ingredients')
+          .select('recipe_id, qty_per_portion, items(per_uom_rate, yield_pct)')
+          .in('recipe_id', recipeIds)
+      : { data: [] }
+
+    const costMap = {}
+    for (const ri of (ingData || [])) {
+      const rate = parseFloat(ri.items?.per_uom_rate || 0)
+      const yf   = (parseFloat(ri.items?.yield_pct) || 100) / 100
+      costMap[ri.recipe_id] = (costMap[ri.recipe_id] || 0) + (parseFloat(ri.qty_per_portion || 0) / yf) * rate
+    }
+
+    const processed = (recipeData || []).map(r => {
+      const cost    = costMap[r.id] || 0
+      const vat     = vatOf(r)
+      const exVat   = parseFloat(r.selling_price || 0)
+      const inclVat = exVat > 0 ? exVat * (1 + vat) : 0
+      const fcPct   = exVat > 0 ? (cost / exVat) * 100 : 0
       return { ...r, cost, vat, exVat, inclVat, fcPct }
     })
 
