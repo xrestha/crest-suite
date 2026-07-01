@@ -491,8 +491,8 @@ export default function PosOrders() {
             Open Order
           </button>
           <button
-            className="btn btn-ghost"
-            style={{ width: '100%', padding: '8px 0', fontSize: 13, justifyContent: 'center' }}
+            className="btn btn-danger"
+            style={{ width: '100%', padding: '12px 0', fontSize: 15, justifyContent: 'center' }}
             onClick={() => { setCoversModal(false); setPendingTable(null) }}
           >
             Cancel
