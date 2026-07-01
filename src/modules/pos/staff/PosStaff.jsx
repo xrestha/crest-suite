@@ -49,13 +49,38 @@ export default function PosStaff() {
   const canEdit        = isAdmin || hasPosAccess('manager')
   const effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
 
-  useEffect(() => { if (clientId) { load(); loadRoles() } }, [clientId]) // eslint-disable-line
+  useEffect(() => { if (clientId) init() }, [clientId]) // eslint-disable-line
+
+  async function init() {
+    setLoading(true)
+    const [{ data: staffData }, { data: settingsData }] = await Promise.all([
+      supabase.rpc('get_pos_staff_list', { p_client_id: clientId }),
+      supabase.from('settings').select('pos_custom_roles').eq('client_id', clientId).single(),
+    ])
+    const roles = settingsData?.pos_custom_roles?.length ? settingsData.pos_custom_roles : DEFAULT_ROLES
+    if (settingsData?.pos_custom_roles?.length) setCustomRoles(settingsData.pos_custom_roles)
+    const staffList = staffData || []
+    setStaff(staffList)
+    setLoading(false)
+
+    // Silently fix any pos_role values that don't match the job title's configured level
+    const mismatched = staffList.filter(p => {
+      if (!p.pos_job_title) return false
+      const expected = roles.find(r => r.label === p.pos_job_title)?.level
+      return expected && expected !== p.pos_role
+    })
+    for (const p of mismatched) {
+      const level = roles.find(r => r.label === p.pos_job_title)?.level
+      const { error } = await supabase.functions.invoke('admin-user-ops', {
+        body: { action: 'update_pos_role', userId: p.id, pos_role: level, pos_job_title: p.pos_job_title },
+      })
+      if (!error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, pos_role: level } : s))
+    }
+  }
 
   async function load() {
-    setLoading(true)
     const { data } = await supabase.rpc('get_pos_staff_list', { p_client_id: clientId })
     setStaff(data || [])
-    setLoading(false)
   }
 
   async function loadRoles() {
