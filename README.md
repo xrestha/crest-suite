@@ -125,6 +125,26 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S201 — 2026-07-01 — Comprehensive tooltip audit + Help.js missing entries
+
+Full sweep of all pages and HR/POS modules for missing `<Tip>` tooltips. All gaps filled. No DB changes.
+
+**Tooltip additions:**
+- **Vendors.js** — Code column, PAN/VAT No. column, Status column; form: Contact Person, PAN/VAT No. labels
+- **Settings.js** — FC Warning %, FC Critical %, Expiry Warning, Variance Flag % thresholds; Item/Vendor/Sub-Recipe Code Prefix labels; VAT Registration Number
+- **AuditLog.js** — all 6 table headers: Time, Client, User, Action, Area, Summary
+- **Periods.js** — BS Year and BS Month form labels; BS Year, BS Month, Status, Created table headers
+- **Sales.js** — Category, Selling Price, Total Qty Sold, Period Revenue stat card; day-column headers
+- **AdminClients.js** — Billing Cycle, Subscription end date per module, FC Warning/Critical %, Expiry Warning (days), Variance Flag %, VAT Number, Location and Contact Person (Add + Edit forms)
+- **EmployeeList.jsx** — Code, Supervisor, and Type column headers
+
+**Help.js additions:**
+- **Roster** entry added to HR module guide (planning vs attendance, shift types, export)
+- **POS Login** entry added to POS module guide (PIN login screen, Owner button, role requirement)
+- **Audit Log** entry added in a new admin-only "Admin Tools" section (only rendered for `isAdmin`)
+
+---
+
 ### S200 — 2026-07-01 — Menu Pricing page + POS toggle
 
 **New page: `/menu-pricing` (all plans, feature key `menu_pricing`)**
