@@ -125,6 +125,65 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S197 — 2026-07-01 — Owner Access, Custom Roles, PIN Login UI, Staff CRUD (complete)
+
+**Access model:**
+- Owner (client user with no `pos_role`) logs in via `/login` (email+password)
+- All POS staff (including managers) log in via PIN on `/pos/login`
+- `isOwner` exposed from AuthContext; owner gets `posRole = 'manager'` for access control, shows "Owner" label in sidebar footer
+
+**Custom role names per client (`Manage Roles`):**
+- `pos_custom_roles jsonb DEFAULT '[]'` added to `settings` table
+- Manager opens "Manage Roles" modal → defines custom names (e.g. Cashier, Barista) mapping to permission levels (staff/supervisor/manager)
+- `effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES` — falls back to Staff/Supervisor/Manager if none defined
+- `pos_job_title text` on `profiles` stores the selected label; `pos_role` stores the permission level
+- Role updates go through `update_pos_role` edge function action (service role — no RLS issues)
+
+**Staff list via SECURITY DEFINER RPC (`get_pos_staff_list`):**
+- Direct `profiles` SELECT blocked for owner JWT (no same-client SELECT policy; adding one caused infinite recursion since policy subquery re-entered itself)
+- Fix: `get_pos_staff_list(p_client_id uuid)` SECURITY DEFINER function — verifies caller is admin or same-client, then reads profiles bypassing RLS
+- Returns `id, full_name, pos_role, pos_job_title, last_seen_at` filtered by `pos_email IS NOT NULL`
+
+**PIN login UI improvements:**
+- Circular numpad buttons (`borderRadius: 50%`), `scale(0.92)` press effect, glow on filled PIN dots
+- "Enter PIN for {name}" — 18px, weight 600, prominent
+- Back (108px) + Login (120px) as a flex row
+- Removed "Deactivate device" from footer (security risk)
+
+**`admin-user-ops` edge function additions:**
+- `isCallerOwner`: `role === 'client' && !pos_role` — owner can create/delete/reset staff
+- `pos_job_title` included in `create_pos_staff` upsert
+- `update_pos_role` action: updates `pos_role` + `pos_job_title` with same-client guard
+- `delete_pos_staff` action: managers can delete staff/supervisors; only admin can delete managers
+
+**DB (run in Supabase):**
+```sql
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS pos_job_title text;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hr_employee_id uuid REFERENCES hr_employees(id) ON DELETE SET NULL;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS pos_custom_roles jsonb DEFAULT '[]'::jsonb;
+ALTER TABLE sales_entries ADD COLUMN IF NOT EXISTS source text DEFAULT 'manual' CHECK (source IN ('manual', 'pos'));
+
+-- RLS SELECT policy on profiles was NOT added (recursive — breaks login)
+-- Staff list uses get_pos_staff_list() SECURITY DEFINER RPC instead
+
+DROP FUNCTION IF EXISTS get_pos_staff_list(uuid);
+CREATE OR REPLACE FUNCTION get_pos_staff_list(p_client_id uuid)
+RETURNS TABLE(id uuid, full_name text, pos_role text, pos_job_title text, last_seen_at timestamptz)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE caller_client_id uuid; caller_role text;
+BEGIN
+  SELECT p.client_id, p.role INTO caller_client_id, caller_role FROM profiles p WHERE p.id = auth.uid();
+  IF caller_role = 'admin' OR caller_client_id = p_client_id THEN
+    RETURN QUERY SELECT p.id, p.full_name, p.pos_role, p.pos_job_title, p.last_seen_at
+      FROM profiles p WHERE p.client_id = p_client_id AND p.role = 'client' AND p.pos_email IS NOT NULL
+      ORDER BY p.full_name;
+  END IF;
+END; $$;
+GRANT EXECUTE ON FUNCTION get_pos_staff_list(uuid) TO authenticated;
+```
+
+---
+
 ### S197 — 2026-07-01 — POS Login Model Clarification + Delete Staff + Integration Foundations
 
 **POS ↔ IMS ↔ HR integration foundations:**
