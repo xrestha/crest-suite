@@ -118,7 +118,12 @@ const pinDots = Math.max(4, pin.length)
                   onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--theme-accent)'; e.currentTarget.style.background = 'var(--theme-table-hover)' }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--theme-border)'; e.currentTarget.style.background = 'var(--theme-card)' }}
                 >
-                  {s.full_name}
+                  <div>{s.full_name}</div>
+                  {s.pos_job_title && (
+                    <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginTop: 3 }}>
+                      {s.pos_job_title}
+                    </div>
+                  )}
                 </button>
               ))}
             </div>
