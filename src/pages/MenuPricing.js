@@ -22,6 +22,7 @@ export default function MenuPricing() {
   const [drafts, setDrafts]     = useState({})   // { id: string (incl-VAT input) }
   const [saving, setSaving]     = useState({})   // { id: bool }
   const [errors, setErrors]     = useState({})   // { id: string }
+  const [toggling, setToggling] = useState({})   // { id: bool }
 
   const load = useCallback(async () => {
     if (!effectiveClientId) return
@@ -29,7 +30,7 @@ export default function MenuPricing() {
 
     const { data: recipeData } = await supabase
       .from('recipes')
-      .select('id, name, category, selling_price, vat_rate')
+      .select('id, name, category, selling_price, vat_rate, pos_enabled')
       .eq('client_id', effectiveClientId)
       .eq('is_active', true)
       .neq('category', 'Sub-Recipe')
@@ -56,7 +57,8 @@ export default function MenuPricing() {
       const exVat   = parseFloat(r.selling_price || 0)
       const inclVat = exVat > 0 ? exVat * (1 + vat) : 0
       const fcPct   = exVat > 0 ? (cost / exVat) * 100 : 0
-      return { ...r, cost, vat, exVat, inclVat, fcPct }
+      // pos_enabled defaults to true if null (column newly added)
+      return { ...r, cost, vat, exVat, inclVat, fcPct, pos_enabled: r.pos_enabled !== false }
     })
 
     setRecipes(processed)
@@ -71,6 +73,19 @@ export default function MenuPricing() {
   function setDraft(id, val) {
     setDrafts(d => ({ ...d, [id]: val }))
     setErrors(e => { const n = { ...e }; delete n[id]; return n })
+  }
+
+  async function togglePos(recipe) {
+    const newVal = !recipe.pos_enabled
+    setToggling(t => ({ ...t, [recipe.id]: true }))
+    const { error } = await supabase
+      .from('recipes')
+      .update({ pos_enabled: newVal })
+      .eq('id', recipe.id)
+    if (!error) {
+      setRecipes(rs => rs.map(r => r.id === recipe.id ? { ...r, pos_enabled: newVal } : r))
+    }
+    setToggling(t => ({ ...t, [recipe.id]: false }))
   }
 
   async function saveRow(recipe) {
@@ -101,12 +116,31 @@ export default function MenuPricing() {
     </th>
   )
 
+  const posOnCount  = recipes.filter(r => r.pos_enabled).length
+  const posOffCount = recipes.filter(r => !r.pos_enabled).length
+
   return (
     <div className="page-container">
       <div style={{ marginBottom: 20 }}>
         <h1 className="page-title">Menu Pricing</h1>
-        <p className="page-subtitle">Review food cost and update menu prices. Enter a new VAT-inclusive price to see the impact on FC% before saving.</p>
+        <p className="page-subtitle">
+          Review food cost and update menu prices. Toggle <strong>On POS</strong> to control which items appear on the POS order screen.
+        </p>
       </div>
+
+      {/* POS summary strip */}
+      {!loading && recipes.length > 0 && (
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+          <span style={{ fontSize: 12, color: 'var(--theme-green)' }}>
+            ● {posOnCount} item{posOnCount !== 1 ? 's' : ''} on POS
+          </span>
+          {posOffCount > 0 && (
+            <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+              ● {posOffCount} hidden from POS
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Category tabs */}
       <div className="tab-bar" style={{ marginBottom: 16 }}>
@@ -130,6 +164,7 @@ export default function MenuPricing() {
             <thead>
               <tr>
                 {th('left',  null, '#', 36)}
+                {th('center', 'Toggle to include or exclude this item from the POS order screen. Turn off for seasonal or discontinued items without deleting the recipe.', 'On POS', 72)}
                 {th('left',  'Recipe name, category, and VAT status. VAT 13% items: selling price includes 13% VAT. No VAT items are sold at the price as entered.', 'Item')}
                 {th('right', 'Total ingredient cost per portion at current item rates from the Item Master.', 'Food Cost', 100)}
                 {th('right', 'Current VAT-inclusive menu price saved in Recipe Costing. Calculated as selling price × (1 + VAT rate).', 'Current Price', 120)}
@@ -137,22 +172,32 @@ export default function MenuPricing() {
                 {th('right', 'Enter a new VAT-inclusive menu price. The ex-VAT price and FC% are back-calculated automatically. Press Enter to save.', 'New Price (incl VAT)', 150)}
                 {th('right', 'Projected FC% at the new price. Updates live as you type.', 'New FC %', 90)}
                 {th('right', 'Difference between new and current VAT-inclusive price. Green = price increase, red = price decrease.', 'Change', 90)}
-                {th(null, null, '', 80)}
+                {th(null, null, '', 72)}
               </tr>
             </thead>
             <tbody>
               {display.map((r, i) => {
-                const draft     = drafts[r.id]
-                const hasDraft  = draft !== undefined && draft !== ''
-                const draftNum  = hasDraft ? parseFloat(draft) : null
+                const draft      = drafts[r.id]
+                const hasDraft   = draft !== undefined && draft !== ''
+                const draftNum   = hasDraft ? parseFloat(draft) : null
                 const draftExVat = draftNum > 0 ? draftNum / (1 + r.vat) : null
-                const newFcPct  = draftExVat > 0 ? (r.cost / draftExVat) * 100 : null
-                const diff      = draftNum !== null && r.inclVat > 0 ? draftNum - r.inclVat : null
-                const changed   = hasDraft && draftNum !== r.inclVat
+                const newFcPct   = draftExVat > 0 ? (r.cost / draftExVat) * 100 : null
+                const diff       = draftNum !== null && r.inclVat > 0 ? draftNum - r.inclVat : null
+                const changed    = hasDraft && draftNum !== r.inclVat
+                const dimmed     = !r.pos_enabled
 
                 return (
-                  <tr key={r.id} style={{ background: changed ? 'rgba(245,158,11,0.05)' : undefined }}>
+                  <tr key={r.id} style={{ opacity: dimmed ? 0.45 : 1, background: changed ? 'rgba(245,158,11,0.05)' : undefined }}>
                     <td style={{ color: 'var(--theme-text2)' }}>{i + 1}</td>
+                    <td style={{ textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={r.pos_enabled}
+                        disabled={toggling[r.id]}
+                        onChange={() => togglePos(r)}
+                        style={{ cursor: 'pointer', width: 15, height: 15, accentColor: 'var(--theme-green)' }}
+                      />
+                    </td>
                     <td>
                       <strong>{r.name}</strong>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
