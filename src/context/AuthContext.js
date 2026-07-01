@@ -132,8 +132,10 @@ export function AuthProvider({ children }) {
   const clientId = isAdmin ? adminViewClientId : (profile?.client_id || null)
 
   const posEnabled = isAdmin || (profile?.clients?.pos_enabled ?? false)
-  // Admin gets 'manager' by default; client users use their explicit pos_role
-  const posRole    = isAdmin ? 'manager' : (profile?.pos_role || null)
+  // Admin gets 'manager'; owner (client with no pos_role) gets 'manager' when POS enabled;
+  // PIN-based staff use their explicit pos_role
+  const isOwner = !isAdmin && profile?.role === 'client' && !profile?.pos_role
+  const posRole = isAdmin || isOwner ? 'manager' : (profile?.pos_role || null)
 
   const POS_RANK = { staff: 1, supervisor: 2, manager: 3 }
   function hasPosAccess(minLevel) {
@@ -227,6 +229,7 @@ export function AuthProvider({ children }) {
       hrEnabled: isAdmin || (profile?.clients?.hr_enabled ?? false),
       posEnabled,
       posRole,
+      isOwner,
       hasPosAccess,
       clientModules, // displayed client's actual subscription (nav + dashboard sections)
       hrPlan: isAdmin ? 'pro' : (profile?.clients?.hr_plan || null),

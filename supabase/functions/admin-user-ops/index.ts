@@ -106,9 +106,10 @@ Deno.serve(async (req) => {
     // ── POS manager-accessible actions (before admin-only guard) ─────────────
     const isCallerAdmin   = profile?.role === 'admin'
     const isCallerManager = profile?.pos_role === 'manager'
-    const isPosPrivileged = isCallerAdmin || isCallerManager
+    const isCallerOwner   = profile?.role === 'client' && !profile?.pos_role // owner has no pos_role
+    const isPosPrivileged = isCallerAdmin || isCallerManager || isCallerOwner
 
-    if (action === 'create_pos_staff' || action === 'reset_pos_pin' || action === 'delete_pos_staff') {
+    if (action === 'create_pos_staff' || action === 'reset_pos_pin' || action === 'delete_pos_staff' || action === 'update_pos_role') {
       if (!isPosPrivileged) return json({ error: 'Forbidden' }, 403)
     }
 
@@ -117,7 +118,7 @@ Deno.serve(async (req) => {
       const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
       if (!targetClientId) return json({ error: 'client_id required' }, 400)
 
-      const { full_name, pin, pos_role } = params
+      const { full_name, pin, pos_role, pos_job_title } = params
       if (!full_name || !pin) return json({ error: 'full_name and pin are required' }, 400)
       if (!/^\d{4,6}$/.test(pin)) return json({ error: 'PIN must be 4–6 digits' }, 400)
 
@@ -140,12 +141,13 @@ Deno.serve(async (req) => {
       }
 
       const { error: profileErr } = await admin.from('profiles').upsert({
-        id:        authData.user.id,
+        id:            authData.user.id,
         full_name,
-        role:      'client',
-        client_id: targetClientId,
-        pos_role:  pos_role || null,
-        pos_email: email,
+        role:          'client',
+        client_id:     targetClientId,
+        pos_role:      pos_role || null,
+        pos_job_title: pos_job_title || null,
+        pos_email:     email,
       }, { onConflict: 'id' })
 
       if (profileErr) {
@@ -154,6 +156,27 @@ Deno.serve(async (req) => {
       }
 
       return json({ success: true, userId: authData.user.id })
+    }
+
+    // ── Update a POS staff member's role ─────────────────────────────────────
+    if (action === 'update_pos_role') {
+      const { userId, pos_role, pos_job_title } = params
+      if (!userId) return json({ error: 'userId is required' }, 400)
+
+      const validRoles = ['staff', 'supervisor', 'manager']
+      if (pos_role && !validRoles.includes(pos_role)) return json({ error: 'Invalid pos_role' }, 400)
+
+      if (!isCallerAdmin) {
+        const { data: targetProfile } = await admin
+          .from('profiles').select('client_id').eq('id', userId).single()
+        if (targetProfile?.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
+      }
+
+      const { error: updateErr } = await admin.from('profiles')
+        .update({ pos_role: pos_role || null, pos_job_title: pos_job_title || null })
+        .eq('id', userId)
+      if (updateErr) return json({ error: updateErr.message }, 400)
+      return json({ success: true })
     }
 
     // ── Delete a POS staff member ─────────────────────────────────────────────

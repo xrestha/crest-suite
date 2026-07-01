@@ -96,7 +96,7 @@ const HR_GROUPS = [
 export default function Layout() {
   const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient,
           isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
-          hasPosAccess, posRole } = useAuth()
+          hasPosAccess, posRole, isOwner } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
   const clientName = profile?.clients?.name
@@ -515,7 +515,7 @@ export default function Layout() {
               <div className="sidebar-user">
                 <div className="sidebar-user-name">{profile?.full_name || 'User'}</div>
                 <div className="sidebar-user-role">
-                  {isAdmin ? 'Admin' : posRole ? `POS · ${posRole.charAt(0).toUpperCase() + posRole.slice(1)}` : 'Client'}
+                  {isAdmin ? 'Admin' : isOwner ? 'Owner' : posRole ? `POS · ${posRole.charAt(0).toUpperCase() + posRole.slice(1)}` : 'Client'}
                 </div>
               </div>
             )}
