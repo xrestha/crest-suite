@@ -81,7 +81,7 @@ export default function PosOrders() {
       .select('id, name, category, selling_price, vat_rate')
       .eq('client_id', clientId)
       .eq('is_active', true)
-      .or('pos_enabled.is.null,pos_enabled.eq.true')
+      .eq('pos_enabled', true)
       .neq('category', 'Sub-Recipe')
       .order('name')
     setMenu(data || [])

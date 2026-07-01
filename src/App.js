@@ -134,7 +134,7 @@ export default function App() {
               <Route path="/recipe-margin"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="recipe_margin" minPlan="growth"><RecipeMargin /></PremiumGate></ModuleGate>} />
               <Route path="/menu-pricing"
-                element={<ModuleGate module="ims"><PremiumGate featureKey="menu_pricing" minPlan="starter"><MenuPricing /></PremiumGate></ModuleGate>} />
+                element={<PremiumGate featureKey="menu_pricing" minPlan="starter"><MenuPricing /></PremiumGate>} />
               <Route path="/menu-repricing"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="menu_repricing" minPlan="growth"><MenuRepricing /></PremiumGate></ModuleGate>} />
               <Route path="/best-sellers"

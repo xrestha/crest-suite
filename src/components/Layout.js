@@ -66,6 +66,9 @@ const POS_GROUPS = [
     { to: '/pos/orders', label: 'Orders', icon: '◉', minPosRole: 'staff' },
     { to: '/pos/tables', label: 'Tables', icon: '⊞', minPosRole: 'supervisor' },
   ]},
+  { key: 'pos-menu', label: 'Menu', items: [
+    { to: '/menu-pricing', label: 'Menu Pricing', icon: '₨', featureKey: 'menu_pricing', minPlan: 'starter', minPosRole: 'manager' },
+  ]},
   { key: 'pos-admin', label: 'Admin', items: [
     { to: '/pos/staff', label: 'POS Staff', icon: '👥', minPosRole: 'manager' },
   ]},
