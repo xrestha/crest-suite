@@ -347,7 +347,7 @@ export default function MenuPricing() {
 
               <div>
                 <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>
-                  Menu Price (incl. VAT) *
+                  {addForm.vatRate > 0 ? 'Menu Price (incl. VAT) *' : 'Menu Price *'}
                 </label>
                 <input
                   type="number" min="0" step="any"
