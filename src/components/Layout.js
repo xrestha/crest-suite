@@ -152,8 +152,9 @@ export default function Layout() {
   }, [isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSignOut() {
+    const isPosDevice = !!localStorage.getItem('pos_device_client_id')
     await signOut()
-    navigate('/login')
+    navigate(isPosDevice && posRole ? '/pos/login' : '/login')
   }
 
   function unlockedItems(items) {
@@ -520,7 +521,7 @@ export default function Layout() {
                 </div>
               </div>
             )}
-            <button onClick={handleSignOut} className="sidebar-signout" title="Sign out">⎋</button>
+            <button onClick={handleSignOut} className="sidebar-signout" title={posRole ? 'Lock POS' : 'Sign out'}>⎋</button>
           </div>
         </div>
       </aside>
