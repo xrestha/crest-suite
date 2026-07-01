@@ -50,8 +50,8 @@ const IMS_TIERS = [
     features: [
       {
         icon: '₨', name: 'Menu Pricing',
-        guide: 'Internal pricing review tool. Shows all active menu items with their food cost, current menu price (VAT-inclusive), and FC%. Type a new VAT-inclusive price on any row to instantly see the new FC% and the price change — then hit Save to commit it to Recipe Costing.',
-        tips: ['Food cost is calculated live from current ingredient rates', 'The Change column shows + (price increase) or − (price decrease) vs current', 'FC% colours: green ≤30%, amber 31–38%, red >38%', 'Press Enter in the new-price field to save quickly', 'Saving updates the selling price in Recipe Costing — ex-VAT price is back-calculated automatically']
+        guide: 'Internal pricing review tool. Shows all active menu items with their food cost, current menu price (VAT-inclusive), and FC%. Type a new VAT-inclusive price on any row to instantly see the new FC% and the price change — then hit Save to commit it to Recipe Costing. Use the On POS toggle to control which items appear on the POS order screen without deleting the recipe.',
+        tips: ['Food cost is calculated live from current ingredient rates', 'The Change column shows + (price increase) or − (price decrease) vs current', 'FC% colours: green ≤30%, amber 31–38%, red >38%', 'Press Enter in the new-price field to save quickly', 'Saving updates the selling price in Recipe Costing — ex-VAT price is back-calculated automatically', 'Turn off On POS for seasonal or discontinued items — recipe history and costing are preserved', 'The POS order screen only shows items with On POS checked']
       },
       {
         icon: '↑', name: 'Sales Entry',

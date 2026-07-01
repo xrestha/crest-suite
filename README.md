@@ -125,6 +125,21 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S200 — 2026-07-01 — Menu Pricing page + POS toggle
+
+**New page: `/menu-pricing` (all plans, feature key `menu_pricing`)**
+
+Serves as the single source of truth for both internal pricing review and the future POS menu. The POS will query `recipes WHERE pos_enabled = true` rather than reading from Recipe Costing directly — so items can be hidden from POS without deactivating the recipe or losing history.
+
+**Changes:**
+- **`src/pages/MenuPricing.js`** (new) — category tabs (Food/Beverage/Dessert/Other), table with Food Cost · Current Price (incl VAT) · FC% · New Price input (live FC% + change diff) · On POS toggle · Save per row.
+- **`recipes.pos_enabled boolean DEFAULT true`** — new column (migration run). NULL treated as true for existing rows.
+- **On POS toggle** — checkbox per row; saves instantly. Rows with `pos_enabled = false` are dimmed (opacity 0.45). Summary strip shows how many items are on/off POS.
+- **Pricing save** — user types VAT-inclusive new price; ex-VAT is back-calculated and written to `recipes.selling_price`. Press Enter or click Save.
+- Wired into `AuthContext` (STARTER_KEYS), `SettingsContext`, `AdminClients`, `App.js`, `Layout.js` (COSTING section), `Help.js`.
+
+---
+
 ### S199 — 2026-07-01 — Purchases: Expiry Date + Shelf Life as Inline Table Columns
 
 **Problem:** Expiry date and shelf-life fields were stacked below the item dropdown in a sub-row (or inline div), making the bill form feel cramped and disconnected from the other fields.
