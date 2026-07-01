@@ -176,10 +176,24 @@ export function AuthProvider({ children }) {
     return { ims: cIms ?? true, hr: cHr ?? false, pos: cPos ?? false }
   }, [isAdmin, adminViewClientId, viewModules, cIms, cHr, cPos])
 
-  // Derive plan: admin always gets 'pro'; fallback to is_premium for pre-migration rows
+  // Derive plan: admin always gets 'pro'; take highest across all active module plans
+  const PLAN_RANK = { starter: 0, growth: 1, pro: 2 }
   const plan = isAdmin
     ? 'pro'
-    : (profile?.clients?.plan || (profile?.clients?.is_premium ? 'pro' : 'starter'))
+    : (() => {
+        const c = profile?.clients
+        const candidates = [
+          c?.plan,
+          c?.ims_enabled  ? c?.ims_plan  : null,
+          c?.hr_enabled   ? c?.hr_plan   : null,
+          c?.pos_enabled  ? c?.pos_plan  : null,
+          c?.is_premium   ? 'pro'        : null,
+        ].filter(Boolean)
+        if (!candidates.length) return 'starter'
+        return candidates.reduce((best, p) =>
+          (PLAN_RANK[p] ?? 0) > (PLAN_RANK[best] ?? 0) ? p : best
+        )
+      })()
 
   // isPremium = true for Growth and Pro (any paid plan) — keeps existing checks working
   const isPremium = isAdmin || plan === 'growth' || plan === 'pro'
