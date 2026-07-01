@@ -132,6 +132,19 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S207 — 2026-07-01 — Menu Pricing: POS-only view + Add Item + DB fix
+
+**DB fix:** `feature_flags` table was missing the `menu_pricing` column — admin Save was failing with schema cache error. Fix: `ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS menu_pricing boolean;`
+
+**`src/pages/MenuPricing.js` — dual-mode rendering**
+- POS-only clients (no IMS) saw "No menu items found. Add recipes in Recipe Costing first." — unusable since they can't access Recipe Costing
+- Added `clientModules` to `useAuth()` destructure; `!clientModules.ims` triggers a separate early return for POS-only clients
+- **POS-only view**: slim table (# | On POS | Item | Price) + `+ Add Item` button + modal to create menu items directly (name, category, VAT toggle, price incl-VAT). Items inserted into `recipes` table with `pos_enabled: true`
+- **IMS view**: full food-cost/FC%/new-price table completely unchanged — zero impact on IMS clients
+- Empty-state message updated: "No menu items yet. Use **+ Add Item** above to add your first item."
+
+---
+
 ### S206 — 2026-07-01 — POS order-taking polish + admin feature access fix
 
 **`src/pages/AdminClients.js` — FeatureAccessModal**
