@@ -83,15 +83,6 @@ export default function PosStaff() {
     setStaff(data || [])
   }
 
-  async function loadRoles() {
-    const { data } = await supabase
-      .from('settings')
-      .select('pos_custom_roles')
-      .eq('client_id', clientId)
-      .single()
-    if (data?.pos_custom_roles?.length) setCustomRoles(data.pos_custom_roles)
-  }
-
   async function saveRoles(roles) {
     setRolesSaving(true); setRolesError('')
     const { data: existing } = await supabase
