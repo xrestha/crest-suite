@@ -16,7 +16,7 @@ function vatOf(r) {
 const EMPTY_FORM = { name: '', category: '', price: '', vatRate: 0.13 }
 
 export default function MenuPricing() {
-  const { clientId, profile } = useAuth()
+  const { clientId, profile, clientModules } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const [recipes, setRecipes]   = useState([])
   const [loading, setLoading]   = useState(true)
@@ -147,6 +147,149 @@ export default function MenuPricing() {
   const posOnCount  = recipes.filter(r => r.pos_enabled).length
   const posOffCount = recipes.filter(r => !r.pos_enabled).length
 
+  /* ── POS-only view (no IMS) ─────────────────────────────────────────────── */
+  if (!clientModules?.ims) return (
+    <div className="page-container">
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <h1 className="page-title">Menu Pricing</h1>
+          <p className="page-subtitle">Set menu prices and toggle <strong>On POS</strong> to control which items appear on the order screen.</p>
+        </div>
+        <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={() => { setAddForm(EMPTY_FORM); setAddError(''); setAddModal(true) }}>
+          + Add Item
+        </button>
+      </div>
+
+      {!loading && recipes.length > 0 && (
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+          <span style={{ fontSize: 12, color: 'var(--theme-green)' }}>● {posOnCount} item{posOnCount !== 1 ? 's' : ''} on POS</span>
+          {posOffCount > 0 && <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>● {posOffCount} hidden from POS</span>}
+        </div>
+      )}
+
+      <div className="tab-bar" style={{ marginBottom: 16 }}>
+        {tabs.map(t => {
+          const count = t === 'All' ? recipes.length : recipes.filter(r => r.category === t).length
+          return (
+            <button key={t} className={`tab-btn${catTab === t ? ' tab-btn--active' : ''}`} onClick={() => setCatTab(t)}>
+              {t} <span style={{ fontSize: 11, opacity: 0.65, marginLeft: 4 }}>{count}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {loading ? (
+        <div className="loading-state">Loading…</div>
+      ) : display.length === 0 ? (
+        <div className="empty-state">No menu items yet. Use <strong>+ Add Item</strong> above to add your first item.</div>
+      ) : (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ width: 36 }}>#</th>
+                <th style={{ width: 72, textAlign: 'center' }}>
+                  <Tip text="Toggle to include or exclude this item from the POS order screen." width={220}>On POS</Tip>
+                </th>
+                <th><Tip text="Item name, category, and VAT status." width={200}>Item</Tip></th>
+                <th style={{ textAlign: 'right', width: 140 }}>
+                  <Tip text="VAT-inclusive menu price." width={180}>Price</Tip>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {display.map((r, i) => (
+                <tr key={r.id} style={{ opacity: r.pos_enabled ? 1 : 0.45 }}>
+                  <td style={{ color: 'var(--theme-text2)' }}>{i + 1}</td>
+                  <td style={{ textAlign: 'center' }}>
+                    <input type="checkbox" checked={r.pos_enabled} disabled={toggling[r.id]}
+                      onChange={() => togglePos(r)}
+                      style={{ cursor: 'pointer', width: 15, height: 15, accentColor: 'var(--theme-green)' }} />
+                  </td>
+                  <td>
+                    <strong>{r.name}</strong>
+                    <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
+                      {r.category}
+                      {r.vat > 0
+                        ? <Tip text="Menu price includes 13% VAT." width={200}> · VAT 13%</Tip>
+                        : <Tip text="No VAT on this item." width={160}> · No VAT</Tip>}
+                    </div>
+                  </td>
+                  <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
+                    {r.inclVat > 0 ? `NPR ${r.inclVat.toFixed(0)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {addModal && (
+        <div onClick={e => { if (e.target === e.currentTarget) setAddModal(false) }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
+          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12, width: 'min(440px, 96vw)', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
+            <h3 style={{ margin: '0 0 20px', fontSize: 16, color: 'var(--theme-text1)' }}>Add Menu Item</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>Item Name *</label>
+                <input autoFocus value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && saveNewItem()} placeholder="e.g. Cappuccino"
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>Category</label>
+                <input list="menu-cats-pos" value={addForm.category} onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))}
+                  placeholder="Beverage / Food / Dessert / Other"
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
+                <datalist id="menu-cats-pos">
+                  {['Beverage', 'Food', 'Dessert', 'Snack', 'Other', ...Array.from(new Set(recipes.map(r => r.category))).sort()]
+                    .filter((v, i, a) => a.indexOf(v) === i).map(c => <option key={c} value={c} />)}
+                </datalist>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>VAT</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[{ label: 'VAT 13%', val: 0.13 }, { label: 'No VAT', val: 0 }].map(opt => (
+                    <button key={opt.val} onClick={() => setAddForm(f => ({ ...f, vatRate: opt.val }))} style={{
+                      flex: 1, padding: '7px 0', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+                      background: addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
+                      color: addForm.vatRate === opt.val ? 'var(--theme-accent-text, #000)' : 'var(--theme-text2)',
+                      border: `1px solid ${addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+                      fontWeight: addForm.vatRate === opt.val ? 700 : 400,
+                    }}>{opt.label}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>
+                  {addForm.vatRate > 0 ? 'Menu Price (incl. VAT) *' : 'Menu Price *'}
+                </label>
+                <input type="number" min="0" step="any" value={addForm.price}
+                  onChange={e => setAddForm(f => ({ ...f, price: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && saveNewItem()} placeholder="e.g. 290"
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
+                {addForm.price && parseFloat(addForm.price) > 0 && addForm.vatRate > 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
+                    Ex-VAT: NPR {(parseFloat(addForm.price) / (1 + addForm.vatRate)).toFixed(2)}
+                  </div>
+                )}
+              </div>
+              {addError && <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-red)' }}>{addError}</p>}
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+              <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setAddModal(false)}>Cancel</button>
+              <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={saveNewItem} disabled={addSaving}>
+                {addSaving ? 'Saving…' : 'Add to Menu'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  /* ── IMS view (full food-cost table) ─────────────────────────────────────── */
   return (
     <div className="page-container">
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
