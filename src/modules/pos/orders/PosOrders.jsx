@@ -32,6 +32,11 @@ export default function PosOrders() {
   const [secFilter,   setSecFilter]   = useState('All')
   const [floorLoad,   setFloorLoad]   = useState(true)
 
+  /* ── covers modal (new table only) ── */
+  const [coversModal,   setCoversModal]   = useState(false)
+  const [pendingTable,  setPendingTable]  = useState(null)
+  const [pendingCovers, setPendingCovers] = useState(1)
+
   /* ── order screen ── */
   const [activeTable, setActiveTable] = useState(null)
   const [orderId,     setOrderId]     = useState(null)
@@ -96,15 +101,29 @@ export default function PosOrders() {
       .eq('status', 'open')
       .eq('table_id', table.id)
       .maybeSingle()
-    setActiveTable(table)
+
     if (existing) {
+      // Resume existing order — skip the covers modal
+      setActiveTable(table)
       setOrderId(existing.id)
       setCovers(existing.covers || 1)
       setOrderItems(existing.pos_order_items || [])
+      setMsg(''); setView('order'); loadMenu()
     } else {
-      setOrderId(null); setCovers(1); setOrderItems([])
+      // New order — ask for covers first
+      setPendingTable(table)
+      setPendingCovers(1)
+      setCoversModal(true)
+      loadMenu()
     }
-    setMsg(''); setView('order'); loadMenu()
+  }
+
+  function confirmCovers() {
+    setActiveTable(pendingTable)
+    setOrderId(null); setOrderItems([])
+    setCovers(pendingCovers)
+    setMsg(''); setCoversModal(false); setPendingTable(null)
+    setView('order')
   }
 
   function openTakeaway() {
@@ -415,6 +434,55 @@ export default function PosOrders() {
   /* ══════════════════════════════════════════ FLOOR VIEW */
 
   return (
+    <>
+    {/* ── Covers modal ── */}
+    {coversModal && pendingTable && (
+      <div
+        onClick={e => { if (e.target === e.currentTarget) { setCoversModal(false); setPendingTable(null) } }}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}
+      >
+        <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, padding: '28px 32px', width: 300, boxShadow: '0 16px 48px rgba(0,0,0,0.35)', textAlign: 'center' }}>
+
+          <h3 style={{ margin: '0 0 4px', fontSize: 18, color: 'var(--theme-text1)' }}>{pendingTable.name}</h3>
+          {pendingTable.section && (
+            <p style={{ margin: '0 0 4px', fontSize: 12, color: 'var(--theme-text3)' }}>{pendingTable.section}</p>
+          )}
+          <p style={{ margin: '0 0 24px', fontSize: 12, color: 'var(--theme-text3)' }}>
+            {pendingTable.capacity} seat{pendingTable.capacity !== 1 ? 's' : ''}
+          </p>
+
+          <p style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 600, color: 'var(--theme-text2)' }}>How many covers?</p>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20, marginBottom: 28 }}>
+            <button
+              onClick={() => setPendingCovers(c => Math.max(1, c - 1))}
+              style={{ width: 44, height: 44, borderRadius: 10, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text1)', fontSize: 24, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >−</button>
+            <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--theme-text1)', minWidth: 48 }}>{pendingCovers}</span>
+            <button
+              onClick={() => setPendingCovers(c => c + 1)}
+              style={{ width: 44, height: 44, borderRadius: 10, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text1)', fontSize: 24, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >+</button>
+          </div>
+
+          <button
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '12px 0', fontSize: 15, marginBottom: 10 }}
+            onClick={confirmCovers}
+          >
+            Open Order
+          </button>
+          <button
+            className="btn btn-ghost"
+            style={{ width: '100%', padding: '8px 0', fontSize: 13 }}
+            onClick={() => { setCoversModal(false); setPendingTable(null) }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )}
+
     <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -493,5 +561,6 @@ export default function PosOrders() {
         </div>
       )}
     </div>
+    </>
   )
 }
