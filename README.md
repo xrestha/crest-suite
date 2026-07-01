@@ -125,6 +125,20 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S198 — 2026-07-01 — Purchases: Per-Line VAT
+
+**Problem:** The "Add Purchase Bill" form had a single bill-level VAT toggle — all items on a bill were either all-taxable or all-non-taxable. Real vendor invoices can have mixed items (e.g. 4 of 10 items VAT-able).
+
+**Changes (`src/pages/Purchases.js`):**
+- **Per-line VAT checkbox** — new column in the bill form table between Rate and Total. Each line independently controls its own `vat_inclusive` flag. Shows a small "13%" label below the checkbox when checked.
+- **Header VAT toggle** → "apply to all" mass action. Visual state derived from lines: gold (all on), amber "VAT Mixed" (some on), off (none). Clicking toggles all lines at once for convenience.
+- **Totals breakdown** — now shows Taxable (ex-VAT) and Non-taxable subtotals separately; VAT 13% applies only to the taxable portion; discount is prorated proportionally across all lines before VAT is levied (Nepal IRD practice).
+- **`setLineTotal` back-calc** — Total column now divides by `line.vat_inclusive ? 1.13 : 1` (was `billHeader.vat_inclusive`).
+- **`saveBill`** — stores `vat_inclusive: l.vat_inclusive` per entry (was `billHeader.vat_inclusive`).
+- **No DB change** — `purchase_entries.vat_inclusive` was already per-row; the list view and all reports (VatReport, NonVatReport, VendorReport) were already reading per-entry values. Change only affects the form.
+
+---
+
 ### S197 — 2026-07-01 — Owner Access, Custom Roles, PIN Login UI, Staff CRUD (complete)
 
 **Access model:**

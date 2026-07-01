@@ -185,7 +185,7 @@ export default function Purchases() {
       const qty = parseFloat(l.qty)
       const amt = parseFloat(amtStr)
       const rate = (qty > 0 && amt > 0)
-        ? String((amt / qty / (billHeader.vat_inclusive ? 1.13 : 1)).toFixed(5))
+        ? String((amt / qty / (l.vat_inclusive ? 1.13 : 1)).toFixed(5))
         : l.rate
       return { ...l, _amtDraft: amtStr, rate }
     }))
@@ -219,7 +219,7 @@ export default function Purchases() {
         invoice_ref:     billHeader.invoice_ref.trim() || null,
         expiry_date:     l.expiry_date || null,
         payment_method:  billHeader.payment_method || 'Cash',
-        vat_inclusive:   billHeader.vat_inclusive || false,
+        vat_inclusive:   l.vat_inclusive || false,
         discount_amount: discountAmt,
       }
     })
@@ -580,19 +580,25 @@ export default function Purchases() {
                     style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', boxSizing: 'border-box' }} />
                 </div>
                 <div className="form-field">
-                  <label><Tip text="Toggle if this vendor's bill includes 13% VAT. Applies to all items on this bill." width={240}>VAT</Tip></label>
-                  <button
-                    type="button"
-                    onClick={() => setBillHeader(h => ({ ...h, vat_inclusive: !h.vat_inclusive }))}
-                    style={{ cursor: 'pointer', background: 'none', border: 'none', padding: '8px 4px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
-                  >
-                    <div style={{ width: 34, height: 18, borderRadius: 9, background: billHeader.vat_inclusive ? '#f59e0b' : 'var(--theme-border)', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}>
-                      <div style={{ position: 'absolute', top: 3, left: billHeader.vat_inclusive ? 17 : 3, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
-                    </div>
-                    <span style={{ fontSize: 13, fontWeight: billHeader.vat_inclusive ? 700 : 400, color: billHeader.vat_inclusive ? '#f59e0b' : 'var(--theme-text3)', letterSpacing: '0.04em' }}>
-                      {billHeader.vat_inclusive ? 'VAT 13%' : 'No VAT'}
-                    </span>
-                  </button>
+                  <label><Tip text="Apply 13% VAT to all line items at once. You can also toggle VAT on each individual line row." width={270}>VAT</Tip></label>
+                  {(() => {
+                    const allVat  = billLines.every(l => l.vat_inclusive)
+                    const someVat = billLines.some(l => l.vat_inclusive)
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setBillLines(ls => ls.map(l => ({ ...l, vat_inclusive: !allVat })))}
+                        style={{ cursor: 'pointer', background: 'none', border: 'none', padding: '8px 4px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
+                      >
+                        <div style={{ width: 34, height: 18, borderRadius: 9, background: allVat ? '#f59e0b' : someVat ? '#b45309' : 'var(--theme-border)', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}>
+                          <div style={{ position: 'absolute', top: 3, left: allVat ? 17 : someVat ? 11 : 3, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+                        </div>
+                        <span style={{ fontSize: 13, fontWeight: someVat ? 700 : 400, color: allVat ? '#f59e0b' : someVat ? '#b45309' : 'var(--theme-text3)', letterSpacing: '0.04em' }}>
+                          {allVat ? 'VAT 13%' : someVat ? 'VAT Mixed' : 'No VAT'}
+                        </span>
+                      </button>
+                    )
+                  })()}
                 </div>
                 <div className="form-field">
                   <label><Tip text="Promo or trade discount on the total bill. Applied before VAT — VAT is levied only on the net taxable amount." width={260}>Discount (NPR)</Tip></label>
@@ -622,7 +628,10 @@ export default function Purchases() {
                       </th>
                       <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 90 }}>Qty *</th>
                       <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 115 }}>
-                        <Tip text="Enter the ex-VAT rate per unit. Toggle VAT in the header if this bill attracts 13% VAT." width={260}>Rate (NPR) *</Tip>
+                        <Tip text="Enter the ex-VAT rate per unit. Check the VAT box on each line for items attracting 13% VAT." width={270}>Rate (NPR) *</Tip>
+                      </th>
+                      <th style={{ textAlign: 'center', fontSize: 11, color: 'var(--theme-text2)', padding: '0 4px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 44 }}>
+                        <Tip text="Check to apply 13% VAT to this line item only." width={210}>VAT</Tip>
                       </th>
                       <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 115 }}>
                         <Tip text="Enter total paid for this line — Rate is back-calculated automatically." width={230}>Total (NPR)</Tip>
@@ -639,7 +648,7 @@ export default function Purchases() {
                       const cf = getCf(selItem)
                       const inputUnit = cf > 1 ? selItem.purchase_unit : (selItem?.uom || '')
                       const lineBase = (parseFloat(line.qty) || 0) * (parseFloat(line.rate) || 0)
-                      const lineAmount = billHeader.vat_inclusive ? lineBase * 1.13 : lineBase
+                      const lineAmount = line.vat_inclusive ? lineBase * 1.13 : lineBase
                       const cellInput = { background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }
                       return (
                         <>
@@ -664,6 +673,15 @@ export default function Purchases() {
                                 onChange={e => updateBillLine(line._key, 'rate', e.target.value)}
                                 style={cellInput} />
                             </td>
+                            <td style={{ padding: '6px 4px 4px', verticalAlign: 'middle', textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={line.vat_inclusive}
+                                onChange={() => updateBillLine(line._key, 'vat_inclusive', !line.vat_inclusive)}
+                                style={{ cursor: 'pointer', width: 15, height: 15, accentColor: '#f59e0b' }}
+                              />
+                              {line.vat_inclusive && <div style={{ fontSize: 9, color: '#f59e0b', marginTop: 2, fontWeight: 700 }}>13%</div>}
+                            </td>
                             <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
                               <input
                                 type="number" min="0" step="any"
@@ -679,7 +697,7 @@ export default function Purchases() {
                                   <div style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600, paddingTop: 7 }}>
                                     {lineAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </div>
-                                  {billHeader.vat_inclusive && parseFloat(line.rate) > 0 && (
+                                  {line.vat_inclusive && parseFloat(line.rate) > 0 && (
                                     <div style={{ fontSize: 10, color: 'var(--theme-amber)', marginTop: 2 }}>
                                       +VAT {(parseFloat(line.rate) * 0.13 * (parseFloat(line.qty) || 1)).toFixed(2)}
                                     </div>
@@ -693,7 +711,7 @@ export default function Purchases() {
                             </td>
                           </tr>
                           <tr key={`${line._key}-sub`} style={{ borderBottom: '1px solid var(--theme-card)' }}>
-                            <td colSpan={6} style={{ padding: '0 8px 8px 0' }}>
+                            <td colSpan={7} style={{ padding: '0 8px 8px 0' }}>
                               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                 <input type="date" value={line.expiry_date}
                                   onChange={e => updateBillLine(line._key, 'expiry_date', e.target.value)}
@@ -714,36 +732,40 @@ export default function Purchases() {
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end', marginTop: 14, gap: 16 }}>
                 {(() => {
-                  const subTotal    = billLines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0), 0)
-                  const vatSubtotal = billHeader.vat_inclusive ? subTotal : 0
-                  const discount    = parseFloat(billHeader.discount) || 0
-                  // Discount reduces the taxable base (applied before VAT, per Nepal IRD practice)
-                  const vatTaxable  = subTotal > 0 ? vatSubtotal * (1 - discount / subTotal) : 0
-                  const vatTotal    = vatTaxable * 0.13
-                  const grandTotal  = (subTotal - discount) + vatTotal
+                  const taxableBase    = billLines.reduce((s, l) => l.vat_inclusive ? s + (parseFloat(l.qty)||0) * (parseFloat(l.rate)||0) : s, 0)
+                  const nonTaxableBase = billLines.reduce((s, l) => !l.vat_inclusive ? s + (parseFloat(l.qty)||0) * (parseFloat(l.rate)||0) : s, 0)
+                  const subTotal       = taxableBase + nonTaxableBase
+                  const discount       = parseFloat(billHeader.discount) || 0
+                  // Discount spread proportionally; VAT levied only on taxable portion after discount
+                  const vatTaxable     = subTotal > 0 ? taxableBase * (1 - discount / subTotal) : 0
+                  const vatTotal       = vatTaxable * 0.13
+                  const grandTotal     = subTotal - discount + vatTotal
                   if (subTotal === 0) return null
+                  const fmt = n => n.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                   return (
-                    <div style={{ textAlign: 'right', fontSize: 13, minWidth: 280 }}>
-                      <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
-                        Subtotal (ex-VAT): <span style={{ color: 'var(--theme-text1)', fontWeight: 600, marginLeft: 8 }}>NPR {subTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      </div>
-                      {discount > 0 && (
+                    <div style={{ textAlign: 'right', fontSize: 13, minWidth: 300 }}>
+                      {taxableBase > 0 && (
                         <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
-                          Discount: <span style={{ color: 'var(--theme-red)', fontWeight: 600, marginLeft: 8 }}>− NPR {discount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          Taxable (ex-VAT): <span style={{ color: 'var(--theme-text1)', fontWeight: 600, marginLeft: 8 }}>NPR {fmt(taxableBase)}</span>
                         </div>
                       )}
-                      {discount > 0 && vatTotal > 0 && (
+                      {nonTaxableBase > 0 && (
                         <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
-                          Taxable: <span style={{ color: 'var(--theme-text1)', fontWeight: 600, marginLeft: 8 }}>NPR {(subTotal - discount).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          Non-taxable: <span style={{ color: 'var(--theme-text1)', fontWeight: 600, marginLeft: 8 }}>NPR {fmt(nonTaxableBase)}</span>
+                        </div>
+                      )}
+                      {discount > 0 && (
+                        <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
+                          Discount: <span style={{ color: 'var(--theme-red)', fontWeight: 600, marginLeft: 8 }}>− NPR {fmt(discount)}</span>
                         </div>
                       )}
                       {vatTotal > 0 && (
                         <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
-                          VAT (13%): <span style={{ color: 'var(--theme-amber)', fontWeight: 600, marginLeft: 8 }}>NPR {vatTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          VAT (13%): <span style={{ color: 'var(--theme-amber)', fontWeight: 600, marginLeft: 8 }}>NPR {fmt(vatTotal)}</span>
                         </div>
                       )}
                       <div style={{ color: 'var(--theme-accent)', fontWeight: 700, fontSize: 14, borderTop: '1px solid var(--theme-border)', paddingTop: 6 }}>
-                        Grand Total: NPR {grandTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        Grand Total: NPR {fmt(grandTotal)}
                       </div>
                     </div>
                   )
