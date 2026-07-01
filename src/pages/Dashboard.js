@@ -483,7 +483,7 @@ export default function Dashboard() {
       <div>
         <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <h1 className="page-title">Dashboard</h1>
+            <h1 className="page-title">Admin Dashboard</h1>
             <p className="page-subtitle">{active.length} active · {inactive.length} inactive · {adminClients.length} total properties</p>
           </div>
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => navigate('/admin/clients')}>Manage Clients →</button>
@@ -785,6 +785,13 @@ export default function Dashboard() {
   const showHr  = clientModules.hr
   const showPos = clientModules.pos
   const moduleCount = [showIms, showHr, showPos].filter(Boolean).length
+  const dashTitle = isAdmin
+    ? 'Admin Dashboard'
+    : moduleCount > 1 ? 'Dashboard'
+    : showIms ? 'Inventory Dashboard'
+    : showHr  ? 'HR Dashboard'
+    : showPos ? 'POS Dashboard'
+    : 'Dashboard'
   const showModuleHeaders = moduleCount >= 2
   const moduleHeader = (text) => showModuleHeaders
     ? <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>{text}</div>
@@ -794,7 +801,7 @@ export default function Dashboard() {
     <div>
       {/* ── Header ── */}
       <div className="page-header">
-        <h1 className="page-title">Dashboard</h1>
+        <h1 className="page-title">{dashTitle}</h1>
         <p className="page-subtitle">
           {isAdmin ? (adminViewClientName || '— Select a property from the sidebar —') : (profile?.clients?.name || '')}
           {activePeriod && ` · ${periodLabel} · Open`}
@@ -817,7 +824,7 @@ export default function Dashboard() {
         )
       })()}
 
-      {!activePeriod && !loading && (
+      {clientModules.ims && !activePeriod && !loading && (
         <div className="card" style={{ marginBottom: 20, cursor: 'pointer', borderColor: 'rgba(201,168,76,0.3)' }} onClick={() => navigate('/periods')}>
           <p style={{ color: 'var(--theme-accent)', margin: 0, fontSize: 14 }}>⚠ No open period. Click here to create one in Periods →</p>
         </div>
