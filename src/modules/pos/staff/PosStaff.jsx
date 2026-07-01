@@ -32,6 +32,7 @@ export default function PosStaff() {
   const [rolesModal,  setRolesModal]  = useState(false)
   const [newRole,     setNewRole]     = useState(EMPTY_ROLE)
   const [rolesSaving, setRolesSaving] = useState(false)
+  const [rolesError,  setRolesError]  = useState('')
 
   // Add staff modal
   const [addModal,    setAddModal]    = useState(false)
@@ -67,7 +68,7 @@ export default function PosStaff() {
   }
 
   async function saveRoles(roles) {
-    setRolesSaving(true)
+    setRolesSaving(true); setRolesError('')
     const { data: existing } = await supabase
       .from('settings').select('id').eq('client_id', clientId).single()
     let err
@@ -78,9 +79,14 @@ export default function PosStaff() {
       const { error } = await supabase.from('settings').insert({ client_id: clientId, pos_custom_roles: roles })
       err = error
     }
-    if (err) { setMsg('Error saving roles: ' + err.message); setRolesSaving(false); return }
+    if (err) { setRolesError('Error saving roles: ' + err.message); setRolesSaving(false); return }
     setCustomRoles(roles)
     setRolesSaving(false)
+  }
+
+  function updateCustomRoleLevel(i, level) {
+    const updated = customRoles.map((r, idx) => idx === i ? { ...r, level } : r)
+    saveRoles(updated)
   }
 
   function addCustomRole() {
@@ -324,6 +330,8 @@ export default function PosStaff() {
               Define custom role names for your team. Each maps to a permission level.
             </p>
 
+            {rolesError && <p style={{ color: 'var(--theme-red)', fontSize: 12, margin: '-8px 0 12px' }}>{rolesError}</p>}
+
             {customRoles.length === 0 ? (
               <p style={{ fontSize: 13, color: 'var(--theme-text3)', fontStyle: 'italic', marginBottom: 16 }}>
                 Using default roles (Staff / Supervisor / Manager)
@@ -333,9 +341,17 @@ export default function PosStaff() {
                 {customRoles.map((r, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
                     <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>{r.label}</span>
-                    <span className={LEVEL_BADGE[r.level]} style={{ fontSize: 11 }}>
-                      {r.level.charAt(0).toUpperCase() + r.level.slice(1)}
-                    </span>
+                    <select
+                      className="form-select"
+                      style={{ width: 120, fontSize: 12 }}
+                      value={r.level}
+                      onChange={e => updateCustomRoleLevel(i, e.target.value)}
+                      disabled={rolesSaving}
+                    >
+                      {PERMISSION_LEVELS.map(l => (
+                        <option key={l.value} value={l.value}>{l.label}</option>
+                      ))}
+                    </select>
                     <button
                       className="btn btn-ghost"
                       style={{ fontSize: 12, padding: '3px 8px', color: 'var(--theme-red)', borderColor: 'var(--theme-red)' }}
