@@ -100,6 +100,13 @@ export function getBsToday() {
   return adToBs(new Date())
 }
 
+/** Nepal fiscal year label (e.g. '82/83') for a BS year/month. FY runs Shrawan (month 4) -> Ashadh (month 3) of the following year. */
+export function getBsFiscalYear(bsYear, bsMonth) {
+  const start = bsMonth >= 4 ? bsYear : bsYear - 1
+  const end = start + 1
+  return `${start % 100}/${end % 100}`
+}
+
 /** Format a JS Date as YYYY-MM-DD for <input type="date"> values. */
 export function formatAd(date) {
   const y = date.getFullYear()

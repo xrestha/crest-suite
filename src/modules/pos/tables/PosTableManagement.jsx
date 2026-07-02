@@ -16,7 +16,7 @@ const ADD_EMPTY = { name: '', section: '', capacity: 4 }
 export default function PosTableManagement() {
   const { clientId, hasPosAccess } = useAuth()
 
-  const [mainTab, setMainTab] = useState('tables') // 'tables' | 'routing' | 'notes'
+  const [mainTab, setMainTab] = useState('tables') // 'tables' | 'routing' | 'notes' | 'hsc'
 
   const [tables,    setTables]    = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -50,6 +50,12 @@ export default function PosTableManagement() {
   const [notesSaving,   setNotesSaving]   = useState(false)
   const [notesMsg,      setNotesMsg]      = useState('')
   const [notesLoaded,   setNotesLoaded]   = useState(false)
+
+  // HSC Codes
+  const [hscItems,   setHscItems]   = useState([])
+  const [hscLoading, setHscLoading] = useState(false)
+  const [hscLoaded,  setHscLoaded]  = useState(false)
+  const [hscSaving,  setHscSaving]  = useState({})   // { recipeId: bool }
 
   useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line
 
@@ -247,6 +253,33 @@ export default function PosTableManagement() {
     setNotesMsg(error ? 'error:' + error.message : 'ok:Quick notes saved.')
   }
 
+  // ── HSC Codes ────────────────────────────────────────────────────────────────
+
+  async function loadHscItems() {
+    setHscLoading(true)
+    const { data } = await supabase
+      .from('recipes').select('id, name, category, hsc_code')
+      .eq('client_id', clientId).eq('is_active', true).eq('pos_enabled', true)
+      .neq('category', 'Sub-Recipe').order('name')
+    setHscItems(data || [])
+    setHscLoading(false)
+    setHscLoaded(true)
+  }
+
+  function openHscTab() {
+    setMainTab('hsc')
+    if (!hscLoaded) loadHscItems()
+  }
+
+  async function saveHsc(recipe, value) {
+    const trimmed = value.trim()
+    if (trimmed === (recipe.hsc_code || '')) return
+    setHscSaving(s => ({ ...s, [recipe.id]: true }))
+    await supabase.from('recipes').update({ hsc_code: trimmed || null }).eq('id', recipe.id)
+    setHscItems(items => items.map(r => r.id === recipe.id ? { ...r, hsc_code: trimmed || null } : r))
+    setHscSaving(s => ({ ...s, [recipe.id]: false }))
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   return (
@@ -277,6 +310,12 @@ export default function PosTableManagement() {
             className={`tab-btn${mainTab === 'notes' ? ' tab-btn--active' : ''}`}
             onClick={openNotesTab}
           >Quick Notes</button>
+        </Tip>
+        <Tip text="Harmonized System Code per menu item — only required (min. 4 digits) if the item is an imported good sold as-is (e.g. imported bottled drinks). Not needed for freshly prepared dishes. Printed on POS bills if set.">
+          <button
+            className={`tab-btn${mainTab === 'hsc' ? ' tab-btn--active' : ''}`}
+            onClick={openHscTab}
+          >HSC Codes</button>
         </Tip>
       </div>
 
@@ -415,6 +454,58 @@ export default function PosTableManagement() {
                 )}
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {/* ══ HSC CODES TAB ══ */}
+      {mainTab === 'hsc' && (
+        <div style={{ maxWidth: 600 }}>
+          <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
+            Harmonized System Code per menu item. IRD only requires this (min. 4 digits) for items
+            that are <strong style={{ color: 'var(--theme-text2)' }}>imported goods sold as-is</strong>{' '}
+            (e.g. imported bottled drinks or snacks) — freshly prepared dishes don't need one.
+            Leave blank unless it applies. Printed on the POS bill per line if set.
+          </p>
+
+          {hscLoading ? (
+            <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+          ) : hscItems.length === 0 ? (
+            <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
+              No POS-enabled menu items found. Toggle items On POS in Menu Pricing first.
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 160px',
+                padding: '10px 18px', borderBottom: '1px solid var(--theme-border)',
+                fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)',
+                textTransform: 'uppercase', letterSpacing: '0.07em',
+              }}>
+                <span>Item</span>
+                <span>HSC Code</span>
+              </div>
+              {hscItems.map((r, i) => (
+                <div key={r.id} style={{
+                  display: 'grid', gridTemplateColumns: '1fr 160px',
+                  alignItems: 'center', padding: '10px 18px',
+                  borderBottom: i < hscItems.length - 1 ? '1px solid var(--theme-border-lt, var(--theme-border))' : 'none',
+                }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{r.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{r.category}</div>
+                  </div>
+                  <input
+                    className="form-select"
+                    defaultValue={r.hsc_code || ''}
+                    onBlur={e => saveHsc(r, e.target.value)}
+                    placeholder="e.g. 2202"
+                    disabled={hscSaving[r.id]}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}

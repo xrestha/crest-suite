@@ -7,11 +7,17 @@ import Tip from '../components/Tip'
 
 const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Recipe Categories', 'Contact', 'Data', 'Theme']
 
+// Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
+function deriveInvoicePrefix(name) {
+  if (!name) return ''
+  return name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 5)
+}
+
 export default function Settings() {
   const { settings, saveSettings, loadSettings, recipeCategories } = useSettings()
   const { clientId, isAdmin, hasFeature } = useAuth()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
-  const ADMIN_TABS = new Set(['Branding', 'Contact', 'Theme', 'Data'])
+  const ADMIN_TABS = new Set(['Branding', 'Property', 'Contact', 'Theme', 'Data'])
   const CLIENT_HIDDEN = new Set(['Contact', 'Branding', 'Property', 'Data'])
   const TABS = ALL_TABS.filter(t => {
     if (isAdmin) return ADMIN_TABS.has(t)
@@ -42,7 +48,11 @@ export default function Settings() {
     loadSettings(isAdmin && !clientId ? null : clientId)
   }, [clientId, isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { setForm({ ...settings }) }, [settings])
+  useEffect(() => {
+    const next = { ...settings }
+    if (!next.invoice_prefix && next.app_name) next.invoice_prefix = deriveInvoicePrefix(next.app_name)
+    setForm(next)
+  }, [settings])
   useEffect(() => { setCats([...recipeCategories]) }, [recipeCategories]) // eslint-disable-line
 
   function update(key, val) { setForm(f => ({ ...f, [key]: val })) }
@@ -336,12 +346,22 @@ export default function Settings() {
               { key: 'property_phone', label: 'Phone', placeholder: '01-XXXXXXX', tip: null },
               { key: 'property_email', label: 'Email', placeholder: 'info@property.com', tip: null },
               { key: 'vat_number', label: 'VAT Registration Number', placeholder: 'e.g. 123456789', tip: 'Your business VAT registration number as issued by IRD Nepal. Printed on report headers and used for VAT invoice compliance.' },
+              { key: 'invoice_prefix', label: 'Invoice Prefix', placeholder: 'e.g. CAC', tip: 'Short client code used in POS invoice numbers, e.g. TI2238-CAC-82/83. Auto-suggested from the property name; edit if you want something different.', upper: true },
             ].map(f => (
               <div key={f.key} className="form-field">
                 <label>{f.tip ? <Tip text={f.tip} width={280}>{f.label}</Tip> : f.label}</label>
-                <input value={form[f.key] || ''} onChange={e => update(f.key, e.target.value)} placeholder={f.placeholder} />
+                <input value={form[f.key] || ''} onChange={e => update(f.key, f.upper ? e.target.value.toUpperCase() : e.target.value)} placeholder={f.placeholder} />
               </div>
             ))}
+            <div className="form-field">
+              <label><Tip text="On = POS bills print as a Tax Invoice with a VAT breakdown (invoice numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). Matches whether this client is actually VAT-registered with IRD." width={280}>VAT Registered</Tip></label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 34 }}>
+                <input type="checkbox" checked={form.is_vat_registered ?? true}
+                  onChange={e => update('is_vat_registered', e.target.checked)}
+                  style={{ width: 16, height: 16, padding: 0, margin: 0, flexShrink: 0, background: 'none', border: 'none', accentColor: 'var(--theme-accent)', cursor: 'pointer' }} />
+                <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{(form.is_vat_registered ?? true) ? 'Yes — issues Tax Invoices' : 'No — PAN Bill only'}</span>
+              </label>
+            </div>
           </div>
         </div>
       )}

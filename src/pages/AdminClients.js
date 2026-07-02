@@ -105,7 +105,14 @@ const SETTINGS_DEFAULTS = {
   app_name: '', app_tagline: '', property_address: '', property_phone: '',
   property_email: '', vat_number: '', fc_warning_pct: 35, fc_critical_pct: 45,
   expiry_warning_days: 7, variance_flag_pct: 10, item_code_prefix: 'ITM',
-  contact_phone: '', contact_email: '', contact_website: ''
+  contact_phone: '', contact_email: '', contact_website: '',
+  is_vat_registered: true, invoice_prefix: ''
+}
+
+// Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
+function deriveInvoicePrefix(name) {
+  if (!name) return ''
+  return name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 5)
 }
 
 // ── Subscription badge ────────────────────────────────────────────────────────
@@ -328,7 +335,13 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
   async function fetchClientSettings() {
     setLoadingSettings(true)
     const data = await loadClientSettings(client.id)
-    if (data) setClientSettings(prev => ({ ...prev, ...data }))
+    if (data) {
+      setClientSettings(prev => {
+        const merged = { ...prev, ...data }
+        if (!merged.invoice_prefix && merged.app_name) merged.invoice_prefix = deriveInvoicePrefix(merged.app_name)
+        return merged
+      })
+    }
     setLoadingSettings(false)
   }
 
@@ -832,6 +845,19 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                     <div className="form-field">
                       <label><Tip text="Client's VAT registration number, printed on invoices and used for IRD compliance reporting.">VAT Number</Tip></label>
                       <input value={clientSettings.vat_number || ''} onChange={e => setClientSettings({ ...clientSettings, vat_number: e.target.value })} />
+                    </div>
+                    <div className="form-field">
+                      <label><Tip text="On = POS bills print as a Tax Invoice with VAT breakdown (invoice numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). Matches whether this client is actually VAT-registered with IRD.">VAT Registered</Tip></label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 34 }}>
+                        <input type="checkbox" checked={clientSettings.is_vat_registered ?? true}
+                          onChange={e => setClientSettings({ ...clientSettings, is_vat_registered: e.target.checked })}
+                          style={{ width: 16, height: 16, padding: 0, margin: 0, flexShrink: 0, background: 'none', border: 'none', accentColor: 'var(--theme-accent)', cursor: 'pointer' }} />
+                        <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{(clientSettings.is_vat_registered ?? true) ? 'Yes — issues Tax Invoices' : 'No — PAN Bill only'}</span>
+                      </label>
+                    </div>
+                    <div className="form-field">
+                      <label><Tip text="Short client code used in POS invoice numbers, e.g. TI2238-CAC-82/83. Auto-suggested from the property name; edit if you want something different.">Invoice Prefix</Tip></label>
+                      <input value={clientSettings.invoice_prefix || ''} onChange={e => setClientSettings({ ...clientSettings, invoice_prefix: e.target.value.toUpperCase() })} placeholder="e.g. CAC" />
                     </div>
                   </div>
 

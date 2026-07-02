@@ -3,13 +3,19 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
-import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { adToBs, BS_MONTHS, getBsToday, getBsFiscalYear } from '../../../utils/bsCalendar'
+import { numberToWordsNpr } from '../../../utils/numberToWords'
 
 const vatOf  = r => (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : parseFloat(r.vat_rate)
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 
 const STATUS_BADGE = { available: 'badge-green', occupied: 'badge-red', reserved: 'badge-amber', inactive: 'badge-gray' }
 const STATUS_LABEL = { available: 'Available', occupied: 'Occupied', reserved: 'Reserved', inactive: 'Inactive' }
+
+const PAYMENT_METHODS  = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay']
+const VOID_REASONS     = ['Wrong table', 'Duplicate order', 'Test order', 'Order entry mistake', 'Other']
+const WRITEOFF_REASONS = ['Walkout / unpaid', 'Complimentary', 'Customer complaint', 'Staff error', 'Other']
+const COPY_LABEL       = n => n <= 1 ? 'ORIGINAL' : n === 2 ? 'DUPLICATE' : n === 3 ? 'TRIPLICATE' : `REPRINT #${n}`
 
 const btnSm = {
   width: 26, height: 26, borderRadius: 4,
@@ -19,6 +25,12 @@ const btnSm = {
   cursor: 'pointer', fontSize: 16, lineHeight: 1,
   display: 'flex', alignItems: 'center', justifyContent: 'center',
   flexShrink: 0,
+}
+
+const billInput = {
+  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
+  borderRadius: 6, padding: '7px 10px', fontSize: 13,
+  color: 'var(--theme-text1)', outline: 'none',
 }
 
 export default function PosOrders() {
@@ -59,14 +71,47 @@ export default function PosOrders() {
   const [suggestions,       setSuggestions]       = useState([])
   const [manualSuggestions, setManualSuggestions] = useState({}) // { recipeId: [suggestedRecipeId] }
 
+  /* ── billing / invoice settings (loaded once per client) ── */
+  const [billingSettings, setBillingSettings] = useState({
+    is_vat_registered: true, invoice_prefix: '', vat_number: '', property_address: '', property_phone: '',
+  })
+
+  /* ── Billing modal ── */
+  const [billingOpen, setBillingOpen] = useState(false)
+  const [billingTab,  setBillingTab]  = useState('pay') // 'pay' | 'void' | 'writeoff'
+  const [payMethod,   setPayMethod]   = useState('Cash')
+  const [tenderedStr, setTenderedStr] = useState('')
+  const [closeReason, setCloseReason] = useState('')
+  const [buyerName,    setBuyerName]    = useState('')
+  const [buyerAddress, setBuyerAddress] = useState('')
+  const [buyerPan,     setBuyerPan]     = useState('')
+  const [buyerPhone,   setBuyerPhone]   = useState('')
+  const [billRemarks,  setBillRemarks]  = useState('')
+  const [closing,     setClosing]     = useState(false)
+  const [closeMsg,    setCloseMsg]    = useState('')
+
+  /* ── Recent Bills / Reprint ── */
+  const [recentBillsOpen, setRecentBillsOpen] = useState(false)
+  const [recentBills,     setRecentBills]     = useState([])
+  const [recentBillsLoad, setRecentBillsLoad] = useState(false)
+
   useEffect(() => {
     if (!clientId) return
     loadFloor()
-    supabase.from('settings').select('pos_bot_categories, pos_note_presets').eq('client_id', clientId).maybeSingle()
+    supabase.from('settings')
+      .select('pos_bot_categories, pos_note_presets, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone')
+      .eq('client_id', clientId).maybeSingle()
       .then(({ data }) => {
         const arr = data?.pos_bot_categories
         if (arr?.length) setBotCategories(new Set(arr))
         setNotePresets(data?.pos_note_presets || [])
+        setBillingSettings({
+          is_vat_registered: data?.is_vat_registered ?? true,
+          invoice_prefix:    data?.invoice_prefix || '',
+          vat_number:        data?.vat_number || '',
+          property_address:  data?.property_address || '',
+          property_phone:    data?.property_phone || '',
+        })
       })
     supabase.from('clients').select('name').eq('id', clientId).single()
       .then(({ data }) => setOutletName(data?.name || ''))
@@ -445,12 +490,214 @@ export default function PosOrders() {
   <hr>
 </body></html>`
 
+    printHtml(html)
+  }
+
+  function printHtml(html) {
     const w = window.open('', '_blank', 'width=340,height=480,left=200,top=100')
-    if (!w) { setMsg('error:Allow pop-ups to print.'); return }
+    if (!w) { setMsg('error:Allow pop-ups to print.'); return false }
     w.document.write(html)
     w.document.close()
     w.focus()
     setTimeout(() => { w.print(); w.close() }, 300)
+    return true
+  }
+
+  /* ── Billing / Charge ── */
+
+  function openBilling() {
+    setBillingTab('pay')
+    setPayMethod('Cash')
+    setTenderedStr('')
+    setCloseReason('')
+    setBuyerName(''); setBuyerAddress(''); setBuyerPan(''); setBuyerPhone(''); setBillRemarks('')
+    setCloseMsg('')
+    setBillingOpen(true)
+  }
+
+  async function writeSalesEntries() {
+    const { data: periods } = await supabase
+      .from('monthly_periods').select('*').eq('client_id', clientId)
+      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+    const open = (periods || []).find(p => p.status === 'open')
+    if (!open) return
+    const today = getBsToday()
+    if (today.year !== open.bs_year || today.month !== open.bs_month) return
+    const rows = orderItems
+      .filter(i => i.recipe_id)
+      .map(i => ({ period_id: open.id, recipe_id: i.recipe_id, bs_day: today.day, qty_sold: i.qty, source: 'pos' }))
+    if (rows.length > 0) await supabase.from('sales_entries').insert(rows)
+  }
+
+  async function closeOrder(closeType) {
+    if (!orderId || !clientId) return
+    if ((closeType === 'void' || closeType === 'writeoff') && !closeReason) {
+      setCloseMsg('error:Select a reason.'); return
+    }
+    setClosing(true); setCloseMsg('')
+
+    const today = getBsToday()
+    const payload = {
+      status:           closeType === 'void' ? 'voided' : 'billed',
+      close_type:       closeType,
+      payment_method:   closeType === 'paid' ? payMethod : null,
+      paid_amount:      closeType === 'paid' ? total : (closeType === 'writeoff' ? 0 : null),
+      tendered_amount:  closeType === 'paid' && payMethod === 'Cash' ? (parseFloat(tenderedStr) || total) : null,
+      close_reason:     closeType === 'paid' ? null : closeReason,
+      buyer_name:       buyerName.trim() || null,
+      buyer_address:    buyerAddress.trim() || null,
+      buyer_pan:        buyerPan.trim() || null,
+      buyer_phone:      buyerPhone.trim() || null,
+      bill_remarks:     billRemarks.trim() || null,
+      closed_by:        profile?.id || null,
+      closed_at:        new Date().toISOString(),
+      ...(closeType !== 'void' ? { invoice_fy: getBsFiscalYear(today.year, today.month) } : {}),
+    }
+
+    const { data: updated, error } = await supabase
+      .from('pos_orders').update(payload).eq('id', orderId)
+      .select('*').single()
+    if (error) { setCloseMsg('error:' + error.message); setClosing(false); return }
+
+    if (closeType !== 'void') await writeSalesEntries()
+
+    if (activeTable?.id) {
+      await supabase.from('pos_tables').update({ status: 'available' }).eq('id', activeTable.id)
+    }
+
+    if (closeType !== 'void') await printBill(updated, orderItems)
+
+    setClosing(false)
+    setBillingOpen(false)
+    await loadFloor()
+    backToFloor()
+  }
+
+  async function printBill(order, items) {
+    const newCount = (order.print_count || 0) + 1
+    await supabase.from('pos_orders').update({ print_count: newCount }).eq('id', order.id)
+
+    // HSC codes live on recipes (set in Table Management → HSC Codes), looked up fresh at print
+    // time rather than denormalized onto pos_order_items — keeps the core order-save path from
+    // ever depending on this rarely-used field.
+    const recipeIds = items.map(i => i.recipe_id).filter(Boolean)
+    let hscMap = {}
+    if (recipeIds.length > 0) {
+      const { data: hscData } = await supabase.from('recipes').select('id, hsc_code').in('id', recipeIds)
+      hscMap = Object.fromEntries((hscData || []).map(r => [r.id, r.hsc_code]))
+    }
+
+    const vatReg      = billingSettings.is_vat_registered
+    const prefix      = billingSettings.invoice_prefix || ''
+    const invoiceNo   = `${vatReg ? 'TI' : 'PB'}${order.invoice_no ?? ''}-${prefix}${prefix ? '-' : ''}${order.invoice_fy || ''}`
+    const tableName   = activeTable?.name || order.table_name || 'Takeaway'
+    const now         = new Date()
+    const nowStr      = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    const adDateStr   = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const bs          = adToBs(now)
+    const bsDateStr   = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
+    const isWriteoff  = order.close_type === 'writeoff'
+    const payLabel    = isWriteoff ? 'Written-off / Unpaid' : (order.payment_method || '')
+
+    const subEx  = items.reduce((s, i) => s + i.qty * i.unit_price, 0)
+    const vatAmt = vatReg ? items.reduce((s, i) => s + i.qty * i.unit_price * (i.vat_rate ?? 0), 0) : 0
+    const gross  = subEx + vatAmt
+    const net    = gross
+    const taxableBase    = vatReg ? items.filter(i => (i.vat_rate ?? 0) > 0).reduce((s, i) => s + i.qty * i.unit_price, 0) : 0
+    const nonTaxableBase = vatReg ? items.filter(i => !(i.vat_rate > 0)).reduce((s, i) => s + i.qty * i.unit_price, 0) : subEx
+    const totalQty = items.reduce((s, i) => s + i.qty, 0)
+    const tendered = order.tendered_amount ?? net
+    const change   = payLabel === 'Cash' ? Math.max(0, tendered - net) : 0
+
+    const html = `<!DOCTYPE html>
+<html><head><title>Bill</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Courier New',monospace; font-size:12px; width:80mm; padding:8px 10px; }
+  .c   { text-align:center; }
+  .b   { font-weight:bold; }
+  .lg  { font-size:16px; letter-spacing:1px; }
+  hr   { border:none; border-top:1px dashed #000; margin:6px 0; }
+  .row { display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
+  table { width:100%; border-collapse:collapse; font-size:11px; }
+  th, td { text-align:left; padding:2px 0; }
+  th:last-child, td:last-child { text-align:right; }
+  .tot  { font-weight:bold; font-size:14px; }
+  .copy { font-size:10px; letter-spacing:1px; }
+</style>
+</head><body>
+  <div class="c copy">${COPY_LABEL(newCount)}</div>
+  ${outletName ? `<div class="c b" style="font-size:14px">${outletName}</div>` : ''}
+  ${billingSettings.property_address ? `<div class="c" style="font-size:10px">${billingSettings.property_address}</div>` : ''}
+  ${billingSettings.property_phone ? `<div class="c" style="font-size:10px">${billingSettings.property_phone}</div>` : ''}
+  ${billingSettings.vat_number ? `<div class="c" style="font-size:10px">PAN No.: ${billingSettings.vat_number}</div>` : ''}
+  <div class="c b lg" style="margin-top:4px">${vatReg ? 'TAX INVOICE' : 'BILL'}</div>
+  <hr>
+  <div class="row"><span>Bill No:</span><span class="b">${invoiceNo}</span></div>
+  <div class="row"><span>Date:</span><span>${adDateStr}</span></div>
+  <div class="row"><span>Miti:</span><span>${bsDateStr}</span></div>
+  <div class="row"><span>Name:</span><span>${order.buyer_name || ''}</span></div>
+  <div class="row"><span>Address:</span><span>${order.buyer_address || ''}</span></div>
+  <div class="row"><span>PAN No:</span><span>${order.buyer_pan || ''}</span></div>
+  <div class="row"><span>Phone:</span><span>${order.buyer_phone || ''}</span></div>
+  <div class="row"><span>Payment Mode:</span><span>${payLabel}</span></div>
+  <div class="row"><span>Remarks:</span><span>${order.bill_remarks || ''}</span></div>
+  <hr>
+  <table>
+    <thead><tr><th>Item</th><th>HSC</th><th>Qty</th><th>Amount</th></tr></thead>
+    <tbody>
+      ${items.map(i => `<tr><td>${i.name}</td><td>${hscMap[i.recipe_id] || ''}</td><td>${i.qty}</td><td>${(i.qty * i.unit_price).toFixed(2)}</td></tr>`).join('')}
+    </tbody>
+  </table>
+  <hr>
+  <div class="row"><span>Gross Amount:</span><span>${gross.toFixed(2)}</span></div>
+  ${vatReg ? `
+  <div class="row"><span>Taxable:</span><span>${taxableBase.toFixed(2)}</span></div>
+  <div class="row"><span>Nontaxable:</span><span>${nonTaxableBase.toFixed(2)}</span></div>
+  <div class="row"><span>VAT 13%:</span><span>${vatAmt.toFixed(2)}</span></div>
+  ` : ''}
+  <div class="row tot"><span>Net Amount:</span><span>${net.toFixed(2)}</span></div>
+  <hr>
+  <div class="row"><span>Tender:</span><span>${tendered.toFixed(2)}</span></div>
+  <div class="row"><span>Change:</span><span>${change.toFixed(2)}</span></div>
+  <hr>
+  <div class="row"><span>Total Qty:</span><span>${totalQty}</span></div>
+  <hr>
+  <div style="font-size:11px; margin:4px 0">Rs. ${numberToWordsNpr(net)} only</div>
+  <hr>
+  <div class="c" style="font-size:11px">Thank you for visiting us.</div>
+  <hr>
+  <div class="row" style="font-size:10px;color:#555"><span>Counter: ${tableName}</span><span>${nowStr}</span></div>
+  <div style="font-size:10px;color:#555">Cashier: ${profile?.full_name || ''}</div>
+</body></html>`
+
+    printHtml(html)
+  }
+
+  async function loadRecentBills() {
+    setRecentBillsLoad(true)
+    const today = getBsToday()
+    const { data } = await supabase
+      .from('pos_orders')
+      .select('id, table_name, invoice_no, invoice_fy, close_type, paid_amount, closed_at, order_no')
+      .eq('client_id', clientId)
+      .in('status', ['billed', 'voided'])
+      .order('closed_at', { ascending: false })
+      .limit(30)
+    setRecentBills((data || []).filter(o => {
+      if (!o.closed_at) return false
+      const bs = adToBs(new Date(o.closed_at))
+      return bs.year === today.year && bs.month === today.month && bs.day === today.day
+    }))
+    setRecentBillsLoad(false)
+  }
+
+  async function reprintBill(orderRow) {
+    const { data: order } = await supabase.from('pos_orders').select('*').eq('id', orderRow.id).single()
+    const { data: items } = await supabase.from('pos_order_items').select('*').eq('order_id', orderRow.id)
+    if (!order) return
+    await printBill(order, items || [])
+    setRecentBills(prev => prev.map(o => o.id === orderRow.id ? { ...o, print_count: (o.print_count || 0) + 1 } : o))
   }
 
   async function clearAllOccupiedTables() {
@@ -822,10 +1069,11 @@ export default function PosOrders() {
                   )}
                 </button>
               </Tip>
-              <Tip text="Billing & payment — coming next">
+              <Tip text="Close this table — collect payment, or void/write-off if unpaid. Order must be saved first.">
                 <button className="btn btn-ghost"
-                  style={{ flex: 1, padding: '8px 0', fontSize: 13, opacity: 0.4, cursor: 'not-allowed', justifyContent: 'center' }}
-                  disabled>
+                  style={{ flex: 1, padding: '8px 0', fontSize: 13, justifyContent: 'center' }}
+                  onClick={openBilling}
+                  disabled={saving || !orderId}>
                   Charge →
                 </button>
               </Tip>
@@ -834,6 +1082,131 @@ export default function PosOrders() {
         </div>
 
       </div>
+
+      {/* ── Billing modal ── */}
+      {billingOpen && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget && !closing) setBillingOpen(false) }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
+        >
+          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, width: 'min(480px, 96vw)', maxHeight: '90vh', overflowY: 'auto', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
+            <h3 style={{ margin: '0 0 4px', fontSize: 18, color: 'var(--theme-text1)' }}>
+              {activeTable ? activeTable.name : 'Takeaway'}
+            </h3>
+            <p style={{ margin: '0 0 16px', fontSize: 20, fontWeight: 700, color: 'var(--theme-accent)' }}>{fmtNpr(total)}</p>
+
+            {(kotCount + botCount) > 0 && (
+              <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber)', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 6, padding: '8px 10px' }}>
+                ⚠ {kotCount + botCount} item{kotCount + botCount !== 1 ? 's' : ''} not yet sent to the kitchen/bar.
+              </p>
+            )}
+
+            <div className="tab-bar" style={{ marginBottom: 16 }}>
+              <button className={`tab-btn${billingTab === 'pay' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('pay'); setCloseMsg('') }}>Pay</button>
+              {hasPosAccess('supervisor') && (
+                <button className={`tab-btn${billingTab === 'void' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('void'); setCloseMsg('') }}>Void</button>
+              )}
+              {hasPosAccess('manager') && (
+                <button className={`tab-btn${billingTab === 'writeoff' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('writeoff'); setCloseMsg('') }}>Write-off</button>
+              )}
+            </div>
+
+            {(billingTab === 'pay' || billingTab === 'writeoff') && (
+              <div style={{ marginBottom: 16 }}>
+                <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
+                  Buyer details <Tip text="Optional for transactions ≤ NPR 10,000 (IRD abbreviated-invoice exemption). Fill in if the customer requests a full invoice with their own PAN.">(optional)</Tip>
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                  <input placeholder="Name" value={buyerName} onChange={e => setBuyerName(e.target.value)} style={billInput} />
+                  <input placeholder="PAN No." value={buyerPan} onChange={e => setBuyerPan(e.target.value)} style={billInput} />
+                  <input placeholder="Address" value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)} style={billInput} />
+                  <input placeholder="Phone" value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} style={billInput} />
+                </div>
+                <input placeholder="Remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%' }} />
+              </div>
+            )}
+
+            {billingTab === 'pay' && (
+              <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                  {PAYMENT_METHODS.map(m => (
+                    <button key={m} onClick={() => setPayMethod(m)} style={{
+                      padding: '8px 16px', borderRadius: 7, fontSize: 13, cursor: 'pointer',
+                      fontWeight: payMethod === m ? 700 : 400,
+                      background: payMethod === m ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
+                      color: payMethod === m ? '#000' : 'var(--theme-text2)',
+                      border: `1px solid ${payMethod === m ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+                    }}>{m}</button>
+                  ))}
+                </div>
+                {payMethod === 'Cash' && (
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Tender</label>
+                      <input type="number" min="0" step="any" placeholder={total.toFixed(0)}
+                        value={tenderedStr} onChange={e => setTenderedStr(e.target.value)} style={{ ...billInput, width: '100%' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Change</label>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>
+                        {fmtNpr(Math.max(0, (parseFloat(tenderedStr) || total) - total))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {closeMsg && <p style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
+                <button className="btn btn-primary" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
+                  onClick={() => closeOrder('paid')} disabled={closing}>
+                  {closing ? 'Processing…' : `Confirm Payment — ${fmtNpr(total)}`}
+                </button>
+              </>
+            )}
+
+            {billingTab === 'void' && (
+              <>
+                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Reason</label>
+                <select className="form-select" style={{ width: '100%', marginBottom: 12 }} value={closeReason} onChange={e => setCloseReason(e.target.value)}>
+                  <option value="">— Select —</option>
+                  {VOID_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                {orderItems.some(i => i.sent_to_kot) && (
+                  <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber)' }}>
+                    ⚠ Some items were already sent to the kitchen/bar — consider Write-off instead so food cost isn't lost.
+                  </p>
+                )}
+                {closeMsg && <p style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
+                <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-red)', color: '#fff', borderColor: 'var(--theme-red)' }}
+                  onClick={() => closeOrder('void')} disabled={closing || !closeReason}>
+                  {closing ? 'Processing…' : 'Void Order'}
+                </button>
+              </>
+            )}
+
+            {billingTab === 'writeoff' && (
+              <>
+                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Reason</label>
+                <select className="form-select" style={{ width: '100%', marginBottom: 12 }} value={closeReason} onChange={e => setCloseReason(e.target.value)}>
+                  <option value="">— Select —</option>
+                  {WRITEOFF_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text3)' }}>
+                  ₨0 is collected, but this still counts as a sale for food-cost accuracy — a bill still prints.
+                </p>
+                {closeMsg && <p style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
+                <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-amber)', color: '#000', borderColor: 'var(--theme-amber)' }}
+                  onClick={() => closeOrder('writeoff')} disabled={closing || !closeReason}>
+                  {closing ? 'Processing…' : 'Write Off (₨0 collected)'}
+                </button>
+              </>
+            )}
+
+            <button className="btn btn-ghost" style={{ width: '100%', padding: '9px 0', justifyContent: 'center', marginTop: 10, fontSize: 13 }}
+              onClick={() => setBillingOpen(false)} disabled={closing}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 
@@ -915,6 +1288,13 @@ export default function PosOrders() {
                 >⚠ Clear Occupied</button>
               </Tip>
             )}
+            <Tip text="Today's closed bills — reprint a duplicate/triplicate copy if a customer needs one again.">
+              <button
+                onClick={() => { setRecentBillsOpen(true); loadRecentBills() }}
+                className="btn btn-ghost"
+                style={{ fontSize: 13, flexShrink: 0 }}
+              >📄 Recent Bills</button>
+            </Tip>
             <button className="btn btn-ghost" onClick={openTakeaway} style={{ fontSize: 13, flexShrink: 0 }}>
               + Takeaway
             </button>
@@ -1009,6 +1389,48 @@ export default function PosOrders() {
         </div>
       )}
     </div>
+
+    {/* ── Recent Bills / Reprint modal ── */}
+    {recentBillsOpen && (
+      <div
+        onClick={e => { if (e.target === e.currentTarget) setRecentBillsOpen(false) }}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}
+      >
+        <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, width: 'min(480px, 96vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
+          <h3 style={{ margin: '0 0 4px', fontSize: 16, color: 'var(--theme-text1)' }}>Recent Bills — Today</h3>
+          <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>Reprint a bill closed earlier today.</p>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {recentBillsLoad ? (
+              <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+            ) : recentBills.length === 0 ? (
+              <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No bills closed yet today.</p>
+            ) : recentBills.map(o => (
+              <div key={o.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid var(--theme-border)' }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>
+                    {o.table_name || 'Takeaway'} {o.close_type === 'void' && <span style={{ color: 'var(--theme-red)', fontSize: 11 }}>(Void)</span>}
+                    {o.close_type === 'writeoff' && <span style={{ color: 'var(--theme-amber)', fontSize: 11 }}>(Write-off)</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                    {o.invoice_no ? `Inv #${o.invoice_no}` : `Order #${o.order_no}`} · {new Date(o.closed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {o.paid_amount != null && <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{fmtNpr(o.paid_amount)}</span>}
+                  {o.close_type !== 'void' && (
+                    <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintBill(o)}>Reprint</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="btn btn-ghost" style={{ width: '100%', padding: '9px 0', justifyContent: 'center', marginTop: 14, fontSize: 13 }}
+            onClick={() => setRecentBillsOpen(false)}>
+            Close
+          </button>
+        </div>
+      </div>
+    )}
     </>
   )
 }

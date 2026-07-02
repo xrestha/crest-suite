@@ -694,6 +694,7 @@ export default function Help() {
                     'Inactive status removes a table from active service without deleting it — useful for tables under repair or seasonal areas',
                     'Ticket Routing: go to the Ticket Routing tab to set which categories print at the kitchen (KOT) vs the bar (BOT). Default is Beverage → BOT, everything else → KOT',
                     'Quick Notes: add preset instruction chips (e.g. "No onion", "Extra spicy") in the Quick Notes tab — staff can tap them instead of typing when adding a note to an order item',
+                    'HSC Codes: set an optional Harmonized System Code per item in the HSC Codes tab — only needed for items that are imported goods sold as-is (e.g. imported bottled drinks). Leave blank for freshly prepared dishes; prints on the bill if set',
                   ],
                 },
                 {
@@ -712,6 +713,10 @@ export default function Help() {
                     'Tap "+ Add note" under any order item to send a special instruction (e.g. "no onion") to the kitchen/bar — it prints indented under that item on the ticket. Preset chips from Table Management → Quick Notes appear while you type',
                     'Editing or adding a note after a ticket was already sent clears its ✓ sent badge — press KOT/BOT again to send the update to the station',
                     'The floor view shows an amber "⚠ pending" pill and per-table badge for any table with items added but not yet sent to the kitchen/bar — a quick way to catch orders that were never fired',
+                    'Charge → closes the table: Pay (any staff) collects Cash/Card/eSewa/Khalti/FonePay and prints a Tax Invoice or Bill; Void (Supervisor+) cancels a mistake with no revenue impact; Write-off (Manager+) closes an unpaid walkout — still counts as a sale for food-cost accuracy, but ₨0 is collected',
+                    'Whether the printed bill says "TAX INVOICE" (with a VAT breakdown) or plain "BILL" (PAN only, no VAT) depends on the VAT Registered toggle an admin sets per client — see Settings below',
+                    'Buyer Name/Address/PAN/Phone on the Charge screen are optional — IRD allows omitting them for bills up to NPR 10,000, but fill them in if a customer requests a full invoice',
+                    '📄 Recent Bills (floor view) lists everything closed today and lets you reprint a bill — the printout is labelled ORIGINAL the first time, DUPLICATE the second, TRIPLICATE the third, and REPRINT #N after that',
                   ],
                 },
                 {
@@ -747,6 +752,15 @@ export default function Help() {
                     'Search by user name or email to trace all actions by a specific person',
                     'The Summary column shows a human-readable description — e.g. "Updated selling price on Chicken Momo to NPR 300"',
                     'Audit entries cannot be edited or deleted — they are the permanent record',
+                  ],
+                },
+                {
+                  icon: '🧾', name: 'POS Billing Setup',
+                  guide: 'Per-client invoice settings, set in Manage Clients → a client → Settings tab. VAT Registered controls whether POS bills print as a Tax Invoice with a VAT breakdown or a plain Bill with PAN only. Invoice Prefix is the short client code used in invoice numbers (e.g. TI2238-CAC-82/83) — auto-suggested from the property name, editable.',
+                  tips: [
+                    'Turn VAT Registered off for clients billing on PAN only (not yet VAT-registered with IRD) — the bill header switches from "TAX INVOICE" to "BILL" and drops the VAT line',
+                    'Invoice numbers reset to 1 at the start of each Nepal fiscal year (Shrawan) automatically — no manual reset needed',
+                    'Invoice Prefix is uppercased automatically; keep it short (3–5 letters) so it fits the 80mm receipt width',
                   ],
                 },
               ].map(feat => (

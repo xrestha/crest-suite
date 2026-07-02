@@ -132,6 +132,63 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S215 — 2026-07-02 — Billing / Charge screen — Void/Write-off + Nepal IRD tax-invoice compliance
+
+Researched IRD (Nepal Inland Revenue Department) VAT/PAN billing rules before building — see sources at the bottom of this entry. Built the entire close-a-table flow from scratch; previously `pos_orders.status` never left `'open'` and nothing released a table back to `'available'`.
+
+**`src/modules/pos/orders/PosOrders.jsx` — Charge → Billing modal**
+- Three tabs, role-gated with the existing `hasPosAccess()`: **Pay** (staff+ — Cash/Card/eSewa/Khalti/FonePay, Tender/Change for Cash), **Void** (supervisor+ — mistake/duplicate/test order, no revenue or food-cost impact, no invoice number consumed), **Write-off** (manager+ — walkout/comp/complaint, ₨0 collected but still counts as a sale so `sales_entries` still gets written for food-cost accuracy)
+- Optional buyer Name/Address/PAN/Phone/Remarks — IRD allows omitting these for bills ≤ NPR 10,000 (abbreviated invoice); fill in when a customer requests a full invoice
+- `closeOrder()` writes `close_type`/`payment_method`/`paid_amount`/`tendered_amount`/`close_reason`/buyer fields, releases the table, writes `sales_entries` (source `'pos'`) for Pay/Write-off by resolving the open BS period + today's `bs_day` (same pattern as `Sales.js`), then prints the bill
+- **Sequential tax-invoice numbering per Nepal fiscal year** — new `assign_pos_invoice_no()` trigger (mirrors S211's `assign_pos_order_no()` advisory-lock pattern, keyed by `client_id + fiscal_year`), fires on the `status → 'billed'` transition. Only Pay/Write-off consume a number; Void never does, since a voided order was never actually invoiced
+- **Printed bill** (`printBill()`, same 80mm thermal pattern as `printTicket()`): header is `TAX INVOICE` (with Taxable/VAT/Net breakdown) if `settings.is_vat_registered`, else plain `BILL` (PAN only, no VAT line). Invoice number format `TI{seq}-{prefix}-{fy}` / `PB{seq}-{prefix}-{fy}`. Includes HSC code per line (live-looked-up from `recipes` by `recipe_id` at print time — see HSC redesign below), Tender/Change, Total Qty, amount-in-words (new `numberToWordsNpr()` util, Nepali Lakh/Crore numbering), Counter/Cashier
+- **Copy labelling** — a thermal printer can't produce carbon triplicates like a manual bill pad, so the app prints one copy and labels it by a `print_count` counter: 1st = ORIGINAL, 2nd = DUPLICATE, 3rd = TRIPLICATE, 4th+ = REPRINT #N. "📄 Recent Bills" on the floor view lists today's closed orders with a Reprint button, satisfying IRD's 6-year-retention duty via a reproducible digital record rather than physical triplicate copies
+- Floor view: admin-only `⚠ Clear Occupied` testing button unaffected (still scoped to `status='open'` only)
+
+**`src/utils/bsCalendar.js`** — new `getBsFiscalYear(bsYear, bsMonth)`, Shrawan(4)→Ashadh(3) rule, returns `'82/83'`-style label.
+**`src/utils/numberToWords.js`** (new) — integer-rupee amount-in-words, Nepali Lakh/Crore numbering.
+**`src/pages/AdminClients.js`** — Settings tab: new `VAT Registered` toggle and `Invoice Prefix` field (auto-suggested from property-name initials, e.g. "Casa Acai Cafe" → "CAC", editable) next to VAT Number. *(Discovered along the way: the client-facing `Settings.js` "Property" tab was unreachable — filtered out of `TABS` for both admin and client roles by a pre-existing asymmetry between `ADMIN_TABS` and `CLIENT_HIDDEN`. Fixed same session — `Property` added to `ADMIN_TABS`, and the same VAT Registered/Invoice Prefix fields added there too for parity with `AdminClients.js`, plus a checkbox CSS fix: `.form-field input` is a descendant selector meant for text inputs, which was also stretching the checkbox into a giant empty box — fixed with explicit inline sizing on both checkboxes.)*
+
+**HSC Code — redesigned mid-session after a regression.** Originally added as a `recipes.hsc_code` field editable inline in both `MenuPricing.js` branches, denormalized onto `pos_order_items.hsc_code` at order-save time. That broke Menu Pricing (blank item list) **and silently broke core Order Taking** — `loadMenu()`, `openTable()`, and `performSave()` all referenced the not-yet-migrated columns, so menu loading, opening an existing order, and saving/updating any order all failed until the migration ran. Redesigned: `recipes.hsc_code` is now the only column (no `pos_order_items.hsc_code` — removed from the migration below); `printBill()` does a live `.in('id', recipeIds)` lookup by `recipe_id` at print time instead of denormalizing. Editing UI moved out of Menu Pricing entirely into a single new **HSC Codes** tab in `src/modules/pos/tables/PosTableManagement.jsx` (alongside Tables / Ticket Routing / Quick Notes), lazy-loaded so it can't break any other tab or screen if the migration hasn't run yet — only that one tab would show empty until then. Researched the actual IRD rule while fixing the tooltip copy too: HSC is only mandatory for items that are **imported goods sold as-is** (e.g. imported bottled drinks), never for freshly prepared dishes — the field stays optional/blank for the vast majority of any F&B menu.
+
+**DB migration (S215) — not yet run**
+```sql
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS close_type      text CHECK (close_type IN ('paid','writeoff','void'));
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS payment_method  text CHECK (payment_method IN ('Cash','Card','eSewa','Khalti','FonePay'));
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS paid_amount     numeric;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS tendered_amount numeric;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS close_reason    text;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS closed_by       uuid REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS buyer_name    text;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS buyer_address text;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS buyer_pan     text;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS buyer_phone   text;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS bill_remarks  text;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS invoice_no integer;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS invoice_fy text;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS print_count integer DEFAULT 0;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS is_vat_registered boolean DEFAULT true;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_prefix    text;
+ALTER TABLE recipes ADD COLUMN IF NOT EXISTS hsc_code text;
+
+CREATE OR REPLACE FUNCTION assign_pos_invoice_no()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NEW.status = 'billed' AND NEW.invoice_no IS NULL AND NEW.invoice_fy IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock(hashtext('pos_invoice_no:' || NEW.client_id::text || ':' || NEW.invoice_fy));
+    SELECT COALESCE(MAX(invoice_no), 0) + 1 INTO NEW.invoice_no
+    FROM pos_orders WHERE client_id = NEW.client_id AND invoice_fy = NEW.invoice_fy;
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS trg_assign_pos_invoice_no ON pos_orders;
+CREATE TRIGGER trg_assign_pos_invoice_no BEFORE UPDATE ON pos_orders FOR EACH ROW EXECUTE FUNCTION assign_pos_invoice_no();
+```
+
+**Known limitations (documented, not solved this session):** `Sales.js` manual entry can still overwrite POS-written `sales_entries` for the same day (unscoped delete-then-reinsert); no in-app manager-PIN re-auth for Void/Write-off (role-gated by the signed-in user only); no reporting page yet (Payment Summary / write-off totals); no Credit Note workflow for correcting an already-billed order (IRD requires a formal Credit Note — accountant-handled, outside the app); no real-time IRD CBMS e-billing integration (not legally required below NPR 5 crore/year for restaurants — far above any realistic Crest client); no Service Charge line (considered, explicitly deferred).
+
+**Sources:** [Union Nepal — VAT Bill](https://www.unionnepal.com/vat-bill-in-nepal), [Union Nepal — PAN Bill](https://www.unionnepal.com/pan-bill-in-nepal), [Common Law Nepal — VAT Invoice Rules & Penalties](https://commonlaw.com.np/publications/vat-invoice-rules-and-penalties-in-nepal), [eStartup Nepal — VAT vs PAN Bill](https://estartupnepal.com/article/vat-and-pan-bill-in-nepal), [HamroInvoice — IRD Bill Format & HS Code Guide](https://hamroinvoice.com/blog/nepal-ird-bill-format-hs-code-guide), [eStartup Nepal — E-Billing in Nepal](https://estartupnepal.com/article/e-billing-in-nepal), [Kathmandu Post — Extra charge cannot be added to menu](https://kathmandupost.com/money/2022/09/28/vat-service-charge-added-to-food-bill-deemed-illegal)
+
 ### S214 — 2026-07-02 — KOT/BOT remarks, BS ticket date, pending-ticket indicators, admin table reset
 
 **`src/modules/pos/orders/PosOrders.jsx`**
