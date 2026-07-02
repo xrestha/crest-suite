@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 
 const vatOf  = r => (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : parseFloat(r.vat_rate)
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
@@ -21,7 +22,7 @@ const btnSm = {
 }
 
 export default function PosOrders() {
-  const { clientId, profile, hasPosAccess } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin } = useAuth()
 
   /* ── view ── */
   const [view, setView] = useState('floor')
@@ -52,6 +53,8 @@ export default function PosOrders() {
   // categories that route to BOT — loaded from settings, default to ['Beverage']
   const [botCategories, setBotCategories] = useState(new Set(['Beverage']))
   const [outletName,    setOutletName]    = useState('')
+  const [notePresets,   setNotePresets]   = useState([])
+  const [noteFocusIdx,  setNoteFocusIdx]  = useState(null)
   // ME-driven suggestion chips
   const [suggestions,       setSuggestions]       = useState([])
   const [manualSuggestions, setManualSuggestions] = useState({}) // { recipeId: [suggestedRecipeId] }
@@ -59,10 +62,11 @@ export default function PosOrders() {
   useEffect(() => {
     if (!clientId) return
     loadFloor()
-    supabase.from('settings').select('pos_bot_categories').eq('client_id', clientId).maybeSingle()
+    supabase.from('settings').select('pos_bot_categories, pos_note_presets').eq('client_id', clientId).maybeSingle()
       .then(({ data }) => {
         const arr = data?.pos_bot_categories
         if (arr?.length) setBotCategories(new Set(arr))
+        setNotePresets(data?.pos_note_presets || [])
       })
     supabase.from('clients').select('name').eq('id', clientId).single()
       .then(({ data }) => setOutletName(data?.name || ''))
@@ -78,7 +82,7 @@ export default function PosOrders() {
       supabase.from('pos_tables').select('*').eq('client_id', clientId)
         .order('sort_order').order('name'),
       supabase.from('pos_orders')
-        .select('id, table_id, covers, pos_order_items(qty, unit_price, vat_rate)')
+        .select('id, table_id, covers, pos_order_items(qty, unit_price, vat_rate, sent_to_kot)')
         .eq('client_id', clientId).eq('status', 'open'),
     ])
     setTables(tbls || [])
@@ -91,6 +95,7 @@ export default function PosOrders() {
         itemCount: items.reduce((s, i) => s + i.qty, 0),
         total:     items.reduce((s, i) => s + i.qty * i.unit_price * (1 + (i.vat_rate ?? 0)), 0),
         covers:    o.covers,
+        pending:   items.filter(i => !i.sent_to_kot).length,
       }
     }
     setTableOrders(map)
@@ -128,7 +133,7 @@ export default function PosOrders() {
   async function openTable(table) {
     const { data: existing } = await supabase
       .from('pos_orders')
-      .select('id, order_no, covers, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot)')
+      .select('id, order_no, covers, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, notes)')
       .eq('client_id', clientId)
       .eq('status', 'open')
       .eq('table_id', table.id)
@@ -201,6 +206,7 @@ export default function PosOrders() {
         vat_rate:    vat,
         sent_to_kot: false,
         sent_qty:    0,
+        notes:       '',
       }]
     })
     setMsg('')
@@ -265,6 +271,22 @@ export default function PosOrders() {
     }
   }
 
+  function updateItemNote(idx, notes) {
+    setOrderItems(prev => prev.map((item, i) => i === idx
+      ? {
+          ...item, notes,
+          sent_to_kot: item.notes === notes ? item.sent_to_kot : false,
+          sent_qty: (item.sent_to_kot && item.notes !== notes) ? item.qty : (item.sent_qty || 0),
+        }
+      : item))
+  }
+
+  function addPresetToNote(idx, phrase) {
+    const existing = (orderItems[idx].notes || '').split(',').map(s => s.trim()).filter(Boolean)
+    if (existing.includes(phrase)) return
+    updateItemNote(idx, [...existing, phrase].join(', '))
+  }
+
   /* ── core save (shared by saveOrder and sendTicket) ── */
 
   async function performSave() {
@@ -309,6 +331,7 @@ export default function PosOrders() {
         unit_price:  i.unit_price,
         vat_rate:    i.vat_rate   ?? 0,
         sent_to_kot: i.sent_to_kot || false,
+        notes:       i.notes || null,
       }))
     )
     if (iErr) return null
@@ -387,7 +410,8 @@ export default function PosOrders() {
   function printTicket(station, items, ticketNo) {
     const tableName    = activeTable?.name || 'Takeaway'
     const now          = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-    const date         = new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
+    const bs           = adToBs(new Date())
+    const date         = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
     const stationLabel = station === 'BOT' ? 'BAR ORDER TICKET' : 'KITCHEN ORDER TICKET'
     const takenBy      = profile?.full_name || ''
 
@@ -402,6 +426,7 @@ export default function PosOrders() {
   hr   { border:none; border-top:1px dashed #000; margin:7px 0; }
   .row { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; }
   .qty { font-weight:bold; font-size:15px; min-width:34px; text-align:right; }
+  .note { font-size:11px; font-style:italic; color:#333; padding:0 0 3px 10px; }
 </style>
 </head><body>
   ${outletName ? `<div class="c b" style="font-size:14px">${outletName}</div>` : ''}
@@ -414,7 +439,8 @@ export default function PosOrders() {
   ${items.map(i => {
       const delta = (i.sent_qty || 0) > 0 ? i.qty - i.sent_qty : 0
       const label = delta > 0 ? `+${delta}` : `×${i.qty}`
-      return `<div class="row"><span class="b">${i.name}</span><span class="qty">${label}</span></div>`
+      const note  = i.notes ? `<div class="note">↳ ${i.notes}</div>` : ''
+      return `<div class="row"><span class="b">${i.name}</span><span class="qty">${label}</span></div>${note}`
     }).join('')}
   <hr>
 </body></html>`
@@ -425,6 +451,20 @@ export default function PosOrders() {
     w.document.close()
     w.focus()
     setTimeout(() => { w.print(); w.close() }, 300)
+  }
+
+  async function clearAllOccupiedTables() {
+    if (!isAdmin || !clientId) return
+    if (!window.confirm('Clear ALL occupied tables? This permanently deletes every open order and its items for this client. Use only for testing.')) return
+    setFloorLoad(true)
+    const { data: openOrders } = await supabase.from('pos_orders').select('id').eq('client_id', clientId).eq('status', 'open')
+    const ids = (openOrders || []).map(o => o.id)
+    if (ids.length > 0) {
+      await supabase.from('pos_order_items').delete().in('order_id', ids)
+      await supabase.from('pos_orders').delete().in('id', ids)
+    }
+    await supabase.from('pos_tables').update({ status: 'available' }).eq('client_id', clientId).eq('status', 'occupied')
+    await loadFloor()
   }
 
   function backToFloor() {
@@ -439,6 +479,10 @@ export default function PosOrders() {
   const total    = subEx + vatAmt
   const kotCount = orderItems.filter(i => !i.sent_to_kot && !botCategories.has(i.category || 'Other')).length
   const botCount = orderItems.filter(i => !i.sent_to_kot && botCategories.has(i.category || 'Other')).length
+
+  const pendingTables    = Object.values(tableOrders).filter(o => o.pending > 0)
+  const pendingTableCount = pendingTables.length
+  const pendingItemCount  = pendingTables.reduce((s, o) => s + o.pending, 0)
 
   const sections  = ['All', ...Array.from(new Set(tables.map(t => t.section).filter(Boolean)))]
   const visTables = secFilter === 'All' ? tables : tables.filter(t => t.section === secFilter)
@@ -588,9 +632,10 @@ export default function PosOrders() {
               const lineTotal = item.qty * item.unit_price * (1 + (item.vat_rate ?? 0))
               return (
                 <div key={idx} style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
+                  display: 'flex', flexDirection: 'column', gap: 4,
                   borderBottom: '1px solid var(--theme-border)', padding: '9px 0',
                 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.3 }}>
@@ -635,6 +680,36 @@ export default function PosOrders() {
                     title="Remove"
                     style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 18, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}
                   >×</button>
+                  </div>
+                  <input
+                    type="text"
+                    value={item.notes || ''}
+                    onChange={e => updateItemNote(idx, e.target.value)}
+                    onFocus={() => setNoteFocusIdx(idx)}
+                    onBlur={() => setNoteFocusIdx(null)}
+                    placeholder="+ Add note (e.g. no onion)"
+                    style={{
+                      background: 'none', border: 'none', outline: 'none',
+                      fontSize: 11, fontStyle: 'italic', color: 'var(--theme-text3)',
+                      padding: '0 0 0 2px', width: '100%',
+                    }}
+                  />
+                  {noteFocusIdx === idx && notePresets.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '2px 0 0 2px' }}>
+                      {notePresets.map(p => (
+                        <button
+                          key={p}
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => addPresetToNote(idx, p)}
+                          style={{
+                            fontSize: 10, padding: '2px 8px', borderRadius: 10,
+                            border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)',
+                            color: 'var(--theme-text2)', cursor: 'pointer',
+                          }}
+                        >{p}</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -829,9 +904,33 @@ export default function PosOrders() {
             Tap a table to open or view its order. Occupied tables show the running total.
           </p>
         </div>
-        <button className="btn btn-ghost" onClick={openTakeaway} style={{ fontSize: 13, flexShrink: 0 }}>
-          + Takeaway
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {isAdmin && (
+              <Tip text="Testing utility — deletes every open order/item and frees all occupied tables for this client. Admin only.">
+                <button
+                  onClick={clearAllOccupiedTables}
+                  className="btn btn-ghost"
+                  style={{ fontSize: 13, flexShrink: 0, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}
+                >⚠ Clear Occupied</button>
+              </Tip>
+            )}
+            <button className="btn btn-ghost" onClick={openTakeaway} style={{ fontSize: 13, flexShrink: 0 }}>
+              + Takeaway
+            </button>
+          </div>
+          {pendingTableCount > 0 && (
+            <Tip text="Tables with items added but not yet sent to the kitchen/bar — tap the table to review and send">
+              <span style={{
+                fontSize: 12, fontWeight: 700, color: '#000',
+                background: 'var(--theme-amber)', borderRadius: 12,
+                padding: '4px 10px', cursor: 'default', whiteSpace: 'nowrap',
+              }}>
+                ⚠ {pendingTableCount} table{pendingTableCount !== 1 ? 's' : ''} · {pendingItemCount} item{pendingItemCount !== 1 ? 's' : ''} pending
+              </span>
+            </Tip>
+          )}
+        </div>
       </div>
 
       {sections.length > 1 && (
@@ -870,9 +969,22 @@ export default function PosOrders() {
               >
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
                   <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{t.name}</span>
-                  <span className={STATUS_BADGE[t.status] || 'badge-gray'} style={{ fontSize: 10, flexShrink: 0 }}>
-                    {STATUS_LABEL[t.status] || t.status}
-                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+                    <span className={STATUS_BADGE[t.status] || 'badge-gray'} style={{ fontSize: 10 }}>
+                      {STATUS_LABEL[t.status] || t.status}
+                    </span>
+                    {ord?.pending > 0 && (
+                      <Tip text="Items added but not sent to the kitchen/bar yet — tap to open and send">
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, color: '#000',
+                          background: 'var(--theme-amber)', borderRadius: 4,
+                          padding: '1px 6px', cursor: 'default', whiteSpace: 'nowrap',
+                        }}>
+                          ⚠ {ord.pending}
+                        </span>
+                      </Tip>
+                    )}
+                  </div>
                 </div>
 
                 {t.section && (

@@ -16,7 +16,7 @@ const ADD_EMPTY = { name: '', section: '', capacity: 4 }
 export default function PosTableManagement() {
   const { clientId, hasPosAccess } = useAuth()
 
-  const [mainTab, setMainTab] = useState('tables') // 'tables' | 'routing'
+  const [mainTab, setMainTab] = useState('tables') // 'tables' | 'routing' | 'notes'
 
   const [tables,    setTables]    = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -42,6 +42,14 @@ export default function PosTableManagement() {
   const [routingSaving,   setRoutingSaving]   = useState(false)
   const [routingMsg,      setRoutingMsg]      = useState('')
   const [routingLoaded,   setRoutingLoaded]   = useState(false)
+
+  // Quick Notes
+  const [notePresets,   setNotePresets]   = useState([])
+  const [newPreset,     setNewPreset]     = useState('')
+  const [notesLoading,  setNotesLoading]  = useState(false)
+  const [notesSaving,   setNotesSaving]   = useState(false)
+  const [notesMsg,      setNotesMsg]      = useState('')
+  const [notesLoaded,   setNotesLoaded]   = useState(false)
 
   useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line
 
@@ -197,6 +205,48 @@ export default function PosTableManagement() {
     setRoutingMsg(error ? 'error:' + error.message : 'ok:Routing saved.')
   }
 
+  // ── Quick Notes ──────────────────────────────────────────────────────────────
+
+  async function loadNotePresets() {
+    setNotesLoading(true)
+    const { data } = await supabase.from('settings').select('pos_note_presets').eq('client_id', clientId).maybeSingle()
+    setNotePresets(data?.pos_note_presets || [])
+    setNotesLoading(false)
+    setNotesLoaded(true)
+  }
+
+  function openNotesTab() {
+    setMainTab('notes')
+    if (!notesLoaded) loadNotePresets()
+  }
+
+  function addPreset() {
+    const v = newPreset.trim()
+    if (!v || notePresets.includes(v)) { setNewPreset(''); return }
+    setNotePresets(prev => [...prev, v])
+    setNewPreset('')
+    setNotesMsg('')
+  }
+
+  function removePreset(p) {
+    setNotePresets(prev => prev.filter(x => x !== p))
+    setNotesMsg('')
+  }
+
+  async function saveNotePresets() {
+    setNotesSaving(true); setNotesMsg('')
+    const { data: existing } = await supabase
+      .from('settings').select('id').eq('client_id', clientId).maybeSingle()
+    let error
+    if (existing?.id) {
+      ;({ error } = await supabase.from('settings').update({ pos_note_presets: notePresets }).eq('id', existing.id))
+    } else {
+      ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_note_presets: notePresets }))
+    }
+    setNotesSaving(false)
+    setNotesMsg(error ? 'error:' + error.message : 'ok:Quick notes saved.')
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   return (
@@ -221,6 +271,12 @@ export default function PosTableManagement() {
             className={`tab-btn${mainTab === 'routing' ? ' tab-btn--active' : ''}`}
             onClick={openRoutingTab}
           >Ticket Routing</button>
+        </Tip>
+        <Tip text="Preset instruction chips (e.g. 'No onion', 'Extra spicy') staff can tap on an order item instead of typing — prints under that item on the KOT/BOT">
+          <button
+            className={`tab-btn${mainTab === 'notes' ? ' tab-btn--active' : ''}`}
+            onClick={openNotesTab}
+          >Quick Notes</button>
         </Tip>
       </div>
 
@@ -291,6 +347,70 @@ export default function PosTableManagement() {
                 {routingMsg && (
                   <span style={{ fontSize: 12, color: routingMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
                     {routingMsg.replace(/^(error|ok):/, '')}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ══ QUICK NOTES TAB ══ */}
+      {mainTab === 'notes' && (
+        <div style={{ maxWidth: 520 }}>
+          <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
+            Preset instruction chips staff can tap on an order item instead of typing (e.g.{' '}
+            <strong style={{ color: 'var(--theme-text2)' }}>No onion</strong>,{' '}
+            <strong style={{ color: 'var(--theme-text2)' }}>Extra spicy</strong>). They print under
+            that item on the KOT/BOT ticket. Staff can still free-type anything not in this list.
+          </p>
+
+          {notesLoading ? (
+            <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                <input
+                  className="form-select" style={{ flex: 1 }}
+                  value={newPreset}
+                  onChange={e => setNewPreset(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addPreset()}
+                  placeholder="e.g. No onion"
+                />
+                <button className="btn btn-ghost" onClick={addPreset}>+ Add</button>
+              </div>
+
+              {notePresets.length === 0 ? (
+                <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
+                  No quick notes yet — add common instructions above.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+                  {notePresets.map(p => (
+                    <span key={p} style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '6px 8px 6px 12px', borderRadius: 14, fontSize: 12,
+                      background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
+                      color: 'var(--theme-text1)',
+                    }}>
+                      {p}
+                      <button
+                        onClick={() => removePreset(p)}
+                        title="Remove"
+                        style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
+                      >×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <button className="btn btn-primary" onClick={saveNotePresets} disabled={notesSaving}>
+                  {notesSaving ? 'Saving…' : 'Save Quick Notes'}
+                </button>
+                {notesMsg && (
+                  <span style={{ fontSize: 12, color: notesMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                    {notesMsg.replace(/^(error|ok):/, '')}
                   </span>
                 )}
               </div>
