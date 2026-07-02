@@ -188,4 +188,5 @@ Recipes with `type = 'sub_recipe'` auto-create a mirror row in `items` with `is_
   ```
 - Admin operations that need the service role key go through the Supabase Edge Function `admin-user-ops` (deployed at `supabase/functions/admin-user-ops/`). Never put `SUPABASE_SERVICE_ROLE_KEY` in the frontend bundle.
 - `per_uom_rate` on `items` is a **generated column** — never include it in INSERT/UPDATE payloads.
+- `pos_orders.order_no` is assigned by a **BEFORE INSERT trigger** (per-client sequential) — never set it from the frontend; read it back via `.select('id, order_no')` after insert.
 - The offline stock count uses IndexedDB (`src/utils/offlineQueue.js`, DB name `crest-offline`) with 5 object stores. Sync flushes automatically on reconnect.
