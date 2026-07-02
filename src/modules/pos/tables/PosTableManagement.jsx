@@ -216,10 +216,12 @@ export default function PosTableManagement() {
           className={`tab-btn${mainTab === 'tables' ? ' tab-btn--active' : ''}`}
           onClick={() => setMainTab('tables')}
         >Tables</button>
-        <button
-          className={`tab-btn${mainTab === 'routing' ? ' tab-btn--active' : ''}`}
-          onClick={openRoutingTab}
-        >Ticket Routing</button>
+        <Tip text="Assign each menu category to KOT (kitchen) or BOT (bar) — controls where the ticket prints when staff send an order">
+          <button
+            className={`tab-btn${mainTab === 'routing' ? ' tab-btn--active' : ''}`}
+            onClick={openRoutingTab}
+          >Ticket Routing</button>
+        </Tip>
       </div>
 
       {/* ══ TICKET ROUTING TAB ══ */}

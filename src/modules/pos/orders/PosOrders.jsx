@@ -511,22 +511,26 @@ export default function PosOrders() {
                         {item.name}
                       </span>
                       {item.sent_to_kot && (
-                        <span style={{
-                          fontSize: 9, fontWeight: 700, flexShrink: 0,
-                          background: 'var(--theme-green)', color: '#fff',
-                          borderRadius: 4, padding: '1px 5px',
-                        }}>
-                          ✓ {botCategories.has(item.category || 'Other') ? 'BOT' : 'KOT'}
-                        </span>
+                        <Tip text="Ticket already sent to the station — press KOT/BOT again only if you add more of this item">
+                          <span style={{
+                            fontSize: 9, fontWeight: 700, flexShrink: 0,
+                            background: 'var(--theme-green)', color: '#fff',
+                            borderRadius: 4, padding: '1px 5px', cursor: 'default',
+                          }}>
+                            ✓ {botCategories.has(item.category || 'Other') ? 'BOT' : 'KOT'}
+                          </span>
+                        </Tip>
                       )}
                       {!item.sent_to_kot && (item.sent_qty || 0) > 0 && item.qty > item.sent_qty && (
-                        <span style={{
-                          fontSize: 9, fontWeight: 700, flexShrink: 0,
-                          background: 'var(--theme-amber)', color: '#000',
-                          borderRadius: 4, padding: '1px 5px',
-                        }}>
-                          +{item.qty - item.sent_qty}
-                        </span>
+                        <Tip text={`${item.qty - item.sent_qty} extra added since last ticket — press KOT or BOT to send the addition to the station`}>
+                          <span style={{
+                            fontSize: 9, fontWeight: 700, flexShrink: 0,
+                            background: 'var(--theme-amber)', color: '#000',
+                            borderRadius: 4, padding: '1px 5px', cursor: 'default',
+                          }}>
+                            +{item.qty - item.sent_qty}
+                          </span>
+                        </Tip>
                       )}
                     </div>
                   </div>
@@ -577,38 +581,42 @@ export default function PosOrders() {
             </button>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                className="btn btn-ghost"
-                style={{ flex: 1, padding: '8px 0', fontSize: 13, justifyContent: 'center', position: 'relative' }}
-                onClick={() => sendTicket('KOT')}
-                disabled={saving || kotCount === 0}
-              >
-                KOT
-                {kotCount > 0 && (
-                  <span style={{
-                    position: 'absolute', top: -6, right: -4,
-                    background: 'var(--theme-red)', color: '#fff',
-                    borderRadius: 10, fontSize: 10, fontWeight: 700,
-                    padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
-                  }}>{kotCount}</span>
-                )}
-              </button>
-              <button
-                className="btn btn-ghost"
-                style={{ flex: 1, padding: '8px 0', fontSize: 13, justifyContent: 'center', position: 'relative' }}
-                onClick={() => sendTicket('BOT')}
-                disabled={saving || botCount === 0}
-              >
-                BOT
-                {botCount > 0 && (
-                  <span style={{
-                    position: 'absolute', top: -6, right: -4,
-                    background: 'var(--theme-red)', color: '#fff',
-                    borderRadius: 10, fontSize: 10, fontWeight: 700,
-                    padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
-                  }}>{botCount}</span>
-                )}
-              </button>
+              <Tip text="Kitchen Order Ticket — sends unsent food items to the kitchen printer. Badge shows how many items are waiting.">
+                <button
+                  className="btn btn-ghost"
+                  style={{ flex: 1, padding: '8px 0', fontSize: 13, justifyContent: 'center', position: 'relative' }}
+                  onClick={() => sendTicket('KOT')}
+                  disabled={saving || kotCount === 0}
+                >
+                  KOT
+                  {kotCount > 0 && (
+                    <span style={{
+                      position: 'absolute', top: -6, right: -4,
+                      background: 'var(--theme-red)', color: '#fff',
+                      borderRadius: 10, fontSize: 10, fontWeight: 700,
+                      padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
+                    }}>{kotCount}</span>
+                  )}
+                </button>
+              </Tip>
+              <Tip text="Bar Order Ticket — sends unsent bar/beverage items to the bar printer. Badge shows how many items are waiting.">
+                <button
+                  className="btn btn-ghost"
+                  style={{ flex: 1, padding: '8px 0', fontSize: 13, justifyContent: 'center', position: 'relative' }}
+                  onClick={() => sendTicket('BOT')}
+                  disabled={saving || botCount === 0}
+                >
+                  BOT
+                  {botCount > 0 && (
+                    <span style={{
+                      position: 'absolute', top: -6, right: -4,
+                      background: 'var(--theme-red)', color: '#fff',
+                      borderRadius: 10, fontSize: 10, fontWeight: 700,
+                      padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
+                    }}>{botCount}</span>
+                  )}
+                </button>
+              </Tip>
               <Tip text="Billing & payment — coming next">
                 <button className="btn btn-ghost"
                   style={{ flex: 1, padding: '8px 0', fontSize: 13, opacity: 0.4, cursor: 'not-allowed', justifyContent: 'center' }}
