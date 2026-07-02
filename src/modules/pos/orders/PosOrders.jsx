@@ -97,6 +97,7 @@ export default function PosOrders() {
   const [discountReason,  setDiscountReason]  = useState('')
   const [discountReasons, setDiscountReasons] = useState(DEFAULT_DISCOUNT_REASONS)
   const [hscMap,      setHscMap]      = useState({}) // { recipeId: hscCode } — fetched once when Billing modal opens
+  const [openShiftId, setOpenShiftId] = useState(null) // cached, not queried per-close — see loadOpenShift()
 
   /* ── Recent Bills / Reprint ── */
   const [recentBillsOpen, setRecentBillsOpen] = useState(false)
@@ -132,6 +133,7 @@ export default function PosOrders() {
 
   async function loadFloor() {
     setFloorLoad(true)
+    loadOpenShift()
     const [{ data: tbls }, { data: orders }] = await Promise.all([
       supabase.from('pos_tables').select('*').eq('client_id', clientId)
         .order('sort_order').order('name'),
@@ -154,6 +156,16 @@ export default function PosOrders() {
     }
     setTableOrders(map)
     setFloorLoad(false)
+  }
+
+  // Cached, not re-queried per order close — closeOrder() just reads this synchronously.
+  // Re-fetched here (loadFloor runs after every close) so it self-heals within seconds if a
+  // shift opens/closes elsewhere; a brief staleness window is fine since shift linkage is
+  // informational only, never a gate on billing.
+  async function loadOpenShift() {
+    const { data } = await supabase.from('pos_shifts').select('id')
+      .eq('client_id', clientId).eq('status', 'open').maybeSingle()
+    setOpenShiftId(data?.id || null)
   }
 
   async function loadMenu() {
@@ -587,6 +599,11 @@ export default function PosOrders() {
       // Complimentary) — the DB trigger partitions the counter by close_type so the two
       // sequences never share numbers. Void never gets one (order was never fulfilled).
       ...(closeType !== 'void' ? { invoice_fy: getBsFiscalYear(today.year, today.month) } : {}),
+      // Best-effort shift attribution — openShiftId is cached, not re-queried per close, so an
+      // order closed just after another device closes the shift gets stamped with whatever shift
+      // is open at that instant (possibly null, possibly the next one). That's correct
+      // bookkeeping, not a bug: shift linkage is informational only and never blocks Charge.
+      shift_id: openShiftId,
     }
 
     const { data: updated, error } = await supabase

@@ -87,7 +87,7 @@ export default function Pos() {
       <div style={{ padding: '16px 0', borderTop: '1px solid var(--theme-border)' }}>
         <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0, lineHeight: 1.8 }}>
           <strong style={{ color: 'var(--theme-text2)' }}>Coming soon:</strong>{' '}
-          KOT printing · Billing · QR payments · Shift Z-reports
+          QR payments
         </p>
       </div>
     </div>

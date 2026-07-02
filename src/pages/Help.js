@@ -749,6 +749,19 @@ export default function Help() {
                   ],
                 },
                 {
+                  icon: '⏱', name: 'Shifts', path: '/pos/shifts',
+                  desc: 'Open a shift with a starting cash count, watch live sales totals as the shift runs (X-report), and reconcile the drawer against expected cash when it ends (Z-report). Requires Supervisor role or above.',
+                  tips: [
+                    'Open Shift and Close Shift both count each note/coin (₨1000 down to ₨1) rather than a single total — more accurate, and matches how cash is actually counted',
+                    'Current Shift is the X-report — a live, repeatable snapshot. Nothing about it is final; check it anytime during the shift without affecting anything',
+                    'Close Shift produces the Z-report — a one-time, final reconciliation. Expected Cash = opening count + cash sales during the shift; Variance = what was actually counted minus that expectation',
+                    'A Balanced badge means the drawer matched exactly; red means short, amber means over — chase down shortages the same day while it\'s easy to remember why',
+                    'You can run several shifts in a day (e.g. a morning cashier closes with a Z-report, an evening cashier opens a new one) — only one shift can be open at a time',
+                    'Orders closed while no shift is open still bill normally — a missing shift never blocks Charge, it just means that order won\'t show up in any shift\'s totals',
+                    'Shift History lists every past shift — click one to see its full frozen Z-report',
+                  ],
+                },
+                {
                   icon: '👥', name: 'POS Staff', path: '/pos/staff',
                   desc: 'Assign POS roles to your team. Only staff with a role assigned can see POS screens. Roles: Staff (order-taking only), Supervisor (+ table setup, billing/Charge, void), Manager (+ Complimentary, reports, role assignment). Requires Manager role or above.',
                   tips: [

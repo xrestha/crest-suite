@@ -132,6 +132,44 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S224 — 2026-07-02 — POS Shift Management (X/Z reports, denomination-based cash drawer counts)
+
+**DB migration required:**
+```sql
+CREATE TABLE IF NOT EXISTS pos_shifts (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id             uuid NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  label                 text,
+  status                text NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+  opened_at             timestamptz NOT NULL DEFAULT now(),
+  opened_by             uuid REFERENCES profiles(id) ON DELETE SET NULL,
+  opening_cash          numeric NOT NULL DEFAULT 0,
+  opening_denominations jsonb,
+  closed_at             timestamptz,
+  closed_by             uuid REFERENCES profiles(id) ON DELETE SET NULL,
+  closing_cash          numeric,
+  closing_denominations jsonb
+);
+CREATE UNIQUE INDEX IF NOT EXISTS pos_shifts_one_open_per_client ON pos_shifts (client_id) WHERE status = 'open';
+ALTER TABLE pos_shifts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "pos_shifts_client" ON pos_shifts FOR ALL TO authenticated
+  USING (client_id = (SELECT client_id FROM profiles WHERE id = auth.uid())
+         OR (SELECT role FROM profiles WHERE id = auth.uid()) = 'admin');
+GRANT ALL ON pos_shifts TO authenticated;
+
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS shift_id uuid REFERENCES pos_shifts(id) ON DELETE SET NULL;
+```
+
+Last of the three agreed fast-follows (Customers ✓ → Sales Exception Report ✓ → **Shift Management**). `src/modules/pos/Pos.js`'s "Coming soon" footer literally listed "Shift Z-reports" — now removed since it's shipped (KOT printing and Billing were also stale on that list and removed at the same time; QR payments is the only genuinely-still-pending item left).
+
+**`src/modules/pos/shifts/PosShifts.jsx`** (new page, route `/pos/shifts`, Supervisor+, `pos-floor` sidebar group)
+- **Denomination-based counting** — both Open Shift and Close Shift count NPR notes/coins individually (1000, 500, 100, 50, 20, 10, 5, 2, 1 × quantity, auto-summed) rather than a single total, per explicit user decision — more audit-accurate, matches real cash-counting practice.
+- **Current Shift tab (X-report)** — live, non-destructive, repeatable snapshot of the open shift: order count, sales by payment method, total discount given, total void value, total comp food cost (same per-type valuation as the Sales Exception Report — Discount = `discount_amount`, Void = menu value incl. VAT, Comp = food cost via `computeRecipeCosts()`), and a Cash Reconciliation section showing Expected Cash = opening count + cash sales so far. If no shift is open, an **Open Shift** button starts one.
+- **Close Shift (Z-Report)** — one-time, final: enter the closing count, and the report locks in `closing_cash` and the variance (`counted − expected`, signed: green "Balanced" near zero, red if short, amber if over).
+- **Shift History tab** — lazy-loaded (mirrors `PosCustomers.jsx`'s pattern), past closed shifts with duration/opened-by/closed-by/variance badge; click a row to expand its frozen Z-report.
+- **Multiple shifts per day, one open at a time** — a partial unique index (`WHERE status = 'open'`) enforces this at the DB level rather than app logic, so two supervisors racing to open a shift from two devices get a clean "already open" message (Postgres error `23505`) instead of a data-integrity problem. Deliberately *not* the advisory-lock pattern used for invoice numbering — opening a shift is a single INSERT with no counter to compute, so the unique constraint alone is the correct concurrency guard.
+- **Non-blocking, per explicit user decision** — `pos_orders.shift_id` is stamped from `PosOrders.jsx`'s cached `openShiftId` state (loaded once, refreshed inside the existing `loadFloor()` call after every close — no extra query on the hot billing path). Charge never checks for an open shift; an order closed with no shift open just gets `shift_id = null` and doesn't appear in any shift's totals. An order still in progress when a shift closes gets stamped with whichever shift is open when it eventually closes (possibly the next one, or null) — documented inline as intentional bookkeeping, not a bug.
+
 ### S223 — 2026-07-02 — Sidebar rebuilt as icon rail + flyout panel (VS Code / Azure Portal pattern)
 
 No DB migration. `src/components/Layout.js`, `Layout.css`, Help FAQ entry, service-worker cache bump (v14 → v15, breaking CSS change).

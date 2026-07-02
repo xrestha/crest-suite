@@ -66,6 +66,7 @@ import PosTableManagement from './modules/pos/tables/PosTableManagement'
 import PosStaff from './modules/pos/staff/PosStaff'
 import PosCustomers from './modules/pos/customers/PosCustomers'
 import PosExceptionReport from './modules/pos/reports/PosExceptionReport'
+import PosShifts from './modules/pos/shifts/PosShifts'
 import PosLogin from './modules/pos/login/PosLogin'
 import './components/Layout.css'
 
@@ -183,6 +184,7 @@ export default function App() {
               <Route path="/pos/orders" element={<ModuleGate module="pos"><PosOrders /></ModuleGate>} />
               <Route path="/pos/tables" element={<ModuleGate module="pos"><PosTableManagement /></ModuleGate>} />
               <Route path="/pos/customers" element={<ModuleGate module="pos"><PosCustomers /></ModuleGate>} />
+              <Route path="/pos/shifts" element={<ModuleGate module="pos"><PosShifts /></ModuleGate>} />
               <Route path="/pos/exceptions" element={<ModuleGate module="pos"><PosExceptionReport /></ModuleGate>} />
               <Route path="/pos/staff"  element={<ModuleGate module="pos"><PosStaff /></ModuleGate>} />
 
