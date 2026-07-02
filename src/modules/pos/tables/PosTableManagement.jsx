@@ -16,8 +16,10 @@ const ADD_EMPTY = { name: '', section: '', capacity: 4 }
 export default function PosTableManagement() {
   const { clientId, hasPosAccess } = useAuth()
 
-  const [tables,   setTables]   = useState([])
-  const [loading,  setLoading]  = useState(true)
+  const [mainTab, setMainTab] = useState('tables') // 'tables' | 'routing'
+
+  const [tables,    setTables]    = useState([])
+  const [loading,   setLoading]   = useState(true)
   const [secFilter, setSecFilter] = useState('All')
 
   // Quick Setup
@@ -33,6 +35,14 @@ export default function PosTableManagement() {
   const [saving,  setSaving]  = useState(false)
   const [msg,     setMsg]     = useState('')
 
+  // Ticket Routing
+  const [categories,      setCategories]      = useState([])
+  const [botCats,         setBotCats]         = useState(new Set(['Beverage']))
+  const [routingLoading,  setRoutingLoading]  = useState(false)
+  const [routingSaving,   setRoutingSaving]   = useState(false)
+  const [routingMsg,      setRoutingMsg]      = useState('')
+  const [routingLoaded,   setRoutingLoaded]   = useState(false)
+
   useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line
 
   if (!hasPosAccess('supervisor')) return <Navigate to="/pos" replace />
@@ -44,7 +54,7 @@ export default function PosTableManagement() {
       .order('sort_order').order('name')
     const rows = data || []
     setTables(rows)
-    if (rows.length === 0) setQsOpen(true)  // auto-expand on first visit
+    if (rows.length === 0) setQsOpen(true)
     setLoading(false)
   }
 
@@ -57,7 +67,7 @@ export default function PosTableManagement() {
     reserved:  tables.filter(t => t.status === 'reserved').length,
   }
 
-  // ── Quick Setup ─────────────────────────────────────────────────────────────
+  // ── Quick Setup ──────────────────────────────────────────────────────────────
 
   function qsPreview() {
     const n = Math.max(0, parseInt(qs.count, 10) || 0)
@@ -141,6 +151,52 @@ export default function PosTableManagement() {
     setTarget(t => ({ ...t, status: val }))
   }
 
+  // ── Ticket Routing ───────────────────────────────────────────────────────────
+
+  async function loadRouting() {
+    setRoutingLoading(true)
+    const [{ data: recipeData }, { data: settingsData }] = await Promise.all([
+      supabase.from('recipes').select('category').eq('client_id', clientId).eq('pos_enabled', true).neq('category', 'Sub-Recipe'),
+      supabase.from('settings').select('pos_bot_categories').eq('client_id', clientId).maybeSingle(),
+    ])
+    const cats = Array.from(new Set((recipeData || []).map(r => r.category).filter(Boolean))).sort()
+    setCategories(cats)
+    const botArr = settingsData?.pos_bot_categories ?? ['Beverage']
+    setBotCats(new Set(botArr))
+    setRoutingLoading(false)
+    setRoutingLoaded(true)
+  }
+
+  function openRoutingTab() {
+    setMainTab('routing')
+    if (!routingLoaded) loadRouting()
+  }
+
+  function toggleCat(cat, station) {
+    setRoutingMsg('')
+    setBotCats(prev => {
+      const next = new Set(prev)
+      if (station === 'BOT') next.add(cat)
+      else next.delete(cat)
+      return next
+    })
+  }
+
+  async function saveRouting() {
+    setRoutingSaving(true); setRoutingMsg('')
+    const botArr = Array.from(botCats)
+    const { data: existing } = await supabase
+      .from('settings').select('id').eq('client_id', clientId).maybeSingle()
+    let error
+    if (existing?.id) {
+      ;({ error } = await supabase.from('settings').update({ pos_bot_categories: botArr }).eq('id', existing.id))
+    } else {
+      ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_bot_categories: botArr }))
+    }
+    setRoutingSaving(false)
+    setRoutingMsg(error ? 'error:' + error.message : 'ok:Routing saved.')
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   return (
@@ -150,161 +206,252 @@ export default function PosTableManagement() {
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>Table Management</h2>
         <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
-          Set up your floor plan. Click a status badge on any card to cycle it instantly.
+          Set up your floor plan and configure ticket routing for the kitchen and bar.
         </p>
       </div>
 
-      {/* ── Quick Setup panel ── */}
-      <div className="card" style={{ marginBottom: 20, overflow: 'hidden' }}>
+      {/* Main tab bar */}
+      <div className="tab-bar" style={{ marginBottom: 24 }}>
         <button
-          onClick={() => { setQsOpen(o => !o); setQsMsg('') }}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            width: '100%', padding: '13px 18px', background: 'none', border: 'none',
-            cursor: 'pointer', color: 'var(--theme-text1)', fontFamily: 'inherit',
-          }}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 13 }}>
-            <span style={{ color: 'var(--theme-accent)' }}>⚡</span> Quick Setup
-            <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)' }}>
-              — generate a batch of tables in one click
-            </span>
-          </span>
-          <span style={{ fontSize: 10, color: 'var(--theme-text3)', transform: qsOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
-        </button>
-
-        {qsOpen && (
-          <div style={{ padding: '0 18px 18px', borderTop: '1px solid var(--theme-border)' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 80px 2fr 80px', gap: 10, marginTop: 14, marginBottom: 10 }}>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
-                  Prefix <Tip text="The name prefix — each table will be Prefix + number, e.g. 'Table 1', 'Bar 1'" />
-                </label>
-                <input className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
-                  value={qs.prefix} onChange={e => setQs(q => ({ ...q, prefix: e.target.value }))} placeholder="e.g. Table" />
-              </div>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
-                  Start # <Tip text="First table number — e.g. start at 1 for Table 1, or 11 to continue from Table 10" />
-                </label>
-                <input type="number" min="1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
-                  value={qs.start} onChange={e => setQs(q => ({ ...q, start: e.target.value }))} />
-              </div>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
-                  Count <Tip text="How many tables to create (max 50 at once)" />
-                </label>
-                <input type="number" min="1" max="50" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
-                  value={qs.count} onChange={e => setQs(q => ({ ...q, count: e.target.value }))} />
-              </div>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
-                  Section <Tip text="Optional — groups these tables under a section tab (e.g. Main Hall, Bar, Outdoor)" />
-                </label>
-                <input className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
-                  value={qs.section} onChange={e => setQs(q => ({ ...q, section: e.target.value }))}
-                  placeholder="e.g. Main Hall" list="qs-section-list" />
-                <datalist id="qs-section-list">
-                  {existingSections.map(s => <option key={s} value={s} />)}
-                </datalist>
-              </div>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
-                  Seats <Tip text="Default capacity for all tables in this batch — edit individual tables to adjust" />
-                </label>
-                <input type="number" min="1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
-                  value={qs.capacity} onChange={e => setQs(q => ({ ...q, capacity: e.target.value }))} />
-              </div>
-            </div>
-
-            {/* Preview */}
-            <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 14px', fontStyle: 'italic' }}>
-              Will create: <span style={{ color: 'var(--theme-text2)', fontStyle: 'normal' }}>{qsPreview()}</span>
-              {parseInt(qs.count, 10) > 0 && (
-                <span style={{ color: 'var(--theme-accent)', marginLeft: 6 }}>({parseInt(qs.count, 10)} tables)</span>
-              )}
-            </p>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <button className="btn btn-primary" onClick={handleGenerate} disabled={qsSaving}>
-                {qsSaving ? 'Creating…' : `Generate ${parseInt(qs.count, 10) || 0} Tables`}
-              </button>
-              {qsMsg && (
-                <span style={{ fontSize: 12, color: qsMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
-                  {qsMsg.replace(/^(error|ok):/, '')}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
+          className={`tab-btn${mainTab === 'tables' ? ' tab-btn--active' : ''}`}
+          onClick={() => setMainTab('tables')}
+        >Tables</button>
+        <button
+          className={`tab-btn${mainTab === 'routing' ? ' tab-btn--active' : ''}`}
+          onClick={openRoutingTab}
+        >Ticket Routing</button>
       </div>
 
-      {/* Stat cards */}
-      {tables.length > 0 && (
-        <div className="stat-grid" style={{ marginBottom: 20 }}>
-          {[
-            { label: 'Total Tables', value: tables.length,    color: 'var(--theme-text1)', tip: null },
-            { label: 'Available',    value: counts.available, color: 'var(--theme-green)',  tip: 'Tables ready to seat a new party right now' },
-            { label: 'Occupied',     value: counts.occupied,  color: 'var(--theme-red)',    tip: 'Tables with an active order currently open' },
-            { label: 'Reserved',     value: counts.reserved,  color: 'var(--theme-amber)',  tip: 'Tables held for an upcoming booking or walk-in queue' },
-          ].map(s => (
-            <div key={s.label} className="card" style={{ padding: '12px 18px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                {s.tip ? <Tip text={s.tip}>{s.label}</Tip> : s.label}
-              </div>
-              <div style={{ fontSize: 28, fontWeight: 700, color: s.color, marginTop: 4 }}>{s.value}</div>
+      {/* ══ TICKET ROUTING TAB ══ */}
+      {mainTab === 'routing' && (
+        <div style={{ maxWidth: 520 }}>
+          <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
+            Assign each menu category to a ticket station.{' '}
+            <strong style={{ color: 'var(--theme-text2)' }}>KOT</strong> prints at the kitchen;{' '}
+            <strong style={{ color: 'var(--theme-text2)' }}>BOT</strong> prints at the bar.
+            Changes take effect immediately on the next KOT/BOT sent.
+          </p>
+
+          {routingLoading ? (
+            <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading categories…</p>
+          ) : categories.length === 0 ? (
+            <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
+              No menu categories found. Add recipes in Menu Pricing first.
             </div>
-          ))}
-        </div>
-      )}
+          ) : (
+            <>
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                {/* Header row */}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1fr auto',
+                  padding: '10px 18px',
+                  borderBottom: '1px solid var(--theme-border)',
+                  fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)',
+                  textTransform: 'uppercase', letterSpacing: '0.07em',
+                }}>
+                  <span>Category</span>
+                  <span style={{ minWidth: 120, textAlign: 'center' }}>Station</span>
+                </div>
 
-      {/* Section filter */}
-      {sections.length > 1 && (
-        <div className="tab-bar" style={{ marginBottom: 20 }}>
-          {sections.map(s => (
-            <button key={s} className={`tab-btn${secFilter === s ? ' tab-btn--active' : ''}`} onClick={() => setSecFilter(s)}>{s}</button>
-          ))}
-        </div>
-      )}
+                {categories.map((cat, i) => {
+                  const isBot = botCats.has(cat)
+                  return (
+                    <div key={cat} style={{
+                      display: 'grid', gridTemplateColumns: '1fr auto',
+                      alignItems: 'center', padding: '12px 18px',
+                      borderBottom: i < categories.length - 1 ? '1px solid var(--theme-border-lt, var(--theme-border))' : 'none',
+                    }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>{cat}</span>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {['KOT', 'BOT'].map(station => {
+                          const active = station === 'BOT' ? isBot : !isBot
+                          return (
+                            <button key={station} onClick={() => toggleCat(cat, station)} style={{
+                              padding: '5px 18px', borderRadius: 6, fontSize: 12,
+                              fontWeight: active ? 700 : 400, cursor: 'pointer',
+                              background: active ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
+                              color: active ? 'var(--theme-accent-text, #000)' : 'var(--theme-text2)',
+                              border: `1px solid ${active ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+                              transition: 'all 0.1s',
+                            }}>{station}</button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
 
-      {/* Floor grid */}
-      {loading ? (
-        <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
-      ) : visible.length === 0 && tables.length > 0 ? (
-        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text3)' }}>
-          No tables in this section.
-        </div>
-      ) : tables.length > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14 }}>
-          {visible.map(t => (
-            <div
-              key={t.id}
-              className="card"
-              onClick={() => openEdit(t)}
-              style={{ padding: '16px 18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8 }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
-                <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)', lineHeight: 1.2 }}>{t.name}</span>
-                <Tip text="Click to cycle: Available → Reserved → Occupied → Inactive. When orders are built, Occupied will set automatically when a bill is opened on this table.">
-                  <span
-                    className={STATUS_BADGE[t.status] || 'badge-gray'}
-                    style={{ fontSize: 10, flexShrink: 0, cursor: 'pointer', borderBottom: 'none' }}
-                    onClick={e => cycleStatus(t, e)}
-                  >
-                    {STATUS_LABEL[t.status] || t.status}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 18 }}>
+                <button className="btn btn-primary" onClick={saveRouting} disabled={routingSaving}>
+                  {routingSaving ? 'Saving…' : 'Save Routing'}
+                </button>
+                {routingMsg && (
+                  <span style={{ fontSize: 12, color: routingMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                    {routingMsg.replace(/^(error|ok):/, '')}
                   </span>
-                </Tip>
+                )}
               </div>
-              {t.section && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{t.section}</div>}
-              <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
-                <Tip text="Seating capacity — edit the table to change it">👥 {t.capacity} seats</Tip>
-              </div>
-            </div>
-          ))}
+            </>
+          )}
         </div>
-      ) : null}
+      )}
 
-      <Fab show={tables.length > 0} onClick={openAdd} />
+      {/* ══ TABLES TAB ══ */}
+      {mainTab === 'tables' && (
+        <>
+          {/* Quick Setup panel */}
+          <div className="card" style={{ marginBottom: 20, overflow: 'hidden' }}>
+            <button
+              onClick={() => { setQsOpen(o => !o); setQsMsg('') }}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                width: '100%', padding: '13px 18px', background: 'none', border: 'none',
+                cursor: 'pointer', color: 'var(--theme-text1)', fontFamily: 'inherit',
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 13 }}>
+                <span style={{ color: 'var(--theme-accent)' }}>⚡</span> Quick Setup
+                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)' }}>
+                  — generate a batch of tables in one click
+                </span>
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--theme-text3)', transform: qsOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+            </button>
+
+            {qsOpen && (
+              <div style={{ padding: '0 18px 18px', borderTop: '1px solid var(--theme-border)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 80px 2fr 80px', gap: 10, marginTop: 14, marginBottom: 10 }}>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
+                      Prefix <Tip text="The name prefix — each table will be Prefix + number, e.g. 'Table 1', 'Bar 1'" />
+                    </label>
+                    <input className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                      value={qs.prefix} onChange={e => setQs(q => ({ ...q, prefix: e.target.value }))} placeholder="e.g. Table" />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
+                      Start # <Tip text="First table number" />
+                    </label>
+                    <input type="number" min="1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                      value={qs.start} onChange={e => setQs(q => ({ ...q, start: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
+                      Count <Tip text="How many tables to create (max 50)" />
+                    </label>
+                    <input type="number" min="1" max="50" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                      value={qs.count} onChange={e => setQs(q => ({ ...q, count: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
+                      Section <Tip text="Optional — groups these tables under a section tab (e.g. Main Hall, Bar, Outdoor)" />
+                    </label>
+                    <input className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                      value={qs.section} onChange={e => setQs(q => ({ ...q, section: e.target.value }))}
+                      placeholder="e.g. Main Hall" list="qs-section-list" />
+                    <datalist id="qs-section-list">
+                      {existingSections.map(s => <option key={s} value={s} />)}
+                    </datalist>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
+                      Seats <Tip text="Default capacity for all tables in this batch" />
+                    </label>
+                    <input type="number" min="1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                      value={qs.capacity} onChange={e => setQs(q => ({ ...q, capacity: e.target.value }))} />
+                  </div>
+                </div>
+
+                <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 14px', fontStyle: 'italic' }}>
+                  Will create: <span style={{ color: 'var(--theme-text2)', fontStyle: 'normal' }}>{qsPreview()}</span>
+                  {parseInt(qs.count, 10) > 0 && (
+                    <span style={{ color: 'var(--theme-accent)', marginLeft: 6 }}>({parseInt(qs.count, 10)} tables)</span>
+                  )}
+                </p>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <button className="btn btn-primary" onClick={handleGenerate} disabled={qsSaving}>
+                    {qsSaving ? 'Creating…' : `Generate ${parseInt(qs.count, 10) || 0} Tables`}
+                  </button>
+                  {qsMsg && (
+                    <span style={{ fontSize: 12, color: qsMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                      {qsMsg.replace(/^(error|ok):/, '')}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Stat cards */}
+          {tables.length > 0 && (
+            <div className="stat-grid" style={{ marginBottom: 20 }}>
+              {[
+                { label: 'Total Tables', value: tables.length,    color: 'var(--theme-text1)', tip: null },
+                { label: 'Available',    value: counts.available, color: 'var(--theme-green)',  tip: 'Tables ready to seat a new party right now' },
+                { label: 'Occupied',     value: counts.occupied,  color: 'var(--theme-red)',    tip: 'Tables with an active order currently open' },
+                { label: 'Reserved',     value: counts.reserved,  color: 'var(--theme-amber)',  tip: 'Tables held for an upcoming booking or walk-in queue' },
+              ].map(s => (
+                <div key={s.label} className="card" style={{ padding: '12px 18px' }}>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                    {s.tip ? <Tip text={s.tip}>{s.label}</Tip> : s.label}
+                  </div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: s.color, marginTop: 4 }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Section filter */}
+          {sections.length > 1 && (
+            <div className="tab-bar" style={{ marginBottom: 20 }}>
+              {sections.map(s => (
+                <button key={s} className={`tab-btn${secFilter === s ? ' tab-btn--active' : ''}`} onClick={() => setSecFilter(s)}>{s}</button>
+              ))}
+            </div>
+          )}
+
+          {/* Floor grid */}
+          {loading ? (
+            <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
+          ) : visible.length === 0 && tables.length > 0 ? (
+            <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text3)' }}>
+              No tables in this section.
+            </div>
+          ) : tables.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14 }}>
+              {visible.map(t => (
+                <div
+                  key={t.id}
+                  className="card"
+                  onClick={() => openEdit(t)}
+                  style={{ padding: '16px 18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8 }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)', lineHeight: 1.2 }}>{t.name}</span>
+                    <Tip text="Click to cycle: Available → Reserved → Occupied → Inactive.">
+                      <span
+                        className={STATUS_BADGE[t.status] || 'badge-gray'}
+                        style={{ fontSize: 10, flexShrink: 0, cursor: 'pointer', borderBottom: 'none' }}
+                        onClick={e => cycleStatus(t, e)}
+                      >
+                        {STATUS_LABEL[t.status] || t.status}
+                      </span>
+                    </Tip>
+                  </div>
+                  {t.section && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{t.section}</div>}
+                  <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                    <Tip text="Seating capacity — edit the table to change it">👥 {t.capacity} seats</Tip>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <Fab show={tables.length > 0} onClick={openAdd} />
+        </>
+      )}
 
       {/* Add / Edit modal */}
       {modal && (
@@ -329,7 +476,7 @@ export default function PosTableManagement() {
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>
-                  Section <Tip text="Groups tables by area — type a new name or pick an existing one. Leave blank for single-area setups." />
+                  Section <Tip text="Groups tables by area — type a new name or pick an existing one." />
                 </label>
                 <input
                   style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, color: 'var(--theme-text1)', fontSize: 13, outline: 'none' }}
@@ -349,7 +496,6 @@ export default function PosTableManagement() {
               </div>
             </div>
 
-            {/* Sort order only shown when editing */}
             {target && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>

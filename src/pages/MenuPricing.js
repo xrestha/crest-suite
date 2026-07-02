@@ -36,27 +36,66 @@ export default function MenuPricing() {
     if (!effectiveClientId) return
     setLoading(true)
 
-    const { data: recipeData } = await supabase
-      .from('recipes')
-      .select('id, name, category, selling_price, vat_rate, pos_enabled')
-      .eq('client_id', effectiveClientId)
-      .eq('is_active', true)
-      .neq('category', 'Sub-Recipe')
-      .order('name')
+    const [{ data: recipeData }, { data: subRecipeData }] = await Promise.all([
+      supabase.from('recipes')
+        .select('id, name, category, selling_price, vat_rate, pos_enabled')
+        .eq('client_id', effectiveClientId)
+        .eq('is_active', true)
+        .neq('category', 'Sub-Recipe')
+        .order('name'),
+      supabase.from('recipes')
+        .select('id, yield_qty')
+        .eq('client_id', effectiveClientId)
+        .eq('category', 'Sub-Recipe'),
+    ])
 
-    const recipeIds = (recipeData || []).map(r => r.id)
-    const { data: ingData } = recipeIds.length > 0
+    const allIds = [
+      ...(recipeData || []).map(r => r.id),
+      ...(subRecipeData || []).map(r => r.id),
+    ]
+    const { data: ingData } = allIds.length > 0
       ? await supabase
           .from('recipe_ingredients')
-          .select('recipe_id, qty_per_portion, items(per_uom_rate, yield_pct)')
-          .in('recipe_id', recipeIds)
+          .select('recipe_id, qty_per_portion, item_id, sub_recipe_id, items(per_uom_rate, yield_pct)')
+          .in('recipe_id', allIds)
       : { data: [] }
 
+    // Build per-sub-recipe ingredient list for recursive cost
+    const subIngMap = {}
+    const subIdSet = new Set((subRecipeData || []).map(sr => sr.id))
+    for (const ri of (ingData || [])) {
+      if (!subIdSet.has(ri.recipe_id)) continue
+      if (!subIngMap[ri.recipe_id]) subIngMap[ri.recipe_id] = []
+      subIngMap[ri.recipe_id].push(ri)
+    }
+
+    function subCostPerUnit(srId) {
+      const sr = (subRecipeData || []).find(r => r.id === srId)
+      if (!sr) return 0
+      const ings = subIngMap[srId] || []
+      let total = 0
+      for (const ri of ings) {
+        if (ri.item_id && ri.items) {
+          const yf = (parseFloat(ri.items.yield_pct) || 100) / 100
+          total += (parseFloat(ri.qty_per_portion || 0) / yf) * parseFloat(ri.items.per_uom_rate || 0)
+        } else if (ri.sub_recipe_id) {
+          total += parseFloat(ri.qty_per_portion || 0) * subCostPerUnit(ri.sub_recipe_id)
+        }
+      }
+      return total / (parseFloat(sr.yield_qty) || 1)
+    }
+
+    const mainIdSet = new Set((recipeData || []).map(r => r.id))
     const costMap = {}
     for (const ri of (ingData || [])) {
-      const rate = parseFloat(ri.items?.per_uom_rate || 0)
-      const yf   = (parseFloat(ri.items?.yield_pct) || 100) / 100
-      costMap[ri.recipe_id] = (costMap[ri.recipe_id] || 0) + (parseFloat(ri.qty_per_portion || 0) / yf) * rate
+      if (!mainIdSet.has(ri.recipe_id)) continue
+      if (ri.item_id && ri.items) {
+        const rate = parseFloat(ri.items.per_uom_rate || 0)
+        const yf   = (parseFloat(ri.items.yield_pct) || 100) / 100
+        costMap[ri.recipe_id] = (costMap[ri.recipe_id] || 0) + (parseFloat(ri.qty_per_portion || 0) / yf) * rate
+      } else if (ri.sub_recipe_id) {
+        costMap[ri.recipe_id] = (costMap[ri.recipe_id] || 0) + parseFloat(ri.qty_per_portion || 0) * subCostPerUnit(ri.sub_recipe_id)
+      }
     }
 
     const processed = (recipeData || []).map(r => {

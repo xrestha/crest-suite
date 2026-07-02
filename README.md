@@ -132,6 +132,43 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S208 — 2026-07-02 — KOT \& BOT + Ticket Routing + Menu Pricing food cost fix
+
+**`src/pages/MenuPricing.js` — sub-recipe food cost fix**
+- IMS clients whose recipes use sub-recipe ingredients (e.g. AMERICANO with "2 sub") showed "—" for food cost
+- Root cause: `load()` only read `items.per_uom_rate` directly; sub-recipe ingredients have `sub_recipe_id` not `item_id`, so `ri.items` was null → cost = 0
+- Fix: fetches sub-recipes + their ingredients in parallel; recursive `subCostPerUnit()` computes cost per sub-recipe unit (same logic as Recipe Costing); main recipe cost accumulates both item and sub-recipe costs
+- Food costs in Menu Pricing now match Recipe Costing exactly
+
+**`src/modules/pos/orders/PosOrders.jsx` — KOT \& BOT**
+- **DB:** `ALTER TABLE pos_order_items ADD COLUMN IF NOT EXISTS category text;`
+- `category` stored per order item (from `recipe.category` at add time; preserved on `performSave`; loaded when resuming existing orders)
+- KOT button → Food/Dessert/Snack/Other categories; BOT button → Beverage (routing configurable via Ticket Routing tab)
+- Both buttons show a red badge with unsent-item count; disabled when nothing to send
+- Sent items show green **✓ KOT** or **✓ BOT** badge in the order panel
+- `performSave()` helper: refactored save to preserve `sent_to_kot` + `category` on delete+re-insert (old logic always reset `sent_to_kot: false`)
+- Print: 80mm thermal-ready pop-up window, `window.print()`
+
+**KOT/BOT — qty bump delta tracking**
+- `sent_qty` field tracks how many of each item have already been sent to a station
+- Bumping qty on a sent item → amber **+N** badge next to item name (e.g. "+1") in the order panel
+- Print ticket: bumped items print as `+1 Pasta` not `×3 Pasta` — kitchen knows to make 1 more, not restart
+- `sent_qty` updates to current `qty` when KOT/BOT is sent
+
+**`src/modules/pos/tables/PosTableManagement.jsx` — Ticket Routing tab**
+- **DB:** `ALTER TABLE settings ADD COLUMN IF NOT EXISTS pos_bot_categories text[];`
+- New top-level tab bar on Table Management: **Tables** | **Ticket Routing**
+- Ticket Routing lists all POS-enabled recipe categories with a KOT/BOT pill toggle per row
+- Categories pulled from `recipes WHERE pos_enabled = true` — works for both IMS and POS-only clients
+- Saves to `settings.pos_bot_categories`; default `['Beverage']` → BOT
+- PosOrders loads routing on mount; falls back to `['Beverage']` if not set
+- Use case: assign "Cakes" (in Beverage) to KOT, or route a "Kitchenette" category independently
+
+- **Files:** `src/pages/MenuPricing.js`, `src/modules/pos/orders/PosOrders.jsx`, `src/modules/pos/tables/PosTableManagement.jsx`
+
+---
+
+
 ### S207 — 2026-07-01 — Menu Pricing: POS-only view + Add Item + DB fix
 
 **DB fix:** `feature_flags` table was missing the `menu_pricing` column — admin Save was failing with schema cache error. Fix: `ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS menu_pricing boolean;`
