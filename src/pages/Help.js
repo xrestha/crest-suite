@@ -693,6 +693,7 @@ export default function Help() {
                     'Sort Order controls the display sequence within a section — use multiples of 10 (10, 20, 30) to leave room for reordering',
                     'Inactive status removes a table from active service without deleting it — useful for tables under repair or seasonal areas',
                     'Ticket Routing: go to the Ticket Routing tab to set which categories print at the kitchen (KOT) vs the bar (BOT). Default is Beverage → BOT, everything else → KOT',
+                    'Quick Notes: add preset instruction chips (e.g. "No onion", "Extra spicy") in the Quick Notes tab — staff can tap them instead of typing when adding a note to an order item',
                   ],
                 },
                 {
@@ -707,6 +708,10 @@ export default function Help() {
                     'Configure which categories go to KOT vs BOT in Table Management → Ticket Routing',
                     'Every order gets a sequential order number (#1, #2, …) shown in the top bar and printed on each KOT/BOT ticket — kitchen, bar and bill all reference the same number',
                     'Printed tickets carry your outlet name and who took the order (Taken by), so the station knows who to call with questions',
+                    'Ticket dates print in the Bikram Sambat (BS) calendar, matching the rest of the app',
+                    'Tap "+ Add note" under any order item to send a special instruction (e.g. "no onion") to the kitchen/bar — it prints indented under that item on the ticket. Preset chips from Table Management → Quick Notes appear while you type',
+                    'Editing or adding a note after a ticket was already sent clears its ✓ sent badge — press KOT/BOT again to send the update to the station',
+                    'The floor view shows an amber "⚠ pending" pill and per-table badge for any table with items added but not yet sent to the kitchen/bar — a quick way to catch orders that were never fired',
                   ],
                 },
                 {

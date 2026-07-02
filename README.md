@@ -132,6 +132,27 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S214 — 2026-07-02 — KOT/BOT remarks, BS ticket date, pending-ticket indicators, admin table reset
+
+**`src/modules/pos/orders/PosOrders.jsx`**
+- Ticket date now prints in Bikram Sambat (`adToBs`/`BS_MONTHS`) instead of AD
+- Per-item note field (`+ Add note`) on order lines — free-typed remark prints indented under that item on the KOT/BOT (`↳ no onion`). Editing a note after the item was already sent flips it back to unsent (same pattern as qty-change) so staff know to resend
+- Quick-note chips: while a note field is focused, preset chips from `settings.pos_note_presets` appear below it — tap to append instead of typing (`onMouseDown` `preventDefault` keeps focus so the click registers before blur)
+- Floor view: amber `⚠ N tables · M items pending` pill under `+ Takeaway`, plus a small `⚠ N` badge per occupied table card — both derived from `sent_to_kot` on open orders (added to `loadFloor()`'s select), catching orders added but never fired to the kitchen/bar
+- Admin-only `⚠ Clear Occupied` button (testing utility) — confirms, then deletes all open orders/items for the client and releases occupied tables back to `available`. Gated on `isAdmin` from AuthContext, not POS role
+
+**`src/modules/pos/tables/PosTableManagement.jsx`**
+- New **Quick Notes** tab (alongside Tables / Ticket Routing) — manager types a phrase, saves to `settings.pos_note_presets text[]`, staff see it as a tappable chip in Order Taking
+
+**DB migration (S214) — run ✓**
+```sql
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS pos_note_presets text[];
+```
+
+**`src/pages/Help.js`** — Order Taking + Table Management entries: 5 new tips covering BS ticket dates, per-item notes, quick-note chips, resend-on-edit behavior, and the pending-tickets floor indicator
+
+**Design decision (not built this session):** researched walkout/no-payment handling for the upcoming Billing/Charge screen — decided on a split **Void** (mistake, excluded from revenue/food-cost) vs **Write-off** (walkout/comp, still counts as a sale for food-cost accuracy, ₨0 collected) rather than one generic "close without payment" action. Deferred until the Billing session starts; decision recorded in project memory so it isn't re-litigated then.
+
 ### S213 — 2026-07-02 — Dashboard: trend chart tooltip label color fix
 
 **`src/pages/Dashboard.js`** — daily trend chart Tooltip (Purchases/Sales/Projection) had no `labelStyle`, so the "Day N" label rendered in Recharts' default dark text — unreadable on the dark theme card. Added `labelStyle={{ color: '#fff' }}`.
