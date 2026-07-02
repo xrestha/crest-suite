@@ -16,6 +16,7 @@ const STATUS_LABEL = { available: 'Available', occupied: 'Occupied', reserved: '
 const PAYMENT_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay']
 const VOID_REASONS    = ['Wrong table', 'Duplicate order', 'Test order', 'Order entry mistake', 'Other']
 const COMP_REASONS    = ['Walkout / unpaid', 'Customer goodwill', 'Customer complaint', 'Staff error', 'Owners', 'Company Guest', 'Other']
+const DEFAULT_DISCOUNT_REASONS = ['Loyalty customer', 'Promo / coupon code', 'Manager goodwill', 'Bulk / corporate order', 'Price match', 'Other']
 const COPY_LABEL      = n => n <= 1 ? 'ORIGINAL-COPY' : n === 2 ? 'SECOND-COPY' : n === 3 ? 'THIRD-COPY' : `REPRINT #${n}`
 
 const btnSm = {
@@ -91,6 +92,10 @@ export default function PosOrders() {
   const [closing,     setClosing]     = useState(false)
   const [closeMsg,    setCloseMsg]    = useState('')
   const [compCostMap, setCompCostMap] = useState({}) // { recipeId: foodCostPerPortion } — fetched when Complimentary tab opens
+  const [discountMode,    setDiscountMode]    = useState('amount') // 'amount' | 'percent'
+  const [discountStr,     setDiscountStr]     = useState('')
+  const [discountReason,  setDiscountReason]  = useState('')
+  const [discountReasons, setDiscountReasons] = useState(DEFAULT_DISCOUNT_REASONS)
   const [hscMap,      setHscMap]      = useState({}) // { recipeId: hscCode } — fetched once when Billing modal opens
 
   /* ── Recent Bills / Reprint ── */
@@ -102,12 +107,13 @@ export default function PosOrders() {
     if (!clientId) return
     loadFloor()
     supabase.from('settings')
-      .select('pos_bot_categories, pos_note_presets, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone')
+      .select('pos_bot_categories, pos_note_presets, pos_discount_reasons, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone')
       .eq('client_id', clientId).maybeSingle()
       .then(({ data }) => {
         const arr = data?.pos_bot_categories
         if (arr?.length) setBotCategories(new Set(arr))
         setNotePresets(data?.pos_note_presets || [])
+        setDiscountReasons(data?.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
         setBillingSettings({
           is_vat_registered: data?.is_vat_registered ?? true,
           invoice_prefix:    data?.invoice_prefix || '',
@@ -514,6 +520,7 @@ export default function PosOrders() {
     setTenderedStr('')
     setCloseReason('')
     setBuyerName(''); setBuyerAddress(''); setBuyerPan(''); setBuyerPhone(''); setBillRemarks('')
+    setDiscountStr(''); setDiscountMode('amount'); setDiscountReason('')
     setCloseMsg('')
     setCompCostMap({})
     setHscMap({})
@@ -551,6 +558,9 @@ export default function PosOrders() {
     if ((closeType === 'void' || closeType === 'writeoff') && !closeReason) {
       setCloseMsg('error:Select a reason.'); return
     }
+    if (closeType === 'paid' && discountAmt > 0 && (!discountReason || !buyerName.trim() || !buyerPhone.trim())) {
+      setCloseMsg('error:A discount requires a reason and buyer Name + Phone.'); return
+    }
     setClosing(true); setCloseMsg('')
 
     const today = getBsToday()
@@ -558,9 +568,11 @@ export default function PosOrders() {
       status:           closeType === 'void' ? 'voided' : 'billed',
       close_type:       closeType,
       payment_method:   closeType === 'paid' ? payMethod : null,
-      paid_amount:      closeType === 'paid' ? total : (closeType === 'writeoff' ? 0 : null),
-      tendered_amount:  closeType === 'paid' && payMethod === 'Cash' ? (parseFloat(tenderedStr) || total) : null,
+      paid_amount:      closeType === 'paid' ? payTotal : (closeType === 'writeoff' ? 0 : null),
+      tendered_amount:  closeType === 'paid' && payMethod === 'Cash' ? (parseFloat(tenderedStr) || payTotal) : null,
       close_reason:     closeType === 'paid' ? null : closeReason,
+      discount_amount:  closeType === 'paid' ? discountAmt : null,
+      discount_reason:  closeType === 'paid' ? (discountReason || null) : null,
       buyer_name:       buyerName.trim() || null,
       buyer_address:    buyerAddress.trim() || null,
       buyer_pan:        buyerPan.trim() || null,
@@ -612,13 +624,20 @@ export default function PosOrders() {
 
     const subEx    = items.reduce((s, i) => s + i.qty * i.unit_price, 0)
     const vatAmt   = vatReg ? items.reduce((s, i) => s + i.qty * i.unit_price * (i.vat_rate ?? 0), 0) : 0
-    const discount = 0 // no discount feature yet — printed as 0.00 per IRD invoice format
+    const discount = order.discount_amount || 0
+    // Discount reduces the pre-VAT taxable base; VAT is recalculated on the discounted amount
+    // (same rule as purchase_entries.discount_amount) — a proportional/blended-rate simplification
+    // since this is an order-level (not per-line) discount.
+    const discRatio = subEx > 0 ? discount / subEx : 0
+    const netVatAmt = vatAmt * (1 - discRatio)
     const grossAmt = subEx
-    const rawNet   = grossAmt - discount + vatAmt
+    const rawNet   = grossAmt - discount + netVatAmt
     const net      = Math.round(rawNet) // rounded to the nearest rupee so Net Amount matches the amount-in-words line
     const roundOff = net - rawNet
-    const taxableBase    = vatReg ? items.filter(i => (i.vat_rate ?? 0) > 0).reduce((s, i) => s + i.qty * i.unit_price, 0) : 0
-    const nonTaxableBase = vatReg ? items.filter(i => !(i.vat_rate > 0)).reduce((s, i) => s + i.qty * i.unit_price, 0) : subEx
+    const taxableBaseRaw    = vatReg ? items.filter(i => (i.vat_rate ?? 0) > 0).reduce((s, i) => s + i.qty * i.unit_price, 0) : 0
+    const nonTaxableBaseRaw = vatReg ? items.filter(i => !(i.vat_rate > 0)).reduce((s, i) => s + i.qty * i.unit_price, 0) : subEx
+    const taxableBase    = taxableBaseRaw * (1 - discRatio)
+    const nonTaxableBase = nonTaxableBaseRaw * (1 - discRatio)
     const totalQty = items.reduce((s, i) => s + i.qty, 0)
     const tendered = order.tendered_amount ?? net
     const change   = payLabel === 'Cash' ? Math.max(0, tendered - net) : 0
@@ -675,7 +694,7 @@ export default function PosOrders() {
   ${vatReg ? `
   <div class="row"><span>Taxable:</span><span>${taxableBase.toFixed(2)}</span></div>
   <div class="row"><span>Nontaxable:</span><span>${nonTaxableBase.toFixed(2)}</span></div>
-  <div class="row"><span>VAT 13%:</span><span>${vatAmt.toFixed(2)}</span></div>
+  <div class="row"><span>VAT 13%:</span><span>${netVatAmt.toFixed(2)}</span></div>
   <div class="row"><span>Round Off:</span><span>${roundOff >= 0 ? '+' : ''}${roundOff.toFixed(2)}</span></div>
   ` : ''}
   <div class="row tot"><span>Net Amount:</span><span>${net.toFixed(2)}</span></div>
@@ -823,14 +842,26 @@ export default function PosOrders() {
   const total    = Math.round(subEx + vatAmt) // rounded to the nearest rupee — matches the bill's Net Amount/Round Off line
   const compTotal = orderItems.reduce((s, i) => s + i.qty * (compCostMap[i.recipe_id] || 0), 0)
 
+  // Discount reduces the pre-VAT taxable base, then VAT is recalculated on the discounted amount
+  // (same rule as purchase_entries.discount_amount in Purchases.js) — not a flat subtraction off total.
+  const discountAmt = (() => {
+    const v = parseFloat(discountStr) || 0
+    if (v <= 0 || subEx <= 0) return 0
+    return discountMode === 'percent' ? Math.min(subEx, subEx * v / 100) : Math.min(subEx, v)
+  })()
+  const discRatio = subEx > 0 ? discountAmt / subEx : 0
+  const payVatAmt = vatAmt * (1 - discRatio)
+  const payTotal  = Math.round(subEx - discountAmt + payVatAmt)
+
   // Live bill/slip preview inside the Billing modal — built from the exact same functions used
   // for the real print, so what the cashier sees always matches what will actually print.
   const previewDraftOrder = {
     invoice_no: null, invoice_fy: null,
     payment_method: payMethod,
-    tendered_amount: payMethod === 'Cash' ? (parseFloat(tenderedStr) || total) : null,
+    tendered_amount: payMethod === 'Cash' ? (parseFloat(tenderedStr) || payTotal) : null,
     buyer_name: buyerName, buyer_address: buyerAddress, buyer_pan: buyerPan, buyer_phone: buyerPhone,
     bill_remarks: billRemarks, close_reason: closeReason,
+    discount_amount: discountAmt,
     table_name: activeTable?.name, order_no: orderNo, print_count: 0,
   }
   const previewHtml = !billingOpen ? null
@@ -1227,8 +1258,13 @@ export default function PosOrders() {
               {activeTable ? activeTable.name : 'Takeaway'}
             </h3>
             <p style={{ margin: '0 0 14px', fontSize: 20, fontWeight: 700, color: 'var(--theme-accent)' }}>
-              {fmtNpr(billingTab === 'writeoff' ? compTotal : total)}
+              {fmtNpr(billingTab === 'writeoff' ? compTotal : billingTab === 'pay' ? payTotal : total)}
               {billingTab === 'writeoff' && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>(food cost, not menu price)</span>}
+              {billingTab === 'pay' && discountAmt > 0 && (
+                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>
+                  ({fmtNpr(total)} − {fmtNpr(discountAmt)} discount)
+                </span>
+              )}
             </p>
 
             {(kotCount + botCount) > 0 && (
@@ -1250,13 +1286,21 @@ export default function PosOrders() {
             {billingTab === 'pay' && (
               <div style={{ marginBottom: 16 }}>
                 <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
-                  Buyer details <Tip text="Optional for transactions ≤ NPR 10,000 (IRD abbreviated-invoice exemption). Fill in if the customer requests a full invoice with their own PAN.">(optional)</Tip>
+                  Buyer details {discountAmt > 0 ? (
+                    <span style={{ color: 'var(--theme-red)', textTransform: 'none', letterSpacing: 'normal' }}>
+                      <Tip text="Name and Phone are required whenever a discount is applied, so there's an identifiable record of who received it.">(Name + Phone required for this discount)</Tip>
+                    </span>
+                  ) : (
+                    <Tip text="Optional for transactions ≤ NPR 10,000 (IRD abbreviated-invoice exemption). Fill in if the customer requests a full invoice with their own PAN.">(optional)</Tip>
+                  )}
                 </p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                  <input placeholder="Name" value={buyerName} onChange={e => setBuyerName(e.target.value)} style={billInput} />
+                  <input placeholder="Name" value={buyerName} onChange={e => setBuyerName(e.target.value)}
+                    style={{ ...billInput, borderColor: discountAmt > 0 && !buyerName.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                   <input placeholder="PAN No." value={buyerPan} onChange={e => setBuyerPan(e.target.value)} style={billInput} />
                   <input placeholder="Address" value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)} style={billInput} />
-                  <input placeholder="Phone" value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} style={billInput} />
+                  <input placeholder="Phone" value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)}
+                    style={{ ...billInput, borderColor: discountAmt > 0 && !buyerPhone.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                 </div>
                 <input placeholder="Remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%' }} />
               </div>
@@ -1275,25 +1319,62 @@ export default function PosOrders() {
                     }}>{m}</button>
                   ))}
                 </div>
+
+                <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
+                  Discount <Tip text="Reduces the pre-VAT taxable amount — VAT is recalculated on the discounted base, matching standard invoice practice. Leave at 0 for no discount.">(optional)</Tip>
+                </p>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                  <button onClick={() => setDiscountMode('amount')} style={{
+                    padding: '7px 12px', borderRadius: 7, fontSize: 13, cursor: 'pointer',
+                    fontWeight: discountMode === 'amount' ? 700 : 400,
+                    background: discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
+                    color: discountMode === 'amount' ? '#000' : 'var(--theme-text2)',
+                    border: `1px solid ${discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+                  }}>₨</button>
+                  <button onClick={() => setDiscountMode('percent')} style={{
+                    padding: '7px 12px', borderRadius: 7, fontSize: 13, cursor: 'pointer',
+                    fontWeight: discountMode === 'percent' ? 700 : 400,
+                    background: discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
+                    color: discountMode === 'percent' ? '#000' : 'var(--theme-text2)',
+                    border: `1px solid ${discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+                  }}>%</button>
+                  <input type="number" min="0" step="any" max={discountMode === 'percent' ? 100 : undefined}
+                    placeholder="0" value={discountStr} onChange={e => setDiscountStr(e.target.value)}
+                    style={{ ...billInput, flex: 1 }} />
+                  {discountMode === 'percent' && discountAmt > 0 && (
+                    <span style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>≈ {fmtNpr(discountAmt)}</span>
+                  )}
+                </div>
+                {discountAmt > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Discount Reason</label>
+                    <select className="form-select" style={{ width: '100%' }} value={discountReason} onChange={e => setDiscountReason(e.target.value)}>
+                      <option value="">— Select —</option>
+                      {discountReasons.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                )}
+
                 {payMethod === 'Cash' && (
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
                     <div style={{ flex: 1 }}>
                       <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Tender</label>
-                      <input type="number" min="0" step="any" placeholder={total.toFixed(0)}
+                      <input type="number" min="0" step="any" placeholder={payTotal.toFixed(0)}
                         value={tenderedStr} onChange={e => setTenderedStr(e.target.value)} style={{ ...billInput, width: '100%' }} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Change</label>
                       <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>
-                        {fmtNpr(Math.max(0, (parseFloat(tenderedStr) || total) - total))}
+                        {fmtNpr(Math.max(0, (parseFloat(tenderedStr) || payTotal) - payTotal))}
                       </div>
                     </div>
                   </div>
                 )}
                 {closeMsg && <p style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
                 <button className="btn btn-primary" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
-                  onClick={() => closeOrder('paid')} disabled={closing}>
-                  {closing ? 'Processing…' : `Confirm Payment — ${fmtNpr(total)}`}
+                  onClick={() => closeOrder('paid')}
+                  disabled={closing || (discountAmt > 0 && (!discountReason || !buyerName.trim() || !buyerPhone.trim()))}>
+                  {closing ? 'Processing…' : `Confirm Payment — ${fmtNpr(payTotal)}`}
                 </button>
               </>
             )}

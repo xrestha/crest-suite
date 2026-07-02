@@ -13,10 +13,12 @@ const STATUS_LABEL = { available: 'Available', occupied: 'Occupied', reserved: '
 const QS_EMPTY  = { prefix: 'Table', start: 1, count: 10, section: '', capacity: 4 }
 const ADD_EMPTY = { name: '', section: '', capacity: 4 }
 
+const DEFAULT_DISCOUNT_REASONS = ['Loyalty customer', 'Promo / coupon code', 'Manager goodwill', 'Bulk / corporate order', 'Price match', 'Other']
+
 export default function PosTableManagement() {
   const { clientId, hasPosAccess } = useAuth()
 
-  const [mainTab, setMainTab] = useState('tables') // 'tables' | 'routing' | 'notes' | 'hsc'
+  const [mainTab, setMainTab] = useState('tables') // 'tables' | 'routing' | 'notes' | 'hsc' | 'discounts'
 
   const [tables,    setTables]    = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -56,6 +58,14 @@ export default function PosTableManagement() {
   const [hscLoading, setHscLoading] = useState(false)
   const [hscLoaded,  setHscLoaded]  = useState(false)
   const [hscSaving,  setHscSaving]  = useState({})   // { recipeId: bool }
+
+  // Discount Reasons
+  const [discReasons,   setDiscReasons]   = useState(DEFAULT_DISCOUNT_REASONS)
+  const [newDiscReason, setNewDiscReason] = useState('')
+  const [discLoading,   setDiscLoading]   = useState(false)
+  const [discSaving,    setDiscSaving]    = useState(false)
+  const [discMsg,       setDiscMsg]       = useState('')
+  const [discLoaded,    setDiscLoaded]    = useState(false)
 
   useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line
 
@@ -280,6 +290,48 @@ export default function PosTableManagement() {
     setHscSaving(s => ({ ...s, [recipe.id]: false }))
   }
 
+  // ── Discount Reasons ────────────────────────────────────────────────────────
+
+  async function loadDiscReasons() {
+    setDiscLoading(true)
+    const { data } = await supabase.from('settings').select('pos_discount_reasons').eq('client_id', clientId).maybeSingle()
+    setDiscReasons(data?.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
+    setDiscLoading(false)
+    setDiscLoaded(true)
+  }
+
+  function openDiscountsTab() {
+    setMainTab('discounts')
+    if (!discLoaded) loadDiscReasons()
+  }
+
+  function addDiscReason() {
+    const v = newDiscReason.trim()
+    if (!v || discReasons.includes(v)) { setNewDiscReason(''); return }
+    setDiscReasons(prev => [...prev, v])
+    setNewDiscReason('')
+    setDiscMsg('')
+  }
+
+  function removeDiscReason(r) {
+    setDiscReasons(prev => prev.filter(x => x !== r))
+    setDiscMsg('')
+  }
+
+  async function saveDiscReasons() {
+    setDiscSaving(true); setDiscMsg('')
+    const { data: existing } = await supabase
+      .from('settings').select('id').eq('client_id', clientId).maybeSingle()
+    let error
+    if (existing?.id) {
+      ;({ error } = await supabase.from('settings').update({ pos_discount_reasons: discReasons }).eq('id', existing.id))
+    } else {
+      ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_discount_reasons: discReasons }))
+    }
+    setDiscSaving(false)
+    setDiscMsg(error ? 'error:' + error.message : 'ok:Discount reasons saved.')
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   return (
@@ -316,6 +368,12 @@ export default function PosTableManagement() {
             className={`tab-btn${mainTab === 'hsc' ? ' tab-btn--active' : ''}`}
             onClick={openHscTab}
           >HSC Codes</button>
+        </Tip>
+        <Tip text="Preset reasons staff can pick when applying a discount at Charge — customize this list to match how your team actually discounts (e.g. Loyalty customer, Manager goodwill)">
+          <button
+            className={`tab-btn${mainTab === 'discounts' ? ' tab-btn--active' : ''}`}
+            onClick={openDiscountsTab}
+          >Discounts</button>
         </Tip>
       </div>
 
@@ -506,6 +564,70 @@ export default function PosTableManagement() {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ DISCOUNTS TAB ══ */}
+      {mainTab === 'discounts' && (
+        <div style={{ maxWidth: 520 }}>
+          <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
+            Preset reasons a Supervisor+ can pick when applying a discount at Charge (e.g.{' '}
+            <strong style={{ color: 'var(--theme-text2)' }}>Loyalty customer</strong>,{' '}
+            <strong style={{ color: 'var(--theme-text2)' }}>Manager goodwill</strong>). A reason is
+            required whenever a discount is applied, for an audit trail.
+          </p>
+
+          {discLoading ? (
+            <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                <input
+                  className="form-select" style={{ flex: 1 }}
+                  value={newDiscReason}
+                  onChange={e => setNewDiscReason(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addDiscReason()}
+                  placeholder="e.g. Bulk / corporate order"
+                />
+                <button className="btn btn-ghost" onClick={addDiscReason}>+ Add</button>
+              </div>
+
+              {discReasons.length === 0 ? (
+                <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
+                  No discount reasons yet — add common reasons above.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+                  {discReasons.map(r => (
+                    <span key={r} style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '6px 8px 6px 12px', borderRadius: 14, fontSize: 12,
+                      background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
+                      color: 'var(--theme-text1)',
+                    }}>
+                      {r}
+                      <button
+                        onClick={() => removeDiscReason(r)}
+                        title="Remove"
+                        style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
+                      >×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <button className="btn btn-primary" onClick={saveDiscReasons} disabled={discSaving}>
+                  {discSaving ? 'Saving…' : 'Save Discount Reasons'}
+                </button>
+                {discMsg && (
+                  <span style={{ fontSize: 12, color: discMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                    {discMsg.replace(/^(error|ok):/, '')}
+                  </span>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}

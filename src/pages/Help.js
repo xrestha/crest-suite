@@ -695,6 +695,7 @@ export default function Help() {
                     'Ticket Routing: go to the Ticket Routing tab to set which categories print at the kitchen (KOT) vs the bar (BOT). Default is Beverage → BOT, everything else → KOT',
                     'Quick Notes: add preset instruction chips (e.g. "No onion", "Extra spicy") in the Quick Notes tab — staff can tap them instead of typing when adding a note to an order item',
                     'HSC Codes: set an optional Harmonized System Code per item in the HSC Codes tab — only needed for items that are imported goods sold as-is (e.g. imported bottled drinks). Leave blank for freshly prepared dishes; prints on the bill if set',
+                    'Discounts: customize the list of reasons staff can pick when applying a discount at Charge, in the Discounts tab — comes preloaded with common reasons (Loyalty customer, Manager goodwill, etc.), fully editable',
                   ],
                 },
                 {
@@ -718,6 +719,8 @@ export default function Help() {
                     'Both the Charge modal\'s total and item list switch to food-cost values while the Complimentary tab is open, and a live preview of the actual bill/slip layout appears in the modal as you fill in the fields — it always matches exactly what will print',
                     'Whether the printed bill says "TAX INVOICE" (with a VAT breakdown) or plain "BILL" (PAN only, no VAT) depends on the VAT Registered toggle an admin sets per client — see Settings below',
                     'Buyer Name/Address/PAN/Phone on the Charge screen are optional — IRD allows omitting them for bills up to NPR 10,000, but fill them in if a customer requests a full invoice',
+                    'Discount on the Pay tab supports a flat NPR amount or a percentage (toggle between ₨/%) — it reduces the pre-VAT taxable amount, with VAT recalculated on the discounted base, not just subtracted off the total',
+                    'Applying any discount makes buyer Name and Phone compulsory (not just optional) and requires picking a Discount Reason — gives an identifiable, audited record of who received it. Customize the reason list in Table Management → Discounts',
                     '📄 Recent Bills (floor view) lists everything closed today and lets you reprint a bill — the printout is labelled ORIGINAL-COPY the first time, SECOND-COPY the second, THIRD-COPY the third, and REPRINT #N after that (matches Nepal IRD\'s Rule 17 buyer/authority/seller copy terminology)',
                   ],
                 },

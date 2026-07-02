@@ -132,6 +132,27 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S219 — 2026-07-02 — POS Billing: order-level Discount (₨/% toggle, mandatory reason + buyer ID)
+
+**DB migration run ✓:**
+```sql
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS discount_amount numeric;
+ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS discount_reason text;
+
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS pos_discount_reasons text[];
+```
+
+**`src/modules/pos/orders/PosOrders.jsx` — Pay tab**
+- New Discount input on the Pay tab: a `₨`/`%` mode toggle + amount field. Percent mode shows a live "≈ NPR X" hint. Discount reduces the pre-VAT taxable base, and VAT is recalculated on the discounted amount (matches the existing `purchase_entries.discount_amount` convention in Purchases.js — *"Applied before VAT, VAT is levied only on the net taxable amount"*), not a flat subtraction off the total.
+- **Applying any discount makes buyer Name and Phone compulsory** (they're normally optional under the IRD ≤NPR 10,000 abbreviated-invoice exemption) and requires selecting a **Discount Reason** — Confirm Payment stays disabled until both are filled in, giving an identifiable, audited record of who received every discount.
+- Discount reasons are admin-customizable (new **Discounts** tab in Table Management — see below), not a hardcoded list, but ship with sensible built-in defaults (Loyalty customer, Promo/coupon code, Manager goodwill, Bulk/corporate order, Price match, Other) so the dropdown is never empty on a new client.
+- `buildBillHtml()` now reads the real `order.discount_amount` (was a hardcoded `0` placeholder since S218) — Gross Amount stays the pre-discount figure, Taxable/Nontaxable/VAT rows are scaled down proportionally by the discount ratio, Net Amount reflects the discounted total. The live in-modal preview reflects the discount as it's typed, same as every other field.
+- The modal's header total, Tender placeholder, Change math, and Confirm Payment button all switch to the discounted `payTotal` on the Pay tab — the Void tab still shows the full undiscounted total (a discount typed into the Pay tab must not leak into Void's display).
+- `pos_orders.paid_amount` is written as the discounted total, so Recent Bills / any future revenue reporting automatically reflects real collected revenue with no separate changes needed.
+- Scope: whole-order only (one discount per bill), not per line-item — matches the single "Discount" row already on the printed invoice; item-level discount/comp is a flagged future gap alongside item-level Complimentary.
+
+**`src/modules/pos/tables/PosTableManagement.jsx`** — new **Discounts** tab (Supervisor+, same page-level gate as the rest of Table Management), built as a line-for-line mirror of the existing Quick Notes tab: a `text[]` column on `settings` (`pos_discount_reasons`), managed via a chip-list add/remove/save UI, falling back to the same built-in defaults when empty.
+
 ### S218 — 2026-07-02 — Tax Invoice/Bill print overhaul: two-column preview, Gross Amount fix, Round Off, IRD copy terms
 
 No DB migration.
