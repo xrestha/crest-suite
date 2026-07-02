@@ -132,6 +132,10 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S212 — 2026-07-02 — Purchases: item count in Add Purchase Bill summary
+
+**`src/pages/Purchases.js`** — bill footer now shows an "Items: N" line above Taxable/Non-taxable, counting valid lines (item selected, qty > 0, rate > 0) — same count already used for the "Save N Entries" button label.
+
 ### S211 — 2026-07-02 — KOT/BOT ticket upgrade: order number, outlet name, Taken by
 
 Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; added the three fields it had that we lacked. Kept our advantages: `+N` addition deltas, station-specific titles (KOT/BOT), `×N` qty format, wrap-safe flex rows.
