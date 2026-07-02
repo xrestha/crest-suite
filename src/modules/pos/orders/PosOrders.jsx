@@ -40,6 +40,7 @@ export default function PosOrders() {
   /* ── order screen ── */
   const [activeTable, setActiveTable] = useState(null)
   const [orderId,     setOrderId]     = useState(null)
+  const [orderNo,     setOrderNo]     = useState(null) // per-client sequential, assigned by DB trigger on insert
   // orderItems: { id?, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot }
   const [orderItems,  setOrderItems]  = useState([])
   const [covers,      setCovers]      = useState(1)
@@ -50,6 +51,7 @@ export default function PosOrders() {
   const [msg,         setMsg]         = useState('')
   // categories that route to BOT — loaded from settings, default to ['Beverage']
   const [botCategories, setBotCategories] = useState(new Set(['Beverage']))
+  const [outletName,    setOutletName]    = useState('')
   // ME-driven suggestion chips
   const [suggestions,       setSuggestions]       = useState([])
   const [manualSuggestions, setManualSuggestions] = useState({}) // { recipeId: [suggestedRecipeId] }
@@ -62,6 +64,8 @@ export default function PosOrders() {
         const arr = data?.pos_bot_categories
         if (arr?.length) setBotCategories(new Set(arr))
       })
+    supabase.from('clients').select('name').eq('id', clientId).single()
+      .then(({ data }) => setOutletName(data?.name || ''))
   }, [clientId]) // eslint-disable-line
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
@@ -124,7 +128,7 @@ export default function PosOrders() {
   async function openTable(table) {
     const { data: existing } = await supabase
       .from('pos_orders')
-      .select('id, covers, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot)')
+      .select('id, order_no, covers, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot)')
       .eq('client_id', clientId)
       .eq('status', 'open')
       .eq('table_id', table.id)
@@ -133,6 +137,7 @@ export default function PosOrders() {
     if (existing) {
       setActiveTable(table)
       setOrderId(existing.id)
+      setOrderNo(existing.order_no || null)
       setCovers(existing.covers || 1)
       setOrderItems((existing.pos_order_items || []).map(i => ({
         ...i,
@@ -159,14 +164,14 @@ export default function PosOrders() {
   function confirmCovers() {
     const n = Math.max(1, parseInt(pendingCoversStr) || 1)
     setActiveTable(pendingTable)
-    setOrderId(null); setOrderItems([])
+    setOrderId(null); setOrderNo(null); setOrderItems([])
     setCovers(n)
     setMsg(''); setCoversModal(false); setPendingTable(null)
     setView('order')
   }
 
   function openTakeaway() {
-    setActiveTable(null); setOrderId(null); setCovers(1); setOrderItems([])
+    setActiveTable(null); setOrderId(null); setOrderNo(null); setCovers(1); setOrderItems([])
     setMsg(''); setView('order'); loadMenu()
   }
 
@@ -264,6 +269,7 @@ export default function PosOrders() {
 
   async function performSave() {
     let oid = orderId
+    let oNo = orderNo
 
     if (!oid) {
       const { data: newOrder, error } = await supabase
@@ -276,10 +282,12 @@ export default function PosOrders() {
           covers,
           opened_by:  profile?.id || null,
         })
-        .select('id').single()
+        .select('id, order_no').single()
       if (error || !newOrder) return null
       oid = newOrder.id
+      oNo = newOrder.order_no || null
       setOrderId(oid)
+      setOrderNo(oNo)
       if (activeTable?.id) {
         await supabase.from('pos_tables').update({ status: 'occupied' }).eq('id', activeTable.id)
         setTables(prev => prev.map(t => t.id === activeTable.id ? { ...t, status: 'occupied' } : t))
@@ -305,7 +313,7 @@ export default function PosOrders() {
     )
     if (iErr) return null
     loadFloor()
-    return oid
+    return { oid, oNo }
   }
 
   async function saveOrder() {
@@ -314,8 +322,9 @@ export default function PosOrders() {
     setSaving(true); setMsg('')
 
     const wasNew = !orderId
-    const oid = await performSave()
-    if (!oid) { setSaving(false); setMsg('error:Save failed.'); return }
+    const saved = await performSave()
+    if (!saved) { setSaving(false); setMsg('error:Save failed.'); return }
+    const { oid, oNo } = saved
 
     if (wasNew) {
       // Auto-send all items to their stations on first save
@@ -323,8 +332,8 @@ export default function PosOrders() {
       const botItems = orderItems.filter(i =>  botCategories.has(i.category || 'Other'))
       await supabase.from('pos_order_items').update({ sent_to_kot: true }).eq('order_id', oid)
       setOrderItems(prev => prev.map(i => ({ ...i, sent_to_kot: true, sent_qty: i.qty })))
-      if (kotItems.length > 0) printTicket('KOT', kotItems)
-      if (botItems.length > 0) printTicket('BOT', botItems)
+      if (kotItems.length > 0) printTicket('KOT', kotItems, oNo)
+      if (botItems.length > 0) printTicket('BOT', botItems, oNo)
       setMsg('ok:Order sent!')
     } else {
       setMsg('ok:Saved.')
@@ -351,8 +360,9 @@ export default function PosOrders() {
     }
 
     setSaving(true); setMsg('')
-    const oid = await performSave()
-    if (!oid) { setSaving(false); setMsg('error:Save failed.'); return }
+    const saved = await performSave()
+    if (!saved) { setSaving(false); setMsg('error:Save failed.'); return }
+    const { oid, oNo } = saved
 
     // Mark sent in DB by recipe_id (unique per order)
     const recipeIds = unsentItems.map(i => i.recipe_id).filter(Boolean)
@@ -371,14 +381,15 @@ export default function PosOrders() {
 
     setSaving(false)
     setMsg(`ok:${station} sent!`)
-    printTicket(station, unsentItems)
+    printTicket(station, unsentItems, oNo)
   }
 
-  function printTicket(station, items) {
+  function printTicket(station, items, ticketNo) {
     const tableName    = activeTable?.name || 'Takeaway'
     const now          = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
     const date         = new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
     const stationLabel = station === 'BOT' ? 'BAR ORDER TICKET' : 'KITCHEN ORDER TICKET'
+    const takenBy      = profile?.full_name || ''
 
     const html = `<!DOCTYPE html>
 <html><head><title>${station}</title>
@@ -393,9 +404,11 @@ export default function PosOrders() {
   .qty { font-weight:bold; font-size:15px; min-width:34px; text-align:right; }
 </style>
 </head><body>
+  ${outletName ? `<div class="c b" style="font-size:14px">${outletName}</div>` : ''}
   <div class="c b lg">${stationLabel}</div>
   <hr>
-  <div class="row"><span class="b">${tableName}</span><span>Covers: ${covers}</span></div>
+  <div class="row"><span class="b" style="font-size:15px">${tableName}</span><span class="b" style="font-size:15px">${ticketNo ? `#${ticketNo}` : ''}</span></div>
+  <div class="row"><span>${takenBy ? `Taken by: ${takenBy}` : ''}</span><span>Covers: ${covers}</span></div>
   <div class="row" style="font-size:11px;color:#555"><span>${date}</span><span>${now}</span></div>
   <hr>
   ${items.map(i => {
@@ -415,7 +428,7 @@ export default function PosOrders() {
   }
 
   function backToFloor() {
-    setView('floor'); setActiveTable(null); setOrderId(null); setOrderItems([]); setMsg('')
+    setView('floor'); setActiveTable(null); setOrderId(null); setOrderNo(null); setOrderItems([]); setMsg('')
     setSuggestions([])
     setMenuLoaded(false)
   }
@@ -457,6 +470,16 @@ export default function PosOrders() {
 
         {activeTable?.section && (
           <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{activeTable.section}</span>
+        )}
+
+        {orderNo && (
+          <Tip text="Order number — printed on every KOT/BOT ticket so the kitchen, bar and bill all reference the same order">
+            <span style={{
+              fontSize: 12, fontWeight: 700, color: 'var(--theme-accent)',
+              border: '1px solid var(--theme-accent)', borderRadius: 5,
+              padding: '2px 7px', cursor: 'default',
+            }}>#{orderNo}</span>
+          </Tip>
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginLeft: 8 }}>

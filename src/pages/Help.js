@@ -705,6 +705,8 @@ export default function Help() {
                     'The green ✓ KOT / ✓ BOT badge means the ticket for that item has already been sent to the station',
                     'KOT and BOT badges on the buttons show how many unsent items are waiting to be sent',
                     'Configure which categories go to KOT vs BOT in Table Management → Ticket Routing',
+                    'Every order gets a sequential order number (#1, #2, …) shown in the top bar and printed on each KOT/BOT ticket — kitchen, bar and bill all reference the same number',
+                    'Printed tickets carry your outlet name and who took the order (Taken by), so the station knows who to call with questions',
                   ],
                 },
                 {

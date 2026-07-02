@@ -132,6 +132,22 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S211 — 2026-07-02 — KOT/BOT ticket upgrade: order number, outlet name, Taken by
+
+Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; added the three fields it had that we lacked. Kept our advantages: `+N` addition deltas, station-specific titles (KOT/BOT), `×N` qty format, wrap-safe flex rows.
+
+**`src/modules/pos/orders/PosOrders.jsx`**
+- `pos_orders.order_no` — per-client sequential order number, assigned by DB trigger on insert (advisory-lock serialized, race-safe)
+- Order number threaded through: `openTable` (existing order select), `performSave` (returns `{ oid, oNo }` so first-save tickets have it before state flushes), reset in `confirmCovers`/`openTakeaway`/`backToFloor`
+- Ticket header now prints: outlet name (`clients.name`, centered top) → station title → table name + bold `#N` → `Taken by: <staff full_name>` + `Covers: N` → date/time
+- Top bar shows accent `#N` chip (with Tip) once the order is saved
+- All three new fields degrade gracefully — line omitted if missing (e.g. migration not yet run → no `#N`)
+
+**`src/pages/Help.js`** — Order Taking entry: 2 new tips (order number, outlet name/Taken by on tickets)
+
+**DB migration (S211) — `pos_order_no.sql`**
+- `ALTER TABLE pos_orders ADD COLUMN order_no integer` + `assign_pos_order_no()` BEFORE INSERT trigger (per-client `MAX+1` under `pg_advisory_xact_lock`) + backfill of existing orders by `created_at`
+
 ### S210 — 2026-07-02 — Upsell/Cross-sell ME suggestion engine (all 3 layers)
 
 **`src/pages/MenuEngineering.js` — me_class writeback**
