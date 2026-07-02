@@ -125,6 +125,7 @@ export default function ReorderReport() {
   }
 
   async function savePar(itemId) {
+    if (!effectiveClientId) return // never insert par_levels with a null client_id
     const val = parseFloat(editingPar[itemId])
     if (isNaN(val) || val < 0) {
       setEditingPar(p => { const n = { ...p }; delete n[itemId]; return n })

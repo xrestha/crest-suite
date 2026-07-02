@@ -177,6 +177,7 @@ export default function MenuPricing() {
   }
 
   async function saveNewItem() {
+    if (!effectiveClientId) { setAddError('No client selected. Pick a client in the top-left switcher before saving.'); return }
     if (!addForm.name.trim()) { setAddError('Name is required.'); return }
     const priceNum = parseFloat(addForm.price)
     if (!priceNum || priceNum <= 0) { setAddError('Enter a valid price.'); return }
@@ -403,7 +404,7 @@ export default function MenuPricing() {
   }
 
   async function savePairings() {
-    if (!suggestModal) return
+    if (!suggestModal || !effectiveClientId) return
     setPairingSaving(true)
     const recipeId = suggestModal.id
     await supabase.from('recipe_suggestions').delete()

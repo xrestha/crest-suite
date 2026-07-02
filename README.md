@@ -148,6 +148,11 @@ Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; a
 **DB migration (S211) — `pos_order_no.sql`**
 - `ALTER TABLE pos_orders ADD COLUMN order_no integer` + `assign_pos_order_no()` BEFORE INSERT trigger (per-client `MAX+1` under `pg_advisory_xact_lock`) + backfill of existing orders by `created_at`
 
+**IMS debug sweep (same session)**
+- `Dashboard.js` — `recipe_ingredients` was fetched UNSCOPED (no `.in('recipe_id', …)`); pulled every client's rows into the browser (results were filtered client-side so numbers were correct, but it was a cross-tenant leak surface + growing payload). Now fetched after recipes, scoped by recipe IDs.
+- NULL `client_id` guard added to 5 unguarded inserts: `Dashboard.closeAndAdvancePeriod` (monthly_periods), `ReorderReport.savePar` (par_levels), `MenuPricing.saveNewItem` (recipes), `MenuPricing.savePairings` (recipe_suggestions), `OutstandingPayables.addPayment` (payable_payments)
+- Verified clean: `is_sub_recipe` filters (all 6 required pages), `per_uom_rate` never in write payloads, Sales/Stock/Purchases inserts period-scoped (no client_id column exposure)
+
 ### S210 — 2026-07-02 — Upsell/Cross-sell ME suggestion engine (all 3 layers)
 
 **`src/pages/MenuEngineering.js` — me_class writeback**

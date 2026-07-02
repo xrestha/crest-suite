@@ -74,7 +74,6 @@ export default function Dashboard() {
       { data: returns },
       { data: salesData },
       { data: recipes },
-      { data: recipeIngs },
       { data: opening },
       { data: closing },
       { data: items },
@@ -90,7 +89,6 @@ export default function Dashboard() {
       period ? supabase.from('vendor_returns').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day').eq('period_id', period.id) : { data: [] },
       supabase.from('recipes').select('id, name, selling_price, category, is_active, target_fc_pct').eq('client_id', effectiveClientId),
-      supabase.from('recipe_ingredients').select('recipe_id, item_id, qty_per_portion, items(per_uom_rate)'),
       period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id) : { data: [] },
       supabase.from('items').select('id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('client_id', effectiveClientId).eq('is_active', true).eq('is_sub_recipe', false),
@@ -98,6 +96,12 @@ export default function Dashboard() {
       period ? supabase.from('overheads').select('amount').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('wastages').select('item_id, qty').eq('period_id', period.id) : { data: [] }
     ])
+
+    // recipe_ingredients has no client_id — must be scoped by this client's recipe IDs
+    const dashRecipeIds = (recipes || []).map(r => r.id)
+    const { data: recipeIngs } = dashRecipeIds.length
+      ? await supabase.from('recipe_ingredients').select('recipe_id, item_id, qty_per_portion, items(per_uom_rate)').in('recipe_id', dashRecipeIds)
+      : { data: [] }
 
     // PATCHED: purchaseTotal = gross − returns
     const grossTotal  = (purchases || []).reduce((s, p) => s + p.qty * p.rate, 0)
@@ -319,7 +323,7 @@ export default function Dashboard() {
   }
 
   async function closeAndAdvancePeriod() {
-    if (!activePeriod) return
+    if (!activePeriod || !effectiveClientId) return
     const nextMonth = activePeriod.bs_month === 12 ? 1 : activePeriod.bs_month + 1
     const nextYear  = activePeriod.bs_month === 12 ? activePeriod.bs_year + 1 : activePeriod.bs_year
     await supabase.from('monthly_periods').update({ status: 'closed' }).eq('id', activePeriod.id)

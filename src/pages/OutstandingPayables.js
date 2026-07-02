@@ -109,6 +109,7 @@ export default function OutstandingPayables() {
   async function payBill(bill) {
     let amount = parseFloat(payForm.amount)
     if (!amount || amount <= 0) return
+    if (!effectiveClientId) { setPayError('No client selected. Pick a client in the top-left switcher before saving.'); return }
     amount = Math.min(amount, bill.remaining) // never over-pay the bill
     setSavingPayment(true)
     setPayError('')
