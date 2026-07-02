@@ -165,7 +165,7 @@ export default function PayrollRun() {
     if (rErr) { setMsg('error:' + rErr.message); setBusy(false); return }
     const { error: pErr } = await supabase.from('hr_payslips').insert(buildRows(runRow.id, ytdMap))
     if (pErr) { setMsg('error:' + pErr.message); setBusy(false); return }
-    await loadAll(period.id)
+    await loadAll(period.id, period.bs_year, period.bs_month)
     setMsg('ok:Payroll generated'); setBusy(false)
   }
 
@@ -376,7 +376,7 @@ export default function PayrollRun() {
                       <th>Employee</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Gross earnings: basic + allowances (monthly) or earned wage (daily/hourly)." width={250}>Gross</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Overtime pay at 1.5× the hourly rate." width={200}>OT</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Pay deducted for unpaid-absence days (basic ÷ days in month × unpaid days)." width={260}>Absence</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Pay deducted for unpaid days — absences, unpaid leave, and half-days (gross ÷ days in month × unpaid days, allowances included)." width={270}>Absence</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="11% SSF — only for employees with an SSF number on file." width={230}>SSF</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="All configured deductions except SSF — CIT/PF, etc." width={250}>Other Ded</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Advance or loan installment auto-recovered this period from active advances in the Advances & Loans ledger. Repayment rows are written on Finalize." width={290}>Advance</Tip></th>
@@ -390,6 +390,11 @@ export default function PayrollRun() {
                       const emp = empMap[s.employee_id] || {}
                       const isMonthly = s.pay_basis === 'monthly'
                       const advDed = s.advance_deduction || 0
+                      // Overtime recorded in BOTH the attendance sheet's OT column AND approved
+                      // Overtime entries pays twice — flag it so the payroll runner can fix the source.
+                      const attOtHrs = attendance.filter(a => a.employee_id === s.employee_id)
+                        .reduce((sum, a) => sum + (parseFloat(a.ot_hours) || 0), 0)
+                      const otBothSources = attOtHrs > 0 && otEntries.some(e => e.employee_id === s.employee_id)
                       return (
                         <tr key={s.id}>
                           <td>
@@ -398,6 +403,11 @@ export default function PayrollRun() {
                               {emp.employee_code && <span style={{ fontSize: 10, color: '#6b7280' }}>{emp.employee_code}</span>}
                               {!isMonthly && <span style={{ fontSize: 10, fontWeight: 700, color: '#60a5fa', background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: 8, padding: '1px 6px' }}>{s.pay_basis}</span>}
                               {!emp.ssf_enrolled && <span style={{ fontSize: 10, color: '#4b5563' }}>no SSF</span>}
+                              {otBothSources && (
+                                <Tip text={`OT recorded in TWO places for this employee — ${attOtHrs} hr in the attendance sheet's OT column AND approved Overtime entries. Both are paid, so the same hours may be paid twice. Zero out one source and Regenerate.`} width={290}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>⚠ OT ×2?</span>
+                                </Tip>
+                              )}
                             </div>
                           </td>
                           <td style={{ textAlign: 'right', color: '#e8e0d0' }}>{fmt(s.gross)}</td>
@@ -503,7 +513,7 @@ function PayslipBody({ slip, emp, periodLabel, forPrint }) {
       <Row label="Gross Earnings" value={slip.gross + slip.ot_amount} strong />
 
       <div style={{ fontSize: 10, color: c1, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '12px 0 4px' }}>Deductions</div>
-      {slip.absence_deduction > 0 && <Row label={`Absence (${slip.absent_days} days)`} value={slip.absence_deduction} neg />}
+      {slip.absence_deduction > 0 && <Row label="Absence / Unpaid Leave" value={slip.absence_deduction} neg />}
       {slip.ssf_employee > 0 && <Row label="SSF Employee (11%)" value={slip.ssf_employee} neg />}
       {slip.other_deductions > 0 && <Row label="Other Deductions" value={slip.other_deductions} neg />}
       {(slip.advance_deduction || 0) > 0 && <Row label="Advance / Loan Recovery" value={slip.advance_deduction} neg />}

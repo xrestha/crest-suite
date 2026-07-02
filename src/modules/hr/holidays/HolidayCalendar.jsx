@@ -85,6 +85,7 @@ export default function HolidayCalendar() {
   function closeForm() { setForm(f => ({ ...f, open: false, editing: null })) }
 
   async function saveForm() {
+    if (!clientId) { setMsg('error:No client selected'); return }
     if (!form.name.trim()) { setMsg('error:Holiday name is required'); return }
     const bs_month = parseInt(form.bs_month, 10)
     const bs_day   = parseInt(form.bs_day, 10)
@@ -109,6 +110,7 @@ export default function HolidayCalendar() {
   }
 
   async function seedFixed() {
+    if (!clientId) { setMsg('error:No client selected'); return }
     const existingNames = new Set(fyHolidays.map(h => h.name))
     const toInsert = FIXED_HOLIDAYS
       .filter(h => !existingNames.has(h.name))

@@ -123,6 +123,7 @@ export default function FestivalAllowance() {
   }
 
   async function generate() {
+    if (!clientId) { setMsg('error:No client selected'); return }
     if (employees.length === 0) return
     setBusy(true); setMsg('')
     const { error } = await supabase.from('hr_festival_allowances')
@@ -132,6 +133,7 @@ export default function FestivalAllowance() {
   }
 
   async function regenerate() {
+    if (!clientId) { setMsg('error:No client selected'); return }
     if (finalized) return
     if (!window.confirm('Recompute all festival amounts from current salaries? Manual edits will be reset.')) return
     setBusy(true); setMsg('')

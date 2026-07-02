@@ -255,7 +255,7 @@ export default function AttendanceSheet() {
                       <Tip text="Hours worked that day. Only used for hourly-paid staff." width={220}>Hours</Tip>
                     </th>
                     <th style={{ width: 110, textAlign: 'right' }}>
-                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll." width={240}>OT Hours</Tip>
+                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll. Don't also log the same hours in the Overtime module — both sources are paid, so duplicates pay twice (payroll flags this with an ⚠ OT ×2? badge)." width={270}>OT Hours</Tip>
                     </th>
                     <th>Note</th>
                   </tr>

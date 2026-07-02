@@ -132,9 +132,31 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S226 — 2026-07-02 — HR module bug audit + fixes (11 findings, all addressed)
+
+No DB migration. Full code audit of `src/modules/hr/` (payroll/TDS engines, payroll runner, attendance, advances, settlement, gratuity, every insert path). TDS slabs, SSF cap/waiver math, YTD projection, and advance auto-repayment idempotency all verified correct against the Nepal payroll-law reference. Fixes:
+
+**High (silent failures)**
+- **Final Settlement never deducted outstanding advances** — it queried `hr_advances` columns that don't exist (`balance`, `issue_date`, `description`; the table has `issued_date`, `purpose`, and no balance column). The query errored silently and every settlement showed zero advance recovery. Now fetches advances + repayments and derives outstanding = amount − repaid, same as PayrollRun's advance map; UI rows show `amount − repaid` per advance.
+- **Payroll Generate broke the OT refetch** — `generate()` called `loadAll(period.id)` without the bs_year/bs_month args, so the overtime-entries query ran `.eq('bs_year', undefined)`, errored, and cleared the OT list; clicking Regenerate right after Generate silently dropped all approved overtime from payslips. One-line fix (pass all three args).
+
+**Medium**
+- **OT double-pay flagging** — overtime can be recorded in both the attendance sheet's OT column and the Overtime module, and both are paid. Rather than silently dropping one source, the payroll register now shows an amber **⚠ OT ×2?** badge on any employee with hours in both sources for the period, with a Tip explaining the fix; matching warnings added to the attendance OT column Tip and Help.
+- **Settlement gratuity now nets out the SSF-funded portion** — for SSF-enrolled staff, the employer's monthly contribution already funds gratuity (3.33% of capped basic), so paying full accrual at settlement double-paid it. Now `gratuity = accrued − SSF-covered` (matching GratuityTracker's own model), with the formula shown on the settlement statement.
+- **Missing `if (!clientId)` guards added** on HolidayCalendar save/seed, LeaveManagement submit/approve/decide/addType, Overtime save, FestivalAllowance generate/regenerate — the known NULL-client_id hydration bug class (records saved during an admin client-switch went invisible).
+- **Absence deduction now on gross, not basic** — previously an employee absent the whole month still received 100% of allowances. Unpaid days now forfeit the full day's pay (gross ÷ month days × unpaid days).
+
+**Low**
+- SSF is now contributed on the basic actually earned (prorated by unpaid days, capped) — deductions can no longer exceed pay in heavy-absence months.
+- Daily-wage staff now get paid for `paid_leave` days (that's what makes the leave paid); hourly staff get a standard 8-hour day credited per paid-leave day.
+- Payslip absence row relabelled "Absence / Unpaid Leave" (the old label showed only absent days while the amount also covered unpaid leave and half-days).
+- Tips/Help updated to match the new formulas.
+
+**Flagged, not changed:** gratuity vesting is 12 months in code (consistent across settlement + tracker) while the law reference says 3 years — verify with the accountant before changing. Settlement TDS baseline approximates annual income as basic × 12 (documented approximation).
+
 ### S225 — 2026-07-02 — Dynamic payment QR on bills + Billing modal (NepalPay/FonePay EMVCo)
 
-**DB migration required:**
+**DB migration run ✓:**
 ```sql
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS payment_qr_data text;
 ```

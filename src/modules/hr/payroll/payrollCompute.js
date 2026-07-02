@@ -78,7 +78,8 @@ export function computePayslip(employee, components, attendanceRows, period, tds
   let result
 
   if (basis === 'daily') {
-    const workedDays = t.present + t.half_day * 0.5
+    // Paid-leave days are paid for daily-wage staff too — that's what makes the leave "paid".
+    const workedDays = t.present + t.half_day * 0.5 + t.paid_leave
     const earned     = r(basic * workedDays)
     const otAmount   = r(t.sumOt * (basic / STANDARD_HOURS_PER_DAY) * OT_MULTIPLIER)
     const ssfEmp     = enrolled ? r(Math.min(earned, SSF_CAP) * SSF_EMPLOYEE_PCT) : 0
@@ -90,7 +91,9 @@ export function computePayslip(employee, components, attendanceRows, period, tds
       net_pay: earned + otAmount - ssfEmp - tdsVal - advDed,
     }
   } else if (basis === 'hourly') {
-    const earned   = r(basic * t.sumHours)
+    // Paid-leave days credit a standard working day of hours for hourly staff.
+    const paidHours = t.sumHours + t.paid_leave * STANDARD_HOURS_PER_DAY
+    const earned   = r(basic * paidHours)
     const otAmount = r(t.sumOt * basic * OT_MULTIPLIER)
     const ssfEmp   = enrolled ? r(Math.min(earned, SSF_CAP) * SSF_EMPLOYEE_PCT) : 0
     const ssfEmpr  = enrolled ? r(Math.min(earned, SSF_CAP) * SSF_EMPLOYER_PCT) : 0
@@ -108,10 +111,15 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     const otherDed    = deductions.reduce((s, c) => s + calcAmount(c, basic), 0)
     const gross       = basic + allowances
     const unpaidDays  = t.absent + t.unpaid_leave + t.half_day * 0.5
-    const perDay      = monthDays > 0 ? basic / monthDays : 0
+    // Unpaid days forfeit the whole day's pay — allowances included, not just the basic
+    // portion (otherwise a full-month absence would still pay full allowances).
+    const perDay      = monthDays > 0 ? gross / monthDays : 0
     const absenceDed  = r(perDay * unpaidDays)
     const otAmount    = r(t.sumOt * hr * OT_MULTIPLIER)
-    const ssfBase     = Math.min(basic, SSF_CAP)
+    // SSF is contributed on the basic actually earned this month (basic minus the unpaid-day
+    // share of basic), capped — keeps deductions from exceeding pay in heavy-absence months.
+    const paidFraction = monthDays > 0 ? Math.max(0, 1 - unpaidDays / monthDays) : 1
+    const ssfBase     = Math.min(basic * paidFraction, SSF_CAP)
     const ssfEmp      = enrolled ? r(ssfBase * SSF_EMPLOYEE_PCT) : 0
     const ssfEmpr     = enrolled ? r(ssfBase * SSF_EMPLOYER_PCT) : 0
     result = {

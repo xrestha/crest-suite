@@ -81,15 +81,25 @@ export default function FinalSettlement() {
       .then(({ data }) => setEmployees(data || []))
   }, [clientId])
 
-  // Load outstanding advances when employee changes
+  // Load outstanding advances when employee changes. There is no stored balance column —
+  // outstanding is always derived as amount − SUM(repayments), same as PayrollRun's advance map.
   useEffect(() => {
     if (!clientId || !empId) { setAdvances([]); return }
-    supabase.from('hr_advances')
-      .select('id, amount, balance, description, issue_date')
-      .eq('client_id', clientId)
-      .eq('employee_id', empId)
-      .gt('balance', 0)
-      .then(({ data }) => setAdvances(data || []))
+    Promise.all([
+      supabase.from('hr_advances')
+        .select('id, amount, purpose, issued_date, status')
+        .eq('client_id', clientId).eq('employee_id', empId).eq('status', 'active'),
+      supabase.from('hr_advance_repayments')
+        .select('advance_id, amount')
+        .eq('client_id', clientId).eq('employee_id', empId),
+    ]).then(([{ data: advs }, { data: reps }]) => {
+      const repaid = {}
+      ;(reps || []).forEach(r => { repaid[r.advance_id] = (repaid[r.advance_id] || 0) + (parseFloat(r.amount) || 0) })
+      const enriched = (advs || [])
+        .map(a => ({ ...a, outstanding: Math.max(0, (parseFloat(a.amount) || 0) - (repaid[a.id] || 0)) }))
+        .filter(a => a.outstanding > 0)
+      setAdvances(enriched)
+    })
   }, [clientId, empId])
 
   const emp = employees.find(e => e.id === empId)
@@ -112,7 +122,12 @@ export default function FinalSettlement() {
     const leaveEncashment = (basic / 26) * (parseFloat(leaveDays) || 0)
 
     // ── Gratuity (if vested) ──
-    const gratuity = vested ? (basic / 12) * serviceMonths : 0
+    // Accrual: 1 month basic per year of service (8.33%). For SSF-enrolled staff the employer's
+    // monthly SSF contribution already funds gratuity (3.33% of capped basic goes to the SSF
+    // gratuity fund) — net that out so it isn't paid twice, matching GratuityTracker's model.
+    const gratuityAccrued    = vested ? (basic / 12) * serviceMonths : 0
+    const gratuitySsfCovered = vested && emp.ssf_enrolled ? Math.min(basic, 100000) * 0.0333 * serviceMonths : 0
+    const gratuity           = Math.max(0, gratuityAccrued - gratuitySsfCovered)
 
     // ── Festival pro-ration (if not yet paid this FY) ──
     // Nepal convention: full basic as festival allowance once a year (around Dashain).
@@ -126,7 +141,7 @@ export default function FinalSettlement() {
     const noticeDeduction = noticeServed ? 0 : (basic / 26) * (parseFloat(noticeDays) || 0)
 
     // ── Outstanding advance deductions ──
-    const advanceDeduction = advances.reduce((a, x) => a + (parseFloat(x.balance) || 0), 0)
+    const advanceDeduction = advances.reduce((a, x) => a + (x.outstanding || 0), 0)
 
     // ── TDS on lump-sum components ──
     // Taxable lump: gratuity + leave encashment (festival pro-ration is also income)
@@ -152,7 +167,7 @@ export default function FinalSettlement() {
     return {
       basic, serviceMonths, vested,
       totalDaysInLastMonth, daysWorked, partialSalary,
-      leaveEncashment, gratuity, festivalPro,
+      leaveEncashment, gratuity, gratuityAccrued, gratuitySsfCovered, festivalPro,
       noticeDeduction, advanceDeduction, lumpTds,
       grossPayout, totalDeductions, netPayout,
       annualTaxable, lumpSum, fyStart,
@@ -310,13 +325,19 @@ export default function FinalSettlement() {
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.leaveEncashment)}</td>
                   </tr>
                 )}
-                {result.vested && (
+                {result.vested && result.gratuity > 0 && (
                   <tr>
                     <td>
-                      <Tip text="Gratuity under Nepal Labour Act: 1 month basic per year of service. Formula: basic ÷ 12 × total months of service." width={280}>Gratuity ({fmtService(result.serviceMonths)})</Tip>
+                      <Tip text={result.gratuitySsfCovered > 0
+                        ? 'Gratuity accrual (1 month basic per year of service) minus the portion already funded through the employer’s monthly SSF contribution (3.33% of capped basic goes to the SSF gratuity fund) — so it isn’t paid twice.'
+                        : 'Gratuity under Nepal Labour Act: 1 month basic per year of service. Formula: basic ÷ 12 × total months of service.'} width={300}>
+                        Gratuity ({fmtService(result.serviceMonths)}){result.gratuitySsfCovered > 0 ? ' — net of SSF-funded' : ''}
+                      </Tip>
                     </td>
                     <td style={{ textAlign: 'right', color: '#6b7280', fontSize: 12 }}>
-                      {fmt(result.basic)} ÷ 12 × {result.serviceMonths}
+                      {result.gratuitySsfCovered > 0
+                        ? `${fmt(result.gratuityAccrued)} − ${fmt(result.gratuitySsfCovered)} (SSF)`
+                        : `${fmt(result.basic)} ÷ 12 × ${result.serviceMonths}`}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.gratuity)}</td>
                   </tr>
@@ -384,12 +405,12 @@ export default function FinalSettlement() {
                   {advances.map(adv => (
                     <tr key={adv.id}>
                       <td>
-                        <Tip text={`Advance issued on ${adv.issue_date || '—'}. Outstanding balance recovered from final pay.`} width={260}>
-                          Advance Recovery — {adv.description || 'Advance'}
+                        <Tip text={`Advance issued on ${adv.issued_date || '—'}. Outstanding balance (amount minus repayments recorded in Advances & Loans) recovered from final pay.`} width={270}>
+                          Advance Recovery — {adv.purpose || 'Advance'}
                         </Tip>
                       </td>
-                      <td style={{ textAlign: 'right', color: '#6b7280', fontSize: 12 }}>Outstanding balance</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: '#f87171' }}>{fmt(adv.balance)}</td>
+                      <td style={{ textAlign: 'right', color: '#6b7280', fontSize: 12 }}>{fmt(adv.amount)} − repaid</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: '#f87171' }}>{fmt(adv.outstanding)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -422,6 +443,7 @@ export default function FinalSettlement() {
             {' '}Leave encashment at basic ÷ 26 per day (Nepal Labour Act).
             {' '}TDS on lump sum is estimated at the marginal rate — final tax liability depends on total annual income for the year.
             {!result.vested && ' Gratuity is not included as service is under 1 year.'}
+            {result.gratuitySsfCovered > 0 && ' Gratuity is shown net of the portion already funded through employer SSF contributions.'}
             {' '}Consult your CA before disbursing.
           </div>
         </div>

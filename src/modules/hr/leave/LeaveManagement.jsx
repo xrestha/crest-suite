@@ -74,6 +74,7 @@ export default function LeaveManagement() {
   // ── New request ───────────────────────────────────────────────────────────
   const previewDays = workingDaysInRange(fStart, fEnd)
   async function submitRequest() {
+    if (!clientId) { setMsg('error:No client selected'); return }
     if (!fEmp || !fType || !fStart || !fEnd) { setMsg('error:Fill employee, type and dates'); return }
     if (previewDays.length === 0) { setMsg('error:No working days in that range (end before start, or all Saturdays)'); return }
     setBusy(true); setMsg('')
@@ -110,6 +111,7 @@ export default function LeaveManagement() {
   }
 
   async function approveRequest(req) {
+    if (!clientId) { setMsg('error:No client selected'); return }
     const type = typeMap[req.leave_type_id]
     if (!type) { setMsg('error:Leave type missing'); return }
     setBusy(true); setMsg('')
@@ -123,6 +125,7 @@ export default function LeaveManagement() {
   }
 
   async function decideRequest(req, newStatus) {
+    if (!clientId) { setMsg('error:No client selected'); return }
     const verb = newStatus === 'rejected' ? 'Reject' : 'Cancel'
     if (!window.confirm(`${verb} this leave request?`)) return
     setBusy(true); setMsg('')
@@ -162,6 +165,7 @@ export default function LeaveManagement() {
     await supabase.from('hr_leave_types').update(patch).eq('id', id)
   }
   async function addType() {
+    if (!clientId) { setMsg('error:No client selected'); return }
     setBusy(true)
     const { error } = await supabase.from('hr_leave_types').insert({
       client_id: clientId, name: 'New Leave Type', code: `custom_${Date.now().toString(36)}`,

@@ -126,6 +126,7 @@ export default function Overtime() {
   function closeDrawer() { setDrawer(false); setForm(f => ({ ...f, open: false, editing: null })) }
 
   async function save() {
+    if (!clientId) { setMsg('error:No client selected'); return }
     if (!form.employee_id) { setMsg('error:Select an employee'); return }
     const hrs = parseFloat(form.ot_hours)
     if (!hrs || hrs <= 0) { setMsg('error:Enter valid OT hours'); return }
