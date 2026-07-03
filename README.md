@@ -132,6 +132,22 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S230 — 2026-07-03 — Payment QR: accept NepalPay tag-00-less payloads + rail-coverage findings
+
+No DB migration. One-file fix from live testing of the dynamic bill QR (S225 feature) with a real merchant payload (C.M.S. Hospitality, NCHL).
+
+**`src/utils/emvQr.js` — `validateEmvQr` no longer rejects payloads missing tag 00**
+- Real-world NepalPay/NCHL merchant QRs ship **without** the EMVCo-mandatory payload format indicator (tag 00) — the CRC is computed over the tag-00-less body and banking apps accept them. Settings rejected the pasted payload with "Missing payload format indicator (tag 00)" even though the CRC check (which runs first) proved the string was byte-for-byte what the bank issued.
+- Fix: dropped the hard tag-00 rejection. All checks that catch real paste errors remain: TLV structure parse, missing checksum (tag 63), CRC mismatch, missing merchant name (tag 59).
+- Verified with a Node test harness: tag-00-less payload validates + `buildDynamicQr` on it produces a correct dynamic QR (tag 01 → '12', amount tag 54 inserted in order, CRC recomputed); standard tag-00 payloads still validate.
+
+**Live scan results (real bill, real apps):**
+- **Bank app (NepalPay member): ✓** — dynamic QR scans, amount pre-filled and locked
+- **eSewa: ✗** — "Sorry, this QR is not supported. Please scan Fonepay Business QR." Not a bug: Nepal has two QR rails (NepalPay/NCHL vs FonePay/F1Soft) and eSewa only accepts the FonePay rail — it would reject the bank's own printed standee QR identically.
+- **Deferred decision** (user: "later"): Plan A — swap the stored payload to the merchant's FonePay Business QR (covers eSewa + most bank apps, no code); Plan B — second QR field in Settings, print per payment method. Test Plan A first.
+
+- **Files:** `src/utils/emvQr.js`
+
 ### S229 — 2026-07-03 — Admin per-module data clearing + full-wipe coverage for HR/POS
 
 **⚠ Redeploy edge function** — paste updated `supabase/functions/admin-user-ops/index.ts` into Supabase Dashboard → Edge Functions → admin-user-ops → editor. **Redeployed ✓ + verified live 2026-07-03** (Clear POS Transactions on Casa Acai: orders/shifts/customers/ledger wiped, tables + staff kept).

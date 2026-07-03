@@ -53,7 +53,10 @@ export function validateEmvQr(str) {
   if (crc16(body) !== crcTag.value.toUpperCase()) {
     return { ok: false, error: 'Checksum mismatch — the payload was altered or copied incompletely.' }
   }
-  if (!tags.find(t => t.id === '00')) return { ok: false, error: 'Missing payload format indicator (tag 00).' }
+  // Tag 00 (payload format indicator) is mandatory per the EMVCo spec, but real-world NepalPay
+  // merchant QRs have been seen without it — CRC computed over the tag-00-less body and accepted
+  // by banking apps. Since the CRC already proved the payload is exactly what the bank issued,
+  // don't reject it for the bank's own spec deviation.
   const merchantName = tags.find(t => t.id === '59')?.value || ''
   if (!merchantName) return { ok: false, error: 'No merchant name (tag 59) found in this QR.' }
   return { ok: true, merchantName }
