@@ -520,14 +520,14 @@ export default function PosOrders() {
 <html><head><title>${station}</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Courier New',monospace; font-size:13px; width:80mm; padding:8px 10px; }
+  body { font-family:'Courier New',monospace; font-size:13px; width:80mm; padding:8px 10px; color:#000; }
   .c   { text-align:center; }
   .b   { font-weight:bold; }
   .lg  { font-size:17px; letter-spacing:1px; }
   hr   { border:none; border-top:1px dashed #000; margin:7px 0; }
   .row { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; }
   .qty { font-weight:bold; font-size:15px; min-width:34px; text-align:right; }
-  .note { font-size:11px; font-style:italic; color:#333; padding:0 0 3px 10px; }
+  .note { font-size:11px; font-style:italic; color:#000; padding:0 0 3px 10px; }
 </style>
 </head><body>
   ${outletName ? `<div class="c b" style="font-size:14px">${outletName}</div>` : ''}
@@ -535,7 +535,7 @@ export default function PosOrders() {
   <hr>
   <div class="row"><span class="b" style="font-size:15px">${tableName}</span><span class="b" style="font-size:15px">${ticketNo ? `#${ticketNo}` : ''}</span></div>
   <div class="row"><span>${takenBy ? `Taken by: ${takenBy}` : ''}</span><span>Covers: ${covers}</span></div>
-  <div class="row" style="font-size:11px;color:#555"><span>${date}</span><span>${now}</span></div>
+  <div class="row" style="font-size:11px;color:#000"><span>${date}</span><span>${now}</span></div>
   <hr>
   ${items.map(i => {
       const delta = (i.sent_qty || 0) > 0 ? i.qty - i.sent_qty : 0
@@ -721,7 +721,7 @@ export default function PosOrders() {
 <html><head><title>Bill</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Courier New',monospace; font-size:11px; width:80mm; padding:8px 10px; margin:0 auto; }
+  body { font-family:'Courier New',monospace; font-size:11px; width:80mm; padding:8px 10px; margin:0 auto; color:#000; }
   .c   { text-align:center; }
   .b   { font-weight:bold; }
   .lg  { font-size:15px; letter-spacing:1px; }
@@ -754,8 +754,8 @@ export default function PosOrders() {
   <div class="row"><span>PAN No: ${order.buyer_pan || ''}</span><span>Phone: ${order.buyer_phone || ''}</span></div>
   <div class="row"><span>Payment Mode:</span><span>${payLabel}</span></div>
   <div class="row"><span>Remarks:</span><span>${order.bill_remarks || ''}</span></div>
-  <div class="row" style="font-size:11px;color:#555"><span>${tableName === 'Takeaway' ? 'Takeaway' : `Dine-In: ${tableName}`}</span><span>${nowStr}</span></div>
-  <div style="font-size:11px;color:#555">Cashier: ${profile?.full_name || ''}</div>
+  <div class="row" style="font-size:11px;color:#000"><span>${tableName === 'Takeaway' ? 'Takeaway' : `Dine-In: ${tableName}`}</span><span>Covers: ${order.covers ?? ''}</span></div>
+  <div class="row" style="font-size:11px;color:#000"><span>Cashier: ${profile?.full_name || ''}</span><span>${nowStr}</span></div>
   <hr>
   <table>
     <thead><tr><th>Sn</th><th>HSC</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
@@ -820,7 +820,7 @@ export default function PosOrders() {
 <html><head><title>Complimentary Slip</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Courier New',monospace; font-size:11px; width:80mm; padding:8px 10px; margin:0 auto; }
+  body { font-family:'Courier New',monospace; font-size:11px; width:80mm; padding:8px 10px; margin:0 auto; color:#000; }
   .c   { text-align:center; }
   .b   { font-weight:bold; }
   .lg  { font-size:14px; letter-spacing:1px; }
@@ -857,7 +857,16 @@ export default function PosOrders() {
   <div class="row"><span>Total Qty:</span><span>${totalQty}</span></div>
   <div class="row tot"><span>Total Food Cost:</span><span>NPR ${totalCost.toFixed(2)}</span></div>
   <hr>
-  <div class="row" style="font-size:11px;color:#555"><span>Table: ${tableName}</span><span>${nowStr}</span></div>
+  <div class="row" style="font-size:11px;color:#000"><span>Table: ${tableName}</span><span>${nowStr}</span></div>
+  <div style="margin-top:16px">
+    <div class="row">
+      <span style="border-bottom:1px solid #000; width:60%; display:inline-block">&nbsp;</span>
+      <span style="border-bottom:1px solid #000; width:32%; display:inline-block">&nbsp;</span>
+    </div>
+    <div class="row" style="font-size:10px; margin-top:2px">
+      <span>Customer Signature</span><span>Date</span>
+    </div>
+  </div>
 </body></html>`
   }
 
@@ -1233,62 +1242,78 @@ export default function PosOrders() {
               <span style={{ color: 'var(--theme-accent)' }}>{fmtNpr(total)}</span>
             </div>
 
-            <button
-              className="btn btn-primary"
-              style={{ width: '100%', padding: '12px 0', fontSize: 16, marginBottom: 8, justifyContent: 'center' }}
-              onClick={saveOrder}
-              disabled={saving || orderItems.length === 0}
-            >
-              {saving ? 'Sending…' : orderId ? 'Update Order' : 'Send Order'}
-            </button>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <button
+                className="btn btn-primary"
+                style={{ width: '48%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex' }}
+                onClick={saveOrder}
+                disabled={saving || orderItems.length === 0}
+              >
+                {saving ? 'Sending…' : orderId ? 'Update Order' : 'Send Order'}
+              </button>
+
+              {hasPosAccess('supervisor') && (
+                <div style={{ width: '48%' }}>
+                  <Tip text="Close this table — collect payment, or void/write-off if unpaid. Order must be saved first. Supervisor role or above."
+                    style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
+                    <button
+                      className="btn"
+                      style={{
+                        width: '100%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex',
+                        background: 'var(--theme-green)', color: '#fff', fontWeight: 700, border: 'none',
+                      }}
+                      onClick={openBilling}
+                      disabled={saving || !orderId}>
+                      Payment
+                    </button>
+                  </Tip>
+                </div>
+              )}
+            </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              <Tip text="Kitchen Order Ticket — sends unsent food items to the kitchen printer. Badge shows how many items are waiting.">
-                <button
-                  className="btn btn-ghost"
-                  style={{ flex: 1, padding: '8px 0', fontSize: 13, justifyContent: 'center', position: 'relative' }}
-                  onClick={() => sendTicket('KOT')}
-                  disabled={saving || kotCount === 0}
-                >
-                  KOT
-                  {kotCount > 0 && (
-                    <span style={{
-                      position: 'absolute', top: -6, right: -4,
-                      background: 'var(--theme-red)', color: '#fff',
-                      borderRadius: 10, fontSize: 10, fontWeight: 700,
-                      padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
-                    }}>{kotCount}</span>
-                  )}
-                </button>
-              </Tip>
-              <Tip text="Bar Order Ticket — sends unsent bar/beverage items to the bar printer. Badge shows how many items are waiting.">
-                <button
-                  className="btn btn-ghost"
-                  style={{ flex: 1, padding: '8px 0', fontSize: 13, justifyContent: 'center', position: 'relative' }}
-                  onClick={() => sendTicket('BOT')}
-                  disabled={saving || botCount === 0}
-                >
-                  BOT
-                  {botCount > 0 && (
-                    <span style={{
-                      position: 'absolute', top: -6, right: -4,
-                      background: 'var(--theme-red)', color: '#fff',
-                      borderRadius: 10, fontSize: 10, fontWeight: 700,
-                      padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
-                    }}>{botCount}</span>
-                  )}
-                </button>
-              </Tip>
-              {hasPosAccess('supervisor') && (
-                <Tip text="Close this table — collect payment, or void/write-off if unpaid. Order must be saved first. Supervisor role or above.">
-                  <button className="btn btn-ghost"
-                    style={{ flex: 1, padding: '8px 0', fontSize: 13, justifyContent: 'center' }}
-                    onClick={openBilling}
-                    disabled={saving || !orderId}>
-                    Charge →
+              <div style={{ width: '48%' }}>
+                <Tip text="Kitchen Order Ticket — sends unsent food items to the kitchen printer. Bold + badge show how many items are waiting."
+                  style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
+                  <button
+                    className={`ticket-btn${kotCount > 0 ? ' ticket-btn--pending' : ''}`}
+                    style={{ width: '100%', padding: '12px 0', fontSize: 16 }}
+                    onClick={() => sendTicket('KOT')}
+                    disabled={saving || kotCount === 0}
+                  >
+                    KOT
+                    {kotCount > 0 && (
+                      <span style={{
+                        position: 'absolute', top: -6, right: -4,
+                        background: 'var(--theme-red)', color: '#fff',
+                        borderRadius: 10, fontSize: 10, fontWeight: 700,
+                        padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
+                      }}>{kotCount}</span>
+                    )}
                   </button>
                 </Tip>
-              )}
+              </div>
+              <div style={{ width: '48%' }}>
+                <Tip text="Bar Order Ticket — sends unsent bar/beverage items to the bar printer. Bold + badge show how many items are waiting."
+                  style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
+                  <button
+                    className={`ticket-btn${botCount > 0 ? ' ticket-btn--pending' : ''}`}
+                    style={{ width: '100%', padding: '12px 0', fontSize: 16 }}
+                    onClick={() => sendTicket('BOT')}
+                    disabled={saving || botCount === 0}
+                  >
+                    BOT
+                    {botCount > 0 && (
+                      <span style={{
+                        position: 'absolute', top: -6, right: -4,
+                        background: 'var(--theme-red)', color: '#fff',
+                        borderRadius: 10, fontSize: 10, fontWeight: 700,
+                        padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
+                      }}>{botCount}</span>
+                    )}
+                  </button>
+                </Tip>
+              </div>
             </div>
           </div>
         </div>
@@ -1378,23 +1403,17 @@ export default function PosOrders() {
               <>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
                   {PAYMENT_METHODS.map(m => (
-                    <button key={m} onClick={() => setPayMethod(m)} style={{
-                      padding: '8px 16px', borderRadius: 7, fontSize: 13, cursor: 'pointer',
-                      fontWeight: payMethod === m ? 700 : 400,
-                      background: payMethod === m ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
-                      color: payMethod === m ? '#000' : 'var(--theme-text2)',
-                      border: `1px solid ${payMethod === m ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-                    }}>{m}</button>
+                    <button key={m} onClick={() => setPayMethod(m)}
+                      className={`pay-method-btn${payMethod === m ? ' pay-method-btn--selected' : ''}`}>
+                      {m}
+                    </button>
                   ))}
                   {hasPosAccess('manager') && (
                     <Tip text="Bill closes normally (counts as a sale, consumes an invoice number) but no payment is collected now — the customer owes this amount. Manager+ only. Collect it later from Customers → Outstanding Credit.">
-                      <button onClick={() => setPayMethod('Credit')} style={{
-                        padding: '8px 16px', borderRadius: 7, fontSize: 13, cursor: 'pointer',
-                        fontWeight: payMethod === 'Credit' ? 700 : 400,
-                        background: payMethod === 'Credit' ? 'var(--theme-red)' : 'var(--theme-input-bg)',
-                        color: payMethod === 'Credit' ? '#fff' : 'var(--theme-red)',
-                        border: '1px solid var(--theme-red)',
-                      }}>Credit</button>
+                      <button onClick={() => setPayMethod('Credit')}
+                        className={`pay-method-btn pay-method-btn--credit${payMethod === 'Credit' ? ' pay-method-btn--selected' : ''}`}>
+                        Credit
+                      </button>
                     </Tip>
                   )}
                 </div>

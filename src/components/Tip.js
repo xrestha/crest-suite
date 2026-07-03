@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
-export default function Tip({ text, children, width = 220 }) {
+export default function Tip({ text, children, width = 220, style }) {
   const [pos, setPos] = useState(null)
   const ref = useRef(null)
 
@@ -17,7 +17,7 @@ export default function Tip({ text, children, width = 220 }) {
   return (
     <span
       ref={ref}
-      style={{ position: 'relative', cursor: 'help', borderBottom: '1px dashed #4b5563', display: 'inline' }}
+      style={{ position: 'relative', cursor: 'help', borderBottom: '1px dashed #4b5563', display: 'inline', ...style }}
       onMouseEnter={handleEnter}
       onMouseLeave={() => setPos(null)}
     >

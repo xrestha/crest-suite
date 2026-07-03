@@ -132,6 +132,36 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S227 — 2026-07-03 — POS Order screen: button redesign, print-doc fixes, Tip positioning bug
+
+No DB migration. UI/print polish pass on `/pos/orders`, driven by iterative screenshot feedback.
+
+**Payment method buttons (Billing modal)**
+- Cash/Card/eSewa/Khalti/FonePay/Credit no longer show a persistent accent fill for the selected method (previously Cash was always gold, Credit always had a red border, even when idle) — new `.pay-method-btn` class family in `Layout.css`: neutral at rest, accent/red color only on `:hover`/`:active`, selected method shown via bold text + subtle border instead
+
+**KOT/BOT/Charge redesign**
+- New `.ticket-btn` class (`Layout.css`) replaces ad-hoc `btn btn-ghost` overrides — same hover/active-only color philosophy as payment buttons, plus `:focus` outline suppressed (kept for `:focus-visible`/keyboard) so the button no longer shows a lingering gold border after a mouse click
+- "Charge →" renamed to **Payment**, recolored green (`var(--theme-green)`), moved into its own row alongside **Send Order** (each 48% width, matching size/placement)
+- KOT and BOT resized to match (48/48 split in their own row below); bold text + badge (no color fill) when a station has unsent items (`ticket-btn--pending`)
+- Send Order width tuned down from 100% → 80% → 40% → 48% across the session, left-aligned (no longer centered)
+
+**Tip.js positioning bug (found + fixed)**
+- Root cause: `Tip`'s wrapper `<span>` was hardcoded `display:inline`, which sizes to a thin text-line "strut" instead of its actual content height — invisible for small text labels, but once KOT/BOT/Payment became full-height buttons the tooltip's `getBoundingClientRect()` anchor was ~13px too low, so the tooltip rendered overlapping the button instead of floating above it
+- Verified with an isolated headless-browser (Playwright) reproduction of the exact DOM/CSS before touching the real component — no login or live data needed, since the app's Supabase project has no seeded test credentials available in this environment
+- Fix: `Tip.js` now accepts an optional `style` prop merged onto the wrapper span (opt-in — every other existing `<Tip>` call site across the app is unaffected). Applied `style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}` to KOT, BOT, and Payment's `Tip` wrappers
+
+**Print documents — black fonts**
+- Tax Invoice/PAN Bill, KOT/BOT kitchen/bar tickets, and the Complimentary Slip all had gray accent text (`#555`/`#333`) on timestamp/cashier/table lines — changed to pure black (`#000`) for consistent thermal-print legibility; shift X/Z reports were left untouched (out of scope)
+
+**Tax Invoice — Covers on the bill**
+- The table/timestamp row and Cashier row were combined: row 1 now shows `Dine-In: Table N` + `Covers: #N` (was table + timestamp); row 2 shows `Cashier: {name}` + the timestamp (was cashier alone, no row partner). Uses `order.covers`, already present on the `pos_orders` row for both the live-close and reprint paths
+
+**Complimentary Slip — signature line**
+- Added a blank signature + date line at the bottom (`buildCompSlipHtml`) — 60%-width underline for the signature, 32%-width underline for the date, labeled underneath. Feeds both the live in-modal preview and the actual print
+- Verified the "no outlet name shown" claim in the Mark Complimentary confirmation copy against the actual slip HTML — found `outletName` was still being printed (leftover from copy-pasting the Tax Invoice template, contradicts the documented Complimentary Slip design of no outlet name/PAN/invoice number). **Left as-is per user decision** — not fixed this session.
+
+- **Files:** `src/modules/pos/orders/PosOrders.jsx`, `src/components/Layout.css`, `src/components/Tip.js`
+
 ### S226 — 2026-07-02 — HR module bug audit + fixes (11 findings, all addressed)
 
 No DB migration. Full code audit of `src/modules/hr/` (payroll/TDS engines, payroll runner, attendance, advances, settlement, gratuity, every insert path). TDS slabs, SSF cap/waiver math, YTD projection, and advance auto-repayment idempotency all verified correct against the Nepal payroll-law reference. Fixes:
