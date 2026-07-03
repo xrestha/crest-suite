@@ -132,6 +132,32 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S229 — 2026-07-03 — Admin per-module data clearing + full-wipe coverage for HR/POS
+
+**⚠ Redeploy edge function** — paste updated `supabase/functions/admin-user-ops/index.ts` into Supabase Dashboard → Edge Functions → admin-user-ops → editor. **Redeployed ✓ + verified live 2026-07-03** (Clear POS Transactions on Casa Acai: orders/shifts/customers/ledger wiped, tables + staff kept).
+
+**SQL run (grants — discovered during live verification):** tables created via raw SQL in this project get **no table-level privileges for any API role**, so the edge function (service_role) hit `42501 permission denied` on `stock_movements`, then `pos_orders`. Fixed with a blanket grant, run ✓:
+```sql
+grant select, insert, update, delete on public.stock_movements to authenticated; -- also lets Reorder Report's admin "Clear Book Stock" delete
+grant all on all tables in schema public to service_role;
+alter default privileges in schema public grant all on tables to service_role;   -- future tables covered
+notify pgrst, 'reload schema';
+```
+`authenticated` still needs an explicit per-table GRANT after every future `CREATE TABLE` (see S228's stock_movements grant); `service_role` is now covered permanently. Note: partial failed runs are safe — `clearModuleData` deletes child tables first and is idempotent, so re-clicking after a grant fix completes the job.
+
+Admin → Clients → ⚠ Danger previously had one "Clear Client Data" action that was **IMS-only** — it never touched any of the 14 `hr_*` tables or 5 `pos_*` tables, and even for IMS it missed `staff_meals`, `payable_payments`, `stock_movements`, and `recipe_suggestions`. For a client running multiple modules there was no way to reset just one of them.
+
+**New edge-function action `clearModuleData` (`{ clientId, module: 'ims'|'hr'|'pos' }`)** — clears one module's *transactions* while keeping its setup/master data:
+- **IMS**: deletes purchases (+ `payable_payments` first), vendor returns, opening/closing stock, wastages, staff meals, sales entries, budgets, stock movements, POs + items, requisitions + lines, overheads. **Keeps** items, vendors, categories, recipes, par levels, and `monthly_periods` — periods are deliberately kept because **HR shares the same `monthly_periods` table** (`hr_attendance.period_id`, `hr_payroll_runs.period_id`); deleting them on an IMS clear would orphan HR data.
+- **HR**: deletes payslips (by run ids first), payroll runs, attendance, leave requests, overtime, festival allowances, advance repayments, advances, roster. **Keeps** employees, salary components, leave types, holiday calendar, shift types.
+- **POS**: deletes order items (by order ids first), the `stock_movements` ledger, POS-sourced `sales_entries` (`source = 'pos'` only — manual sales survive), orders, shifts, customers. **Keeps** tables/floor plan and staff accounts/PINs; any table left "occupied" by a deleted order is reset to available. Invoice numbering restarts (sequence derives from existing rows).
+
+**`deleteClientData` (full wipe behind "Clear Client Data" / "Delete Client") extended** to cover everything it missed: `payable_payments` (before `purchase_entries` — FK), `staff_meals`, `stock_movements`, `recipe_suggestions` (both directions), all 5 `pos_*` tables, all 14 `hr_*` tables (payslips→runs and repayments→advances ordered for FKs, HR tables before `monthly_periods`). Previously **"Delete Client" could FK-fail or leave orphans for any client with HR/POS data**.
+
+**AdminClients.js Danger tab** — new "Clear one module — transactions only, setup kept" row with three buttons (Clear IMS/HR/POS Transactions), each with a Tip and a confirm dialog listing exactly what's deleted vs kept; existing buttons regrouped under "Full client reset"; banner + confirm texts updated to describe all-module coverage.
+
+- **Files:** `supabase/functions/admin-user-ops/index.ts`, `src/pages/AdminClients.js`
+
 ### S228 — 2026-07-03 — IMS stock deduction trigger: `stock_movements` ledger + Reorder Report Book Stock
 
 **SQL run:**

@@ -422,10 +422,35 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
     setDeleteMsg(error ? 'error:' + error.message : `ok:Conversions cleared on ${count} item${count !== 1 ? 's' : ''}.`)
   }
 
+  async function handleClearModule(module) {
+    const labels = {
+      ims: 'IMS transactions (purchases, stock counts, wastage, staff meals, sales, budgets, payables, POs, requisitions, overheads, stock movements)\n\nKEPT: items, vendors, categories, recipes, par levels, and periods',
+      hr:  'HR transactions (attendance, payroll runs, payslips, leave requests, overtime, advances + repayments, festival allowances, roster)\n\nKEPT: employees, salary components, leave types, holiday calendar, shift types',
+      pos: 'POS transactions (orders, order items, shifts, customers, POS-sourced sales entries, stock movements)\n\nKEPT: tables, floor plan, staff accounts + PINs. Occupied tables are freed.',
+    }
+    if (!window.confirm(
+      `Clear ${module.toUpperCase()} transactions for "${client.name}"?\n\n` +
+      `This deletes: ${labels[module]}\n\n` +
+      `This cannot be undone.`
+    )) return
+    setDeleting(true)
+    setDeleteMsg('')
+    try {
+      await adminOp('clearModuleData', { clientId: client.id, module })
+      setDeleteMsg(`ok:${module.toUpperCase()} transactions cleared. Setup data was kept.`)
+    } catch (err) {
+      setDeleteMsg('error:' + err.message)
+    }
+    setDeleting(false)
+  }
+
   async function handleDeleteClientData() {
     if (!window.confirm(
       `Clear ALL operational data for "${client.name}"?\n\n` +
-      `This removes: categories, items, vendors, recipes, purchases, stock, sales, overheads, and all periods.\n\n` +
+      `This removes everything across all modules:\n` +
+      `IMS — categories, items, vendors, recipes, purchases, stock, sales, overheads, payables, and all periods\n` +
+      `HR — employees, salary setup, attendance, payroll, leave, advances, roster, holidays\n` +
+      `POS — tables, orders, shifts, customers, stock movements\n\n` +
       `The client record, user accounts, feature flags, and settings are kept intact.\n\n` +
       `This cannot be undone.`
     )) return
@@ -973,11 +998,12 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
               }}>
                 <p style={{ fontSize: 13, color: 'var(--theme-red)', fontWeight: 700, margin: '0 0 6px' }}>⚠ Danger Zone</p>
                 <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.65 }}>
-                  This permanently deletes all operational data for{' '}
-                  <strong style={{ color: 'var(--theme-text1)' }}>{client.name}</strong>:{' '}
-                  categories, items, vendors, recipes, purchases, stock, sales, overheads, and all periods.
-                  The client record, user accounts, feature flags, and settings are kept intact.
-                  <br /><strong style={{ color: 'var(--theme-red)' }}>This cannot be undone.</strong>
+                  Destructive actions for{' '}
+                  <strong style={{ color: 'var(--theme-text1)' }}>{client.name}</strong>.{' '}
+                  Per-module buttons clear only that module's transactions and keep its setup (items, employees, tables…).
+                  "Clear Client Data" wipes all operational data across IMS, HR and POS; the client record, user accounts,
+                  feature flags, and settings are kept intact.
+                  <br /><strong style={{ color: 'var(--theme-red)' }}>None of these can be undone.</strong>
                 </p>
               </div>
 
@@ -987,6 +1013,48 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                 </p>
               )}
 
+              <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
+                Clear one module — transactions only, setup kept
+              </p>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
+                <Tip text="Deletes IMS activity: purchases, stock counts, wastage, staff meals, sales, budgets, payables, POs, requisitions, overheads, stock movements. Keeps items, vendors, categories, recipes, par levels, and periods (periods are shared with HR payroll). Cannot be undone.">
+                  <button onClick={() => handleClearModule('ims')} disabled={deleting}
+                    style={{
+                      background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.15)',
+                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
+                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
+                      opacity: deleting ? 0.6 : 1
+                    }}>
+                    {deleting ? 'Working…' : 'Clear IMS Transactions'}
+                  </button>
+                </Tip>
+                <Tip text="Deletes HR activity: attendance, payroll runs, payslips, leave requests, overtime, advances + repayments, festival allowances, roster. Keeps employees, salary components, leave types, holiday calendar, and shift types. Cannot be undone.">
+                  <button onClick={() => handleClearModule('hr')} disabled={deleting}
+                    style={{
+                      background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.15)',
+                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
+                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
+                      opacity: deleting ? 0.6 : 1
+                    }}>
+                    {deleting ? 'Working…' : 'Clear HR Transactions'}
+                  </button>
+                </Tip>
+                <Tip text="Deletes POS activity: orders, order items, shifts, customers, POS-sourced sales entries, and the stock-movements ledger. Keeps tables, floor plan, and staff accounts/PINs; occupied tables are freed. Invoice numbering restarts. Cannot be undone.">
+                  <button onClick={() => handleClearModule('pos')} disabled={deleting}
+                    style={{
+                      background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.15)',
+                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
+                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
+                      opacity: deleting ? 0.6 : 1
+                    }}>
+                    {deleting ? 'Working…' : 'Clear POS Transactions'}
+                  </button>
+                </Tip>
+              </div>
+
+              <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
+                Full client reset
+              </p>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <Tip text="Removes purchase unit conversions from all items (e.g. carton → pcs). Items and stock data are kept. Use this to reset unit setup without losing any transactions.">
                   <button
@@ -1002,7 +1070,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                     {deleting ? 'Working…' : 'Clear All Conversions'}
                   </button>
                 </Tip>
-                <Tip text="Permanently deletes all operational data: categories, items, vendors, recipes, purchases, stock, sales, overheads, and periods. The client account, users, and settings are kept. Cannot be undone.">
+                <Tip text="Permanently deletes ALL operational data across IMS, HR, and POS — master data and transactions. The client account, users, feature flags, and settings are kept. Cannot be undone.">
                   <button
                     onClick={handleDeleteClientData}
                     disabled={deleting}

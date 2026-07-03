@@ -8,7 +8,7 @@ import { explodeRecipeIngredients } from '../utils/recipeCost'
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 export default function ReorderReport() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, isAdmin, loading: authLoading } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
 
   const [periods, setPeriods] = useState([])
@@ -199,6 +199,13 @@ export default function ReorderReport() {
     setRows(r => r.map(row => ({ ...row, par: 0, shortfall: 0, needsReorder: false, shortfallValue: 0 })))
   }
 
+  async function clearBookStock() {
+    if (!selectedPeriod) return
+    if (!window.confirm(`Delete all stock_movements ledger rows for ${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}? Book Stock resets to "—" for every item in this period. Physical counts and Current Stock are unaffected. Cannot be undone.`)) return
+    await supabase.from('stock_movements').delete().eq('client_id', effectiveClientId).eq('period_id', selectedPeriod.id)
+    setRows(r => r.map(row => ({ ...row, bookStock: null, hasMovements: false })))
+  }
+
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   return (
     <div>
@@ -263,6 +270,17 @@ export default function ReorderReport() {
         >
           ✕ Clear All Par
         </button>
+        {isAdmin && (
+          <Tip text="Deletes every stock_movements ledger row for the selected period — resets the Book Stock column back to '—'. Does not touch physical stock counts or Current Stock. Admin only.">
+            <button
+              className="btn btn-ghost"
+              onClick={clearBookStock}
+              style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
+            >
+              ✕ Clear Book Stock
+            </button>
+          </Tip>
+        )}
       </div>
 
       <div className="card">

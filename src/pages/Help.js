@@ -80,7 +80,7 @@ const IMS_TIERS = [
       },
       {
         icon: '⚑', name: 'Reorder Report',
-        guide: 'Flags items running below their par level. Theoretical stock = Opening + Net Purchases − Wastage − Usage. Set par levels inline on the report. "✕ Clear All Par" resets all par levels at once. Book Stock is a separate, live column fed by Crest POS — every time a POS order is charged or marked Complimentary, the recipe is exploded into its raw ingredients (recursing through sub-recipes) and a depletion entry is recorded automatically. Book Stock shows "—" for items with no POS sales this period; it does not replace Current Stock, which still reflects manual Sales Entry too.',
+        guide: 'Flags items running below their par level. Theoretical stock = Opening + Net Purchases − Wastage − Usage. Set par levels inline on the report. "✕ Clear All Par" resets all par levels at once. Book Stock is a separate, live column fed by Crest POS — every time a POS order is charged or marked Complimentary, the recipe is exploded into its raw ingredients (recursing through sub-recipes) and a depletion entry is recorded automatically. Book Stock shows "—" for items with no POS sales this period; it does not replace Current Stock, which still reflects manual Sales Entry too. Admins see a "✕ Clear Book Stock" button to wipe the ledger for the selected period back to "—" (e.g. to clear out bad test data) without touching physical counts or Current Stock.',
         tips: ['Set par levels based on supplier lead time × daily usage rate', 'Review the reorder report weekly, not just at month end', 'Book Stock only reflects POS-recorded sales/comps — if you also log sales manually, Current Stock is the more complete number']
       },
       {
