@@ -64,20 +64,29 @@ export async function explodeRecipeIngredients(supabase, recipeIds) {
 // limited to one level of sub-recipe nesting). Mirrors the cost calculation in
 // src/pages/MenuPricing.js, scoped to an arbitrary recipe id list — used e.g. to value a
 // complimentary/comp item at cost rather than menu price. Requires a live Supabase client.
+//
+// Falls back to `recipes.cost_price` (manually entered via Menu Pricing's POS-only Add Item
+// modal) for recipes with no ingredient breakdown — POS-only clients have no Item Master to
+// link an ingredient to, so this is the only cost basis they can ever supply.
 export async function computeRecipeCosts(supabase, recipeIds) {
   if (!recipeIds || recipeIds.length === 0) return {}
 
   const breakdown = await explodeRecipeIngredients(supabase, recipeIds)
   const itemIds = [...new Set(Object.values(breakdown).flatMap(rows => rows.map(r => r.item_id)))]
-  if (itemIds.length === 0) return {}
 
-  const { data: rates } = await supabase.from('items').select('id, per_uom_rate').in('id', itemIds)
+  const [{ data: rates }, { data: manualCosts }] = await Promise.all([
+    itemIds.length > 0 ? supabase.from('items').select('id, per_uom_rate').in('id', itemIds) : Promise.resolve({ data: [] }),
+    supabase.from('recipes').select('id, cost_price').in('id', recipeIds),
+  ])
   const rateMap = {}
   ;(rates || []).forEach(i => { rateMap[i.id] = parseFloat(i.per_uom_rate) || 0 })
+  const manualMap = {}
+  ;(manualCosts || []).forEach(r => { manualMap[r.id] = parseFloat(r.cost_price) || 0 })
 
   const costMap = {}
   for (const recipeId of recipeIds) {
-    costMap[recipeId] = (breakdown[recipeId] || []).reduce((sum, { item_id, qty }) => sum + qty * (rateMap[item_id] || 0), 0)
+    const ingredientCost = (breakdown[recipeId] || []).reduce((sum, { item_id, qty }) => sum + qty * (rateMap[item_id] || 0), 0)
+    costMap[recipeId] = ingredientCost > 0 ? ingredientCost : (manualMap[recipeId] || 0)
   }
   return costMap
 }

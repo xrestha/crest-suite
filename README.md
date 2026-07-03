@@ -132,6 +132,32 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S231 — 2026-07-03 — Payment QR moved to Admin; POS non-VAT total bug fix; POS role gate rework; Menu Pricing Cost Price for POS-only clients
+
+Migration required: `ALTER TABLE recipes ADD COLUMN IF NOT EXISTS cost_price numeric;` (run ✓ 2026-07-03).
+
+**Payment QR moved from client Settings → Admin (`src/pages/AdminClients.js`, `src/pages/Settings.js`)**
+- The "Payment QR (merchant payload)" field used to live in Settings → Property (an admin-only tab, edited while impersonating a client). Moved to a new **QR tab** in Manage Clients → a client's drawer — same validate/preview/save behavior (`validateEmvQr`, live QR preview via the `qrcode` lib), now scoped correctly to admin-side per-client setup instead of a client-facing settings page.
+- No change to what POS reads — still `settings.payment_qr_data`, same table/column.
+
+**POS non-VAT-registered total bug (`src/modules/pos/orders/PosOrders.jsx`)**
+- Found via a real bill: a non-VAT-registered (PAN Bill) client's live cart total, Confirm Payment amount, and Tender/Change defaults were silently adding 13% VAT regardless of the client's `is_vat_registered` flag — only the *printed* bill correctly excluded VAT. A ₨354 PAN Bill was about to be charged/recorded as ₨400.
+- Fix: a `vatReg` flag now threads through the cart total, per-line item price, menu tile prices, "pair with" suggestion price, and the floor-plan table badge — all gate VAT on `billingSettings.is_vat_registered`, matching what `buildBillHtml()` already did for the printed bill.
+- Same investigation: the printed/preview bill was showing a "Scan to pay" QR even on Cash payments. QR generation is now gated to eSewa/Khalti/FonePay only (`QR_PAY_METHODS` constant), matching the on-screen payment panel.
+
+**POS role gates reworked (`src/modules/pos/orders/PosOrders.jsx`)**
+- **Credit**: Manager+ → **Supervisor+**
+- **Complimentary**: Manager+ → **Supervisor+**
+- **Void**: Supervisor+ → **owner/admin login only** — no PIN-based role (Staff/Supervisor/Manager), including Manager, can void a bill anymore. Uses `isAdmin || isOwner` directly instead of `hasPosAccess()`, deliberately bypassing the PIN rank system.
+
+**Menu Pricing — Cost Price + Edit for POS-only clients (`src/pages/MenuPricing.js`, `src/utils/recipeCost.js`)**
+- POS-only clients (no IMS) can never reach `Recipes.js` (ModuleGate-locked) to link an ingredient, so every item added via Menu Pricing was permanently food-cost-blind — Complimentary Slips always valued at ₨0.
+- New `recipes.cost_price` column (nullable numeric) — a manual cost entered in the POS-only "Add Item" modal, used as the food-cost fallback wherever ingredient-derived cost is unavailable.
+- `computeRecipeCosts()` (feeds Complimentary Slip, Sales Exception Report Comp column, Shift reports) now falls back to `cost_price` when a recipe has no ingredient breakdown; ingredient-derived cost still wins when present, so IMS clients are unaffected.
+- Menu Pricing's POS-only table gained an **Edit** link (reuses the Add Item modal, pre-filled, switches insert→update) and a **Cost Price** column.
+
+**Files:** `src/pages/AdminClients.js`, `src/pages/Settings.js`, `src/modules/pos/orders/PosOrders.jsx`, `src/pages/MenuPricing.js`, `src/utils/recipeCost.js`, `src/pages/Help.js`
+
 ### S230 — 2026-07-03 — Payment QR: accept NepalPay tag-00-less payloads + rail-coverage findings
 
 No DB migration. One-file fix from live testing of the dynamic bill QR (S225 feature) with a real merchant payload (C.M.S. Hospitality, NCHL).

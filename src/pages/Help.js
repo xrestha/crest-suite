@@ -688,6 +688,16 @@ export default function Help() {
                   ],
                 },
                 {
+                  icon: '₨', name: 'Menu Pricing', path: '/menu-pricing',
+                  desc: 'Build your menu directly here — no Item Master or IMS setup needed on a POS-only plan. + Add Item takes a name, category, VAT status, menu price, and an optional Cost Price (what you pay to buy/produce it). Use the On POS toggle to control what shows on the order screen without deleting the item.',
+                  tips: [
+                    'Cost Price is optional but recommended — on a POS-only plan there\'s no Item Master to link an ingredient to, so this is the only food-cost figure the system can ever have. It values the Complimentary Slip and the Comp column on Sales Exceptions instead of showing NPR 0',
+                    'Click Edit next to any item to change its name, category, VAT, menu price, or Cost Price — same modal as Add Item, just pre-filled with the current values',
+                    'Turn off On POS for seasonal or discontinued items — the item and its history are preserved, it just disappears from the order screen',
+                    'Pair sets which items appear as quick "pair with" suggestions when staff tap this item while taking an order',
+                  ],
+                },
+                {
                   icon: '⊞', name: 'Table Management', path: '/pos/tables',
                   desc: 'Set up your restaurant floor plan — create tables, assign them to sections (Main Hall, Bar, Outdoor), set capacity, and track status (Available / Occupied / Reserved / Inactive). The Ticket Routing tab lets you assign each recipe category to KOT (kitchen) or BOT (bar) so tickets print at the right station automatically. Requires Supervisor role or above.',
                   tips: [
@@ -717,16 +727,16 @@ export default function Help() {
                     'Tap "+ Add note" under any order item to send a special instruction (e.g. "no onion") to the kitchen/bar — it prints indented under that item on the ticket. Preset chips from Table Management → Quick Notes appear while you type',
                     'Editing or adding a note after a ticket was already sent clears its ✓ sent badge — press KOT/BOT again to send the update to the station',
                     'The floor view shows an amber "⚠ pending" pill and per-table badge for any table with items added but not yet sent to the kitchen/bar — a quick way to catch orders that were never fired',
-                    'Charge → closes the table — Supervisor role or above only, hidden entirely for Staff. Pay collects Cash/Card/eSewa/Khalti/FonePay and prints a Tax Invoice or Bill; Void cancels a mistake with no revenue impact; Complimentary (Manager+) closes a walkout or comp — ₨0 is collected but it still counts against food-cost/inventory reporting',
+                    'Charge → closes the table — Supervisor role or above only, hidden entirely for Staff. Pay collects Cash/Card/eSewa/Khalti/FonePay and prints a Tax Invoice or Bill; Complimentary closes a walkout or comp — ₨0 is collected but it still counts against food-cost/inventory reporting; Void cancels a mistake with no revenue impact but is reserved for the owner/admin login — no PIN-based role (Staff, Supervisor, or Manager) can void a bill',
                     'Complimentary prints an internal Complimentary Slip, not a Tax Invoice or PAN Bill — its own sequential NC-01 style number (separate from Tax Invoice/Bill numbers), each line valued at food cost (not menu price) so comps don\'t distort your P&L',
                     'Both the Charge modal\'s total and item list switch to food-cost values while the Complimentary tab is open, and a live preview of the actual bill/slip layout appears in the modal as you fill in the fields — it always matches exactly what will print',
                     'Whether the printed bill says "TAX INVOICE" (with a VAT breakdown) or plain "BILL" (PAN only, no VAT) depends on the VAT Registered toggle an admin sets per client — see Settings below',
                     'Buyer Name/Address/PAN/Phone on the Charge screen are optional — IRD allows omitting them for bills up to NPR 10,000, but fill them in if a customer requests a full invoice',
                     'Discount on the Pay tab supports a flat NPR amount or a percentage (toggle between ₨/%) — it reduces the pre-VAT taxable amount, with VAT recalculated on the discounted base, not just subtracted off the total',
                     'Applying any discount makes buyer Name and Phone compulsory (not just optional) and requires picking a Discount Reason — gives an identifiable, audited record of who received it. Customize the reason list in Table Management → Discounts',
-                    'Credit (red button, Manager+ only) closes the bill normally — it counts as a sale and consumes a Tax Invoice/Bill number — but no payment is collected now; the customer owes the amount. Buyer Name and Phone are compulsory, same as a discount. Collect it later from Customers → Outstanding Credit',
+                    'Credit (red button, Supervisor role or above) closes the bill normally — it counts as a sale and consumes a Tax Invoice/Bill number — but no payment is collected now; the customer owes the amount. Buyer Name and Phone are compulsory, same as a discount. Collect it later from Customers → Outstanding Credit',
                     '📄 Recent Bills (floor view) lists everything closed today and lets you reprint a bill — the printout is labelled ORIGINAL-COPY the first time, SECOND-COPY the second, THIRD-COPY the third, and REPRINT #N after that (matches Nepal IRD\'s Rule 17 buyer/authority/seller copy terminology)',
-                    'Scan-to-pay QR: once your admin pastes the outlet\'s merchant QR payload in Settings → Property, every bill carries a dynamic QR with that bill\'s exact amount pre-filled — the customer can\'t mistype it. The QR also appears in the Charge modal when eSewa/Khalti/FonePay is selected, updating live as discounts change. Payment confirmation is still manual — confirm once you see it land on your merchant app',
+                    'Scan-to-pay QR: once your admin pastes the outlet\'s merchant QR payload in Manage Clients → this client → QR tab, every bill carries a dynamic QR with that bill\'s exact amount pre-filled — the customer can\'t mistype it. The QR also appears in the Charge modal when eSewa/Khalti/FonePay is selected, updating live as discounts change. Payment confirmation is still manual — confirm once you see it land on your merchant app',
                   ],
                 },
                 {
@@ -766,7 +776,7 @@ export default function Help() {
                 },
                 {
                   icon: '👥', name: 'POS Staff', path: '/pos/staff',
-                  desc: 'Assign POS roles to your team. Only staff with a role assigned can see POS screens. Roles: Staff (order-taking only), Supervisor (+ table setup, billing/Charge, void), Manager (+ Complimentary, reports, role assignment). Requires Manager role or above.',
+                  desc: 'Assign POS roles to your team. Only staff with a role assigned can see POS screens. Roles: Staff (order-taking only), Supervisor (+ table setup, billing/Charge, Complimentary, Credit), Manager (+ Sales Exceptions report, role assignment). Void is not available to any PIN-based role — only the owner/admin login can void a bill. Requires Manager role or above.',
                   tips: [
                     'Start by assigning the owner/manager account the Manager role — they can then assign roles to the rest of the team',
                     'Staff role = waiters who take orders only. They cannot access Table Management or reports',
@@ -801,10 +811,11 @@ export default function Help() {
                 },
                 {
                   icon: '🧾', name: 'POS Billing Setup',
-                  guide: 'Per-client invoice settings, set in Manage Clients → a client → Settings tab. VAT Registered controls whether POS bills print as a Tax Invoice with a VAT breakdown or a plain Bill with PAN only. Invoice Prefix is the short client code used in invoice numbers (e.g. TI2238-CAC-82/83) — auto-suggested from the property name, editable.',
+                  guide: 'Per-client invoice settings, set in Manage Clients → a client → Settings tab. VAT Registered controls whether POS bills print as a Tax Invoice with a VAT breakdown or a plain Bill with PAN only. Invoice Prefix is the short client code used in invoice numbers (e.g. TI2238-CAC-82/83) — auto-suggested from the property name, editable. The client\'s scan-to-pay merchant QR payload is a separate QR tab in the same drawer.',
                   tips: [
                     'Turn VAT Registered off for clients billing on PAN only (not yet VAT-registered with IRD) — the bill header switches from "TAX INVOICE" to "BILL" and drops the VAT line',
                     'Invoice numbers reset to 1 at the start of each Nepal fiscal year (Shrawan) automatically — no manual reset needed',
+                    'Payment QR: paste the client\'s raw merchant QR text (scanned off their physical FonePay/NepalPay/eSewa standee with any QR-reader app) into the QR tab — it live-validates and previews before saving, and every POS bill then carries a dynamic per-bill QR with the exact amount pre-filled',
                     'Invoice Prefix is uppercased automatically; keep it short (3–5 letters) so it fits the 80mm receipt width',
                   ],
                 },

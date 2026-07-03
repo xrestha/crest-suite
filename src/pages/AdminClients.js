@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import QRCode from 'qrcode'
 import { supabase } from '../supabaseClient'
 import { useSettings } from '../context/SettingsContext'
 import { getBsToday, formatAd } from '../utils/bsCalendar'
 import BsCalendarPicker from '../components/BsCalendarPicker'
 import { getSubStatus, getDateStatus } from '../utils/subscription'
+import { validateEmvQr } from '../utils/emvQr'
 import Tip from '../components/Tip'
 
 // All auth-admin operations go through an Edge Function — service role key stays server-side
@@ -106,7 +108,7 @@ const SETTINGS_DEFAULTS = {
   property_email: '', vat_number: '', fc_warning_pct: 35, fc_critical_pct: 45,
   expiry_warning_days: 7, variance_flag_pct: 10, item_code_prefix: 'ITM',
   contact_phone: '', contact_email: '', contact_website: '',
-  is_vat_registered: true, invoice_prefix: ''
+  is_vat_registered: true, invoice_prefix: '', payment_qr_data: ''
 }
 
 // Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
@@ -149,6 +151,15 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [savingSettings, setSavingSettings]   = useState(false)
   const [settingsMsg, setSettingsMsg]         = useState('')
 
+  // QR tab state
+  const [qrPreview, setQrPreview] = useState('')
+  const qrCheck = validateEmvQr(clientSettings.payment_qr_data || '')
+  useEffect(() => {
+    if (!qrCheck.ok) { setQrPreview(''); return }
+    QRCode.toDataURL(clientSettings.payment_qr_data.trim(), { margin: 1, width: 180 })
+      .then(setQrPreview).catch(() => setQrPreview(''))
+  }, [clientSettings.payment_qr_data]) // eslint-disable-line
+
   // Modules state
   const [imsEnabled, setImsEnabled] = useState(client.ims_enabled !== false)
   const [hrEnabled,  setHrEnabled]  = useState(!!client.hr_enabled)
@@ -190,7 +201,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
   }, [client.id])
 
   useEffect(() => {
-    if (activeTab === 'settings' || activeTab === 'thresholds') fetchClientSettings()
+    if (activeTab === 'settings' || activeTab === 'thresholds' || activeTab === 'qr') fetchClientSettings()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
@@ -519,6 +530,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
     { key: 'billing',    label: 'Billing' },
     { key: 'settings',   label: 'Settings' },
     { key: 'thresholds', label: 'Thresholds' },
+    { key: 'qr',         label: 'QR' },
     { key: 'danger',     label: '⚠ Danger' },
   ]
 
@@ -983,6 +995,58 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
                   )}
                   <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={handleSaveSettings} disabled={savingSettings}>
                     {savingSettings ? 'Saving…' : 'Save Thresholds'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── QR TAB ── */}
+          {activeTab === 'qr' && (
+            <div>
+              {loadingSettings ? (
+                <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+              ) : (
+                <>
+                  <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 6px' }}>
+                    Payment QR
+                  </p>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text3)', display: 'block', marginBottom: 6 }}>
+                    <Tip text="Paste the raw text from this business's payment QR (FonePay / NepalPay / eSewa merchant QR). Scan the counter standee with any QR-reader app — it yields a long text string starting with 000201 — and paste it here. POS bills will then show a per-bill dynamic QR with the exact amount pre-filled, so customers can't mistype it." width={320}>
+                      Payment QR (merchant payload)
+                    </Tip>
+                  </label>
+                  <textarea
+                    value={clientSettings.payment_qr_data || ''}
+                    onChange={e => setClientSettings({ ...clientSettings, payment_qr_data: e.target.value })}
+                    placeholder="e.g. 00020101021129370016...6304ABCD — scan the standee QR with a QR-reader app and paste the text here"
+                    rows={3}
+                    style={{ width: '100%', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', color: 'var(--theme-text1)', outline: 'none', resize: 'vertical' }}
+                  />
+                  {(clientSettings.payment_qr_data || '').trim() && (
+                    qrCheck.ok ? (
+                      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginTop: 10 }}>
+                        {qrPreview && <img src={qrPreview} alt="Payment QR preview" style={{ width: 120, height: 120, borderRadius: 6, background: '#fff', padding: 4 }} />}
+                        <div>
+                          <p style={{ fontSize: 12, color: 'var(--theme-green)', margin: '0 0 4px', fontWeight: 600 }}>✓ Valid payment QR — merchant: {qrCheck.merchantName}</p>
+                          <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0, maxWidth: 420, lineHeight: 1.6 }}>
+                            Scan this preview with a banking app to test it before saving. Once saved, every POS bill shows a dynamic
+                            version of this QR with that bill's exact amount pre-filled.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p style={{ fontSize: 12, color: 'var(--theme-red)', margin: '8px 0 0' }}>✗ {qrCheck.error}</p>
+                    )
+                  )}
+
+                  {settingsMsg && (
+                    <p style={{ fontSize: 12, margin: '16px 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                      {settingsMsg.replace(/^(ok|error):/, '')}
+                    </p>
+                  )}
+                  <button className="btn btn-primary" style={{ fontSize: 13, marginTop: settingsMsg ? 0 : 16 }} onClick={handleSaveSettings} disabled={savingSettings}>
+                    {savingSettings ? 'Saving…' : 'Save QR'}
                   </button>
                 </>
               )}

@@ -11,6 +11,9 @@ import { buildDynamicQr } from '../../../utils/emvQr'
 
 const vatOf  = r => (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : parseFloat(r.vat_rate)
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+// Only these payment methods are scanned by the customer — Cash/Card/Credit already have their
+// own settlement path, so a "scan to pay" QR on the bill would be irrelevant or misleading there.
+const QR_PAY_METHODS = ['eSewa', 'Khalti', 'FonePay']
 
 const STATUS_BADGE = { available: 'badge-green', occupied: 'badge-red', reserved: 'badge-amber', inactive: 'badge-gray' }
 const STATUS_LABEL = { available: 'Available', occupied: 'Occupied', reserved: 'Reserved', inactive: 'Inactive' }
@@ -38,7 +41,7 @@ const billInput = {
 }
 
 export default function PosOrders() {
-  const { clientId, profile, hasPosAccess, isAdmin } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin, isOwner } = useAuth()
 
   /* ── view ── */
   const [view, setView] = useState('floor')
@@ -132,8 +135,12 @@ export default function PosOrders() {
   }, [clientId]) // eslint-disable-line
 
   /* ── computed totals ── */
+  // Non-VAT-registered clients print a plain PAN Bill with no VAT line (see buildBillHtml's
+  // `vatReg` gate) — the live cart/payment totals must honor the same flag, or the amount
+  // charged/tendered on screen drifts from the amount on the printed bill.
+  const vatReg   = billingSettings.is_vat_registered
   const subEx    = orderItems.reduce((s, i) => s + i.qty * i.unit_price, 0)
-  const vatAmt   = orderItems.reduce((s, i) => s + i.qty * i.unit_price * (i.vat_rate ?? 0), 0)
+  const vatAmt   = vatReg ? orderItems.reduce((s, i) => s + i.qty * i.unit_price * (i.vat_rate ?? 0), 0) : 0
   const total    = Math.round(subEx + vatAmt) // rounded to the nearest rupee — matches the bill's Net Amount/Round Off line
   const compTotal = orderItems.reduce((s, i) => s + i.qty * (compCostMap[i.recipe_id] || 0), 0)
 
@@ -156,11 +163,11 @@ export default function PosOrders() {
   // makeBillQr is a hoisted function declaration, so calling it from here is safe even though
   // it appears later in the file.
   useEffect(() => {
-    if (!billingOpen || !billingSettings.payment_qr_data || !(payTotal > 0)) { setBillQrUrl(''); return }
+    if (!billingOpen || !QR_PAY_METHODS.includes(payMethod) || !billingSettings.payment_qr_data || !(payTotal > 0)) { setBillQrUrl(''); return }
     let cancelled = false
     makeBillQr(payTotal).then(url => { if (!cancelled) setBillQrUrl(url) })
     return () => { cancelled = true }
-  }, [billingOpen, payTotal, billingSettings.payment_qr_data]) // eslint-disable-line
+  }, [billingOpen, payMethod, payTotal, billingSettings.payment_qr_data]) // eslint-disable-line
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
 
@@ -184,7 +191,7 @@ export default function PosOrders() {
       map[o.table_id] = {
         orderId:   o.id,
         itemCount: items.reduce((s, i) => s + i.qty, 0),
-        total:     items.reduce((s, i) => s + i.qty * i.unit_price * (1 + (i.vat_rate ?? 0)), 0),
+        total:     items.reduce((s, i) => s + i.qty * i.unit_price * (1 + (vatReg ? (i.vat_rate ?? 0) : 0)), 0),
         covers:    o.covers,
         pending:   items.filter(i => !i.sent_to_kot).length,
       }
@@ -284,7 +291,7 @@ export default function PosOrders() {
   /* ── order item helpers ── */
 
   function addItem(recipe) {
-    const vat = vatOf(recipe)
+    const vat = vatReg ? vatOf(recipe) : 0
     setOrderItems(prev => {
       const idx = prev.findIndex(i => i.recipe_id === recipe.id)
       if (idx >= 0) {
@@ -820,7 +827,7 @@ export default function PosOrders() {
   async function printBill(order, items) {
     const newCount = (order.print_count || 0) + 1
     await supabase.from('pos_orders').update({ print_count: newCount }).eq('id', order.id)
-    const qrUrl = await makeBillQr(order.paid_amount)
+    const qrUrl = QR_PAY_METHODS.includes(order.payment_method) ? await makeBillQr(order.paid_amount) : ''
     printHtml(buildBillHtml(order, items, COPY_LABEL(newCount), qrUrl))
   }
 
@@ -1070,7 +1077,7 @@ export default function PosOrders() {
                 gap: 10,
               }}>
                 {visMenu.map(r => {
-                  const vat   = vatOf(r)
+                  const vat   = vatReg ? vatOf(r) : 0
                   const price = Math.round((parseFloat(r.selling_price) || 0) * (1 + vat))
                   const inOrd = orderItems.find(i => i.recipe_id === r.id)
                   return (
@@ -1120,7 +1127,7 @@ export default function PosOrders() {
                 Tap items on the left to add them
               </p>
             ) : orderItems.map((item, idx) => {
-              const lineTotal = item.qty * item.unit_price * (1 + (item.vat_rate ?? 0))
+              const lineTotal = item.qty * item.unit_price * (1 + (vatReg ? (item.vat_rate ?? 0) : 0))
               return (
                 <div key={idx} style={{
                   display: 'flex', flexDirection: 'column', gap: 4,
@@ -1222,7 +1229,7 @@ export default function PosOrders() {
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {suggestions.map(r => {
-                  const price        = Math.round((parseFloat(r.selling_price) || 0) * (1 + vatOf(r)))
+                  const price        = Math.round((parseFloat(r.selling_price) || 0) * (1 + (vatReg ? vatOf(r) : 0)))
                   const isChefsPick  = r.me_class === 'puzzle' && !r._manual
                   return (
                     <button
@@ -1391,10 +1398,10 @@ export default function PosOrders() {
 
             <div className="tab-bar" style={{ marginBottom: 16 }}>
               <button className={`tab-btn${billingTab === 'pay' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('pay'); setCloseMsg('') }}>Pay</button>
-              {hasPosAccess('supervisor') && (
+              {(isAdmin || isOwner) && (
                 <button className={`tab-btn${billingTab === 'void' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('void'); setCloseMsg('') }}>Void</button>
               )}
-              {hasPosAccess('manager') && (
+              {hasPosAccess('supervisor') && (
                 <button className={`tab-btn${billingTab === 'writeoff' ? ' tab-btn--active' : ''}`} onClick={openCompTab}>Complimentary</button>
               )}
             </div>
@@ -1433,8 +1440,8 @@ export default function PosOrders() {
                       {m}
                     </button>
                   ))}
-                  {hasPosAccess('manager') && (
-                    <Tip text="Bill closes normally (counts as a sale, consumes an invoice number) but no payment is collected now — the customer owes this amount. Manager+ only. Collect it later from Customers → Outstanding Credit.">
+                  {hasPosAccess('supervisor') && (
+                    <Tip text="Bill closes normally (counts as a sale, consumes an invoice number) but no payment is collected now — the customer owes this amount. Supervisor+ only. Collect it later from Customers → Outstanding Credit.">
                       <button onClick={() => setPayMethod('Credit')}
                         className={`pay-method-btn pay-method-btn--credit${payMethod === 'Credit' ? ' pay-method-btn--selected' : ''}`}>
                         Credit
@@ -1493,7 +1500,7 @@ export default function PosOrders() {
                     </div>
                   </div>
                 )}
-                {['eSewa', 'Khalti', 'FonePay'].includes(payMethod) && billQrUrl && (
+                {QR_PAY_METHODS.includes(payMethod) && billQrUrl && (
                   <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8 }}>
                     <img src={billQrUrl} alt="Scan to pay" style={{ width: 110, height: 110, background: '#fff', borderRadius: 6, padding: 4, flexShrink: 0 }} />
                     <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.6 }}>

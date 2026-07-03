@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react'
-import QRCode from 'qrcode'
 import { useSettings } from '../context/SettingsContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import { useTheme, PRESETS } from '../context/ThemeContext'
 import Tip from '../components/Tip'
-import { validateEmvQr } from '../utils/emvQr'
 
 const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Recipe Categories', 'Contact', 'Data', 'Theme']
 
@@ -45,16 +43,6 @@ export default function Settings() {
   const [newCat, setNewCat] = useState('')
   const [catSaving, setCatSaving] = useState(false)
   const [catMsg, setCatMsg] = useState('')
-  const [qrPreview, setQrPreview] = useState('')
-
-  // Live preview of the pasted merchant payment QR — lets the owner scan-test it with a
-  // banking app before saving. Only renders when the payload validates (structure + CRC).
-  const qrCheck = validateEmvQr(form.payment_qr_data || '')
-  useEffect(() => {
-    if (!qrCheck.ok) { setQrPreview(''); return }
-    QRCode.toDataURL(form.payment_qr_data.trim(), { margin: 1, width: 180 })
-      .then(setQrPreview).catch(() => setQrPreview(''))
-  }, [form.payment_qr_data]) // eslint-disable-line
 
   useEffect(() => {
     loadSettings(isAdmin && !clientId ? null : clientId)
@@ -374,38 +362,6 @@ export default function Settings() {
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{(form.is_vat_registered ?? true) ? 'Yes — issues Tax Invoices' : 'No — PAN Bill only'}</span>
               </label>
             </div>
-          </div>
-
-          {/* Payment QR — one-time setup for per-bill dynamic QR */}
-          <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--theme-border)' }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text3)', display: 'block', marginBottom: 6 }}>
-              <Tip text="Paste the raw text from this business's payment QR (FonePay / NepalPay / eSewa merchant QR). Scan the counter standee with any QR-reader app — it yields a long text string starting with 000201 — and paste it here. POS bills will then show a per-bill dynamic QR with the exact amount pre-filled, so customers can't mistype it." width={320}>
-                Payment QR (merchant payload)
-              </Tip>
-            </label>
-            <textarea
-              value={form.payment_qr_data || ''}
-              onChange={e => update('payment_qr_data', e.target.value)}
-              placeholder="e.g. 00020101021129370016...6304ABCD — scan your standee QR with a QR-reader app and paste the text here"
-              rows={3}
-              style={{ width: '100%', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', color: 'var(--theme-text1)', outline: 'none', resize: 'vertical' }}
-            />
-            {(form.payment_qr_data || '').trim() && (
-              qrCheck.ok ? (
-                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginTop: 10 }}>
-                  {qrPreview && <img src={qrPreview} alt="Payment QR preview" style={{ width: 120, height: 120, borderRadius: 6, background: '#fff', padding: 4 }} />}
-                  <div>
-                    <p style={{ fontSize: 12, color: 'var(--theme-green)', margin: '0 0 4px', fontWeight: 600 }}>✓ Valid payment QR — merchant: {qrCheck.merchantName}</p>
-                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0, maxWidth: 420, lineHeight: 1.6 }}>
-                      Scan this preview with a banking app to test it before saving. Once saved, every POS bill shows a dynamic
-                      version of this QR with that bill's exact amount pre-filled.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <p style={{ fontSize: 12, color: 'var(--theme-red)', margin: '8px 0 0' }}>✗ {qrCheck.error}</p>
-              )
-            )}
           </div>
         </div>
       )}
