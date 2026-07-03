@@ -132,6 +132,20 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S233 — 2026-07-03 — Admin Dashboard POS module bug fixes (count, badge, MRR) + module pill color consistency
+
+No DB migration. Two-file bug fix from the user noticing a POS-subscribed client (BHATTI CHOILA) wasn't showing up as such anywhere in Admin.
+
+**`src/pages/Dashboard.js`**
+- Root cause: the Admin Dashboard's `clients` query never selected `pos_enabled`/`pos_plan`/`pos_ends_at` at all — POS was structurally invisible to every calculation on the page, not just a display bug. Added all three columns.
+- Top KPI card's `POS {posCount}` was a **hardcoded literal `POS 0`**, never actually computed — added a real `posCount = active.filter(c => c.pos_enabled).length`, same pattern as the existing `imsCount`/`hrCount`.
+- Per-property **Modules** column pill list only ever rendered IMS/HR — added the missing POS pill.
+- Found in the same spot while fixing the above: `clientMRR()` (drives Monthly Value, Total, and ARR) only summed IMS + HR — **POS subscription revenue was silently excluded from every platform revenue figure**. Now includes POS same as the other two modules. Added a "POS: {plan}" label next to the plan badge (mirrors the existing HR one) for when POS is on a different tier than the client's main plan.
+
+**Module pill color consistency (`Dashboard.js` + `src/pages/AdminClients.js`)** — two rounds of user-caught color issues, both against the same root cause: color must encode *module identity* (which module is this — always the same color), not something else that varies. First pass, the POS pill I'd added was still using its old muted gray/`--theme-border` styling on the Dashboard's top badge (fixed the count but forgot the color), and the row pill used the gold `--theme-accent` which read as washed-out next to IMS's vivid blue and HR's vivid green. Second pass, caught the same root issue in a completely different component: `AdminClients.js`'s "Manage Clients" list colors its module pills by **plan tier** (Pro=gold, Growth=green, Starter=gray) rather than by module — so three same-tier modules (e.g. all Pro) rendered as three identical gold pills, indistinguishable by color, and it was also inconsistent with how Dashboard.js colors its own pills. Standardized both places on one fixed module-identity palette — IMS `#60a5fa` (blue), HR `#34d399` (green), POS `#a78bfa` (purple, chosen to avoid clashing with the gold "Pro" plan badge or amber's warning connotation elsewhere in the app) — plan tier still shown as text (e.g. "POS · Pro") in `AdminClients.js`, just no longer driving the color. Removed the now-dead `planColor` helper.
+
+**Files:** `src/pages/Dashboard.js`, `src/pages/AdminClients.js`
+
 ### S232 — 2026-07-03 — Split Payment (multi-tender); Shift Open/Close printable slips; Charge modal sticky footer; assorted POS polish
 
 DB migration required: `pos_order_payments` table + widened `pos_orders.payment_method` CHECK to add `'Split'` (run ✓ 2026-07-03).

@@ -1701,7 +1701,6 @@ export default function AdminClients() {
             const rel      = relativeTime(lastSeenMap[c.id])
             const isRecent = lastSeenMap[c.id] && Date.now() - new Date(lastSeenMap[c.id]).getTime() < 86400000
             const lastUser = lastUserMap[c.id]
-            const planColor = p => p === 'pro' ? 'var(--theme-accent)' : p === 'growth' ? 'var(--theme-green)' : 'var(--theme-text3)'
             const planLabel = p => p === 'pro' ? 'Pro' : p === 'growth' ? 'Growth' : 'Starter'
 
             return (
@@ -1736,14 +1735,14 @@ export default function AdminClients() {
                   {/* Module pills */}
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
                     {[
-                      { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan },
-                      { key: 'HR',  enabled: !!c.hr_enabled,          plan: c.hr_plan },
-                      { key: 'POS', enabled: !!c.pos_enabled,         plan: c.pos_plan },
+                      { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan,     color: '#60a5fa', borderRgba: 'rgba(96,165,250,0.4)' },
+                      { key: 'HR',  enabled: !!c.hr_enabled,          plan: c.hr_plan,  color: '#34d399', borderRgba: 'rgba(52,211,153,0.35)' },
+                      { key: 'POS', enabled: !!c.pos_enabled,         plan: c.pos_plan, color: '#a78bfa', borderRgba: 'rgba(167,139,250,0.35)' },
                     ].map(m => (
                       <span key={m.key} style={{
                         fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
-                        border: `1px solid ${m.enabled ? (planColor(m.plan) === 'var(--theme-accent)' ? 'rgba(201,168,76,0.4)' : planColor(m.plan) === 'var(--theme-green)' ? 'rgba(52,211,153,0.35)' : 'rgba(107,114,128,0.35)') : 'var(--theme-border)'}`,
-                        color: m.enabled ? planColor(m.plan) : 'var(--theme-text3)',
+                        border: `1px solid ${m.enabled ? m.borderRgba : 'var(--theme-border)'}`,
+                        color: m.enabled ? m.color : 'var(--theme-text3)',
                         background: 'transparent',
                       }}>
                         {m.key}{m.enabled ? ` · ${planLabel(m.plan || 'starter')}` : ' · off'}

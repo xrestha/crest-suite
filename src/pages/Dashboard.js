@@ -384,7 +384,7 @@ export default function Dashboard() {
     const since24h = new Date(Date.now() - 86400000).toISOString()
     const [{ data: clients }, { data: periods }, { data: recentProfiles }] = await Promise.all([
       supabase.from('clients')
-        .select('id, name, plan, hr_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, billing_cycle, location, ims_enabled, hr_enabled, is_trial, subscribe_requested, trial_expires_at')
+        .select('id, name, plan, hr_plan, pos_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, is_trial, subscribe_requested, trial_expires_at')
         .order('name'),
       supabase.from('monthly_periods')
         .select('client_id, bs_year, bs_month, status')
@@ -432,6 +432,7 @@ export default function Dashboard() {
     // Module adoption counts
     const imsCount = active.filter(c => c.ims_enabled !== false).length
     const hrCount  = active.filter(c => c.hr_enabled).length
+    const posCount = active.filter(c => c.pos_enabled).length
 
     // Subscription health buckets
     const expiring30  = active.filter(c => { const s = getSubStatus(c); return s.days !== null && s.days >= 0 && s.days <= 30 })
@@ -446,13 +447,14 @@ export default function Dashboard() {
     const wantToSub    = trialSignups.filter(c => c.subscribe_requested)
     const activeClientIds = new Set(activeTodayClients.map(c => c.id))
 
-    // MRR: IMS + HR combined (same plan price table for both modules)
+    // MRR: IMS + HR + POS combined (same plan price table for all three modules)
     const PLAN_MRR = { starter: 5000, growth: 8000, pro: 12000 }
     function clientMRR(c) {
       let val = 0
       const imsEnd = c.ims_ends_at || c.subscription_ends_at
       if (imsEnd && Math.ceil((new Date(imsEnd) - Date.now()) / 86400000) > 0) val += PLAN_MRR[c.plan] || 0
       if (c.hr_ends_at && Math.ceil((new Date(c.hr_ends_at) - Date.now()) / 86400000) > 0) val += PLAN_MRR[c.hr_plan] || 0
+      if (c.pos_ends_at && Math.ceil((new Date(c.pos_ends_at) - Date.now()) / 86400000) > 0) val += PLAN_MRR[c.pos_plan] || 0
       return val
     }
     const estMRR = active.reduce((sum, c) => sum + clientMRR(c), 0)
@@ -506,7 +508,7 @@ export default function Dashboard() {
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(96,165,250,0.10)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.2)' }}>IMS {imsCount}</span>
                   <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(52,211,153,0.08)', color: '#34d399', border: '1px solid rgba(52,211,153,0.18)' }}>HR {hrCount}</span>
-                  <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(120,113,108,0.08)', color: 'var(--theme-text3)', border: '1px solid var(--theme-border)' }}>POS 0</span>
+                  <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(167,139,250,0.10)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}>POS {posCount}</span>
                 </div>
               </div>
 
@@ -662,6 +664,9 @@ export default function Dashboard() {
                               {c.hr_enabled && (
                                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(52,211,153,0.08)', color: '#34d399', border: '1px solid rgba(52,211,153,0.18)' }}>HR</span>
                               )}
+                              {c.pos_enabled && (
+                                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(167,139,250,0.10)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}>POS</span>
+                              )}
                             </div>
                           </td>
 
@@ -673,9 +678,12 @@ export default function Dashboard() {
                             {c.hr_enabled && c.hr_plan && c.hr_plan !== c.plan && (
                               <span style={{ fontSize: 10, color: 'var(--theme-text3)', marginLeft: 5 }}>HR: {c.hr_plan}</span>
                             )}
+                            {c.pos_enabled && c.pos_plan && c.pos_plan !== c.plan && (
+                              <span style={{ fontSize: 10, color: 'var(--theme-text3)', marginLeft: 5 }}>POS: {c.pos_plan}</span>
+                            )}
                           </td>
 
-                          {/* Monthly Value (IMS + HR) */}
+                          {/* Monthly Value (IMS + HR + POS) */}
                           <td style={{ textAlign: 'right', fontWeight: mrr > 0 ? 700 : 400, color: mrr > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>
                             {mrr > 0 ? `NPR ${mrr.toLocaleString('en-NP')}` : '—'}
                           </td>
