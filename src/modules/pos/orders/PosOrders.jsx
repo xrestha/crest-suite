@@ -67,6 +67,7 @@ export default function PosOrders() {
   const [menu,        setMenu]        = useState([])
   const [menuLoaded,  setMenuLoaded]  = useState(false)
   const [catTab,      setCatTab]      = useState('All')
+  const [menuSearch,  setMenuSearch]  = useState('')
   const [saving,      setSaving]      = useState(false)
   const [msg,         setMsg]         = useState('')
   // categories that route to BOT — loaded from settings, default to ['Beverage']
@@ -104,6 +105,13 @@ export default function PosOrders() {
   const [hscMap,      setHscMap]      = useState({}) // { recipeId: hscCode } — fetched once when Billing modal opens
   const [openShiftId, setOpenShiftId] = useState(null) // cached, not queried per-close — see loadOpenShift()
   const [billQrUrl,   setBillQrUrl]   = useState('')   // per-bill dynamic payment QR (data URL), regenerated as the total changes
+
+  // Split payment — multiple tenders collected against one order/one invoice (not a split bill;
+  // see [[Split Payment (multi-tender) for POS Charge]] plan). tenders: [{ method, amount, tenderedAmount }]
+  const [splitMode,    setSplitMode]    = useState(false)
+  const [tenders,       setTenders]     = useState([])
+  const [tenderMethod, setTenderMethod] = useState('Cash')
+  const [tenderAmtStr, setTenderAmtStr] = useState('')
 
   /* ── Recent Bills / Reprint ── */
   const [recentBillsOpen, setRecentBillsOpen] = useState(false)
@@ -158,16 +166,24 @@ export default function PosOrders() {
   // when the bill is going on Credit — both cases need an identifiable, audited record.
   const requireBuyerId = discountAmt > 0 || payMethod === 'Credit'
 
-  // Regenerate the dynamic payment QR as the payable total changes (discount typed, items
-  // edited) — the modal QR and print preview always encode the exact current amount.
-  // makeBillQr is a hoisted function declaration, so calling it from here is safe even though
-  // it appears later in the file.
+  // Split payment — running total of tenders collected so far against payTotal, and what's left.
+  const tendersTotal = tenders.reduce((s, t) => s + t.amount, 0)
+  const remaining     = Math.max(0, payTotal - tendersTotal)
+
+  // Regenerate the dynamic payment QR as the payable amount changes (discount typed, items
+  // edited) — the modal QR and print preview always encode the exact current amount. In split
+  // mode this targets whatever the next tender's amount is (defaulting to the remaining balance),
+  // not the full order total. makeBillQr is a hoisted function declaration, so calling it from
+  // here is safe even though it appears later in the file.
   useEffect(() => {
-    if (!billingOpen || !QR_PAY_METHODS.includes(payMethod) || !billingSettings.payment_qr_data || !(payTotal > 0)) { setBillQrUrl(''); return }
+    if (!billingOpen) { setBillQrUrl(''); return }
+    const qrMethod = splitMode ? tenderMethod : payMethod
+    const qrAmount = splitMode ? (parseFloat(tenderAmtStr) || remaining) : payTotal
+    if (!QR_PAY_METHODS.includes(qrMethod) || !billingSettings.payment_qr_data || !(qrAmount > 0)) { setBillQrUrl(''); return }
     let cancelled = false
-    makeBillQr(payTotal).then(url => { if (!cancelled) setBillQrUrl(url) })
+    makeBillQr(qrAmount).then(url => { if (!cancelled) setBillQrUrl(url) })
     return () => { cancelled = true }
-  }, [billingOpen, payMethod, payTotal, billingSettings.payment_qr_data]) // eslint-disable-line
+  }, [billingOpen, splitMode, payMethod, tenderMethod, tenderAmtStr, remaining, payTotal, billingSettings.payment_qr_data]) // eslint-disable-line
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
 
@@ -578,6 +594,7 @@ export default function PosOrders() {
     setCloseMsg('')
     setCompCostMap({})
     setHscMap({})
+    setSplitMode(false); setTenders([]); setTenderMethod('Cash'); setTenderAmtStr('')
     setBillingOpen(true)
     const recipeIds = orderItems.map(i => i.recipe_id).filter(Boolean)
     if (recipeIds.length > 0) {
@@ -591,6 +608,26 @@ export default function PosOrders() {
     const recipeIds = orderItems.map(i => i.recipe_id).filter(Boolean)
     const map = await computeRecipeCosts(supabase, recipeIds)
     setCompCostMap(map)
+  }
+
+  // Split payment — adds one tender against the running `remaining` balance. Non-cash methods are
+  // capped at remaining (no electronic overpay/change); Cash can exceed it, producing change, but
+  // only the portion up to `remaining` is ever recorded as applied to the bill.
+  function addTender() {
+    const amt = parseFloat(tenderAmtStr)
+    if (!amt || amt <= 0 || remaining <= 0) return
+    setTenders(t => [...t, {
+      method: tenderMethod,
+      amount: Math.min(amt, remaining),
+      tenderedAmount: tenderMethod === 'Cash' ? amt : null,
+    }])
+    setTenderAmtStr('')
+  }
+
+  // Only the most recent tender can be undone — correcting an earlier one means voiding and
+  // re-ringing the whole order, same as any other billing mistake. See split-payment plan.
+  function undoLastTender() {
+    setTenders(t => t.slice(0, -1))
   }
 
   async function writeSalesEntries(closeType) {
@@ -643,15 +680,19 @@ export default function PosOrders() {
     if (closeType === 'paid' && requireBuyerId && (!buyerName.trim() || !buyerPhone.trim())) {
       setCloseMsg('error:Buyer Name + Phone are required for a discount or Credit sale.'); return
     }
+    if (closeType === 'paid' && splitMode && (remaining > 0 || tenders.length === 0)) {
+      setCloseMsg('error:Split payment is not fully collected yet.'); return
+    }
     setClosing(true); setCloseMsg('')
 
+    const isSplit = closeType === 'paid' && splitMode && tenders.length > 0
     const today = getBsToday()
     const payload = {
       status:           closeType === 'void' ? 'voided' : 'billed',
       close_type:       closeType,
-      payment_method:   closeType === 'paid' ? payMethod : null,
+      payment_method:   closeType === 'paid' ? (isSplit ? 'Split' : payMethod) : null,
       paid_amount:      closeType === 'paid' ? payTotal : (closeType === 'writeoff' ? 0 : null),
-      tendered_amount:  closeType === 'paid' && payMethod === 'Cash' ? (parseFloat(tenderedStr) || payTotal) : null,
+      tendered_amount:  closeType === 'paid' && !isSplit && payMethod === 'Cash' ? (parseFloat(tenderedStr) || payTotal) : null,
       close_reason:     closeType === 'paid' ? null : closeReason,
       discount_amount:  closeType === 'paid' ? discountAmt : null,
       discount_reason:  closeType === 'paid' ? (discountReason || null) : null,
@@ -677,6 +718,14 @@ export default function PosOrders() {
       .from('pos_orders').update(payload).eq('id', orderId)
       .select('*').single()
     if (error) { setCloseMsg('error:' + error.message); setClosing(false); return }
+
+    if (isSplit) {
+      await supabase.from('pos_order_payments').insert(tenders.map(t => ({
+        order_id: orderId, client_id: clientId,
+        payment_method: t.method, amount: t.amount, tendered_amount: t.tenderedAmount,
+        recorded_by: profile?.id || null,
+      })))
+    }
 
     if (closeType !== 'void') await writeSalesEntries(closeType)
 
@@ -715,7 +764,7 @@ export default function PosOrders() {
     try { return await QRCode.toDataURL(payload, { margin: 1, width: 200 }) } catch { return '' }
   }
 
-  function buildBillHtml(order, items, copyLabel, qrUrl) {
+  function buildBillHtml(order, items, copyLabel, qrUrl, payments, qrAmount) {
     const vatReg      = billingSettings.is_vat_registered
     const prefix      = billingSettings.invoice_prefix || ''
     const invoiceNo   = order.invoice_no != null
@@ -728,6 +777,10 @@ export default function PosOrders() {
     const bs          = adToBs(now)
     const bsDateStr   = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
     const payLabel    = order.payment_method || ''
+    // Split payment — multiple tenders against one bill/one invoice number (not a split bill).
+    // `payments` is [{ method, amount }], sourced either from pos_order_payments (real print) or
+    // the live `tenders` state (in-modal preview) — same shape either way.
+    const isSplitBill = payLabel === 'Split' && payments && payments.length > 0
 
     const subEx    = items.reduce((s, i) => s + i.qty * i.unit_price, 0)
     const vatAmt   = vatReg ? items.reduce((s, i) => s + i.qty * i.unit_price * (i.vat_rate ?? 0), 0) : 0
@@ -747,7 +800,7 @@ export default function PosOrders() {
     const nonTaxableBase = nonTaxableBaseRaw * (1 - discRatio)
     const totalQty = items.reduce((s, i) => s + i.qty, 0)
     const tendered = order.tendered_amount ?? net
-    const change   = payLabel === 'Cash' ? Math.max(0, tendered - net) : 0
+    const change   = !isSplitBill && payLabel === 'Cash' ? Math.max(0, tendered - net) : 0
 
     return `<!DOCTYPE html>
 <html><head><title>Bill</title>
@@ -784,7 +837,7 @@ export default function PosOrders() {
   <div class="row"><span>Name:</span><span>${order.buyer_name || ''}</span></div>
   <div class="row"><span>Address:</span><span>${order.buyer_address || ''}</span></div>
   <div class="row"><span>PAN No: ${order.buyer_pan || ''}</span><span>Phone: ${order.buyer_phone || ''}</span></div>
-  <div class="row"><span>Payment Mode:</span><span>${payLabel}</span></div>
+  <div class="row"><span>Payment Mode:</span><span>${isSplitBill ? 'Split' : payLabel}</span></div>
   <div class="row"><span>Remarks:</span><span>${order.bill_remarks || ''}</span></div>
   <div class="row" style="font-size:11px;color:#000"><span>${tableName === 'Takeaway' ? 'Takeaway' : `Dine-In: ${tableName}`}</span><span>Covers: ${order.covers ?? ''}</span></div>
   <div class="row" style="font-size:11px;color:#000"><span>Cashier: ${profile?.full_name || ''}</span><span>${nowStr}</span></div>
@@ -806,8 +859,10 @@ export default function PosOrders() {
   ` : ''}
   <div class="row tot"><span>Net Amount:</span><span>${net.toFixed(2)}</span></div>
   <hr>
+  ${isSplitBill ? payments.map(p => `<div class="row"><span>${p.method}:</span><span>${p.amount.toFixed(2)}</span></div>`).join('') : `
   <div class="row"><span>Tender:</span><span>${tendered.toFixed(2)}</span></div>
   <div class="row"><span>Change:</span><span>${change.toFixed(2)}</span></div>
+  `}
   <hr>
   <div class="row"><span>Total Qty:</span><span>${totalQty}</span></div>
   <hr>
@@ -816,10 +871,60 @@ export default function PosOrders() {
   ${qrUrl ? `
   <div class="c" style="margin:6px 0">
     <img src="${qrUrl}" alt="Scan to pay" style="width:120px;height:120px;display:block;margin:0 auto" />
-    <div style="font-size:11px;margin-top:2px">Scan to pay ${net.toFixed(0)} — amount pre-filled</div>
+    <div style="font-size:11px;margin-top:2px">Scan to pay ${(qrAmount ?? net).toFixed(0)} — amount pre-filled</div>
   </div>
   <hr>
   ` : ''}
+  ${payLabel === 'Credit' ? `
+  <div style="margin-top:16px">
+    <div class="row">
+      <span style="border-bottom:1px solid #000; width:60%; display:inline-block">&nbsp;</span>
+      <span style="border-bottom:1px solid #000; width:32%; display:inline-block">&nbsp;</span>
+    </div>
+    <div class="row" style="font-size:10px; margin-top:2px">
+      <span>Customer Signature</span><span>Date</span>
+    </div>
+  </div>
+  ` : ''}
+  <div class="c" style="font-size:11px">Thank you for stopping by! We hope to see you again soon.</div>
+</body></html>`
+  }
+
+  // Optional courtesy slip for one split-payment tender — not a Tax Invoice/PAN Bill, just proof
+  // of that person's own payment while the rest of the table is still settling up. The one real
+  // invoice still only prints once, at full close, via buildBillHtml above.
+  function buildTenderSlipHtml(tender, remainingAfter) {
+    const now       = new Date()
+    const nowStr    = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    const tableName = activeTable?.name || 'Takeaway'
+    const change    = tender.tenderedAmount != null ? Math.max(0, tender.tenderedAmount - tender.amount) : 0
+
+    return `<!DOCTYPE html>
+<html><head><title>Payment Slip</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Courier New',monospace; font-size:11px; width:80mm; padding:8px 10px; margin:0 auto; color:#000; }
+  .c   { text-align:center; }
+  .b   { font-weight:bold; }
+  hr   { border:none; border-top:1px dashed #000; margin:6px 0; }
+  .row { display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
+  .tot { font-weight:bold; font-size:12px; }
+</style>
+</head><body>
+  ${outletName ? `<div class="c b" style="font-size:13px">${outletName}</div>` : ''}
+  <div class="c" style="font-size:11px; margin-top:2px">Payment Received</div>
+  <hr>
+  <div class="row"><span>Table:</span><span>${tableName}</span></div>
+  <div class="row"><span>Method:</span><span class="b">${tender.method}</span></div>
+  <div class="row tot"><span>Amount:</span><span>NPR ${tender.amount.toFixed(2)}</span></div>
+  ${tender.tenderedAmount != null ? `
+  <div class="row"><span>Tendered:</span><span>${tender.tenderedAmount.toFixed(2)}</span></div>
+  <div class="row"><span>Change:</span><span>${change.toFixed(2)}</span></div>
+  ` : ''}
+  <hr>
+  <div class="row"><span>Remaining on bill:</span><span>${remainingAfter > 0 ? `NPR ${remainingAfter.toFixed(2)}` : 'Paid in full'}</span></div>
+  <div class="row" style="font-size:10px; margin-top:6px"><span>Not a Tax Invoice / PAN Bill</span><span>${nowStr}</span></div>
+  <hr>
   <div class="c" style="font-size:11px">Thank you for stopping by! We hope to see you again soon.</div>
 </body></html>`
   }
@@ -828,7 +933,13 @@ export default function PosOrders() {
     const newCount = (order.print_count || 0) + 1
     await supabase.from('pos_orders').update({ print_count: newCount }).eq('id', order.id)
     const qrUrl = QR_PAY_METHODS.includes(order.payment_method) ? await makeBillQr(order.paid_amount) : ''
-    printHtml(buildBillHtml(order, items, COPY_LABEL(newCount), qrUrl))
+    let payments
+    if (order.payment_method === 'Split') {
+      const { data } = await supabase.from('pos_order_payments')
+        .select('payment_method, amount').eq('order_id', order.id).order('recorded_at')
+      payments = (data || []).map(p => ({ method: p.payment_method, amount: p.amount }))
+    }
+    printHtml(buildBillHtml(order, items, COPY_LABEL(newCount), qrUrl, payments))
   }
 
   // Complimentary items were never sold — this is an internal cost-tracking slip, not a Tax
@@ -964,15 +1075,15 @@ export default function PosOrders() {
   // for the real print, so what the cashier sees always matches what will actually print.
   const previewDraftOrder = {
     invoice_no: null, invoice_fy: null,
-    payment_method: payMethod,
-    tendered_amount: payMethod === 'Cash' ? (parseFloat(tenderedStr) || payTotal) : null,
+    payment_method: splitMode && tenders.length > 0 ? 'Split' : payMethod,
+    tendered_amount: !splitMode && payMethod === 'Cash' ? (parseFloat(tenderedStr) || payTotal) : null,
     buyer_name: buyerName, buyer_address: buyerAddress, buyer_pan: buyerPan, buyer_phone: buyerPhone,
     bill_remarks: billRemarks, close_reason: closeReason,
     discount_amount: discountAmt,
     table_name: activeTable?.name, order_no: orderNo, print_count: 0,
   }
   const previewHtml = !billingOpen ? null
-    : billingTab === 'pay' ? buildBillHtml(previewDraftOrder, orderItems, 'PREVIEW', billQrUrl)
+    : billingTab === 'pay' ? buildBillHtml(previewDraftOrder, orderItems, 'PREVIEW', billQrUrl, tenders, splitMode ? (parseFloat(tenderAmtStr) || remaining) : payTotal)
     : billingTab === 'writeoff' ? buildCompSlipHtml(previewDraftOrder, orderItems, compCostMap, 'PREVIEW')
     : null
   const kotCount = orderItems.filter(i => !i.sent_to_kot && !botCategories.has(i.category || 'Other')).length
@@ -985,7 +1096,8 @@ export default function PosOrders() {
   const sections  = ['All', ...Array.from(new Set(tables.map(t => t.section).filter(Boolean)))]
   const visTables = secFilter === 'All' ? tables : tables.filter(t => t.section === secFilter)
   const menuCats  = ['All', ...Array.from(new Set(menu.map(r => r.category))).sort()]
-  const visMenu   = catTab === 'All' ? menu : menu.filter(r => r.category === catTab)
+  const visMenu   = (catTab === 'All' ? menu : menu.filter(r => r.category === catTab))
+    .filter(r => r.name.toLowerCase().includes(menuSearch.trim().toLowerCase()))
 
   /* ══════════════════════════════════════════ ORDER SCREEN */
 
@@ -1053,12 +1165,26 @@ export default function PosOrders() {
           <div style={{
             flexShrink: 0, padding: '8px 12px',
             borderBottom: '1px solid var(--theme-border)',
-            display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none',
+            display: 'flex', alignItems: 'center', gap: 6,
           }}>
-            {menuCats.map(c => (
-              <button key={c} className={`tab-btn${catTab === c ? ' tab-btn--active' : ''}`}
-                onClick={() => setCatTab(c)} style={{ flexShrink: 0 }}>{c}</button>
-            ))}
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+              {menuCats.map(c => (
+                <button key={c} className={`tab-btn${catTab === c ? ' tab-btn--active' : ''}`}
+                  onClick={() => setCatTab(c)} style={{ flexShrink: 0 }}>{c}</button>
+              ))}
+            </div>
+            <input
+              type="text"
+              placeholder="🔍 Search menu…"
+              value={menuSearch}
+              onChange={e => setMenuSearch(e.target.value)}
+              style={{
+                marginLeft: 'auto', flexShrink: 0, width: 160,
+                background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
+                borderRadius: 6, padding: '6px 10px', fontSize: 12,
+                color: 'var(--theme-text1)', outline: 'none',
+              }}
+            />
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
@@ -1068,7 +1194,9 @@ export default function PosOrders() {
               <p style={{ color: 'var(--theme-text3)', margin: 0 }}>
                 {menu.length === 0
                   ? 'No POS-enabled items. Toggle items On POS in Menu Pricing first.'
-                  : 'No items in this category.'}
+                  : menuSearch.trim()
+                    ? `No items match "${menuSearch.trim()}".`
+                    : 'No items in this category.'}
               </p>
             ) : (
               <div style={{
@@ -1358,8 +1486,8 @@ export default function PosOrders() {
           onClick={e => { if (e.target === e.currentTarget && !closing) setBillingOpen(false) }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
         >
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, width: 'min(980px, 96vw)', maxHeight: '90vh', boxShadow: '0 16px 48px rgba(0,0,0,0.4)', display: 'flex', overflow: 'hidden' }}>
-          <div style={{ width: 418, flexShrink: 0, background: 'var(--theme-sidebar)', borderRight: '1px solid var(--theme-border)', padding: '24px 20px', overflowY: 'auto', maxHeight: '90vh' }}>
+          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, width: 'min(1060px, 96vw)', maxHeight: '92vh', boxShadow: '0 16px 48px rgba(0,0,0,0.4)', display: 'flex', overflow: 'hidden' }}>
+          <div style={{ width: 418, flexShrink: 0, background: 'var(--theme-sidebar)', borderRight: '1px solid var(--theme-border)', padding: '24px 20px', overflowY: 'auto' }}>
             <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 10px' }}>
               {billingTab === 'writeoff' ? 'Complimentary slip preview' : 'Bill preview'} <Tip text="Live preview built from the same layout that actually prints — updates as you fill in the fields to the right. The invoice/NC number shown here is a placeholder; the real one is assigned when you confirm.">(live)</Tip>
             </p>
@@ -1376,7 +1504,8 @@ export default function PosOrders() {
               </p>
             )}
           </div>
-          <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', maxHeight: '90vh', padding: '24px 28px' }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '24px 28px' }}>
             <h3 style={{ margin: '0 0 4px', fontSize: 18, color: 'var(--theme-text1)' }}>
               {activeTable ? activeTable.name : 'Takeaway'}
             </h3>
@@ -1433,22 +1562,40 @@ export default function PosOrders() {
 
             {billingTab === 'pay' && (
               <>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                  {PAYMENT_METHODS.map(m => (
-                    <button key={m} onClick={() => setPayMethod(m)}
-                      className={`pay-method-btn${payMethod === m ? ' pay-method-btn--selected' : ''}`}>
-                      {m}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                  <Tip text={tenders.length > 0 ? 'Undo all tenders below first to switch back.' : 'Collect this bill with one payment method.'}>
+                    <button onClick={() => setSplitMode(false)} disabled={tenders.length > 0}
+                      className={`pay-method-btn${!splitMode ? ' pay-method-btn--selected' : ''}`}
+                      style={{ opacity: tenders.length > 0 ? 0.5 : 1, cursor: tenders.length > 0 ? 'not-allowed' : 'pointer' }}>
+                      Single Payment
                     </button>
-                  ))}
-                  {hasPosAccess('supervisor') && (
-                    <Tip text="Bill closes normally (counts as a sale, consumes an invoice number) but no payment is collected now — the customer owes this amount. Supervisor+ only. Collect it later from Customers → Outstanding Credit.">
-                      <button onClick={() => setPayMethod('Credit')}
-                        className={`pay-method-btn pay-method-btn--credit${payMethod === 'Credit' ? ' pay-method-btn--selected' : ''}`}>
-                        Credit
-                      </button>
-                    </Tip>
-                  )}
+                  </Tip>
+                  <Tip text="Collect this bill using more than one payment method — e.g. part eSewa, part cash. Not available with Credit.">
+                    <button onClick={() => { setSplitMode(true); setPayMethod('Cash'); setTenderMethod('Cash'); setTenderAmtStr('') }}
+                      className={`pay-method-btn${splitMode ? ' pay-method-btn--selected' : ''}`}>
+                      Split Payment
+                    </button>
+                  </Tip>
                 </div>
+
+                {!splitMode && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                    {PAYMENT_METHODS.map(m => (
+                      <button key={m} onClick={() => setPayMethod(m)}
+                        className={`pay-method-btn${payMethod === m ? ' pay-method-btn--selected' : ''}`}>
+                        {m}
+                      </button>
+                    ))}
+                    {hasPosAccess('supervisor') && (
+                      <Tip text="Bill closes normally (counts as a sale, consumes an invoice number) but no payment is collected now — the customer owes this amount. Supervisor+ only. Collect it later from Customers → Outstanding Credit.">
+                        <button onClick={() => setPayMethod('Credit')}
+                          className={`pay-method-btn pay-method-btn--credit${payMethod === 'Credit' ? ' pay-method-btn--selected' : ''}`}>
+                          Credit
+                        </button>
+                      </Tip>
+                    )}
+                  </div>
+                )}
 
                 <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
                   Discount <Tip text="Reduces the pre-VAT taxable amount — VAT is recalculated on the discounted base, matching standard invoice practice. Leave at 0 for no discount.">(optional)</Tip>
@@ -1485,36 +1632,99 @@ export default function PosOrders() {
                   </div>
                 )}
 
-                {payMethod === 'Cash' && (
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Tender</label>
-                      <input type="number" min="0" step="any" placeholder={payTotal.toFixed(0)}
-                        value={tenderedStr} onChange={e => setTenderedStr(e.target.value)} style={{ ...billInput, width: '100%' }} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Change</label>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>
-                        {fmtNpr(Math.max(0, (parseFloat(tenderedStr) || payTotal) - payTotal))}
+                {!splitMode ? (
+                  <>
+                    {payMethod === 'Cash' && (
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+                        <div style={{ flex: 1 }}>
+                          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Tender</label>
+                          <input type="number" min="0" step="any" placeholder={payTotal.toFixed(0)}
+                            value={tenderedStr} onChange={e => setTenderedStr(e.target.value)} style={{ ...billInput, width: '100%' }} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Change</label>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>
+                            {fmtNpr(Math.max(0, (parseFloat(tenderedStr) || payTotal) - payTotal))}
+                          </div>
+                        </div>
                       </div>
+                    )}
+                    {QR_PAY_METHODS.includes(payMethod) && billQrUrl && (
+                      <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8 }}>
+                        <img src={billQrUrl} alt="Scan to pay" style={{ width: 110, height: 110, background: '#fff', borderRadius: 6, padding: 4, flexShrink: 0 }} />
+                        <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.6 }}>
+                          Customer scans to pay <strong>{fmtNpr(payTotal)}</strong> — the amount arrives pre-filled and locked
+                          in their app, so it can't be mistyped. Confirm once you see the payment land on your merchant app.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                        <span style={{ color: 'var(--theme-text2)' }}>Remaining</span>
+                        <span style={{ fontWeight: 700, color: remaining > 0 ? 'var(--theme-amber)' : 'var(--theme-green)' }}>{fmtNpr(remaining)}</span>
+                      </div>
+                      {tenders.map((t, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0 0', marginTop: 5, borderTop: '1px solid var(--theme-border-lt)' }}>
+                          <span style={{ color: 'var(--theme-text2)' }}>{t.method}</span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{fmtNpr(t.amount)}</span>
+                            <Tip text="Prints a small courtesy slip for this payment only — not the Tax Invoice/PAN Bill, which still prints once at the end.">
+                              <button onClick={() => printHtml(buildTenderSlipHtml(t, payTotal - tenders.slice(0, i + 1).reduce((s, x) => s + x.amount, 0)))}
+                                style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
+                                🖨
+                              </button>
+                            </Tip>
+                            {i === tenders.length - 1 && (
+                              <button onClick={undoLastTender} style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 11, textDecoration: 'underline', padding: 0 }}>
+                                ↩ Undo
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  </div>
+
+                    {remaining > 0 && (
+                      <>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                          {PAYMENT_METHODS.map(m => (
+                            <button key={m} onClick={() => setTenderMethod(m)}
+                              className={`pay-method-btn${tenderMethod === m ? ' pay-method-btn--selected' : ''}`}>
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 6 }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Amount</label>
+                            <input type="number" min="0" step="any" placeholder={remaining.toFixed(0)}
+                              value={tenderAmtStr} onChange={e => setTenderAmtStr(e.target.value)}
+                              onKeyDown={e => e.key === 'Enter' && addTender()} style={{ ...billInput, width: '100%' }} />
+                          </div>
+                          <button className="btn btn-ghost" onClick={addTender} disabled={!(parseFloat(tenderAmtStr) > 0)}>
+                            + Add Tender
+                          </button>
+                        </div>
+                        {tenderMethod === 'Cash' && parseFloat(tenderAmtStr) > remaining && (
+                          <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 10px' }}>
+                            Change due: <strong>{fmtNpr(parseFloat(tenderAmtStr) - remaining)}</strong>
+                          </p>
+                        )}
+                        {QR_PAY_METHODS.includes(tenderMethod) && billQrUrl && (
+                          <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8 }}>
+                            <img src={billQrUrl} alt="Scan to pay" style={{ width: 100, height: 100, background: '#fff', borderRadius: 6, padding: 4, flexShrink: 0 }} />
+                            <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.6 }}>
+                              Customer scans to pay <strong>{fmtNpr(parseFloat(tenderAmtStr) || remaining)}</strong> for this portion.
+                            </p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
                 )}
-                {QR_PAY_METHODS.includes(payMethod) && billQrUrl && (
-                  <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8 }}>
-                    <img src={billQrUrl} alt="Scan to pay" style={{ width: 110, height: 110, background: '#fff', borderRadius: 6, padding: 4, flexShrink: 0 }} />
-                    <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.6 }}>
-                      Customer scans to pay <strong>{fmtNpr(payTotal)}</strong> — the amount arrives pre-filled and locked
-                      in their app, so it can't be mistyped. Confirm once you see the payment land on your merchant app.
-                    </p>
-                  </div>
-                )}
-                {closeMsg && <p style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
-                <button className="btn btn-primary" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
-                  onClick={() => closeOrder('paid')}
-                  disabled={closing || (discountAmt > 0 && !discountReason) || (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim()))}>
-                  {closing ? 'Processing…' : `Confirm Payment — ${fmtNpr(payTotal)}`}
-                </button>
               </>
             )}
 
@@ -1530,11 +1740,6 @@ export default function PosOrders() {
                     ⚠ Some items were already sent to the kitchen/bar — consider Complimentary instead so food cost isn't lost.
                   </p>
                 )}
-                {closeMsg && <p style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
-                <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-red)', color: '#fff', borderColor: 'var(--theme-red)' }}
-                  onClick={() => closeOrder('void')} disabled={closing || !closeReason}>
-                  {closing ? 'Processing…' : 'Void Order'}
-                </button>
               </>
             )}
 
@@ -1550,18 +1755,40 @@ export default function PosOrders() {
                   ₨0 is collected, but this still counts against food-cost/inventory reporting. Prints an internal
                   Complimentary Slip valued at food cost — not a Tax Invoice or PAN Bill, no outlet name shown.
                 </p>
-                {closeMsg && <p style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
-                <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-amber)', color: '#000', borderColor: 'var(--theme-amber)' }}
-                  onClick={() => closeOrder('writeoff')} disabled={closing || !closeReason}>
-                  {closing ? 'Processing…' : 'Mark Complimentary (₨0 collected)'}
-                </button>
               </>
             )}
+          </div>
 
-            <button className="btn btn-ghost" style={{ width: '100%', padding: '9px 0', justifyContent: 'center', marginTop: 14, fontSize: 13 }}
+          {/* Sticky footer — primary action + Cancel always reachable, independent of how tall the
+              scrollable content above gets (e.g. a long list of split-payment tenders). */}
+          <div style={{ flexShrink: 0, padding: '14px 28px 20px', borderTop: '1px solid var(--theme-border)' }}>
+            {closeMsg && <p style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
+            {billingTab === 'pay' && (
+              <button className="btn btn-primary" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
+                onClick={() => closeOrder('paid')}
+                disabled={closing || (splitMode && (remaining > 0 || tenders.length === 0)) || (discountAmt > 0 && !discountReason) || (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim()))}>
+                {closing ? 'Processing…'
+                  : splitMode ? (remaining > 0 ? `Remaining ${fmtNpr(remaining)}` : `Complete Order — ${fmtNpr(payTotal)}`)
+                  : `Confirm Payment — ${fmtNpr(payTotal)}`}
+              </button>
+            )}
+            {billingTab === 'void' && (
+              <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-red)', color: '#fff', borderColor: 'var(--theme-red)' }}
+                onClick={() => closeOrder('void')} disabled={closing || !closeReason}>
+                {closing ? 'Processing…' : 'Void Order'}
+              </button>
+            )}
+            {billingTab === 'writeoff' && (
+              <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-amber)', color: '#000', borderColor: 'var(--theme-amber)' }}
+                onClick={() => closeOrder('writeoff')} disabled={closing || !closeReason}>
+                {closing ? 'Processing…' : 'Mark Complimentary (₨0 collected)'}
+              </button>
+            )}
+            <button className="btn btn-ghost" style={{ width: '100%', padding: '9px 0', justifyContent: 'center', marginTop: 8, fontSize: 13 }}
               onClick={() => setBillingOpen(false)} disabled={closing}>
               Cancel
             </button>
+          </div>
           </div>
           </div>
         </div>

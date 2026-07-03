@@ -432,7 +432,7 @@ export default function Help() {
         </div>
         {isOpen && (
           <div style={{ padding: '0 18px 16px', borderTop: '1px solid var(--theme-border)' }}>
-            <p style={{ fontSize: 13, color: 'var(--theme-text2)', marginTop: 14, lineHeight: 1.75 }}>{feat.guide}</p>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', marginTop: 14, lineHeight: 1.75 }}>{feat.guide || feat.desc}</p>
             {feat.tips?.length > 0 && (
               <div style={{ marginTop: 12 }}>
                 <p style={{ fontSize: 10, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Tips</p>
@@ -688,6 +688,18 @@ export default function Help() {
                   ],
                 },
                 {
+                  icon: '🖨', name: 'Silent Printing Setup',
+                  desc: 'By default, every print in Crest POS (KOT/BOT tickets, bills, Complimentary Slips, Shift Opening/Cash Settlement slips) opens your browser\'s normal print dialog. On a dedicated till, you can skip that dialog entirely — the browser sends the job straight to the printer the moment Print fires. This is a one-time setup on each POS device, not something toggled inside the app.',
+                  tips: [
+                    'First, set your receipt/thermal printer as the Windows default printer (Settings → Printers & scanners) — silent printing always targets whatever the OS considers default, not whatever\'s selected inside Chrome',
+                    'Close every open Chrome window on the till, then edit (or recreate) the desktop shortcut used to launch Crest POS — right-click → Properties → Target — and append a `--kiosk-printing` flag after the .exe, e.g. "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing https://your-crest-url.com',
+                    'Optional: add `--kiosk` as well for a full-screen locked-down till (no address bar, no tabs) — not required just for silent printing, but common on dedicated POS terminals',
+                    'Microsoft Edge works the same way — same `--kiosk-printing` flag, launched from msedge.exe instead of chrome.exe',
+                    'Always launch the till from this shortcut, never a normal browser icon — a normal window still shows the print dialog even with the printer set as default',
+                    'This is a browser/OS setting, not a Crest feature — there is no in-app switch for it, and it cannot be configured remotely by Crest Admin',
+                  ],
+                },
+                {
                   icon: '₨', name: 'Menu Pricing', path: '/menu-pricing',
                   desc: 'Build your menu directly here — no Item Master or IMS setup needed on a POS-only plan. + Add Item takes a name, category, VAT status, menu price, and an optional Cost Price (what you pay to buy/produce it). Use the On POS toggle to control what shows on the order screen without deleting the item.',
                   tips: [
@@ -721,6 +733,7 @@ export default function Help() {
                     'The green ✓ KOT / ✓ BOT badge means the ticket for that item has already been sent to the station',
                     'KOT and BOT badges on the buttons show how many unsent items are waiting to be sent',
                     'Configure which categories go to KOT vs BOT in Table Management → Ticket Routing',
+                    'Use the search box above the category tabs to find an item by name — filters within whatever category tab is currently active',
                     'Every order gets a sequential order number (#1, #2, …) shown in the top bar and printed on each KOT/BOT ticket — kitchen, bar and bill all reference the same number',
                     'Printed tickets carry your outlet name and who took the order (Taken by), so the station knows who to call with questions',
                     'Ticket dates print in the Bikram Sambat (BS) calendar, matching the rest of the app',
@@ -734,7 +747,9 @@ export default function Help() {
                     'Buyer Name/Address/PAN/Phone on the Charge screen are optional — IRD allows omitting them for bills up to NPR 10,000, but fill them in if a customer requests a full invoice',
                     'Discount on the Pay tab supports a flat NPR amount or a percentage (toggle between ₨/%) — it reduces the pre-VAT taxable amount, with VAT recalculated on the discounted base, not just subtracted off the total',
                     'Applying any discount makes buyer Name and Phone compulsory (not just optional) and requires picking a Discount Reason — gives an identifiable, audited record of who received it. Customize the reason list in Table Management → Discounts',
-                    'Credit (red button, Supervisor role or above) closes the bill normally — it counts as a sale and consumes a Tax Invoice/Bill number — but no payment is collected now; the customer owes the amount. Buyer Name and Phone are compulsory, same as a discount. Collect it later from Customers → Outstanding Credit',
+                    'Credit (red button, Supervisor role or above) closes the bill normally — it counts as a sale and consumes a Tax Invoice/Bill number — but no payment is collected now; the customer owes the amount. Buyer Name and Phone are compulsory, same as a discount. Collect it later from Customers → Outstanding Credit. The printed bill adds a Customer Signature/Date line, same as the Complimentary Slip, so there\'s a signed record of the debt',
+                    'Split Payment: toggle from Single Payment to Split Payment on the Pay tab to collect one bill using more than one payment method (e.g. part eSewa, part cash) — add each tender\'s amount and method one at a time; a running Remaining balance tracks what\'s left, and cash change is calculated against that remaining balance, not the full bill. It\'s still one bill and one Tax Invoice/Bill number — only the collection is split, not the invoice. Not available with Credit. Only the most recent tender can be undone; to fix an earlier one, void the order and re-ring it',
+                    'Each split tender can print its own small courtesy slip (🖨 next to the tender) — proof of that person\'s payment while the table is still settling up. It is not the Tax Invoice/PAN Bill, which still only prints once, at the very end, listing every tender',
                     '📄 Recent Bills (floor view) lists everything closed today and lets you reprint a bill — the printout is labelled ORIGINAL-COPY the first time, SECOND-COPY the second, THIRD-COPY the third, and REPRINT #N after that (matches Nepal IRD\'s Rule 17 buyer/authority/seller copy terminology)',
                     'Scan-to-pay QR: once your admin pastes the outlet\'s merchant QR payload in Manage Clients → this client → QR tab, every bill carries a dynamic QR with that bill\'s exact amount pre-filled — the customer can\'t mistype it. The QR also appears in the Charge modal when eSewa/Khalti/FonePay is selected, updating live as discounts change. Payment confirmation is still manual — confirm once you see it land on your merchant app',
                   ],
