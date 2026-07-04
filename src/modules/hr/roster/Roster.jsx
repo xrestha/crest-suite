@@ -77,7 +77,7 @@ const INP = {
 
 // ── ShiftPicker dropdown ──────────────────────────────────────────────────────
 
-function ShiftPicker({ shifts, anchorRef, onSelect, onClose }) {
+function ShiftPicker({ shifts, anchorRef, onSelect, onClose, cellCount = 1 }) {
   const ref = useRef()
 
   useEffect(() => {
@@ -113,6 +113,12 @@ function ShiftPicker({ shifts, anchorRef, onSelect, onClose }) {
       borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
       minWidth: 200, overflow: 'hidden',
     }}>
+      {cellCount > 1 && (
+        <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--theme-text3)',
+          borderBottom: '1px solid var(--theme-border)', fontWeight: 600 }}>
+          Apply to {cellCount} cells
+        </div>
+      )}
       {active.map(s => {
         const hrs = s.hours ?? calcHours(s.start_time, s.end_time)
         return (
@@ -388,8 +394,44 @@ export default function Roster() {
   const [roster,     setRoster]     = useState({})
   const [loading,    setLoading]    = useState(true)
 
-  const [activeCell, setActiveCell] = useState(null)
-  const anchorRef = useRef(null)
+  // Letterhead info for the print header — fetched once per client
+  const [bizInfo, setBizInfo] = useState({ name: '', address: '' })
+  useEffect(() => {
+    if (!clientId) return
+    Promise.all([
+      supabase.from('clients').select('name').eq('id', clientId).single(),
+      supabase.from('settings').select('property_address').eq('client_id', clientId).maybeSingle(),
+    ]).then(([{ data: client }, { data: settings }]) => {
+      setBizInfo({ name: client?.name || '', address: settings?.property_address || '' })
+    })
+  }, [clientId])
+
+  // Drag-to-select: mousedown starts a selection anchor, mouseenter while dragging extends
+  // it, global mouseup finalizes and opens the shift picker for every cell in the rectangle —
+  // so assigning the same shift across a week (e.g. a multi-day Leave block) is one action
+  // instead of one click per day. A plain click is just a 1x1 selection, so this one path
+  // covers both single-cell and multi-cell assignment.
+  const [selection,  setSelection]  = useState(null) // {chunkIdx, anchorR, anchorC, curR, curC}
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const isDraggingRef = useRef(false)
+  const dragInfoRef   = useRef(null) // {chunkIdx, closingSameCell}
+  const anchorRef     = useRef(null)
+
+  useEffect(() => {
+    function onUp() {
+      if (!isDraggingRef.current) return
+      isDraggingRef.current = false
+      if (dragInfoRef.current?.closingSameCell) {
+        setSelection(null)
+        setPickerOpen(false)
+      } else {
+        setPickerOpen(true)
+      }
+      dragInfoRef.current = null
+    }
+    document.addEventListener('mouseup', onUp)
+    return () => document.removeEventListener('mouseup', onUp)
+  }, [])
 
   // ── Load shift types + employees (once per clientId) ───────────────────────
   useEffect(() => {
@@ -466,37 +508,49 @@ export default function Roster() {
 
   useEffect(() => { loadRoster() }, [loadRoster])
 
-  // ── Assign or clear a shift on one cell ───────────────────────────────────
-  async function assignShift(year, month, day, empId, shiftTypeId) {
-    if (!clientId) return
-    const key = rKey(year, month, day, empId)
-
-    // Capture existing before optimistic update
-    const existing = roster[key]
+  // ── Assign or clear a shift across every cell in the current selection ────
+  // A plain click is just a 1-cell selection, so this single path covers both.
+  async function assignShiftBulk(cells, shiftTypeId) {
+    if (!clientId || cells.length === 0) return
+    const existingRows = cells
+      .map(c => roster[rKey(c.year, c.month, c.day, c.empId)])
+      .filter(Boolean)
 
     // Optimistic update
     setRoster(prev => {
-      if (shiftTypeId === null) {
-        const next = { ...prev }
-        delete next[key]
-        return next
+      const next = { ...prev }
+      for (const c of cells) {
+        const key = rKey(c.year, c.month, c.day, c.empId)
+        if (shiftTypeId === null) {
+          delete next[key]
+        } else {
+          next[key] = { ...(next[key] || {}), shift_type_id: shiftTypeId, bs_year: c.year, bs_month: c.month, bs_day: c.day, employee_id: c.empId }
+        }
       }
-      return {
-        ...prev,
-        [key]: { ...(prev[key] || {}), shift_type_id: shiftTypeId, bs_year: year, bs_month: month, bs_day: day, employee_id: empId },
-      }
+      return next
     })
-    setActiveCell(null)
+    setSelection(null)
+    setPickerOpen(false)
 
     if (shiftTypeId === null) {
-      if (existing?.id) await supabase.from('hr_roster').delete().eq('id', existing.id)
+      const ids = existingRows.map(r => r.id).filter(Boolean)
+      if (ids.length > 0) await supabase.from('hr_roster').delete().in('id', ids)
     } else {
-      const { data } = await supabase.from('hr_roster').upsert({
-        client_id: clientId, employee_id: empId,
+      const rows = cells.map(c => ({
+        client_id: clientId, employee_id: c.empId,
         shift_type_id: shiftTypeId,
-        bs_year: year, bs_month: month, bs_day: day,
-      }, { onConflict: 'client_id,employee_id,bs_year,bs_month,bs_day' }).select().single()
-      if (data) setRoster(prev => ({ ...prev, [key]: data }))
+        bs_year: c.year, bs_month: c.month, bs_day: c.day,
+      }))
+      const { data } = await supabase.from('hr_roster')
+        .upsert(rows, { onConflict: 'client_id,employee_id,bs_year,bs_month,bs_day' })
+        .select()
+      if (data) {
+        setRoster(prev => {
+          const next = { ...prev }
+          for (const row of data) next[rKey(row.bs_year, row.bs_month, row.bs_day, row.employee_id)] = row
+          return next
+        })
+      }
     }
   }
 
@@ -580,12 +634,14 @@ export default function Roster() {
           }
           .roster-sticky { position: static !important; }
           .roster-wrap   { overflow: visible !important; }
-          .roster-cell   { border: 1px solid #ccc !important; }
+          /* Layout.css hides all <button> elements on print (.btn, button { display: none }) —
+             roster cells are buttons on screen for click/drag, so they need display restored here. */
+          .roster-cell   { display: flex !important; border: 1px solid #ccc !important; }
           .roster-cell.filled { background: #e8e8e8 !important; border-color: #888 !important; }
         }
       `}</style>
 
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title">Staff Roster</h1>
           <p className="page-subtitle">Plan weekly and monthly shift schedules for all staff</p>
@@ -608,7 +664,9 @@ export default function Roster() {
         <>
           {/* Print-only header */}
           <div className="print-only roster-print-header" style={{ marginBottom: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>Staff Roster — {periodLabel}</div>
+            {bizInfo.name && <div style={{ fontWeight: 700, fontSize: 15 }}>{bizInfo.name}</div>}
+            {bizInfo.address && <div style={{ fontSize: 11 }}>{bizInfo.address}</div>}
+            <div style={{ fontWeight: 700, fontSize: 16, marginTop: bizInfo.name ? 6 : 0 }}>Staff Roster — {periodLabel}</div>
             <div style={{ fontSize: 11, marginTop: 4, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
               {shiftTypes.filter(s => s.active !== false).map(s => {
                 const hrs = s.hours ?? calcHours(s.start_time, s.end_time)
@@ -683,6 +741,10 @@ export default function Roster() {
             </div>
           </div>
 
+          <p className="no-print" style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 10px' }}>
+            Tip: click and drag across cells to assign the same shift to multiple days at once.
+          </p>
+
           {/* Board */}
           {loading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
@@ -699,7 +761,7 @@ export default function Roster() {
                 const isLast = chunkIdx === colChunks.length - 1
                 return (
                   <div key={chunkIdx} className="card roster-board"
-                    style={{ padding: 0, marginBottom: !isLast ? 12 : 0 }}>
+                    style={{ padding: 0, marginBottom: !isLast ? 12 : 0, userSelect: selection ? 'none' : 'auto' }}>
                     <div className="table-wrap roster-wrap">
                       <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
                         <colgroup>
@@ -740,7 +802,7 @@ export default function Roster() {
                         </thead>
 
                         <tbody>
-                          {filteredEmps.map(emp => (
+                          {filteredEmps.map((emp, ri) => (
                             <tr key={emp.id} style={{ borderBottom: '1px solid var(--theme-border-lt)' }}>
                               <td className={STICKY_CLS} style={{ ...stickyCol, padding: '8px 14px', borderRight: '2px solid var(--theme-border)' }}>
                                 <div style={{ fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', fontSize: 13 }}>
@@ -756,10 +818,9 @@ export default function Roster() {
                                 const entry = roster[key]
                                 const shift = entry ? shiftMap[entry.shift_type_id] : null
                                 const hrs   = shift ? (shift.hours ?? calcHours(shift.start_time, shift.end_time)) : null
-                                const isAct = activeCell?.empId === emp.id &&
-                                              activeCell?.year  === col.bsYear &&
-                                              activeCell?.month === col.bsMonth &&
-                                              activeCell?.day   === col.bsDay
+                                const inSel = selection?.chunkIdx === chunkIdx &&
+                                              ri >= Math.min(selection.anchorR, selection.curR) && ri <= Math.max(selection.anchorR, selection.curR) &&
+                                              ci >= Math.min(selection.anchorC, selection.curC) && ci <= Math.max(selection.anchorC, selection.curC)
 
                                 return (
                                   <td key={ci} style={{
@@ -771,11 +832,23 @@ export default function Roster() {
                                       className={`roster-cell${shift ? ' filled' : ''}`}
                                       title={shift
                                         ? `${shift.name}${hrs != null ? ` · ${hrs}h` : ''}${shift.start_time ? ` · ${fmtTime(shift.start_time)}–${fmtTime(shift.end_time)}` : ''}`
-                                        : 'Assign shift'}
-                                      onClick={e => {
-                                        if (isAct) { setActiveCell(null); return }
+                                        : 'Assign shift — click and drag across cells to assign multiple at once'}
+                                      onMouseDown={e => {
+                                        e.preventDefault()
+                                        const closingSameCell = pickerOpen && selection &&
+                                          selection.chunkIdx === chunkIdx &&
+                                          selection.anchorR === ri && selection.anchorC === ci &&
+                                          selection.curR === ri && selection.curC === ci
+                                        isDraggingRef.current = true
+                                        dragInfoRef.current = { chunkIdx, closingSameCell }
                                         anchorRef.current = e.currentTarget
-                                        setActiveCell({ year: col.bsYear, month: col.bsMonth, day: col.bsDay, empId: emp.id })
+                                        setSelection({ chunkIdx, anchorR: ri, anchorC: ci, curR: ri, curC: ci })
+                                        setPickerOpen(false)
+                                      }}
+                                      onMouseEnter={e => {
+                                        if (!isDraggingRef.current || dragInfoRef.current?.chunkIdx !== chunkIdx) return
+                                        anchorRef.current = e.currentTarget
+                                        setSelection(prev => prev ? { ...prev, curR: ri, curC: ci } : prev)
                                       }}
                                       style={{
                                         width: '100%',
@@ -786,8 +859,9 @@ export default function Roster() {
                                         padding: viewMode === 'weekly' ? '6px 6px' : '2px',
                                         display: 'flex', flexDirection: 'column',
                                         alignItems: 'center', justifyContent: 'center', gap: 1,
-                                        outline: isAct ? '2px solid var(--theme-accent)' : 'none',
+                                        outline: inSel ? '2px solid var(--theme-accent)' : 'none',
                                         outlineOffset: -1,
+                                        userSelect: 'none',
                                       }}
                                     >
                                       {shift ? (
@@ -852,15 +926,33 @@ export default function Roster() {
             </>
           )}
 
-          {/* Shift picker dropdown */}
-          {activeCell && (
-            <ShiftPicker
-              shifts={shiftTypes}
-              anchorRef={anchorRef}
-              onSelect={shiftId => assignShift(activeCell.year, activeCell.month, activeCell.day, activeCell.empId, shiftId)}
-              onClose={() => setActiveCell(null)}
-            />
-          )}
+          {/* Shift picker dropdown — applies to every cell in the current selection rectangle */}
+          {pickerOpen && selection && (() => {
+            const rMin = Math.min(selection.anchorR, selection.curR)
+            const rMax = Math.max(selection.anchorR, selection.curR)
+            const cMin = Math.min(selection.anchorC, selection.curC)
+            const cMax = Math.max(selection.anchorC, selection.curC)
+            const chunkCols = colChunks[selection.chunkIdx] || []
+            const cells = []
+            for (let r = rMin; r <= rMax; r++) {
+              const emp = filteredEmps[r]
+              if (!emp) continue
+              for (let c = cMin; c <= cMax; c++) {
+                const col = chunkCols[c]
+                if (!col) continue
+                cells.push({ year: col.bsYear, month: col.bsMonth, day: col.bsDay, empId: emp.id })
+              }
+            }
+            return (
+              <ShiftPicker
+                shifts={shiftTypes}
+                anchorRef={anchorRef}
+                cellCount={cells.length}
+                onSelect={shiftId => assignShiftBulk(cells, shiftId)}
+                onClose={() => { setSelection(null); setPickerOpen(false) }}
+              />
+            )
+          })()}
         </>
       )}
     </div>
