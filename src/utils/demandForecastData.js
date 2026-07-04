@@ -181,6 +181,11 @@ export async function runForecast(clientId, horizonDays = 7) {
       }
     }
 
+    // Clear this client+horizon's previous run before writing the new one — demand_forecast_daily
+    // has no natural upsert key (recipe-level rows share a date), so without this, every recompute
+    // click stacks duplicate day-rows and loadStored's read-back non-deterministically picks
+    // between old and new values instead of always showing the latest run.
+    await supabase.from('demand_forecast_daily').delete().eq('client_id', clientId).eq('horizon_days', horizonDays)
     if (rows.length > 0) {
       await supabase.from('demand_forecast_daily').insert(rows)
     }

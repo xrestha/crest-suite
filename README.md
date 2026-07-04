@@ -132,6 +132,14 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S244 — 2026-07-04 — Demand Forecast: fixed duplicate rows on every Recompute click
+
+Live-testing after S242 shipped surfaced a 3rd bug: some forecast days showed a literal "NPR 0" (not the expected "—" or "≈" estimate) even after the S242 basis-tagging fix was live. Root cause: `runForecast()` only ever **inserted** into `demand_forecast_daily`, with no delete of the previous run's rows first. Every "Recompute Forecast" click during testing (including runs from before the S242 fix) stacked another full set of day-rows on top of the old ones. `loadStored()`'s read-back has no natural upsert key for the covers-level row per day, so it just overwrites as it loops through whatever order Postgres returns — meaning an old pre-fix row (with the original false-zero bug baked in) could win over the freshly-computed correct one, non-deterministically per day.
+
+Fixed by deleting this client's rows for the target horizon before writing the new batch: `await supabase.from('demand_forecast_daily').delete().eq('client_id', clientId).eq('horizon_days', horizonDays)` immediately before the insert in `runForecast()`. This only prevents future duplication — the rows already stacked up from prior test runs needed a one-time manual cleanup (`DELETE FROM demand_forecast_daily WHERE client_id = '...'`) before the next Recompute produced a clean result.
+
+**Files:** `src/utils/demandForecastData.js`.
+
 ### S243 — 2026-07-04 — Print filename fix applied to every print button, all 3 modules (IMS + HR + POS)
 
 The `document.title`-before-print fix built for Demand Forecast (S242) had the same root cause everywhere: 20 other print buttons across IMS, HR, and POS all called `window.print()` directly, so every one of them also defaulted to "Crest Inventory" in the browser's "Save as PDF" dialog. Extracted the fix into a shared `src/utils/printTitle.js` (`printWithTitle(title)`) — one canonical implementation instead of 21 copies — and pointed every print button at it (including refactoring `DemandForecast.js`'s own bespoke version to use the shared one).
