@@ -247,14 +247,14 @@ const HR_FEATURES = [
   },
   {
     icon: '📋', name: 'Roster',
-    guide: 'Plan weekly or monthly staff shifts. Two view modes: Monthly (pick a BS month, click any cell to assign a shift for that employee on that day) and Weekly (7-day grid centred on the selected week). Built-in shifts — Morning, Afternoon, Evening, Night, Full Day, Split — each colour-coded; right-click a cell for a quick action menu or click the + / × icons. An employee can have multiple shifts on the same day. The Shifts tab lets you customise shift names, times, and colours. Export to Excel to share or print the schedule.',
+    guide: 'Plan weekly or monthly staff shifts. Two view modes: Monthly (pick a BS month; the board splits into two halves — days 1–16 and 17–end — so nothing overflows) and Weekly (7-day grid centred on the selected week). Click a cell to assign a shift, or click-and-drag across a rectangle of cells (multiple days, multiple staff, or both) to assign the same shift to all of them in one action — useful for a multi-day Leave block or a whole week of the same shift. The Shifts tab lets you customise shift names, times, colours, and hours. Print the schedule with a Company Name/Address letterhead for department heads.',
     tips: [
       'Plan the roster before the month starts — it helps forecast labour cost and avoids scheduling conflicts',
       'Roster is for planning only — Attendance is the official record that feeds payroll',
-      'Right-click a cell (or use the inline icons) to assign or clear a shift quickly',
-      'An employee can carry more than one shift on the same day — useful for split shifts',
-      'The Shifts tab lets you rename and recolour any shift to match your venue\'s terminology',
-      'Use Export Excel to share the printed schedule with department heads',
+      'Click and drag across cells to assign the same shift to multiple days/staff at once, instead of one click per cell',
+      'Each employee can only have one shift per day — assigning a new one replaces whatever was there before',
+      'The Shifts tab lets you rename, recolour, and adjust the hours of any shift to match your venue\'s terminology',
+      '🖨 Print shows the Company Name/Address, the period, and the shift legend above the board — no Excel export, print/Save-as-PDF only',
     ]
   },
   {

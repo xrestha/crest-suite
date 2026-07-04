@@ -132,6 +132,48 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S241 — 2026-07-04 — Phase 0 foundation for the 9-feature cross-module build (Forecasting, Labor Scheduling, QR Menu/Loyalty, KDS, Digital Receipts + 4 Tier-3 reports)
+
+Kicked off the founder-approved cross-module roadmap (see the plan doc for full feature-by-feature design). Phase 0 is small, additive infra that several downstream features depend on — none of it touches the fragile `PosOrders.jsx` billing hot path.
+
+**`src/utils/bsCalendar.js`** — added `bsAddDays(bsYear, bsMonth, bsDay, n)` and `bsDiffDays(y1,m1,d1,y2,m2,d2)`, both built on the existing `bsToAd`/`adToBs` (convert to AD, add/diff in AD space, convert back) rather than reimplementing BS month-length math. Needed by Demand Forecasting (D+30 horizons cross month boundaries) and the upcoming Cash-Flow Forecast (30-day bucketing).
+
+**`src/utils/phone.js`** (new) — `normalizePhone(raw)` strips non-digits, a leading `977` country code, and leading zeros, returning `null` if under 7 digits. `buyer_phone` on `pos_orders` has zero format validation today (raw free text), so this gives Loyalty/RFM/Digital-Receipts a consistent matching key.
+
+**DB migration required (NOT YET RUN):**
+```sql
+-- pos_customers.phone_canonical — mirrors src/utils/phone.js's normalizePhone() stripping
+-- logic (minus its <7-digit NULL guard, which only matters for validating new input, not
+-- for a lookup/join key) so existing rows get a canonical key with zero app-code changes
+-- to the PosOrders.jsx bill-close upsert.
+ALTER TABLE pos_customers ADD COLUMN IF NOT EXISTS phone_canonical text
+  GENERATED ALWAYS AS (
+    regexp_replace(
+      CASE
+        WHEN regexp_replace(phone, '\D', '', 'g') ~ '^977.{8,}'
+          THEN substring(regexp_replace(phone, '\D', '', 'g') from 4)
+        ELSE regexp_replace(phone, '\D', '', 'g')
+      END,
+      '^0+', ''
+    )
+  ) STORED;
+CREATE INDEX IF NOT EXISTS idx_pos_customers_phone_canonical ON public.pos_customers (phone_canonical);
+```
+
+**`src/utils/edgeFunctions.js`** (new) — `invokeEdge(name, action, params)` generalizes the try/catch/error-unwrap logic that was previously duplicated ad hoc as a private `edgeOp()` helper in `Login.js`. `Login.js`'s own `edgeOp` is unchanged (not worth the churn of switching a working call site); new Edge Function work (Digital Receipts' `send-receipt`) uses the shared version instead of copy-pasting a third time.
+
+**Files:** `src/utils/bsCalendar.js`, `src/utils/phone.js` (new), `src/utils/edgeFunctions.js` (new)
+
+### S240 — 2026-07-04 — Roster: drag-to-select bulk shift assign + print fixes
+
+Replaced the old single-cell shift picker (`activeCell` state, `assignShift`) with click-and-drag rectangle selection across the roster board — mousedown anchors a selection, mouseenter while dragging extends it, global mouseup opens the shift picker once for the whole rectangle (`assignShiftBulk`, upserting one row per selected cell). A plain click is just a 1×1 selection, so this single path now covers both single- and multi-cell assignment — e.g. dragging across a week assigns "Leave" to every day in one action instead of one click per day.
+
+**Print bug fixed:** `Layout.css` has a global `.btn, button { display: none !important; }` print rule (meant to hide UI action buttons like Edit/Delete/+Add). Since each roster shift cell is a `<button className="roster-cell">` on screen (needed for the click/drag interaction), that same rule was wiping out every cell's content on print — shift name, time, and hours all vanished, leaving blank bordered boxes. Fixed by adding `display: flex !important` to the existing `.roster-cell` print rule — a class selector always beats a bare element selector regardless of stylesheet order, so this restores the button's layout deterministically.
+
+**Print header cleanup:** the generic page title + "Plan weekly and monthly shift schedules for all staff" subtitle (app-navigation chrome, not useful on a printed schedule) is now `no-print`. Print header instead shows a Company Name/Address letterhead (new `bizInfo` state, `clients.name` + `settings.property_address`, fetched once per client — same convention as `SalesReport.jsx`'s `withLetterhead`) followed by the period label and the existing shift-type legend, left unchanged per Aashish's request.
+
+**Files:** `src/modules/hr/roster/Roster.jsx`
+
 ### S239 — 2026-07-04 — KOT Log: Bill Trail tab (complete bill ↔ KOT/BOT audit view)
 
 Reconciliation only surfaces exceptions (mismatches, voids) — Aashish wanted a complete view of every paid/voided bill and its full KOT/BOT history, not just the flagged ones, including bills that never sent anything to the kitchen at all. No schema change needed — `pos_kot_log.order_id` already links everything.

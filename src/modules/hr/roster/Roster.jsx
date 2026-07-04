@@ -620,10 +620,14 @@ export default function Roster() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div>
+    <div className="roster-print-page">
       <style>{`
         @media print {
           @page { size: A4 landscape; margin: 12mm 10mm; }
+          /* Some browsers' print dialogs let the user override @page margins with "None" —
+             bake real padding into the content itself so there's always visible whitespace
+             around the edge regardless of that setting. */
+          .roster-print-page { padding: 8mm 10mm !important; }
           .roster-print-header, .roster-print-header *,
           .roster-board, .roster-board * {
             background: #fff !important;
