@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSettings } from '../context/SettingsContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
+import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { useTheme, PRESETS } from '../context/ThemeContext'
 import Tip from '../components/Tip'
 
@@ -16,6 +17,7 @@ function deriveInvoicePrefix(name) {
 export default function Settings() {
   const { settings, saveSettings, loadSettings, recipeCategories } = useSettings()
   const { clientId, isAdmin, hasFeature } = useAuth()
+  const { scopedFrom, scopedUpdate } = useScopedDb()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
   const ADMIN_TABS = new Set(['Branding', 'Property', 'Contact', 'Theme', 'Data'])
   const CLIENT_HIDDEN = new Set(['Contact', 'Branding', 'Property', 'Data'])
@@ -130,17 +132,14 @@ export default function Settings() {
         await saveSettings({ ...form, item_code_prefix: prefix })
       }
 
-      const { data: items, error: fetchErr } = await supabase
-        .from('items')
-        .select('id, name')
-        .eq('client_id', clientId)
+      const { data: items, error: fetchErr } = await scopedFrom('items', 'id, name')
         .order('name')
 
       if (fetchErr) throw fetchErr
 
       for (let i = 0; i < (items || []).length; i++) {
         const code = `${prefix}-${String(i + 1).padStart(3, '0')}`
-        await supabase.from('items').update({ item_code: code }).eq('id', items[i].id)
+        await scopedUpdate('items', { item_code: code }).eq('id', items[i].id)
       }
 
       setRegenerateMsg(`✓ Renumbered ${items?.length || 0} items as ${prefix}-001 through ${prefix}-${String(items?.length || 0).padStart(3, '0')}`)
@@ -164,17 +163,14 @@ export default function Settings() {
         await saveSettings({ ...form, vendor_code_prefix: prefix })
       }
 
-      const { data: vendors, error: fetchErr } = await supabase
-        .from('vendors')
-        .select('id, name')
-        .eq('client_id', clientId)
+      const { data: vendors, error: fetchErr } = await scopedFrom('vendors', 'id, name')
         .order('name')
 
       if (fetchErr) throw fetchErr
 
       for (let i = 0; i < (vendors || []).length; i++) {
         const code = `${prefix}-${String(i + 1).padStart(3, '0')}`
-        await supabase.from('vendors').update({ vendor_code: code }).eq('id', vendors[i].id)
+        await scopedUpdate('vendors', { vendor_code: code }).eq('id', vendors[i].id)
       }
 
       setRegenerateMsgVnd(`✓ Renumbered ${vendors?.length || 0} vendors as ${prefix}-001 through ${prefix}-${String(vendors?.length || 0).padStart(3, '0')}`)
@@ -198,10 +194,7 @@ export default function Settings() {
         await saveSettings({ ...form, sub_recipe_code_prefix: prefix })
       }
 
-      const { data: subRecipes, error: fetchErr } = await supabase
-        .from('recipes')
-        .select('id, name')
-        .eq('client_id', clientId)
+      const { data: subRecipes, error: fetchErr } = await scopedFrom('recipes', 'id, name')
         .eq('category', 'Sub-Recipe')
         .order('name')
 
@@ -209,7 +202,7 @@ export default function Settings() {
 
       for (let i = 0; i < (subRecipes || []).length; i++) {
         const code = `${prefix}-${String(i + 1).padStart(3, '0')}`
-        await supabase.from('recipes').update({ recipe_code: code }).eq('id', subRecipes[i].id)
+        await scopedUpdate('recipes', { recipe_code: code }).eq('id', subRecipes[i].id)
       }
 
       setRegenerateMsgSrc(`✓ Renumbered ${subRecipes?.length || 0} sub-recipes as ${prefix}-001 through ${prefix}-${String(subRecipes?.length || 0).padStart(3, '0')}`)

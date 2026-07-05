@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
+import { scopedInsert as scopedInsertRaw, scopedUpdate as scopedUpdateRaw } from '../shared/scopedDb'
+import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { getBsToday } from '../utils/bsCalendar'
 import { useNavigate } from 'react-router-dom'
 import Tip from '../components/Tip'
@@ -12,6 +14,7 @@ const BS_MONTHS = [
 
 export default function Periods() {
   const { isAdmin, clientId, switchAdminClient } = useAuth()
+  const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
   const [periods, setPeriods] = useState([])
   const [loading, setLoading] = useState(true)
@@ -37,7 +40,6 @@ export default function Periods() {
   const [editAllError, setEditAllError] = useState('')
   const [savingAll, setSavingAll] = useState(false)
 
-  const effectiveClientId = clientId
   const bsToday = getBsToday()
 
   useEffect(() => {
@@ -69,8 +71,8 @@ export default function Periods() {
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
     if (!window.confirm(`Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} and open ${BS_MONTHS[nextMonth - 1]} ${nextYear}?`)) return
     setActionClientId(cid)
-    await supabase.from('monthly_periods').update({ status: 'closed' }).eq('id', period.id)
-    await supabase.from('monthly_periods').insert({ client_id: cid, bs_year: nextYear, bs_month: nextMonth, status: 'open' })
+    await scopedUpdateRaw('monthly_periods', cid, { status: 'closed' }).eq('id', period.id)
+    await scopedInsertRaw('monthly_periods', cid, { bs_year: nextYear, bs_month: nextMonth, status: 'open' })
     await loadAllClientPeriods()
     setActionClientId(null)
   }
@@ -78,7 +80,7 @@ export default function Periods() {
   async function adminEndPeriod(period, cid) {
     if (!window.confirm(`End ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} for this client without starting a new period?\n\nThe client will be blocked from recording data until a new period is created.`)) return
     setActionClientId(cid)
-    await supabase.from('monthly_periods').update({ status: 'closed' }).eq('id', period.id)
+    await scopedUpdateRaw('monthly_periods', cid, { status: 'closed' }).eq('id', period.id)
     await loadAllClientPeriods()
     setActionClientId(null)
   }
@@ -89,10 +91,10 @@ export default function Periods() {
       p => p.bs_year === bsToday.year && p.bs_month === bsToday.month
     )
     if (existing) {
-      await supabase.from('monthly_periods').update({ status: 'open' }).eq('id', existing.id)
+      await scopedUpdateRaw('monthly_periods', cid, { status: 'open' }).eq('id', existing.id)
     } else {
-      const { error } = await supabase.from('monthly_periods').insert({
-        client_id: cid, bs_year: bsToday.year, bs_month: bsToday.month, status: 'open'
+      const { error } = await scopedInsertRaw('monthly_periods', cid, {
+        bs_year: bsToday.year, bs_month: bsToday.month, status: 'open'
       })
       if (error) alert(error.message)
     }
@@ -108,7 +110,7 @@ export default function Periods() {
     const duplicate = (allClientPeriods[cid] || []).find(p => p.id !== periodId && p.bs_year === year && p.bs_month === month)
     if (duplicate) { setEditAllError('A period for this month already exists.'); return }
     setSavingAll(true)
-    const { error } = await supabase.from('monthly_periods').update({ bs_year: year, bs_month: month }).eq('id', periodId).eq('status', 'open')
+    const { error } = await scopedUpdateRaw('monthly_periods', cid, { bs_year: year, bs_month: month }).eq('id', periodId).eq('status', 'open')
     if (error) { setEditAllError(error.message.includes('unique') ? 'A period for this month already exists.' : error.message) }
     else { setEditingAllClientId(null); await loadAllClientPeriods() }
     setSavingAll(false)
@@ -116,10 +118,7 @@ export default function Periods() {
 
   async function loadPeriods() {
     setLoading(true)
-    const { data } = await supabase
-      .from('monthly_periods')
-      .select('*')
-      .eq('client_id', effectiveClientId)
+    const { data } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
     setPeriods(data || [])
@@ -130,8 +129,7 @@ export default function Periods() {
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before creating a period.'); return }
     setError('')
     setCreating(true)
-    const { error } = await supabase.from('monthly_periods').insert({
-      client_id: clientId,
+    const { error } = await scopedInsert('monthly_periods', {
       bs_year: parseInt(form.bs_year),
       bs_month: parseInt(form.bs_month),
       status: 'open'
@@ -151,9 +149,8 @@ export default function Periods() {
     if (!window.confirm(
       `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} and open ${BS_MONTHS[nextMonth - 1]} ${nextYear}?`
     )) return
-    await supabase.from('monthly_periods').update({ status: 'closed' }).eq('id', period.id)
-    const { error } = await supabase.from('monthly_periods').insert({
-      client_id: effectiveClientId,
+    await scopedUpdate('monthly_periods', { status: 'closed' }).eq('id', period.id)
+    const { error } = await scopedInsert('monthly_periods', {
       bs_year: nextYear,
       bs_month: nextMonth,
       status: 'open'
@@ -165,7 +162,7 @@ export default function Periods() {
   }
 
   async function reopenPeriod(id) {
-    await supabase.from('monthly_periods').update({ status: 'open' }).eq('id', id)
+    await scopedUpdate('monthly_periods', { status: 'open' }).eq('id', id)
     loadPeriods()
   }
 
@@ -200,9 +197,7 @@ export default function Periods() {
     }
 
     setSaving(true)
-    const { error } = await supabase
-      .from('monthly_periods')
-      .update({ bs_year: year, bs_month: month })
+    const { error } = await scopedUpdate('monthly_periods', { bs_year: year, bs_month: month })
       .eq('id', id)
       .eq('status', 'open') // safety guard — DB-level protection
 
