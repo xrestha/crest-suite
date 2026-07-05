@@ -257,7 +257,7 @@ const HR_FEATURES = [
   },
   {
     icon: '📋', name: 'Roster',
-    guide: 'Plan weekly or monthly staff shifts. Two view modes: Monthly (pick a BS month; the board splits into two halves — days 1–16 and 17–end — so nothing overflows) and Weekly (7-day grid centred on the selected week). Click a cell to assign a shift, or click-and-drag across a rectangle of cells (multiple days, multiple staff, or both) to assign the same shift to all of them in one action — useful for a multi-day Leave block or a whole week of the same shift. The Shifts tab lets you customise shift names, times, colours, and hours. Print the schedule with a Company Name/Address letterhead for department heads. In Weekly view, if Demand Forecast has been run, the board also shows a Forecast Revenue and Planned Labor Cost row under each day (Planned Labor Cost = scheduled hours × each employee\'s resolved pay rate — a live estimate, not a payroll run), plus a banner calling out the week\'s busiest forecasted day with a recommended headcount and whether you\'re currently short-staffed against it.',
+    guide: 'Plan weekly or monthly staff shifts. Three tabs: Roster Board (the schedule itself), Shift Types (customise shift names, times, colours, hours), and Labor Forecast (demand-forecast overlay — see below). Two view modes on the board: Monthly (pick a BS month; the board splits into two halves — days 1–16 and 17–end — so nothing overflows) and Weekly (7-day grid centred on the selected week). Click a cell to assign a shift, or click-and-drag across a rectangle of cells (multiple days, multiple staff, or both) to assign the same shift to all of them in one action — useful for a multi-day Leave block or a whole week of the same shift. Print the schedule with a Company Name/Address letterhead for department heads — the Board only prints the shift assignments, never any labor-cost data.',
     tips: [
       'Plan the roster before the month starts — it helps forecast labour cost and avoids scheduling conflicts',
       'Roster is for planning only — Attendance is the official record that feeds payroll',
@@ -265,9 +265,10 @@ const HR_FEATURES = [
       'Each employee can only have one shift per day — assigning a new one replaces whatever was there before',
       'The Shifts tab lets you rename, recolour, and adjust the hours of any shift to match your venue\'s terminology',
       '🖨 Print shows the Company Name/Address, the period, and the shift legend above the board — no Excel export, print/Save-as-PDF only',
-      'Forecast Revenue/Planned Labor Cost rows only appear in Weekly view and only for days that already have a Demand Forecast — run/refresh that on the Demand Forecast page first',
-      'Recommended headcount = forecasted covers ÷ Covers/Staff target (editable in the banner, saved per client, default 20) — a starting estimate, not a hard rule',
-      'The Labor Cost % under the NPR figure turns amber above 35% of that day\'s forecasted revenue',
+      'Labor Forecast tab: one row per day (Weekly or Monthly, same navigation as the Board) showing Scheduled Hours, Forecast Revenue, Planned Labor Cost, Cost %, Recommended Staff, Scheduled Staff, and a Covered/Short status badge — deliberately kept off the Board and out of print since it\'s management-only data, not something to hand to staff',
+      'A day shows "—" for forecast columns until Demand Forecast has been run/refreshed for that date on the Demand Forecast page',
+      'Recommended Staff = forecasted covers ÷ Covers/Staff target (editable on the Labor Forecast tab, saved per client, default 20) — a starting estimate, not a hard rule',
+      'Cost % turns amber above 35% of that day\'s forecasted revenue',
     ]
   },
   {

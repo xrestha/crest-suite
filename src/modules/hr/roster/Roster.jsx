@@ -656,20 +656,17 @@ export default function Roster() {
     ? weekLabel
     : `${BS_MONTHS[bsMonth - 1]} ${bsYear}`
 
-  // Busiest forecasted day this week (weekly view only — see summary banner below the controls).
-  // Recommended headcount vs. who's actually scheduled that day, so a gap is visible before the
-  // week starts, not discovered mid-shift.
-  const busiestDay = viewMode === 'weekly' ? (() => {
-    let best = null
-    for (const col of columns) {
-      const f = forecastByDay[`${col.bsYear}:${col.bsMonth}:${col.bsDay}`]
-      if (f?.covers != null && (!best || f.covers > best.covers)) best = { col, covers: f.covers }
-    }
-    if (!best) return null
-    const scheduledCount = filteredEmps.filter(emp => roster[rKey(best.col.bsYear, best.col.bsMonth, best.col.bsDay, emp.id)]).length
-    const recommended = computeRecommendedHeadcount(best.covers, coversPerStaffTarget)
-    return { ...best, scheduledCount, recommended }
-  })() : null
+  // Per-day labor-forecast rows for the Labor Forecast tab — one row per visible column,
+  // combining scheduled hours/cost (from the roster) with the demand forecast (if any).
+  const laborForecastRows = columns.map(col => {
+    const f = forecastByDay[`${col.bsYear}:${col.bsMonth}:${col.bsDay}`]
+    const scheduledHrs   = dayHrs(col)
+    const plannedCost    = dayLaborCost(col)
+    const scheduledCount = filteredEmps.filter(emp => roster[rKey(col.bsYear, col.bsMonth, col.bsDay, emp.id)]).length
+    const recommended    = computeRecommendedHeadcount(f?.covers, coversPerStaffTarget)
+    const costPct        = f?.revenue > 0 ? (plannedCost / f.revenue) * 100 : null
+    return { col, scheduledHrs, plannedCost, scheduledCount, recommended, costPct, forecastRevenue: f?.revenue ?? null, forecastCovers: f?.covers ?? null }
+  })
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -709,6 +706,7 @@ export default function Roster() {
       <div className="tab-bar no-print" style={{ marginBottom: 20 }}>
         <button className={`tab-btn${tab === 'board'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('board')}>Roster Board</button>
         <button className={`tab-btn${tab === 'shifts' ? ' tab-btn--active' : ''}`} onClick={() => setTab('shifts')}>Shift Types</button>
+        <button className={`tab-btn${tab === 'labor'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('labor')}>Labor Forecast</button>
       </div>
 
       {/* ── Shift Settings tab ── */}
@@ -801,39 +799,6 @@ export default function Roster() {
           <p className="no-print" style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 10px' }}>
             Tip: click and drag across cells to assign the same shift to multiple days at once.
           </p>
-
-          {busiestDay && (
-            <div className="no-print card" style={{
-              padding: '10px 16px', marginBottom: 14, display: 'flex', alignItems: 'center',
-              gap: 10, flexWrap: 'wrap', fontSize: 12.5,
-              borderColor: busiestDay.scheduledCount < busiestDay.recommended ? 'rgba(245,158,11,0.4)' : 'var(--theme-border)',
-            }}>
-              <span style={{ fontWeight: 700, color: 'var(--theme-text1)' }}>
-                📈 Busiest forecasted day: {WEEKDAYS[bsToAd(busiestDay.col.bsYear, busiestDay.col.bsMonth, busiestDay.col.bsDay).getDay()]} {busiestDay.col.sublabel}
-              </span>
-              <span style={{ color: 'var(--theme-text2)' }}>~{Math.round(busiestDay.covers)} covers forecasted</span>
-              <span style={{ color: 'var(--theme-text2)' }}>
-                <Tip text={`Ceil(forecasted covers ÷ Covers/Staff target). Edit the target below.`}>
-                  Recommended {busiestDay.recommended} staff
-                </Tip>
-              </span>
-              <span style={{
-                fontWeight: 600,
-                color: busiestDay.scheduledCount < busiestDay.recommended ? 'var(--theme-amber)' : 'var(--theme-green)',
-              }}>
-                Scheduled: {busiestDay.scheduledCount}
-                {busiestDay.scheduledCount < busiestDay.recommended ? ' ⚠ short-staffed vs. forecast' : ' ✓'}
-              </span>
-              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Tip text="Target covers each staff member can comfortably serve — used to compute the recommended headcount above. Saved per client.">
-                  <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Covers/Staff target</span>
-                </Tip>
-                <input type="number" min="1" step="1" defaultValue={coversPerStaffTarget}
-                  onBlur={e => saveCoversPerStaffTarget(e.target.value)}
-                  className="form-select" style={{ width: 56, padding: '3px 6px', fontSize: 12 }} />
-              </div>
-            </div>
-          )}
 
           {/* Board */}
           {loading ? (
@@ -1007,47 +972,6 @@ export default function Roster() {
                             })}
                             {isLast && <td />}
                           </tr>
-
-                          {viewMode === 'weekly' && (
-                            <>
-                              <tr style={{ background: 'var(--theme-bg)' }}>
-                                <td className={STICKY_CLS} style={{ ...stickyCol, background: 'var(--theme-bg)', padding: '6px 14px',
-                                  fontSize: 11, color: 'var(--theme-text3)', fontWeight: 600,
-                                  borderRight: '2px solid var(--theme-border)' }}>
-                                  <Tip text="Forecasted revenue for this day, from Demand Forecast — run/update it on the Demand Forecast page." width={220}>Forecast Revenue</Tip>
-                                </td>
-                                {cols.map((col, i) => {
-                                  const rev = forecastByDay[`${col.bsYear}:${col.bsMonth}:${col.bsDay}`]?.revenue
-                                  return (
-                                    <td key={i} style={{ textAlign: 'center', padding: '6px 2px', fontSize: 10.5, color: rev != null ? 'var(--theme-text2)' : 'var(--theme-border)' }}>
-                                      {rev != null ? fmtNpr(rev) : '—'}
-                                    </td>
-                                  )
-                                })}
-                                {isLast && <td />}
-                              </tr>
-                              <tr style={{ background: 'var(--theme-bg)' }}>
-                                <td className={STICKY_CLS} style={{ ...stickyCol, background: 'var(--theme-bg)', padding: '6px 14px 10px',
-                                  fontSize: 11, color: 'var(--theme-text3)', fontWeight: 600,
-                                  borderRight: '2px solid var(--theme-border)' }}>
-                                  <Tip text="Scheduled staff hours that day × each employee's resolved hourly rate (monthly/daily/hourly pay basis) — a live estimate, not the payroll engine." width={260}>Planned Labor Cost</Tip>
-                                </td>
-                                {cols.map((col, i) => {
-                                  const cost = dayLaborCost(col)
-                                  const rev  = forecastByDay[`${col.bsYear}:${col.bsMonth}:${col.bsDay}`]?.revenue
-                                  const pct  = rev > 0 ? (cost / rev) * 100 : null
-                                  return (
-                                    <td key={i} style={{ textAlign: 'center', padding: '6px 2px 10px', fontSize: 10.5,
-                                      color: cost > 0 ? (pct != null && pct > 35 ? 'var(--theme-amber)' : 'var(--theme-text2)') : 'var(--theme-border)' }}>
-                                      {cost > 0 ? fmtNpr(cost) : '—'}
-                                      {pct != null && <div style={{ fontSize: 9 }}>{pct.toFixed(0)}%</div>}
-                                    </td>
-                                  )
-                                })}
-                                {isLast && <td />}
-                              </tr>
-                            </>
-                          )}
                         </tfoot>
                       </table>
                     </div>
@@ -1085,6 +1009,99 @@ export default function Roster() {
             )
           })()}
         </>
+      )}
+
+      {/* ── Labor Forecast tab — kept separate from the Roster Board so this management-only
+          data never bleeds into the printed schedule handed to staff ── */}
+      {tab === 'labor' && (
+        <div className="no-print">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 16 }}>
+            <div className="tab-bar" style={{ marginBottom: 0 }}>
+              <button className={`tab-btn${viewMode === 'weekly'  ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('weekly')}>Weekly</button>
+              <button className={`tab-btn${viewMode === 'monthly' ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('monthly')}>Monthly</button>
+            </div>
+
+            {viewMode === 'weekly' ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                  onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d) }}>‹</button>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 210, textAlign: 'center' }}>{weekLabel}</span>
+                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                  onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d) }}>›</button>
+                <button className="btn btn-ghost" style={{ fontSize: 11 }}
+                  onClick={() => setWeekStart(weekSunday(new Date()))}>Today</button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                  onClick={() => { if (bsMonth === 1) { setBsYear(y => y - 1); setBsMonth(12) } else setBsMonth(m => m - 1) }}>‹</button>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 150, textAlign: 'center' }}>{BS_MONTHS[bsMonth - 1]} {bsYear}</span>
+                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                  onClick={() => { if (bsMonth === 12) { setBsYear(y => y + 1); setBsMonth(1) } else setBsMonth(m => m + 1) }}>›</button>
+                <button className="btn btn-ghost" style={{ fontSize: 11 }}
+                  onClick={() => { setBsYear(today.year); setBsMonth(today.month) }}>This Month</button>
+              </div>
+            )}
+
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Tip text="Target covers each staff member can comfortably serve — used to compute Recommended Staff below. Saved per client.">
+                <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Covers/Staff target</span>
+              </Tip>
+              <input type="number" min="1" step="1" defaultValue={coversPerStaffTarget}
+                onBlur={e => saveCoversPerStaffTarget(e.target.value)}
+                className="form-select" style={{ width: 56, padding: '3px 6px', fontSize: 12 }} />
+            </div>
+          </div>
+
+          <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 14px' }}>
+            Scheduled hours/cost come from the roster; Forecast Revenue/Covers come from Demand Forecast (run/update it on the Demand Forecast page) — a day with no forecast yet just shows "—".
+          </p>
+
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th style={{ textAlign: 'right' }}>Scheduled Hours</th>
+                  <th style={{ textAlign: 'right' }}>Forecast Revenue</th>
+                  <th style={{ textAlign: 'right' }}>Planned Labor Cost</th>
+                  <th style={{ textAlign: 'right' }}>Cost %</th>
+                  <th style={{ textAlign: 'right' }}>
+                    <Tip text="Ceil(forecasted covers ÷ Covers/Staff target)" width={200}>Recommended Staff</Tip>
+                  </th>
+                  <th style={{ textAlign: 'right' }}>Scheduled Staff</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {laborForecastRows.map((r, i) => {
+                  const weekday = WEEKDAYS[bsToAd(r.col.bsYear, r.col.bsMonth, r.col.bsDay).getDay()]
+                  const short = r.recommended != null && r.scheduledCount < r.recommended
+                  return (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                        {weekday} {r.col.bsDay} {BS_MONTHS[r.col.bsMonth - 1].slice(0, 3)}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>{r.scheduledHrs > 0 ? `${r.scheduledHrs}h` : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{r.forecastRevenue != null ? fmtNpr(r.forecastRevenue) : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{r.plannedCost > 0 ? fmtNpr(r.plannedCost) : '—'}</td>
+                      <td style={{ textAlign: 'right', color: r.costPct != null && r.costPct > 35 ? 'var(--theme-amber)' : 'inherit' }}>
+                        {r.costPct != null ? `${r.costPct.toFixed(0)}%` : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>{r.recommended ?? '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{r.scheduledCount}</td>
+                      <td>
+                        {r.recommended == null ? '—' : short
+                          ? <span className="badge-amber" style={{ fontSize: 10 }}>⚠ Short</span>
+                          : <span className="badge-green" style={{ fontSize: 10 }}>✓ Covered</span>}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -132,6 +132,14 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S247 — 2026-07-05 — Roster: Labor Forecast moved to its own tab (was leaking into the printed schedule)
+
+Live-testing S246 surfaced a real problem: the Forecast Revenue/Planned Labor Cost footer rows on the Roster Board were not marked `no-print`, so they showed up on the printed staff schedule — management-only cost/revenue data has no business being on the physical sheet handed to staff. The busiest-day banner was already `no-print` and never had this problem.
+
+Rather than just hiding the two rows from print, restructured per Aashish's request: Roster now has a third tab, **Labor Forecast**, and the Board goes back to showing only shift assignments (on screen and in print). The banner and footer rows were removed from the Board entirely and replaced with one `laborForecastRows` array (one entry per visible day, combining `dayHrs`/`dayLaborCost` from the roster with `forecastByDay` from `demand_forecast_daily`), rendered as a proper report table on the new tab: Date · Scheduled Hours · Forecast Revenue · Planned Labor Cost · Cost % · Recommended Staff · Scheduled Staff · Covered/Short status badge. This also fixed a real limitation of the old design — the table works in **both Weekly and Monthly view** now (30 rows reads fine; the old footer-row approach was Weekly-only because 30 cramped columns didn't). The tab has its own copy of the Weekly/Monthly toggle + prev/next navigation (same `viewMode`/`weekStart`/`bsYear`/`bsMonth` state as the Board, so switching tabs doesn't lose your place) and the Covers/Staff target input.
+
+**Files:** `src/modules/hr/roster/Roster.jsx`, `src/pages/Help.js`
+
 ### S246 — 2026-07-05 — Cross-module roadmap Features 2 + 7: Demand-Based Labor Scheduling + Combo Builder
 
 Two of the 9 cross-module features from the S241 roadmap plan, picked as the "quick wins" (lowest build complexity, no new architecture pattern, both build directly on infrastructure already shipped this week).
