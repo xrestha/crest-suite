@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import { supabase } from '../supabaseClient'
+import { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } from '../shared/scopedDb'
 import { useSettings } from '../context/SettingsContext'
 import { getBsToday, formatAd } from '../utils/bsCalendar'
 import BsCalendarPicker from '../components/BsCalendarPicker'
@@ -418,8 +419,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   // ── Danger Zone ──
   async function handleClearConversions() {
-    const { data: withConv } = await supabase
-      .from('items').select('id').eq('client_id', client.id).not('purchase_unit', 'is', null)
+    const { data: withConv } = await scopedFrom('items', client.id, 'id').not('purchase_unit', 'is', null)
     const count = withConv?.length || 0
     if (count === 0) { setDeleteMsg('ok:No items have a conversion set.'); return }
     if (!window.confirm(
@@ -428,10 +428,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
       `This cannot be undone.`
     )) return
     setDeleting(true); setDeleteMsg('')
-    const { error } = await supabase
-      .from('items')
-      .update({ purchase_unit: null, base_unit: null, conversion_factor: 1, purchase_qty: 1 })
-      .eq('client_id', client.id)
+    const { error } = await scopedUpdate('items', client.id, { purchase_unit: null, base_unit: null, conversion_factor: 1, purchase_qty: 1 })
       .not('purchase_unit', 'is', null)
     setDeleting(false)
     setDeleteMsg(error ? 'error:' + error.message : `ok:Conversions cleared on ${count} item${count !== 1 ? 's' : ''}.`)
@@ -497,7 +494,7 @@ function ClientDrawer({ client, onClose, onClientUpdated }) {
       // Delete operational data, settings, feature flags, then the client record
       await adminOp('deleteClientData', { clientId: client.id })
       await supabase.from('settings').delete().eq('client_id', client.id)
-      await supabase.from('feature_flags').delete().eq('client_id', client.id)
+      await scopedDelete('feature_flags', client.id)
       await supabase.from('clients').delete().eq('id', client.id)
       onClientUpdated()
       onClose()
@@ -1478,8 +1475,7 @@ export default function AdminClients() {
       const { year: bsYear, month: bsMonth } = getBsToday()
       await Promise.all([
         // Auto-create opening period for the current BS month
-        supabase.from('monthly_periods').insert({
-          client_id: clientData.id,
+        scopedInsert('monthly_periods', clientData.id, {
           bs_year: bsYear,
           bs_month: bsMonth,
           status: 'open'
