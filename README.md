@@ -132,6 +132,24 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S245 — 2026-07-05 — Sales Report Payment Summary tab + POS Order Taking offline mode
+
+**Payment Summary tab.** Closed the last gap in the "POS reporting suite" backlog item — write-off totals (`/pos/exceptions`) and VAT-return export (Sales Report's existing tabs) were already covered; a payment-method breakdown for POS sales was not. Added an 8th tab to `/pos/sales-report` (`SalesReport.jsx`) grouping the same date-range order data by `payment_method` (Cash/Card/eSewa/Khalti/FonePay/Credit) with the standard Bills/Gross/Discount/Non-Taxable/Taxable/VAT/Net columns, % of Net Total, and the same letterhead Excel export as the other tabs. No new query — `payment_method` was already selected in the existing range fetch. Credit-noted bills excluded, same reconciliation rule as the Daily/Customer tabs.
+
+**POS Order Taking — offline mode.** Restaurant wifi drops mid-service more than an office network, and previously any connectivity loss silently broke Order Taking (add items, send KOT/BOT). Extended the existing IndexedDB offline pattern from IMS Stock Count (`src/utils/offlineQueue.js`) to POS order-taking specifically — **not** to Billing/Charge, Shifts, Void/Comp, or Credit Notes, which stay hard-gated on connectivity since they involve server-assigned sequential invoice numbers (Nepal IRD compliance, not just UX).
+
+Scope: opening a new table/order offline (client-generated `crypto.randomUUID()` order id, inserted as the real primary key on sync — Postgres accepts a client-supplied UUID over the column's `gen_random_uuid()` default), editing items/covers on an order already cached on this device, and queuing KOT/BOT sends (ticket printing itself needed no changes — already 100% local, no network). A table whose existing order was never loaded on this device is **blocked** offline ("reconnect to open this table") rather than risking a full item-list replace that could silently delete items this device never saw.
+
+`offlineQueue.js`: bumped `DB_VERSION` 1→2, added `pos_menu_cache`, `pos_tables_cache`, `pos_settings_cache`, `pos_order_cache` (per-table last-known-good snapshot), and `pos_order_queue` (one upserted row per order touched offline — `enqueuePosOrder()` merges patches so repeated edits collapse instead of piling up, with `kot_sends` accumulating rather than overwriting).
+
+`PosOrders.jsx`: `loadFloor()`/`loadMenu()`/the settings mount-effect/`openTable()` all branch on `navigator.onLine`, warming the relevant cache on every online read. `performSave()` queues the full desired order state instead of hitting Supabase when offline. `flushPosOrderQueue()` replays the queue on reconnect (same swallow-and-retry-later shape as Stock.js's `flushQueue`), with a `status` check before overwriting any order — if another device already billed/voided it while this one was offline, the queued edit is surfaced as a dismissible conflict banner instead of silently reapplied. UI additions: offline/syncing banners, a per-tile "not yet synced" dot, `#— (pending)` order-number label until sync backfills the real trigger-assigned number, and the Payment button now hard-disabled offline with an explanatory tooltip.
+
+**Bug fix (same session):** the Payment button relied only on the `disabled` attribute + tooltip with no visual dimming (inline `background: var(--theme-green)` never changed), unlike the KOT/BOT buttons which already dim via `.ticket-btn:disabled { opacity: 0.5 }` in `Layout.css`. Added the same `opacity: 0.5` / `cursor: default` treatment inline so a disabled Payment button now actually looks disabled.
+
+No DB migration required for any of the above — `pos_orders.id`'s UUID default, the `order_no` trigger's `IF NEW.order_no IS NULL` guard, and the existing `status` column already supported the design.
+
+**Files:** `src/modules/pos/reports/SalesReport.jsx`, `src/pages/Help.js`, `src/utils/offlineQueue.js`, `src/modules/pos/orders/PosOrders.jsx`.
+
 ### S244 — 2026-07-04 — Demand Forecast: fixed duplicate rows on every Recompute click
 
 Live-testing after S242 shipped surfaced a 3rd bug: some forecast days showed a literal "NPR 0" (not the expected "—" or "≈" estimate) even after the S242 basis-tagging fix was live. Root cause: `runForecast()` only ever **inserted** into `demand_forecast_daily`, with no delete of the previous run's rows first. Every "Recompute Forecast" click during testing (including runs from before the S242 fix) stacked another full set of day-rows on top of the old ones. `loadStored()`'s read-back has no natural upsert key for the covers-level row per day, so it just overwrites as it loops through whatever order Postgres returns — meaning an old pre-fix row (with the original false-zero bug baked in) could win over the freshly-computed correct one, non-deterministically per day.

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -10,9 +10,26 @@ import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/rec
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
+import {
+  cachePosMenu, getCachedPosMenu, cachePosTables, getCachedPosTables,
+  cachePosSettings, getCachedPosSettings, cachePosOrderForTable, getCachedPosOrderForTable,
+  enqueuePosOrder, getPosOrderQueue, getQueuedPosOrder, dequeuePosOrder,
+} from '../../../utils/offlineQueue'
 
 const vatOf  = r => (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : parseFloat(r.vat_rate)
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+// Shared shape for a pos_order_items row, whether it's about to go straight to Supabase or into
+// the offline queue (enqueuePosOrder) — keeps the two write paths from drifting apart.
+const toItemPayload = i => ({
+  recipe_id:   i.recipe_id || null,
+  name:        i.name,
+  category:    i.category   || 'Other',
+  qty:         i.qty,
+  unit_price:  i.unit_price,
+  vat_rate:    i.vat_rate   ?? 0,
+  sent_to_kot: i.sent_to_kot || false,
+  notes:       i.notes || null,
+})
 // Only these payment methods are scanned by the customer — Cash/Card/Credit already have their
 // own settlement path, so a "scan to pay" QR on the bill would be irrelevant or misleading there.
 const QR_PAY_METHODS = ['eSewa', 'Khalti', 'FonePay']
@@ -121,13 +138,41 @@ export default function PosOrders() {
   const [recentBillsLoad, setRecentBillsLoad] = useState(false)
   const [creditNoteOrder, setCreditNoteOrder] = useState(null) // order row currently in the Issue Credit Note modal
 
+  /* ── offline mode (Order Taking only — Billing stays online-only, see closeOrder/openBilling gates) ── */
+  const [isOnline,        setIsOnline]        = useState(() => navigator.onLine)
+  const [pendingOrderIds, setPendingOrderIds] = useState(new Set()) // order ids currently queued, not yet synced
+  const [syncingOffline,  setSyncingOffline]  = useState(false)
+  const [conflictOrders,  setConflictOrders]  = useState([]) // queued orders whose server row was no longer 'open' at flush time
+  const [floorMsg,        setFloorMsg]        = useState('') // transient floor-view banner (e.g. blocked-table message)
+  const flushRef = useRef(null)
+
   useEffect(() => {
     if (!clientId) return
     loadFloor()
-    supabase.from('settings')
-      .select('pos_bot_categories, pos_note_presets, pos_discount_reasons, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone, payment_qr_data')
-      .eq('client_id', clientId).maybeSingle()
-      .then(({ data }) => {
+    if (!navigator.onLine) {
+      getCachedPosSettings(clientId).then(data => {
+        if (!data) return
+        const arr = data.pos_bot_categories
+        if (arr?.length) setBotCategories(new Set(arr))
+        setNotePresets(data.pos_note_presets || [])
+        setDiscountReasons(data.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
+        setBillingSettings({
+          is_vat_registered: data.is_vat_registered ?? true,
+          invoice_prefix:    data.invoice_prefix || '',
+          vat_number:        data.vat_number || '',
+          property_address:  data.property_address || '',
+          property_phone:    data.property_phone || '',
+          payment_qr_data:   data.payment_qr_data || '',
+        })
+        setOutletName(data.outlet_name || '')
+      })
+    } else {
+      Promise.all([
+        supabase.from('settings')
+          .select('pos_bot_categories, pos_note_presets, pos_discount_reasons, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone, payment_qr_data')
+          .eq('client_id', clientId).maybeSingle(),
+        supabase.from('clients').select('name').eq('id', clientId).single(),
+      ]).then(([{ data }, { data: clientData }]) => {
         const arr = data?.pos_bot_categories
         if (arr?.length) setBotCategories(new Set(arr))
         setNotePresets(data?.pos_note_presets || [])
@@ -140,10 +185,20 @@ export default function PosOrders() {
           property_phone:    data?.property_phone || '',
           payment_qr_data:   data?.payment_qr_data || '',
         })
+        setOutletName(clientData?.name || '')
+        cachePosSettings(clientId, { ...data, outlet_name: clientData?.name || '' })
       })
-    supabase.from('clients').select('name').eq('id', clientId).single()
-      .then(({ data }) => setOutletName(data?.name || ''))
+    }
+    if (navigator.onLine) flushRef.current?.()
   }, [clientId]) // eslint-disable-line
+
+  useEffect(() => {
+    const up   = () => { setIsOnline(true);  flushRef.current?.() }
+    const down = () => setIsOnline(false)
+    window.addEventListener('online',  up)
+    window.addEventListener('offline', down)
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down) }
+  }, [])
 
   /* ── computed totals ── */
   // Non-VAT-registered clients print a plain PAN Bill with no VAT line (see buildBillHtml's
@@ -192,8 +247,34 @@ export default function PosOrders() {
 
   /* ── data loaders ── */
 
+  // Turns a queued (not-yet-synced) offline order into the same shape as a live floor overlay
+  // entry, so the floor grid renders identically whether the count comes from the server or the
+  // local queue. Flagged `offlinePending` so the tile can show the "unsynced" dot.
+  function queuedOrderToOverlay(q) {
+    return {
+      orderId:   q.order_id,
+      itemCount: q.items.reduce((s, i) => s + i.qty, 0),
+      total:     q.items.reduce((s, i) => s + i.qty * i.unit_price * (1 + (vatReg ? (i.vat_rate ?? 0) : 0)), 0),
+      covers:    q.covers,
+      pending:   q.items.filter(i => !i.sent_to_kot).length,
+      offlinePending: true,
+    }
+  }
+
   async function loadFloor() {
     setFloorLoad(true)
+
+    if (!navigator.onLine) {
+      const [cachedTables, queue] = await Promise.all([getCachedPosTables(clientId), getPosOrderQueue()])
+      setTables(cachedTables || [])
+      const map = {}
+      for (const q of queue) { if (q.table_id) map[q.table_id] = queuedOrderToOverlay(q) }
+      setTableOrders(map)
+      setPendingOrderIds(new Set(queue.map(q => q.order_id)))
+      setFloorLoad(false)
+      return
+    }
+
     loadOpenShift()
     const [{ data: tbls }, { data: orders }] = await Promise.all([
       supabase.from('pos_tables').select('*').eq('client_id', clientId)
@@ -203,6 +284,7 @@ export default function PosOrders() {
         .eq('client_id', clientId).eq('status', 'open'),
     ])
     setTables(tbls || [])
+    cachePosTables(clientId, tbls || [])
     const map = {}
     for (const o of (orders || [])) {
       if (!o.table_id) continue
@@ -215,8 +297,71 @@ export default function PosOrders() {
         pending:   items.filter(i => !i.sent_to_kot).length,
       }
     }
+    // Layer any still-queued (not-yet-synced) local edits on top of server truth, so a table
+    // doesn't briefly look wrong while a reconnect flush is still in flight.
+    const queue = await getPosOrderQueue()
+    for (const q of queue) { if (q.table_id) map[q.table_id] = queuedOrderToOverlay(q) }
     setTableOrders(map)
+    setPendingOrderIds(new Set(queue.map(q => q.order_id)))
     setFloorLoad(false)
+  }
+
+  // Replays every queued offline order against Supabase, one at a time (structurally identical to
+  // Stock.js's flushQueue — swallow-and-retry-later on failure, never dequeue on error). Runs on
+  // reconnect (window 'online' event, via flushRef below) and once on mount if already online.
+  async function flushPosOrderQueue() {
+    const queue = await getPosOrderQueue()
+    if (queue.length === 0) return
+    setSyncingOffline(true)
+    for (const q of queue) {
+      try {
+        const oid = q.order_id
+        if (q.created_offline) {
+          const { error } = await supabase.from('pos_orders').insert({
+            id: oid, client_id: clientId, table_id: q.table_id, table_name: q.table_name,
+            status: 'open', covers: q.covers, opened_by: q.opened_by,
+          })
+          if (error) throw error
+          if (q.table_id) await supabase.from('pos_tables').update({ status: 'occupied' }).eq('id', q.table_id)
+        } else {
+          // Safety check: don't blindly overwrite an order another device already closed while
+          // this one was offline — a queued item replace on a billed/voided order would be wrong.
+          const { data: current } = await supabase.from('pos_orders').select('status').eq('id', oid).single()
+          if (current && current.status !== 'open') {
+            setConflictOrders(prev => prev.some(c => c.order_id === oid) ? prev : [...prev, q])
+            continue // stays queued — surfaced for manual review, not auto-discarded
+          }
+          await supabase.from('pos_orders').update({ covers: q.covers }).eq('id', oid)
+        }
+
+        await supabase.from('pos_order_items').delete().eq('order_id', oid)
+        await supabase.from('pos_order_items').insert(q.items.map(i => ({ order_id: oid, client_id: clientId, ...i })))
+
+        for (const send of q.kot_sends || []) {
+          try { await supabase.from('pos_kot_log').insert({ ...send, order_id: oid }) } catch (_) { /* best-effort, matches online logKotSend */ }
+        }
+
+        await dequeuePosOrder(oid)
+        setPendingOrderIds(prev => { const next = new Set(prev); next.delete(oid); return next })
+
+        // If the order currently open on screen just got synced, backfill its real order number.
+        if (orderId === oid) {
+          const { data: synced } = await supabase.from('pos_orders').select('order_no').eq('id', oid).single()
+          if (synced) setOrderNo(synced.order_no)
+        }
+      } catch (err) {
+        console.error('POS offline order sync failed, will retry:', err) // left queued, retried next flush
+      }
+    }
+    setSyncingOffline(false)
+    loadFloor()
+  }
+  flushRef.current = flushPosOrderQueue
+
+  function discardConflictOrder(orderIdToDiscard) {
+    dequeuePosOrder(orderIdToDiscard)
+    setConflictOrders(prev => prev.filter(c => c.order_id !== orderIdToDiscard))
+    setPendingOrderIds(prev => { const next = new Set(prev); next.delete(orderIdToDiscard); return next })
   }
 
   // Cached, not re-queried per order close — closeOrder() just reads this synchronously.
@@ -231,6 +376,17 @@ export default function PosOrders() {
 
   async function loadMenu() {
     if (!clientId || menuLoaded) return
+
+    if (!navigator.onLine) {
+      const cached = await getCachedPosMenu(clientId)
+      if (cached) {
+        setMenu(cached.menu || [])
+        setManualSuggestions(cached.manualSuggestions || {})
+        setMenuLoaded(true)
+      }
+      return
+    }
+
     const [{ data }, { data: suggData }] = await Promise.all([
       supabase
         .from('recipes')
@@ -246,18 +402,59 @@ export default function PosOrders() {
         .eq('client_id', clientId),
     ])
     setMenu(data || [])
+    let suggMap = {}
     if (suggData) {
-      const map = {}
       suggData.forEach(s => {
-        if (!map[s.recipe_id]) map[s.recipe_id] = []
-        map[s.recipe_id].push(s.suggest_recipe_id)
+        if (!suggMap[s.recipe_id]) suggMap[s.recipe_id] = []
+        suggMap[s.recipe_id].push(s.suggest_recipe_id)
       })
-      setManualSuggestions(map)
+      setManualSuggestions(suggMap)
     }
     setMenuLoaded(true)
+    cachePosMenu(clientId, data || [], suggMap)
   }
 
   async function openTable(table) {
+    setFloorMsg('')
+
+    if (!navigator.onLine) {
+      // A table this device already touched offline is the source of truth — use the queue.
+      const queue = await getPosOrderQueue()
+      const queued = queue.find(q => q.table_id === table.id)
+      if (queued) {
+        setActiveTable(table)
+        setOrderId(queued.order_id)
+        setOrderNo(null) // real order_no assigned on sync
+        setCovers(queued.covers || 1)
+        setOrderItems(queued.items.map(i => ({ ...i, sent_qty: i.sent_to_kot ? i.qty : 0 })))
+        setMsg(''); setView('order'); loadMenu()
+        return
+      }
+      // Otherwise fall back to the last-known-good snapshot from an earlier online visit.
+      const cached = await getCachedPosOrderForTable(table.id)
+      if (cached) {
+        setActiveTable(table)
+        setOrderId(cached.orderId)
+        setOrderNo(cached.orderNo || null)
+        setCovers(cached.covers || 1)
+        setOrderItems((cached.items || []).map(i => ({ ...i, sent_qty: i.sent_to_kot ? i.qty : 0 })))
+        setMsg(''); setView('order'); loadMenu()
+        return
+      }
+      // The table has an order per the last-synced table list, but this device never loaded its
+      // items — block rather than risk a full item replace that silently deletes what's really there.
+      if (table.status === 'occupied' || table.status === 'reserved') {
+        setFloorMsg(`error:${table.name} has an order that hasn't been loaded on this device yet — reconnect to open it.`)
+        return
+      }
+      // No known order on this table — safe to start fresh, same as the online empty-table path.
+      setPendingTable(table)
+      setPendingCoversStr('')
+      setCoversModal(true)
+      loadMenu()
+      return
+    }
+
     const { data: existing } = await supabase
       .from('pos_orders')
       .select('id, order_no, covers, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, notes)')
@@ -271,10 +468,12 @@ export default function PosOrders() {
       setOrderId(existing.id)
       setOrderNo(existing.order_no || null)
       setCovers(existing.covers || 1)
-      setOrderItems((existing.pos_order_items || []).map(i => ({
+      const items = (existing.pos_order_items || []).map(i => ({
         ...i,
         sent_qty: i.sent_to_kot ? i.qty : 0,
-      })))
+      }))
+      setOrderItems(items)
+      cachePosOrderForTable(table.id, { orderId: existing.id, orderNo: existing.order_no || null, covers: existing.covers || 1, items })
       setMsg(''); setView('order'); loadMenu()
     } else {
       setPendingTable(table)
@@ -419,8 +618,37 @@ export default function PosOrders() {
   async function performSave() {
     let oid = orderId
     let oNo = orderNo
+    const isNewOrder = !oid
 
-    if (!oid) {
+    const itemsPayload = orderItems.map(toItemPayload)
+
+    if (!navigator.onLine) {
+      let createdOffline = isNewOrder
+      if (isNewOrder) {
+        oid = crypto.randomUUID()
+        setOrderId(oid)
+        // oNo stays null — the real order_no is assigned by the server-side trigger on sync
+      } else {
+        const existingQueued = await getQueuedPosOrder(oid)
+        createdOffline = existingQueued?.created_offline || false
+      }
+      await enqueuePosOrder(oid, {
+        created_offline: createdOffline,
+        table_id:   activeTable?.id   || null,
+        table_name: activeTable?.name || 'Takeaway',
+        covers,
+        opened_by:  profile?.id || null,
+        items: itemsPayload,
+      })
+      setPendingOrderIds(prev => new Set([...prev, oid]))
+      if (isNewOrder && activeTable?.id) {
+        setTables(prev => prev.map(t => t.id === activeTable.id ? { ...t, status: 'occupied' } : t))
+      }
+      loadFloor() // safe offline — reads from cache/queue, no network
+      return { oid, oNo: null }
+    }
+
+    if (isNewOrder) {
       const { data: newOrder, error } = await supabase
         .from('pos_orders')
         .insert({
@@ -448,20 +676,10 @@ export default function PosOrders() {
     // Delete + re-insert preserving sent_to_kot and category from local state
     await supabase.from('pos_order_items').delete().eq('order_id', oid)
     const { error: iErr } = await supabase.from('pos_order_items').insert(
-      orderItems.map(i => ({
-        order_id:    oid,
-        client_id:   clientId,
-        recipe_id:   i.recipe_id || null,
-        name:        i.name,
-        category:    i.category   || 'Other',
-        qty:         i.qty,
-        unit_price:  i.unit_price,
-        vat_rate:    i.vat_rate   ?? 0,
-        sent_to_kot: i.sent_to_kot || false,
-        notes:       i.notes || null,
-      }))
+      itemsPayload.map(i => ({ order_id: oid, client_id: clientId, ...i }))
     )
     if (iErr) return null
+    if (activeTable?.id) cachePosOrderForTable(activeTable.id, { orderId: oid, orderNo: oNo, covers, items: orderItems })
     loadFloor()
     return { oid, oNo }
   }
@@ -480,8 +698,13 @@ export default function PosOrders() {
       // Auto-send all items to their stations on first save
       const kotItems = orderItems.filter(i => !botCategories.has(i.category || 'Other'))
       const botItems = orderItems.filter(i =>  botCategories.has(i.category || 'Other'))
-      await supabase.from('pos_order_items').update({ sent_to_kot: true }).eq('order_id', oid)
-      setOrderItems(prev => prev.map(i => ({ ...i, sent_to_kot: true, sent_qty: i.qty })))
+      const sentItems = orderItems.map(i => ({ ...i, sent_to_kot: true, sent_qty: i.qty }))
+      if (navigator.onLine) {
+        await supabase.from('pos_order_items').update({ sent_to_kot: true }).eq('order_id', oid)
+      } else {
+        await enqueuePosOrder(oid, { items: sentItems.map(toItemPayload) })
+      }
+      setOrderItems(sentItems)
       if (kotItems.length > 0) printTicket('KOT', kotItems, oNo)
       if (botItems.length > 0) printTicket('BOT', botItems, oNo)
       logKotSend('KOT', kotItems, oid, oNo)
@@ -516,20 +739,25 @@ export default function PosOrders() {
     if (!saved) { setSaving(false); setMsg('error:Save failed.'); return }
     const { oid, oNo } = saved
 
-    // Mark sent in DB by recipe_id (unique per order)
+    // Mark sent by recipe_id (unique per order)
     const recipeIds = unsentItems.map(i => i.recipe_id).filter(Boolean)
+    const sentSet = new Set(recipeIds)
+    const updatedItems = orderItems.map(i =>
+      sentSet.has(i.recipe_id) ? { ...i, sent_to_kot: true, sent_qty: i.qty } : i
+    )
+
     if (recipeIds.length > 0) {
-      await supabase.from('pos_order_items')
-        .update({ sent_to_kot: true })
-        .eq('order_id', oid)
-        .in('recipe_id', recipeIds)
+      if (navigator.onLine) {
+        await supabase.from('pos_order_items')
+          .update({ sent_to_kot: true })
+          .eq('order_id', oid)
+          .in('recipe_id', recipeIds)
+      } else {
+        await enqueuePosOrder(oid, { items: updatedItems.map(toItemPayload) })
+      }
     }
 
-    // Update local state
-    const sentSet = new Set(recipeIds)
-    setOrderItems(prev => prev.map(i =>
-      sentSet.has(i.recipe_id) ? { ...i, sent_to_kot: true, sent_qty: i.qty } : i
-    ))
+    setOrderItems(updatedItems)
 
     setSaving(false)
     setMsg(`ok:${station} sent!`)
@@ -542,21 +770,28 @@ export default function PosOrders() {
   // reports reflect the real kitchen/bar send history, not just the current live order state.
   async function logKotSend(station, items, oid, oNo) {
     if (items.length === 0) return
+    const payload = {
+      client_id: clientId,
+      order_id: oid,
+      order_no: oNo,
+      table_name: activeTable?.name || 'Takeaway',
+      station,
+      items: items.map(i => ({
+        recipe_id: i.recipe_id, name: i.name, category: i.category,
+        // Clamped at 0: a reduced-then-resent item must not log a negative delta, which would
+        // cancel its earlier sends in the cumulative sum and un-flag it in KOT Reconciliation.
+        qty: (i.sent_qty || 0) > 0 ? Math.max(0, i.qty - i.sent_qty) : i.qty,
+      })),
+      sent_by: profile?.id || null,
+    }
+    // Offline: queued alongside the order and replayed on sync — same best-effort contract as the
+    // online path (a failed replay is silently retried later, never blocks/surfaces to the waiter).
+    if (!navigator.onLine) {
+      await enqueuePosOrder(oid, { kot_sends: [payload] })
+      return
+    }
     try {
-      await supabase.from('pos_kot_log').insert({
-        client_id: clientId,
-        order_id: oid,
-        order_no: oNo,
-        table_name: activeTable?.name || 'Takeaway',
-        station,
-        items: items.map(i => ({
-          recipe_id: i.recipe_id, name: i.name, category: i.category,
-          // Clamped at 0: a reduced-then-resent item must not log a negative delta, which would
-          // cancel its earlier sends in the cumulative sum and un-flag it in KOT Reconciliation.
-          qty: (i.sent_qty || 0) > 0 ? Math.max(0, i.qty - i.sent_qty) : i.qty,
-        })),
-        sent_by: profile?.id || null,
-      })
+      await supabase.from('pos_kot_log').insert(payload)
     } catch (err) {
       console.error('pos_kot_log insert failed:', err)
     }
@@ -1152,6 +1387,26 @@ export default function PosOrders() {
           </Tip>
         )}
 
+        {!orderNo && orderId && (
+          <Tip text="This order was saved offline — it will get a real order number once this device reconnects and syncs">
+            <span style={{
+              fontSize: 12, fontWeight: 700, color: 'var(--theme-amber)',
+              border: '1px solid var(--theme-amber)', borderRadius: 5,
+              padding: '2px 7px', cursor: 'default',
+            }}>#— (pending)</span>
+          </Tip>
+        )}
+
+        {!isOnline && (
+          <Tip text="Offline — this order is saved on this device and will sync when you reconnect">
+            <span style={{
+              fontSize: 12, fontWeight: 700, color: 'var(--theme-amber)',
+              background: 'rgba(251,191,36,0.12)', borderRadius: 5,
+              padding: '2px 7px', cursor: 'default',
+            }}>📵 Offline</span>
+          </Tip>
+        )}
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginLeft: 8 }}>
           <Tip text="Number of guests at this table — used for cover count reporting">
             <span style={{ fontSize: 12, color: 'var(--theme-text3)', cursor: 'default' }}>Covers</span>
@@ -1428,23 +1683,32 @@ export default function PosOrders() {
                 {saving ? 'Sending…' : orderId ? 'Update Order' : 'Send Order'}
               </button>
 
-              {hasPosAccess('supervisor') && (
+              {hasPosAccess('supervisor') && (() => {
+                const payDisabled = saving || !orderId || !isOnline
+                return (
                 <div style={{ width: '48%' }}>
-                  <Tip text="Close this table — collect payment, or void/write-off if unpaid. Order must be saved first. Supervisor role or above."
+                  <Tip text={!isOnline
+                      ? 'Reconnect to close this bill — billing needs a live connection for the sequential invoice number and stock/sales posting.'
+                      : 'Close this table — collect payment, or void/write-off if unpaid. Order must be saved first. Supervisor role or above.'}
                     style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
                     <button
                       className="btn"
                       style={{
                         width: '100%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex',
                         background: 'var(--theme-green)', color: '#fff', fontWeight: 700, border: 'none',
+                        // Same disabled treatment as the KOT/BOT ticket-btn class (opacity 0.5) — this
+                        // button uses inline styles instead of that class, so it needs its own dimming.
+                        opacity: payDisabled ? 0.5 : 1,
+                        cursor: payDisabled ? 'default' : 'pointer',
                       }}
                       onClick={openBilling}
-                      disabled={saving || !orderId}>
+                      disabled={payDisabled}>
                       Payment
                     </button>
                   </Tip>
                 </div>
-              )}
+                )
+              })()}
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
@@ -1915,6 +2179,44 @@ export default function PosOrders() {
         </div>
       </div>
 
+      {!isOnline && (
+        <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber)' }}>
+          <span>📵</span>
+          <span><strong>Offline</strong> — orders are saved on this device and will sync when you reconnect. Billing stays disabled until then.</span>
+          {pendingOrderIds.size > 0 && (
+            <span style={{ marginLeft: 'auto', background: 'rgba(251,191,36,0.15)', borderRadius: 20, padding: '2px 10px', fontWeight: 600, flexShrink: 0 }}>
+              {pendingOrderIds.size} pending
+            </span>
+          )}
+        </div>
+      )}
+      {syncingOffline && (
+        <div style={{ background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.25)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green)' }}>
+          ⟳ Syncing {pendingOrderIds.size} {pendingOrderIds.size === 1 ? 'order' : 'orders'}…
+        </div>
+      )}
+      {floorMsg && (
+        <div style={{
+          background: floorMsg.startsWith('error:') ? 'rgba(248,113,113,0.08)' : 'rgba(52,211,153,0.08)',
+          border: `1px solid ${floorMsg.startsWith('error:') ? 'rgba(248,113,113,0.25)' : 'rgba(52,211,153,0.25)'}`,
+          borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
+          color: floorMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)',
+        }}>
+          {floorMsg.replace(/^(error|ok):/, '')}
+        </div>
+      )}
+      {conflictOrders.map(c => (
+        <div key={c.order_id} style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red)' }}>
+          <span>⚠</span>
+          <span>
+            <strong>{c.table_name}</strong>'s bill was closed on another device while you were offline —
+            your queued changes ({c.items.length} item{c.items.length !== 1 ? 's' : ''}) were NOT applied.
+          </span>
+          <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--theme-red)', flexShrink: 0 }}
+            onClick={() => discardConflictOrder(c.order_id)}>Discard</button>
+        </div>
+      ))}
+
       {sections.length > 1 && (
         <div className="tab-bar" style={{ marginBottom: 20 }}>
           {sections.map(s => (
@@ -1955,6 +2257,18 @@ export default function PosOrders() {
                     <span className={STATUS_BADGE[t.status] || 'badge-gray'} style={{ fontSize: 10 }}>
                       {STATUS_LABEL[t.status] || t.status}
                     </span>
+                    {ord?.offlinePending && (
+                      <Tip text="Not yet synced to the server — will upload automatically once this device reconnects">
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, color: '#000',
+                          background: 'var(--theme-amber)', borderRadius: '50%',
+                          width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          cursor: 'default',
+                        }}>
+                          📵
+                        </span>
+                      </Tip>
+                    )}
                     {ord?.pending > 0 && (
                       <Tip text="Items added but not sent to the kitchen/bar yet — tap to open and send">
                         <span style={{

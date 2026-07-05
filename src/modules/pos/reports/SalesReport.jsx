@@ -22,11 +22,13 @@ const TABS = [
   { key: 'daily',    label: 'Daily' },
   { key: 'hourly',   label: 'Hourly' },
   { key: 'voucher',  label: 'Bill Register' },
+  { key: 'payment',  label: 'Payment Summary' },
   { key: 'category', label: 'Category Wise' },
   { key: 'item',     label: 'Item Wise' },
   { key: 'customer', label: 'Customer Wise' },
   { key: 'onelakh',  label: '1L+ Report' },
 ]
+const PAY_METHOD_ORDER = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay', 'Credit']
 
 export default function SalesReport() {
   const { clientId, hasPosAccess } = useAuth()
@@ -135,6 +137,22 @@ export default function SalesReport() {
       }
     }).sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt))
   }, [orders, itemsByOrder, vatReg, staffNames])
+
+  const paymentRows = useMemo(() => {
+    const grouped = {}
+    const ensure = m => grouped[m] = grouped[m] || { method: m, bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 }
+    for (const o of orders) {
+      if (o.credit_note_id) continue // same exclusion rule as dailyRows — totals must reconcile across tabs
+      const amounts = computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg)
+      const b = ensure(o.payment_method || 'Cash')
+      b.bills += 1; b.gross += amounts.grossAmt; b.discount += amounts.discount
+      b.taxable += amounts.taxableBase; b.nonTaxable += amounts.nonTaxableBase; b.vat += amounts.vatAmt; b.net += amounts.net
+    }
+    return Object.values(grouped).sort((a, b) => {
+      const ia = PAY_METHOD_ORDER.indexOf(a.method), ib = PAY_METHOD_ORDER.indexOf(b.method)
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+    })
+  }, [orders, itemsByOrder, vatReg])
 
   const categoryRows = useMemo(() => {
     const grouped = {}
@@ -260,6 +278,7 @@ export default function SalesReport() {
   const dailyTotals = dailyRows.reduce((s, r) => ({ bills: s.bills + r.bills, qty: s.qty + r.qty, gross: s.gross + r.gross, discount: s.discount + r.discount, taxable: s.taxable + r.taxable, nonTaxable: s.nonTaxable + r.nonTaxable, vat: s.vat + r.vat, net: s.net + r.net }), { bills: 0, qty: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
   const hourlyTotals = hourlyRows.reduce((s, h) => ({ bills: s.bills + h.bills, qty: s.qty + h.qty, net: s.net + h.net }), { bills: 0, qty: 0, net: 0 })
   const voucherTotals = voucherRows.reduce((s, v) => ({ gross: s.gross + v.gross, discount: s.discount + v.discount, taxable: s.taxable + v.taxable, nonTaxable: s.nonTaxable + v.nonTaxable, vat: s.vat + v.vat, net: s.net + v.net }), { gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
+  const paymentTotals = paymentRows.reduce((s, p) => ({ bills: s.bills + p.bills, gross: s.gross + p.gross, discount: s.discount + p.discount, taxable: s.taxable + p.taxable, nonTaxable: s.nonTaxable + p.nonTaxable, vat: s.vat + p.vat, net: s.net + p.net }), { bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
   const categoryNetOf = c => c.gross - c.discount + c.vat
   const categoryTotals = categoryRows.reduce((s, c) => ({ qtySales: s.qtySales + c.qtySales, qtyReturn: s.qtyReturn + c.qtyReturn, gross: s.gross + c.gross, discount: s.discount + c.discount, taxable: s.taxable + c.taxable, nonTaxable: s.nonTaxable + c.nonTaxable, vat: s.vat + c.vat }), { qtySales: 0, qtyReturn: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0 })
   const itemNetOf = i => i.gross - i.discount + i.vat
@@ -316,6 +335,16 @@ export default function SalesReport() {
       }))
       XLSX.utils.book_append_sheet(wb, ws, 'Bill Register')
       XLSX.writeFile(wb, `bill-register-${fromIso}-to-${toIso}.xlsx`)
+    } else if (tab === 'payment') {
+      const ws = withLetterhead('Sales Report - Payment Summary', dateRangeLine, paymentRows.map(p => ({
+        'Payment Method': p.method, 'Bills': p.bills,
+        'Gross (NPR)': Math.round(p.gross * 100) / 100, 'Discount (NPR)': Math.round(p.discount * 100) / 100,
+        'Non-Taxable (NPR)': Math.round(p.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(p.taxable * 100) / 100,
+        'VAT (NPR)': Math.round(p.vat * 100) / 100, 'Net (NPR)': Math.round(p.net * 100) / 100,
+        '% of Net Total': paymentTotals.net > 0 ? `${((p.net / paymentTotals.net) * 100).toFixed(1)}%` : '0%',
+      })))
+      XLSX.utils.book_append_sheet(wb, ws, 'Payment Summary')
+      XLSX.writeFile(wb, `payment-summary-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'category') {
       const ws = withLetterhead('Sales Report - Category Wise', dateRangeLine, categoryRows.map(c => ({
         'Category': c.name, 'Qty Sales': c.qtySales, 'Qty Return': c.qtyReturn, 'Qty Net': c.qtySales - c.qtyReturn,
@@ -361,6 +390,7 @@ export default function SalesReport() {
     (tab === 'daily' && dailyRows.length === 0) ||
     (tab === 'hourly' && hourlyTotals.bills === 0) ||
     (tab === 'voucher' && voucherRows.length === 0) ||
+    (tab === 'payment' && paymentRows.length === 0) ||
     (tab === 'category' && categoryRows.length === 0) ||
     (tab === 'item' && itemRows.length === 0) ||
     (tab === 'customer' && customerRows.length === 0) ||
@@ -370,10 +400,10 @@ export default function SalesReport() {
     <div style={{ padding: '24px 28px', maxWidth: 1150 }}>
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
-          Sales Report <Tip text="Seven views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={300}>ⓘ</Tip>
+          Sales Report <Tip text="Eight views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Payment Summary breaks it down by how customers paid, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={320}>ⓘ</Tip>
         </h2>
         <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
-          One report, seven ways to slice it.
+          One report, eight ways to slice it.
         </p>
       </div>
 
@@ -540,6 +570,50 @@ export default function SalesReport() {
                 <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.vat)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.net)}</td>
                 <td></td><td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      ) : tab === 'payment' ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Payment Method</th><th style={{ textAlign: 'right' }}>Bills</th>
+                <th style={{ textAlign: 'right' }}>Gross</th><th style={{ textAlign: 'right' }}>Discount</th>
+                <th style={{ textAlign: 'right' }}>Non-Taxable</th><th style={{ textAlign: 'right' }}>Taxable</th>
+                <th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>Net</th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="This method's net sales as a share of total net sales in the range" width={220}>% of Net</Tip>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {paymentRows.map(p => (
+                <tr key={p.method}>
+                  <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{p.method}</td>
+                  <td style={{ textAlign: 'right' }}>{p.bills}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(p.gross)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(p.discount)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(p.nonTaxable)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(p.taxable)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(p.vat)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(p.net)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{paymentTotals.net > 0 ? `${((p.net / paymentTotals.net) * 100).toFixed(1)}%` : '0%'}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ fontWeight: 700 }}>
+                <td>TOTAL</td>
+                <td style={{ textAlign: 'right' }}>{paymentTotals.bills}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.gross)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.discount)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.nonTaxable)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.taxable)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.vat)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.net)}</td>
+                <td style={{ textAlign: 'right' }}>100%</td>
               </tr>
             </tfoot>
           </table>
