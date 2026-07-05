@@ -226,7 +226,7 @@ New page `src/pages/DemandForecast.js` (`/demand-forecast`, Growth) — "Recompu
 
 **Also fixed `src/components/Tip.js`** (shared tooltip component, used app-wide) — it clamped horizontal position near screen edges but always rendered *above* its anchor with no vertical edge-detection, so a tooltip on a heading near the top of the page (e.g. this page's own title tooltip) rendered partly off-screen. Now flips below the anchor when `rect.top < 120`, the same edge-flip pattern `ShiftPicker`/`SearchableSelect` already use for their own dropdowns.
 
-**DB migration required (NOT YET RUN):**
+**DB migration — run ✓ (confirmed 2026-07-05 via re-run hitting expected "policy already exists"):**
 ```sql
 CREATE TABLE IF NOT EXISTS demand_forecast_daily (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -268,7 +268,7 @@ Kicked off the founder-approved cross-module roadmap (see the plan doc for full 
 
 **`src/utils/phone.js`** (new) — `normalizePhone(raw)` strips non-digits, a leading `977` country code, and leading zeros, returning `null` if under 7 digits. `buyer_phone` on `pos_orders` has zero format validation today (raw free text), so this gives Loyalty/RFM/Digital-Receipts a consistent matching key.
 
-**DB migration required (NOT YET RUN):**
+**DB migration — run ✓ 2026-07-05:**
 ```sql
 -- pos_customers.phone_canonical — mirrors src/utils/phone.js's normalizePhone() stripping
 -- logic (minus its <7-digit NULL guard, which only matters for validating new input, not
