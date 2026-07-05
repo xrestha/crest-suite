@@ -142,7 +142,7 @@ Two of the 9 cross-module features from the S241 roadmap plan, picked as the "qu
 
 **Feature 7 — Combo Builder.** New `src/pages/ComboBuilder.js`, `/combo-builder`, Growth plan (`combo_builder` flag) — the first non-order-flow caller of the existing `get_cooccurrence(p_client_id, p_recipe_id, p_days)` RPC (previously only called from `PosOrders.jsx`'s live upsell suggestion chips). Pick an anchor menu item (`SearchableSelect`) and a window (30/90/180 days); the table ranks its most frequent real-bill pairings with a bills-together count/frequency bar, combined price, and a suggested combo price = combined price × (1 − Combo Discount %). Combo Discount % (`settings.combo_discount_pct`, default 10) is editable inline and saved per client. Insight-only, per plan — "Create as Menu Item →" links out to `/menu-pricing`; nothing is auto-created.
 
-**DB migration required (NOT YET RUN):**
+**DB migration — run ✓ 2026-07-05:**
 ```sql
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS covers_per_staff_target numeric DEFAULT 20;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS combo_discount_pct numeric DEFAULT 10;
