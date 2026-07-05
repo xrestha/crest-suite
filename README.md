@@ -132,6 +132,22 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S250 — 2026-07-05 — scopedDb rollout completed across IMS + HR; stale planning doc removed
+
+Follow-up to S249, which had only migrated `Items.js`/`Vendors.js` as the proof-of-concept and left ~68 files. Continued the same mechanical pattern (hand-written `.eq('client_id', ...)` → `scopedFrom`/`scopedUpdate`/`scopedDelete`, hand-stamped `client_id: X` on inserts/upserts → `scopedInsert`/`scopedUpsert`) across every remaining IMS file (34: purchases, recipes, sales, stockcount, variance, and all 13 flat reports) and every HR file (14: advances, attendance, employees, festival, gratuity, holidays, leave, overtime, pay, payroll reports, roster, settlement), verifying `CI=true npm run build` after each batch.
+
+Found and fixed two real bugs surfaced by the sweep, not just call-site mechanics:
+- `MenuEngineering.js` was fetching `recipe_ingredients` completely unfiltered — no `client_id` and no `recipe_id` scoping at all, meaning every tenant's ingredient rows loaded on every request (harmless today only because nothing downstream used the wrong rows by accident). Fixed by scoping to `.in('recipe_id', recipes.map(r => r.id))`.
+- `CLIENT_SCOPED_TABLES` was missing every `hr_*` and `pos_*` table (24 of them) — the original S134/S211-era audit only ever looked at IMS. Expanded to the full 37-table list, cross-checked against the live `NOT NULL` constraints in `supabase/migrations/20260705074838_baseline_schema.sql`.
+
+`scopedDb.js` itself needed two API extensions discovered mid-migration: `scopedInsert(..., { single: true })` for the `.insert().select().single()` shape, and `scopedUpsert` now always calls `.select()` internally (Roster.jsx's `hr_roster` upsert needs the row back to read its `id`). `useScopedDb()` also had to be wrapped in `useMemo(..., [clientId])` — without it, every consumer's own `useCallback`/`useEffect` deps arrays saw a new function reference each render and either warned or refetched in a loop.
+
+Also deleted `CREST_SUITE_PROJECT_CONTEXT_HR.md` — a pre-build planning doc frozen at S173 (2026-06-30) that had drifted from reality (used a `shared_clients`/`ims_purchases`/`pos_bills` naming scheme that was never built, and listed `hr_overtime_entries`/`hr_holiday_calendar` as unbuilt when both are live tables today). Superseded by `CLAUDE.md`, this README, and the memory files.
+
+**Not done, still on the architecture punch list:** POS (9 files: CreditNotes, IssueCreditNoteModal, PosCustomers, KotLog, PosExceptionReport, SalesReport, PosShifts, PosStaff, PosTableManagement) and core/admin pages (AdminClients, AuditLog, Dashboard, Periods, Settings) still filter `client_id` by hand. The six 1,200+ line "god components" remain unsplit.
+
+**Files:** `src/shared/scopedDb.js`, `src/shared/hooks/useScopedDb.js`, `src/shared/scopedDb.test.js`, 34 IMS files under `src/modules/ims/`, 14 HR files under `src/modules/hr/`, `src/utils/demandForecastData.js`, `CREST_SUITE_PROJECT_CONTEXT_HR.md` (removed)
+
 ### S249 — 2026-07-05 — Architecture hardening: IMS modularization, pure-function test coverage, client-scoped data-access layer, versioned DB migrations
 
 Requested architecture review of the whole Suite, then worked down its punch list.

@@ -57,18 +57,30 @@ Plan ranks: `starter (0) < growth (1) < pro (2)`. Keys auto-unlocked by plan liv
 
 ### Multi-tenant data isolation
 
-Every Supabase table is client-scoped. **Critical invariant:**
+Every Supabase table is client-scoped. **Use the scoped data-access layer, not hand-written `.eq('client_id', ...)`:**
 
 ```js
-// Guard every insert — clientId can be null during admin hydration
-if (!clientId) { setError('No client selected'); return }
+import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+
+const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
+
+const { data } = await scopedFrom('items', 'id, name').eq('is_active', true)
+await scopedInsert('vendors', { name: 'Big Mart' })                    // stamps client_id
+await scopedInsert('categories', { name: 'Dairy' }, { single: true })  // .insert().select().single()
+await scopedUpsert('hr_roster', rows, { onConflict: '...' })           // always selects the row(s) back
+await scopedUpdate('items', { is_active: false }).eq('id', itemId)
+await scopedDelete('vendors').eq('id', vendorId)
 ```
 
-`clientId` in `AuthContext` resolves as:
+`src/shared/scopedDb.js` fails closed (a sentinel UUID on reads/updates/deletes, an error object on inserts/upserts) when `clientId` is missing, instead of silently running unfiltered or leaking a NULL row — this matters most on **reads**, since an admin's RLS policy (`role='admin' OR client_id=own`) allows every tenant's rows and only the per-query filter narrows an admin "viewing as" session down to one client. Only tables in the `CLIENT_SCOPED_TABLES` allowlist (mirrors the DB's `client_id NOT NULL` constraints) can go through it — `scopedDb` throws for anything else. Tables scoped by `period_id`/parent-id instead of `client_id` (`purchase_entries`, `sales_entries`, `recipe_ingredients`, `opening_stock`, `closing_stock`, `wastages`, `staff_meals`, etc.), tables with a nullable `client_id` (`settings`, `budgets`), and the `clients` table itself stay on raw `supabase.from()`.
+
+`clientId` in `AuthContext` (and thus in `useScopedDb()`) resolves as:
 - Admin: `adminViewClientId` (from `localStorage`; set when admin "views as" a client)
 - Client user: `profile.client_id`
 
 Admin switches clients via the sidebar dropdown → `switchAdminClient(id, name)` → all pages re-fetch via `useEffect([clientId, ...])`.
+
+As of 2026-07-05, IMS and HR are fully migrated to `scopedDb`; POS and the core/admin pages (`AdminClients`, `AuditLog`, `Dashboard`, `Periods`, `Settings`) still use the old hand-written `.eq('client_id', ...)` / manual guard pattern — migrate a file to `scopedDb` when you touch it for other reasons, rather than leaving new code on the old pattern.
 
 ### Modules
 
