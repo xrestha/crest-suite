@@ -132,6 +132,12 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S267 — 2026-07-06 — "FREE FOR 7 DAYS" badge made more prominent
+
+Follow-up to S266: the corrected trial badge was still small, upright text easy to miss next to the price below it. Bumped it to italic and a larger font size (11→14 on `Pricing.js`, 10→13 on Help.js's Pricing tab) so it reads as a nudge to try the free week, not just fine print.
+
+**Files:** `src/pages/Pricing.js`, `src/pages/Help.js`
+
 ### S266 — 2026-07-06 — Pricing: fixed stale "FREE FOR 1 MONTH" trial copy, bolder Help.js Pricing intro
 
 Two follow-ups from a client review of the S263-265 pricing rollout. **Trial copy bug:** the IMS Starter tier's badge said "FREE FOR 1 MONTH" (both `Pricing.js` and Help.js's Pricing tab) and a FAQ answer echoed "free for the first month" — both stale, left over from the pre-existing file content, and contradicting the real trial mechanism: a **7-day** self-service trial (`AuthContext.js`'s `trial_expires_at`/`isTrial`, `Login.js`'s own "7-day free trial" copy), which the same page's hero banner already correctly advertises ("1-week free trial"). Corrected the badge to "FREE FOR 7 DAYS" in both places and reworded the FAQ answer to match.

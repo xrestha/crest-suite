@@ -1225,7 +1225,7 @@ export default function Help() {
                   <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--theme-border)' }}>
                     {plan.key === 'starter' && !pricingAnnual ? (
                       <>
-                        <div style={{ fontSize: 10, color: MODULE_COLORS.ims, fontWeight: 800, marginBottom: 4, letterSpacing: '0.07em' }}>FREE FOR 7 DAYS</div>
+                        <div style={{ fontSize: 13, fontStyle: 'italic', color: MODULE_COLORS.ims, fontWeight: 800, marginBottom: 4, letterSpacing: '0.07em' }}>FREE FOR 7 DAYS</div>
                         <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {plan.monthly.toLocaleString()}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo after</span></div>
                       </>
                     ) : (

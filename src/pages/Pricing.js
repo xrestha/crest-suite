@@ -145,7 +145,7 @@ export default function Pricing() {
               <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
                 {plan.key === 'starter' && !annual ? (
                   <>
-                    <div style={{ fontSize: 11, color: MODULE_COLORS.ims, fontWeight: 800, marginBottom: 5, letterSpacing: '0.07em' }}>FREE FOR 7 DAYS</div>
+                    <div style={{ fontSize: 14, fontStyle: 'italic', color: MODULE_COLORS.ims, fontWeight: 800, marginBottom: 5, letterSpacing: '0.07em' }}>FREE FOR 7 DAYS</div>
                     <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
                       NPR {plan.monthly.toLocaleString()}
                       <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo after</span>
