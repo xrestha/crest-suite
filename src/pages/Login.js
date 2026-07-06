@@ -104,9 +104,16 @@ export default function Login() {
 
         {/* ── Left: Trial signup ── */}
         <div className="login-left">
-          <div className="login-brand">
-            <span style={{ fontSize: 30, color: 'var(--theme-accent)', lineHeight: 1 }}>⬢</span>
-            <span className="login-brand-name">{settings?.app_name || 'Crest Inventory'}</span>
+          <div className="login-brand" style={{ justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              <span style={{ fontSize: 30, color: 'var(--theme-accent)', lineHeight: 1 }}>⬢</span>
+              <span className="login-brand-name">{settings?.app_name || 'Crest Inventory'}</span>
+            </div>
+            <button
+              onClick={() => navigate('/pricing')}
+              style={{ background: 'none', border: 'none', color: 'var(--theme-accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              View Pricing →
+            </button>
           </div>
 
           <div className="login-pitch">

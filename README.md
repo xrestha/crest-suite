@@ -132,6 +132,12 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S268 — 2026-07-06 — Login page: added a "View Pricing" link for pre-login visitors
+
+`/pricing` has been a public, no-auth route all along, but nothing on the Login page ever pointed to it — a new visitor had no way to discover it existed unless they already knew the URL. Added a "View Pricing →" button in the top-right of `Login.js`'s brand row (next to the "Crest Inventory" logo/name, above both the trial-signup form and the sign-in form), navigating to `/pricing` via the existing `useNavigate()` hook. Visible immediately without scrolling, for both new visitors and existing users who forgot the plan details.
+
+**Files:** `src/pages/Login.js`
+
 ### S267 — 2026-07-06 — "FREE FOR 7 DAYS" badge made more prominent
 
 Follow-up to S266: the corrected trial badge was still small, upright text easy to miss next to the price below it. Bumped it to italic and a larger font size (11→14 on `Pricing.js`, 10→13 on Help.js's Pricing tab) so it reads as a nudge to try the free week, not just fine print.
