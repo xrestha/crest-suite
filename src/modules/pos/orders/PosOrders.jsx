@@ -5,60 +5,21 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import QRCode from 'qrcode'
-import { adToBs, BS_MONTHS, getBsToday, getBsFiscalYear } from '../../../utils/bsCalendar'
-import { numberToWordsNpr } from '../../../utils/numberToWords'
+import { adToBs, getBsToday, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { buildDynamicQr } from '../../../utils/emvQr'
-import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
 import {
   cachePosMenu, getCachedPosMenu, cachePosTables, getCachedPosTables,
   cachePosSettings, getCachedPosSettings, cachePosOrderForTable, getCachedPosOrderForTable,
   enqueuePosOrder, getPosOrderQueue, getQueuedPosOrder, dequeuePosOrder,
 } from '../../../utils/offlineQueue'
-
-const vatOf  = r => (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : parseFloat(r.vat_rate)
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
-// Shared shape for a pos_order_items row, whether it's about to go straight to Supabase or into
-// the offline queue (enqueuePosOrder) — keeps the two write paths from drifting apart.
-const toItemPayload = i => ({
-  recipe_id:   i.recipe_id || null,
-  name:        i.name,
-  category:    i.category   || 'Other',
-  qty:         i.qty,
-  unit_price:  i.unit_price,
-  vat_rate:    i.vat_rate   ?? 0,
-  sent_to_kot: i.sent_to_kot || false,
-  notes:       i.notes || null,
-})
-// Only these payment methods are scanned by the customer — Cash/Card/Credit already have their
-// own settlement path, so a "scan to pay" QR on the bill would be irrelevant or misleading there.
-const QR_PAY_METHODS = ['eSewa', 'Khalti', 'FonePay']
-
-const STATUS_BADGE = { available: 'badge-green', occupied: 'badge-red', reserved: 'badge-amber', inactive: 'badge-gray' }
-const STATUS_LABEL = { available: 'Available', occupied: 'Occupied', reserved: 'Reserved', inactive: 'Inactive' }
-
-const PAYMENT_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay']
-const VOID_REASONS    = ['Wrong table', 'Duplicate order', 'Test order', 'Order entry mistake', 'Other']
-const COMP_REASONS    = ['Walkout / unpaid', 'Customer goodwill', 'Customer complaint', 'Staff error', 'Owners', 'Company Guest', 'Other']
-const DEFAULT_DISCOUNT_REASONS = ['Loyalty customer', 'Promo / coupon code', 'Manager goodwill', 'Bulk / corporate order', 'Price match', 'Other']
-const COPY_LABEL      = n => n <= 1 ? 'ORIGINAL-COPY' : n === 2 ? 'SECOND-COPY' : n === 3 ? 'THIRD-COPY' : `REPRINT #${n}`
-
-const btnSm = {
-  width: 26, height: 26, borderRadius: 4,
-  border: '1px solid var(--theme-border)',
-  background: 'var(--theme-input-bg)',
-  color: 'var(--theme-text1)',
-  cursor: 'pointer', fontSize: 16, lineHeight: 1,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  flexShrink: 0,
-}
-
-const billInput = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-  borderRadius: 6, padding: '7px 10px', fontSize: 13,
-  color: 'var(--theme-text1)', outline: 'none',
-}
+import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml } from './posOrderPrintHtml'
+import {
+  vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL,
+  PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, COPY_LABEL,
+  btnSm, billInput,
+} from './posOrdersConstants'
 
 export default function PosOrders() {
   const { clientId, profile, hasPosAccess, isAdmin, isOwner } = useAuth()
@@ -784,43 +745,12 @@ export default function PosOrders() {
   }
 
   function printTicket(station, items, ticketNo) {
-    const tableName    = activeTable?.name || 'Takeaway'
-    const now          = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-    const bs           = adToBs(new Date())
-    const date         = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
-    const stationLabel = station === 'BOT' ? 'BAR ORDER TICKET' : 'KITCHEN ORDER TICKET'
-    const takenBy      = profile?.full_name || ''
-
-    const html = `<!DOCTYPE html>
-<html><head><title>${station}</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Courier New',monospace; font-size:13px; width:80mm; padding:8px 10px; color:#000; }
-  .c   { text-align:center; }
-  .b   { font-weight:bold; }
-  .lg  { font-size:17px; letter-spacing:1px; }
-  hr   { border:none; border-top:1px dashed #000; margin:7px 0; }
-  .row { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; }
-  .qty { font-weight:bold; font-size:15px; min-width:34px; text-align:right; }
-  .note { font-size:11px; font-style:italic; color:#000; padding:0 0 3px 10px; }
-</style>
-</head><body>
-  ${outletName ? `<div class="c b" style="font-size:14px">${outletName}</div>` : ''}
-  <div class="c b lg">${stationLabel}</div>
-  <hr>
-  <div class="row"><span class="b" style="font-size:15px">${tableName}</span><span class="b" style="font-size:15px">${ticketNo ? `#${ticketNo}` : ''}</span></div>
-  <div class="row"><span>${takenBy ? `Taken by: ${takenBy}` : ''}</span><span>Covers: ${covers}</span></div>
-  <div class="row" style="font-size:11px;color:#000"><span>${date}</span><span>${now}</span></div>
-  <hr>
-  ${items.map(i => {
-      const delta = (i.sent_qty || 0) > 0 ? i.qty - i.sent_qty : 0
-      const label = delta > 0 ? `+${delta}` : `×${i.qty}`
-      const note  = i.notes ? `<div class="note">↳ ${i.notes}</div>` : ''
-      return `<div class="row"><span class="b">${i.name}</span><span class="qty">${label}</span></div>${note}`
-    }).join('')}
-  <hr>
-</body></html>`
-
+    const html = buildKotBotHtml({
+      station, items, ticketNo, outletName,
+      tableName: activeTable?.name || 'Takeaway',
+      takenBy: profile?.full_name || '',
+      covers,
+    })
     printHtml(html)
   }
 
@@ -1014,156 +944,6 @@ export default function PosOrders() {
     try { return await QRCode.toDataURL(payload, { margin: 1, width: 200 }) } catch { return '' }
   }
 
-  function buildBillHtml(order, items, copyLabel, qrUrl, payments, qrAmount) {
-    const vatReg      = billingSettings.is_vat_registered
-    const prefix      = billingSettings.invoice_prefix || ''
-    const invoiceNo   = order.invoice_no != null
-      ? `${vatReg ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${order.invoice_fy || ''}`
-      : `${vatReg ? 'TI' : 'PB'}-(on confirm)`
-    const tableName   = activeTable?.name || order.table_name || 'Takeaway'
-    const now         = new Date()
-    const nowStr      = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-    const adDateStr   = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    const bs          = adToBs(now)
-    const bsDateStr   = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
-    const payLabel    = order.payment_method || ''
-    // Split payment — multiple tenders against one bill/one invoice number (not a split bill).
-    // `payments` is [{ method, amount }], sourced either from pos_order_payments (real print) or
-    // the live `tenders` state (in-modal preview) — same shape either way.
-    const isSplitBill = payLabel === 'Split' && payments && payments.length > 0
-
-    const { grossAmt, discount, taxableBase, nonTaxableBase, vatAmt: netVatAmt, net, roundOff, totalQty } =
-      computeOrderAmounts(order, items, vatReg)
-    const tendered = order.tendered_amount ?? net
-    const change   = !isSplitBill && payLabel === 'Cash' ? Math.max(0, tendered - net) : 0
-
-    return `<!DOCTYPE html>
-<html><head><title>Bill</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Courier New',monospace; font-size:11px; width:80mm; padding:8px 10px; margin:0 auto; color:#000; }
-  .c   { text-align:center; }
-  .b   { font-weight:bold; }
-  .lg  { font-size:15px; letter-spacing:1px; }
-  hr   { border:none; border-top:1px dashed #000; margin:6px 0; }
-  .row { display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
-  table { width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed; }
-  th, td { text-align:left; padding:2px 4px 2px 0; word-wrap:break-word; }
-  th:last-child, td:last-child { padding-right:0; }
-  th:nth-child(1), td:nth-child(1) { width:19px; }
-  th:nth-child(2), td:nth-child(2) { width:24px; }
-  th:nth-child(4), td:nth-child(4) { width:26px; text-align:center; padding-right:0; }
-  th:nth-child(5), td:nth-child(5) { width:46px; text-align:right; }
-  th:nth-child(6), td:nth-child(6) { width:54px; text-align:right; }
-  .tot  { font-weight:bold; font-size:13px; }
-  .copy { font-size:11px; letter-spacing:1px; }
-</style>
-</head><body>
-  ${outletName ? `<div class="c b" style="font-size:13px">${outletName}</div>` : ''}
-  ${billingSettings.property_address ? `<div class="c" style="font-size:11px">${billingSettings.property_address}</div>` : ''}
-  ${billingSettings.property_phone ? `<div class="c" style="font-size:11px">${billingSettings.property_phone}</div>` : ''}
-  ${billingSettings.vat_number ? `<div class="c" style="font-size:11px">${vatReg ? 'VAT No' : 'PAN No'}: ${billingSettings.vat_number}</div>` : ''}
-  <div class="c b lg" style="margin-top:4px">${vatReg ? 'TAX INVOICE' : 'BILL'}</div>
-  <div class="c copy">${copyLabel}</div>
-  <hr>
-  <div class="row"><span>Bill No:</span><span class="b">${invoiceNo}</span></div>
-  <div class="row"><span>Date:</span><span>${adDateStr}</span></div>
-  <div class="row"><span>Miti:</span><span>${bsDateStr}</span></div>
-  <div class="row"><span>Name:</span><span>${order.buyer_name || ''}</span></div>
-  <div class="row"><span>Address:</span><span>${order.buyer_address || ''}</span></div>
-  <div class="row"><span>PAN No: ${order.buyer_pan || ''}</span><span>Phone: ${order.buyer_phone || ''}</span></div>
-  <div class="row"><span>Payment Mode:</span><span>${isSplitBill ? 'Split' : payLabel}</span></div>
-  <div class="row"><span>Remarks:</span><span>${order.bill_remarks || ''}</span></div>
-  <div class="row" style="font-size:11px;color:#000"><span>${tableName === 'Takeaway' ? 'Takeaway' : `Dine-In: ${tableName}`}</span><span>Covers: ${order.covers ?? ''}</span></div>
-  <div class="row" style="font-size:11px;color:#000"><span>Cashier: ${profile?.full_name || ''}</span><span>${nowStr}</span></div>
-  <hr>
-  <table>
-    <thead><tr><th>Sn</th><th>HSC</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
-    <tbody>
-      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${hscMap[i.recipe_id] || ''}</td><td>${i.name}</td><td>${i.qty}</td><td>${i.unit_price.toFixed(2)}</td><td>${(i.qty * i.unit_price).toFixed(2)}</td></tr>`).join('')}
-    </tbody>
-  </table>
-  <hr>
-  <div class="row"><span>Gross Amount:</span><span>${grossAmt.toFixed(2)}</span></div>
-  <div class="row"><span>Discount:</span><span>${discount.toFixed(2)}</span></div>
-  ${vatReg ? `
-  <div class="row"><span>Taxable:</span><span>${taxableBase.toFixed(2)}</span></div>
-  <div class="row"><span>Nontaxable:</span><span>${nonTaxableBase.toFixed(2)}</span></div>
-  <div class="row"><span>VAT 13%:</span><span>${netVatAmt.toFixed(2)}</span></div>
-  <div class="row"><span>Round Off:</span><span>${roundOff >= 0 ? '+' : ''}${roundOff.toFixed(2)}</span></div>
-  ` : ''}
-  <div class="row tot"><span>Net Amount:</span><span>${net.toFixed(2)}</span></div>
-  <hr>
-  ${isSplitBill ? payments.map(p => `<div class="row"><span>${p.method}:</span><span>${p.amount.toFixed(2)}</span></div>`).join('') : `
-  <div class="row"><span>Tender:</span><span>${tendered.toFixed(2)}</span></div>
-  <div class="row"><span>Change:</span><span>${change.toFixed(2)}</span></div>
-  `}
-  <hr>
-  <div class="row"><span>Total Qty:</span><span>${totalQty}</span></div>
-  <hr>
-  <div style="font-size:11px; margin:4px 0">Rs. ${numberToWordsNpr(net)} only</div>
-  <hr>
-  ${qrUrl ? `
-  <div class="c" style="margin:6px 0">
-    <img src="${qrUrl}" alt="Scan to pay" style="width:120px;height:120px;display:block;margin:0 auto" />
-    <div style="font-size:11px;margin-top:2px">Scan to pay ${(qrAmount ?? net).toFixed(0)} — amount pre-filled</div>
-  </div>
-  <hr>
-  ` : ''}
-  ${payLabel === 'Credit' ? `
-  <div style="margin-top:16px">
-    <div class="row">
-      <span style="border-bottom:1px solid #000; width:60%; display:inline-block">&nbsp;</span>
-      <span style="border-bottom:1px solid #000; width:32%; display:inline-block">&nbsp;</span>
-    </div>
-    <div class="row" style="font-size:10px; margin-top:2px">
-      <span>Customer Signature</span><span>Date</span>
-    </div>
-  </div>
-  ` : ''}
-  <div class="c" style="font-size:11px">Thank you for stopping by! We hope to see you again soon.</div>
-</body></html>`
-  }
-
-  // Optional courtesy slip for one split-payment tender — not a Tax Invoice/PAN Bill, just proof
-  // of that person's own payment while the rest of the table is still settling up. The one real
-  // invoice still only prints once, at full close, via buildBillHtml above.
-  function buildTenderSlipHtml(tender, remainingAfter) {
-    const now       = new Date()
-    const nowStr    = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-    const tableName = activeTable?.name || 'Takeaway'
-    const change    = tender.tenderedAmount != null ? Math.max(0, tender.tenderedAmount - tender.amount) : 0
-
-    return `<!DOCTYPE html>
-<html><head><title>Payment Slip</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Courier New',monospace; font-size:11px; width:80mm; padding:8px 10px; margin:0 auto; color:#000; }
-  .c   { text-align:center; }
-  .b   { font-weight:bold; }
-  hr   { border:none; border-top:1px dashed #000; margin:6px 0; }
-  .row { display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
-  .tot { font-weight:bold; font-size:12px; }
-</style>
-</head><body>
-  ${outletName ? `<div class="c b" style="font-size:13px">${outletName}</div>` : ''}
-  <div class="c" style="font-size:11px; margin-top:2px">Payment Received</div>
-  <hr>
-  <div class="row"><span>Table:</span><span>${tableName}</span></div>
-  <div class="row"><span>Method:</span><span class="b">${tender.method}</span></div>
-  <div class="row tot"><span>Amount:</span><span>NPR ${tender.amount.toFixed(2)}</span></div>
-  ${tender.tenderedAmount != null ? `
-  <div class="row"><span>Tendered:</span><span>${tender.tenderedAmount.toFixed(2)}</span></div>
-  <div class="row"><span>Change:</span><span>${change.toFixed(2)}</span></div>
-  ` : ''}
-  <hr>
-  <div class="row"><span>Remaining on bill:</span><span>${remainingAfter > 0 ? `NPR ${remainingAfter.toFixed(2)}` : 'Paid in full'}</span></div>
-  <div class="row" style="font-size:10px; margin-top:6px"><span>Not a Tax Invoice / PAN Bill</span><span>${nowStr}</span></div>
-  <hr>
-  <div class="c" style="font-size:11px">Thank you for stopping by! We hope to see you again soon.</div>
-</body></html>`
-  }
-
   async function printBill(order, items) {
     const newCount = (order.print_count || 0) + 1
     await scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id)
@@ -1173,86 +953,29 @@ export default function PosOrders() {
       const { data } = await scopedFrom('pos_order_payments', 'payment_method, amount').eq('order_id', order.id).order('recorded_at')
       payments = (data || []).map(p => ({ method: p.payment_method, amount: p.amount }))
     }
-    printHtml(buildBillHtml(order, items, COPY_LABEL(newCount), qrUrl, payments))
+    printHtml(buildBillHtml({
+      order, items, copyLabel: COPY_LABEL(newCount), qrUrl, payments,
+      outletName, billingSettings, hscMap,
+      tableName: activeTable?.name || order.table_name || 'Takeaway',
+      cashierName: profile?.full_name || '',
+    }))
   }
 
   // Complimentary items were never sold — this is an internal cost-tracking slip, not a Tax
   // Invoice or PAN Bill: no VAT/PAN, own NC-prefixed sequence (separate from TI/PB), and line
   // amounts are valued at food cost (not menu price) so the P&L impact isn't distorted by
   // retail pricing. Standard practice per restaurant accounting for comps.
-  // Pure builder (see buildBillHtml) — shared by printCompSlip and the live in-modal preview.
-  function buildCompSlipHtml(order, items, costMap, copyLabel) {
-    const ncNo      = order.invoice_no != null ? `NC-${String(order.invoice_no).padStart(2, '0')}` : 'NC-(on confirm)'
-    const tableName = activeTable?.name || order.table_name || 'Takeaway'
-    const now       = new Date()
-    const nowStr    = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-    const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    const bs        = adToBs(now)
-    const bsDateStr = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
-
-    const totalQty  = items.reduce((s, i) => s + i.qty, 0)
-    const totalCost = items.reduce((s, i) => s + i.qty * (costMap[i.recipe_id] || 0), 0)
-
-    return `<!DOCTYPE html>
-<html><head><title>Complimentary Slip</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Courier New',monospace; font-size:11px; width:80mm; padding:8px 10px; margin:0 auto; color:#000; }
-  .c   { text-align:center; }
-  .b   { font-weight:bold; }
-  .lg  { font-size:14px; letter-spacing:1px; }
-  hr   { border:none; border-top:1px dashed #000; margin:6px 0; }
-  .row { display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
-  table { width:100%; border-collapse:collapse; font-size:11px; }
-  th, td { text-align:left; padding:2px 0; }
-  th:last-child, td:last-child { text-align:right; }
-  .tot  { font-weight:bold; font-size:12px; }
-  .copy { font-size:11px; letter-spacing:1px; }
-</style>
-</head><body>
-  <div class="c copy">${copyLabel}</div>
-  ${outletName ? `<div class="c b" style="font-size:13px">${outletName}</div>` : ''}
-  <div class="c b lg" style="margin-top:4px">COMPLIMENTARY SLIP</div>
-  <div class="c" style="font-size:11px">Internal record — not a Tax Invoice or PAN Bill</div>
-  <hr>
-  <div class="row"><span>No:</span><span class="b">${ncNo}</span></div>
-  <div class="row"><span>Order Ref:</span><span>#${order.order_no ?? ''}</span></div>
-  <div class="row"><span>Table:</span><span>${tableName}</span></div>
-  <div class="row"><span>Date:</span><span>${adDateStr}</span></div>
-  <div class="row"><span>Miti:</span><span>${bsDateStr}</span></div>
-  <div class="row"><span>Reason:</span><span>${order.close_reason || ''}</span></div>
-  <div class="row"><span>Authorized by:</span><span>${profile?.full_name || ''}</span></div>
-  <div class="row"><span>Remarks:</span><span>${order.bill_remarks || ''}</span></div>
-  <hr>
-  <table>
-    <thead><tr><th>Item</th><th>Qty</th><th>Cost</th></tr></thead>
-    <tbody>
-      ${items.map(i => `<tr><td>${i.name}</td><td>${i.qty}</td><td>${(i.qty * (costMap[i.recipe_id] || 0)).toFixed(2)}</td></tr>`).join('')}
-    </tbody>
-  </table>
-  <hr>
-  <div class="row"><span>Total Qty:</span><span>${totalQty}</span></div>
-  <div class="row tot"><span>Total Food Cost:</span><span>NPR ${totalCost.toFixed(2)}</span></div>
-  <hr>
-  <div class="row" style="font-size:11px;color:#000"><span>Table: ${tableName}</span><span>${nowStr}</span></div>
-  <div style="margin-top:16px">
-    <div class="row">
-      <span style="border-bottom:1px solid #000; width:60%; display:inline-block">&nbsp;</span>
-      <span style="border-bottom:1px solid #000; width:32%; display:inline-block">&nbsp;</span>
-    </div>
-    <div class="row" style="font-size:10px; margin-top:2px">
-      <span>Customer Signature</span><span>Date</span>
-    </div>
-  </div>
-</body></html>`
-  }
-
   async function printCompSlip(order, items) {
     const newCount = (order.print_count || 0) + 1
     await scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id)
     const recipeIds = items.map(i => i.recipe_id).filter(Boolean)
     const costMap = await computeRecipeCosts(supabase, recipeIds)
-    printHtml(buildCompSlipHtml(order, items, costMap, COPY_LABEL(newCount)))
+    printHtml(buildCompSlipHtml({
+      order, items, costMap, copyLabel: COPY_LABEL(newCount),
+      outletName,
+      tableName: activeTable?.name || order.table_name || 'Takeaway',
+      authorizedBy: profile?.full_name || '',
+    }))
   }
 
   async function loadRecentBills() {
@@ -1314,8 +1037,19 @@ export default function PosOrders() {
     table_name: activeTable?.name, order_no: orderNo, print_count: 0,
   }
   const previewHtml = !billingOpen ? null
-    : billingTab === 'pay' ? buildBillHtml(previewDraftOrder, orderItems, 'PREVIEW', billQrUrl, tenders, splitMode ? (parseFloat(tenderAmtStr) || remaining) : payTotal)
-    : billingTab === 'writeoff' ? buildCompSlipHtml(previewDraftOrder, orderItems, compCostMap, 'PREVIEW')
+    : billingTab === 'pay' ? buildBillHtml({
+        order: previewDraftOrder, items: orderItems, copyLabel: 'PREVIEW', qrUrl: billQrUrl, payments: tenders,
+        qrAmount: splitMode ? (parseFloat(tenderAmtStr) || remaining) : payTotal,
+        outletName, billingSettings, hscMap,
+        tableName: activeTable?.name || 'Takeaway',
+        cashierName: profile?.full_name || '',
+      })
+    : billingTab === 'writeoff' ? buildCompSlipHtml({
+        order: previewDraftOrder, items: orderItems, costMap: compCostMap, copyLabel: 'PREVIEW',
+        outletName,
+        tableName: activeTable?.name || 'Takeaway',
+        authorizedBy: profile?.full_name || '',
+      })
     : null
   const kotCount = orderItems.filter(i => !i.sent_to_kot && !botCategories.has(i.category || 'Other')).length
   const botCount = orderItems.filter(i => !i.sent_to_kot && botCategories.has(i.category || 'Other')).length
@@ -1932,7 +1666,10 @@ export default function PosOrders() {
                           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{fmtNpr(t.amount)}</span>
                             <Tip text="Prints a small courtesy slip for this payment only — not the Tax Invoice/PAN Bill, which still prints once at the end.">
-                              <button onClick={() => printHtml(buildTenderSlipHtml(t, payTotal - tenders.slice(0, i + 1).reduce((s, x) => s + x.amount, 0)))}
+                              <button onClick={() => printHtml(buildTenderSlipHtml({
+                                  tender: t, remainingAfter: payTotal - tenders.slice(0, i + 1).reduce((s, x) => s + x.amount, 0),
+                                  outletName, tableName: activeTable?.name || 'Takeaway',
+                                }))}
                                 style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
                                 🖨
                               </button>
