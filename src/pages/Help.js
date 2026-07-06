@@ -453,6 +453,51 @@ const FAQ = [
   { q: 'Can I edit or delete a bill after it\'s been paid/closed?', a: 'No — once billed, an order can\'t be edited or deleted directly, so the original record is always preserved for audit. To correct a paid bill, issue a Credit Note, which reverses it instead of altering history.' },
 ]
 
+// ── Getting Started — Crest HR ────────────────────────────────────────────────
+const HR_SETUP_STEPS = [
+  { step: 1, title: 'Add your Employees', desc: 'Go to Employees → add each staff member with a name, designation, join date, and pay basis (monthly, daily, or hourly).', why: 'Every attendance mark and payslip is tied to an employee record here.' },
+  { step: 2, title: 'Set up their Pay', desc: 'Go to Pay Setup → enter basic salary, allowances, SSF enrollment, and bank details for each employee.', why: 'Payroll can\'t compute anything until basic salary — and, if applicable, SSF enrollment — is set.' },
+  { step: 3, title: 'Build your Roster', desc: 'Go to Staff Roster → assign shifts for the month. Optional, but unlocks ⚡ Generate from Roster in Attendance.', why: 'Without a roster, every day for every employee has to be marked by hand in Attendance.' },
+  { step: 4, title: 'Mark Attendance', desc: 'Go to Attendance → click ⚡ Generate from Roster to pre-fill the month from what you scheduled, then adjust leave, offs, and OT by hand.', why: 'Payroll reads attendance directly — an incomplete month means an incomplete payslip.' },
+  { step: 5, title: 'Run your first Payroll', desc: 'Go to Payroll → Generate Payroll for the period → review each payslip → Finalize.', why: 'Finalizing locks the run and is what actually commits net pay, SSF, and TDS for the month.' },
+]
+const HR_WORKFLOW_STEPS = [
+  { step: 1, title: 'Confirm the period is open', desc: 'Periods → the current BS month should already be open from IMS, or create one if HR runs standalone.' },
+  { step: 2, title: 'Update the Roster', desc: 'Staff Roster → adjust shifts for the month ahead as staffing changes.' },
+  { step: 3, title: 'Mark / Generate Attendance', desc: 'Attendance → Generate from Roster, then handle leave, unscheduled offs, and OT day by day as the month goes.' },
+  { step: 4, title: 'Approve Leave & Overtime requests', desc: 'Leave and Overtime → approve or reject pending requests before running payroll.' },
+  { step: 5, title: 'Run Payroll', desc: 'Payroll → Generate → review TDS/SSF/deductions per employee → Finalize.' },
+  { step: 6, title: 'Handle Advances & Festival Allowance', desc: 'Advances & Loans and Festival Allowance → process anything due this month; both feed back into the next payroll run automatically.' },
+]
+const HR_MISTAKES = [
+  'Finalizing payroll before attendance, leave, and OT are fully settled for the period — Finalize locks the month, so anything entered late won\'t be reflected.',
+  'Forgetting to switch on SSF Enrolled per employee in Pay Setup — it\'s off by default, and until it\'s on, no SSF is deducted or contributed for that employee anywhere, including Payroll.',
+  'Logging the same overtime in both the Attendance sheet\'s OT column and the Overtime module — both get paid, so it pays twice (the app flags this with an ⚠ OT ×2? badge, but it\'s easy to miss).',
+  'Finalizing months out of BS-calendar order — TDS is a year-to-date cumulative projection, so skipping ahead throws off the tax calculation for every month after it.',
+]
+
+// ── Getting Started — Crest POS ───────────────────────────────────────────────
+const POS_SETUP_STEPS = [
+  { step: 1, title: 'Set up your Tables', desc: 'Go to Tables → ⚡ Quick Setup to batch-generate a floor plan in one click.', why: 'Orders and billing are organised by table — there\'s nothing to bill against without them.' },
+  { step: 2, title: 'Add Staff & PINs', desc: 'Go to POS Staff → add each team member with a role (Staff / Supervisor / Manager) and a 4–6 digit PIN.', why: 'Only staff with a role assigned appear on the POS login screen at all.' },
+  { step: 3, title: 'Configure your Menu', desc: 'Go to Menu Pricing → add items with a menu price (and cost price, if you\'re not also running IMS Recipe Costing).', why: 'The order screen only shows items that exist here with On POS checked.' },
+  { step: 4, title: 'Set up Silent Printing', desc: 'One-time device setup on a dedicated till — see the Silent Printing Setup guide below. Skip this if staff are fine using the normal browser print dialog.', why: 'Without it, every KOT/bill print pops a print dialog staff have to click through manually.' },
+  { step: 5, title: 'Open your first Shift', desc: 'Go to Shifts → Open Shift → count the starting cash drawer.', why: 'Orders can be billed without an open shift, but they won\'t show up in any shift\'s reconciliation total.' },
+]
+const POS_WORKFLOW_STEPS = [
+  { step: 1, title: 'Open Shift', desc: 'Shifts → Open Shift → count the starting cash drawer at the start of the day.' },
+  { step: 2, title: 'Take Orders', desc: 'Orders → seat guests, add items, send KOT/BOT to the kitchen or bar.' },
+  { step: 3, title: 'Bill & Close', desc: 'Charge the order when the guest is ready to pay — apply any discount or mark Complimentary, always with a reason.' },
+  { step: 4, title: 'Close Shift', desc: 'Shifts → Close Shift at the end of the day → reconcile the counted cash against the system total → review the Z-report.' },
+  { step: 5, title: 'Check the Sales Report', desc: 'Sales Report → review payment-method and category breakdowns periodically, not just at shift close.' },
+]
+const POS_MISTAKES = [
+  'Not closing a Shift before opening a new one — only one shift can be open at a time, and orders billed with no shift open never show up in any reconciliation.',
+  'Confusing Void with Complimentary — Void cancels the sale entirely (nothing recorded); Complimentary keeps the sale on record for stock/COGS but zeroes what the guest pays.',
+  'Forgetting to configure Ticket Routing — an item in a category with no route assigned won\'t print to the kitchen or bar at all when sent.',
+  'Letting staff share PINs — it breaks the per-staff accountability that Sales Exceptions and the audit trail depend on.',
+]
+
 export default function Help() {
   const { imsEnabled, hrEnabled, posEnabled, plan, isAdmin } = useAuth()
   const [activeSection, setActiveSection]         = useState('guide')
@@ -478,6 +523,23 @@ export default function Help() {
     setOpenModules(prev => {
       const next = { ...prev, [key]: !moduleOpen(key, prev) }
       localStorage.setItem('crest_help_modules', JSON.stringify(next))
+      return next
+    })
+  }
+
+  // Same pattern, but for the Getting Started tab's per-module sections — these default
+  // *closed* (unlike Module Guide) so a Suite client sees three clickable topics instead of a
+  // 12-card wall on first load, and picks the one they're actually onboarding right now.
+  const [openGS, setOpenGS] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('crest_help_gs')) || {} } catch { return {} }
+  })
+  function gsOpen(key, state = openGS) {
+    return state[key] === true
+  }
+  function toggleGS(key) {
+    setOpenGS(prev => {
+      const next = { ...prev, [key]: !gsOpen(key, prev) }
+      localStorage.setItem('crest_help_gs', JSON.stringify(next))
       return next
     })
   }
@@ -561,24 +623,38 @@ export default function Help() {
       {/* GETTING STARTED */}
       {activeSection === 'guide' && (
         <div>
+          {imsEnabled && (
+          <div>
           <div className="card" style={{ marginBottom: 16, background: 'rgba(201,168,76,0.03)', borderColor: 'rgba(201,168,76,0.2)' }}>
-            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+            <div onClick={() => toggleGS('ims')} style={{ display: 'flex', gap: 16, alignItems: 'flex-start', cursor: 'pointer' }}>
               <span style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⬢</span>
-              <div>
-                <h3 style={{ margin: '0 0 8px', fontSize: 15, color: 'var(--theme-text1)' }}>Welcome to Crest Inventory</h3>
-                <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
-                  Crest tracks your ingredient purchases, stock levels, and food cost in real time. The core idea is simple:
-                </p>
-                <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '10px 16px', display: 'inline-block', marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600 }}>Opening Stock + Purchases − Wastage − Closing Stock = COGS (what you actually used)</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: 15, color: 'var(--theme-text1)' }}>Welcome to Crest Inventory</h3>
+                  <span style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{gsOpen('ims') ? '▲' : '▼'}</span>
                 </div>
-                <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
-                  Follow the steps below to get set up. First-time setup takes about 30–60 minutes. After that, the monthly routine takes 15–20 minutes of admin at month end.
-                </p>
+                {!gsOpen('ims') && (
+                  <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Click to see first-time setup, monthly workflow, and common mistakes to avoid.</p>
+                )}
+                {gsOpen('ims') && (
+                  <>
+                    <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
+                      Crest tracks your ingredient purchases, stock levels, and food cost in real time. The core idea is simple:
+                    </p>
+                    <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '10px 16px', display: 'inline-block', marginBottom: 8 }}>
+                      <span style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600 }}>Opening Stock + Purchases − Wastage − Closing Stock = COGS (what you actually used)</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
+                      Follow the steps below to get set up. First-time setup takes about 30–60 minutes. After that, the monthly routine takes 15–20 minutes of admin at month end.
+                    </p>
+                  </>
+                )}
               </div>
             </div>
           </div>
 
+          {gsOpen('ims') && (
+          <>
           <div className="card" style={{ marginBottom: 16 }}>
             <h3 style={{ margin: '0 0 6px', fontSize: 15, color: 'var(--theme-text1)' }}>First-Time Setup</h3>
             <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Do this once when you first log in. Takes 30–60 minutes.</p>
@@ -648,6 +724,155 @@ export default function Help() {
               </div>
             ))}
           </div>
+          </>
+          )}
+          </div>
+          )}
+
+          {hrEnabled && (
+          <div>
+            <div className="card" style={{ marginBottom: 16, background: 'rgba(96,165,250,0.03)', borderColor: 'rgba(96,165,250,0.2)' }}>
+              <div onClick={() => toggleGS('hr')} style={{ display: 'flex', gap: 16, alignItems: 'flex-start', cursor: 'pointer' }}>
+                <span style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>👤</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <h3 style={{ margin: 0, fontSize: 15, color: 'var(--theme-text1)' }}>Welcome to Crest HR</h3>
+                    <span style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{gsOpen('hr') ? '▲' : '▼'}</span>
+                  </div>
+                  {!gsOpen('hr') && (
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Click to see first-time setup, monthly workflow, and common mistakes to avoid.</p>
+                  )}
+                  {gsOpen('hr') && (
+                    <>
+                      <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
+                        Crest HR runs payroll, attendance, and Nepal-compliant SSF/TDS deductions for your staff. The core idea is simple:
+                      </p>
+                      <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '10px 16px', display: 'inline-block', marginBottom: 8 }}>
+                        <span style={{ fontSize: 13, color: '#60a5fa', fontWeight: 600 }}>Attendance → Payroll: what you mark each day becomes what people get paid</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {gsOpen('hr') && (
+            <>
+            <div className="card" style={{ marginBottom: 16 }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: 15, color: 'var(--theme-text1)' }}>First-Time Setup</h3>
+              <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Do this once when you first turn on Crest HR.</p>
+              {HR_SETUP_STEPS.map((s, i, arr) => (
+                <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 16, paddingBottom: 16, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border)' : 'none' }}>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#60a5fa', flexShrink: 0 }}>{s.step}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 4 }}>{s.title}</div>
+                    <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 6 }}>{s.desc}</div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                      <span style={{ color: '#60a5fa', fontSize: 11, marginTop: 1, flexShrink: 0 }}>Why:</span>
+                      <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.why}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: 15, color: 'var(--theme-text1)' }}>Monthly Workflow</h3>
+              <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Repeat this every BS month.</p>
+              {HR_WORKFLOW_STEPS.map((s, i, arr) => (
+                <div key={s.step} style={{ display: 'flex', gap: 14, marginBottom: 12, paddingBottom: 12, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border-lt)' : 'none' }}>
+                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#60a5fa', flexShrink: 0 }}>{s.step}</div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 3 }}>{s.title}</div>
+                    <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="card" style={{ borderColor: 'rgba(248,113,113,0.15)' }}>
+              <h3 style={{ margin: '0 0 16px', fontSize: 15, color: 'var(--theme-text1)' }}>Common Mistakes to Avoid</h3>
+              {HR_MISTAKES.map((text, i, arr) => (
+                <div key={i} style={{ display: 'flex', gap: 10, marginBottom: i < arr.length - 1 ? 10 : 0 }}>
+                  <span style={{ color: 'var(--theme-red)', fontSize: 12, flexShrink: 0, marginTop: 1 }}>✕</span>
+                  <span style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{text}</span>
+                </div>
+              ))}
+            </div>
+            </>
+            )}
+          </div>
+          )}
+
+          {posEnabled && (
+          <div>
+            <div className="card" style={{ marginBottom: 16, background: 'rgba(201,168,76,0.03)', borderColor: 'rgba(201,168,76,0.2)' }}>
+              <div onClick={() => toggleGS('pos')} style={{ display: 'flex', gap: 16, alignItems: 'flex-start', cursor: 'pointer' }}>
+                <span style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⊕</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: gsOpen('pos') ? 8 : 0 }}>
+                    <h3 style={{ margin: 0, fontSize: 15, color: 'var(--theme-text1)' }}>Welcome to Crest POS</h3>
+                    <span style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{gsOpen('pos') ? '▲' : '▼'}</span>
+                  </div>
+                  {!gsOpen('pos') && (
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Click to see first-time setup, daily workflow, and common mistakes to avoid.</p>
+                  )}
+                  {gsOpen('pos') && (
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
+                      Crest POS runs your floor — tables, orders, billing, and shift reconciliation.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {gsOpen('pos') && (
+            <>
+            <div className="card" style={{ marginBottom: 16 }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: 15, color: 'var(--theme-text1)' }}>First-Time Setup</h3>
+              <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Do this once when you first turn on Crest POS.</p>
+              {POS_SETUP_STEPS.map((s, i, arr) => (
+                <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 16, paddingBottom: 16, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border)' : 'none' }}>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent)', flexShrink: 0 }}>{s.step}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 4 }}>{s.title}</div>
+                    <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 6 }}>{s.desc}</div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                      <span style={{ color: 'var(--theme-accent)', fontSize: 11, marginTop: 1, flexShrink: 0 }}>Why:</span>
+                      <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.why}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: 15, color: 'var(--theme-text1)' }}>Daily Workflow</h3>
+              <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Repeat this every shift/day the floor is open.</p>
+              {POS_WORKFLOW_STEPS.map((s, i, arr) => (
+                <div key={s.step} style={{ display: 'flex', gap: 14, marginBottom: 12, paddingBottom: 12, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border-lt)' : 'none' }}>
+                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent)', flexShrink: 0 }}>{s.step}</div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 3 }}>{s.title}</div>
+                    <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="card" style={{ borderColor: 'rgba(248,113,113,0.15)' }}>
+              <h3 style={{ margin: '0 0 16px', fontSize: 15, color: 'var(--theme-text1)' }}>Common Mistakes to Avoid</h3>
+              {POS_MISTAKES.map((text, i, arr) => (
+                <div key={i} style={{ display: 'flex', gap: 10, marginBottom: i < arr.length - 1 ? 10 : 0 }}>
+                  <span style={{ color: 'var(--theme-red)', fontSize: 12, flexShrink: 0, marginTop: 1 }}>✕</span>
+                  <span style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{text}</span>
+                </div>
+              ))}
+            </div>
+            </>
+            )}
+          </div>
+          )}
         </div>
       )}
 

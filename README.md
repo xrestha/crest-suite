@@ -132,6 +132,14 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S260 — 2026-07-06 — Getting Started tab: added HR and POS onboarding, made all three collapsible
+
+The Help page's "Getting Started" tab was 100% IMS content — welcome blurb, First-Time Setup, Monthly Workflow, and Common Mistakes cards all only covered Item Master/Purchases/Recipe Costing, unconditionally rendered regardless of which modules a client actually has. Added equivalent onboarding for Crest HR (Employees → Pay Setup → Roster → Attendance → Payroll, with a "Monthly Workflow" and common mistakes list that calls out the SSF-toggle bug fixed in S255, the OT ×2 double-pay risk, and TDS's year-to-date calculation depending on finalizing months in order) and Crest POS (Tables → POS Staff → Menu Pricing → Shifts, with a "Daily Workflow" since POS is an operational loop, not monthly) — each gated behind `hrEnabled`/`posEnabled` the same way the Module Guide tab already gates its sections. The existing IMS content is unchanged, now gated behind `imsEnabled`.
+
+**Made all three sections an accordion, collapsed by default** (added mid-session after seeing the three modules stacked would mean 12 cards of scrolling for a Suite client): each module's "Welcome to Crest X" card is now the clickable header — collapsed it shows just a one-line teaser, expanded it reveals the welcome text plus that module's Setup/Workflow/Mistakes cards. New `openGS`/`crest_help_gs`-persisted state, independent per-module toggles (not a single-open accordion), mirroring the `openModules` pattern already used on the Module Guide tab but defaulting closed instead of open.
+
+**Files:** `src/pages/Help.js`
+
 ### S259 — 2026-07-06 — IMS re-tiering: Staff Meals → Starter, Demand Forecast → Pro
 
 Part of the pricing/bundling strategy work: moved two features between IMS plan tiers ahead of the actual price-number rollout. `staff_meals` (Growth → Starter) and `demand_forecast` (Growth → Pro).
