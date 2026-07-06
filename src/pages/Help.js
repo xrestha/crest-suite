@@ -818,9 +818,14 @@ export default function Help() {
                     <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Click to see first-time setup, daily workflow, and common mistakes to avoid.</p>
                   )}
                   {gsOpen('pos') && (
-                    <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
-                      Crest POS runs your floor — tables, orders, billing, and shift reconciliation.
-                    </p>
+                    <>
+                      <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
+                        Crest POS runs your floor — tables, orders, billing, and shift reconciliation. The core idea is simple:
+                      </p>
+                      <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '10px 16px', display: 'inline-block' }}>
+                        <span style={{ fontSize: 13, color: '#a78bfa', fontWeight: 600 }}>Order → Bill → Shift Close: every sale reconciles back to the cash drawer at day's end</span>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
