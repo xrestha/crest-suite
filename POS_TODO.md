@@ -4,7 +4,7 @@ Living checklist compiled from: the competitor "IMS" ERP report-menu audit, the 
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-07-04 (S239)
+Last updated: 2026-07-06 (S245)
 
 ---
 
@@ -37,13 +37,14 @@ Last updated: 2026-07-04 (S239)
 - [ ] 🟡 Item Wise tab: add Product Code + UoM columns (found via competitor screenshot comparison, 2026-07-04 — `recipes.recipe_code`/`yield_uom` already exist, just not pulled into the report query; no migration needed)
 - [x] ~~Printed letterhead baked into Excel exports~~ — shipped S238, 2026-07-04. All 7 `/pos/sales-report` tabs now export Company Name/VAT No./Address + `@As On Dated : ... To : ...` date-range line (or `@Fiscal Year :` for 1L+ Report) above the data, matching the statutory-report look of competitor exports.
 - [x] ~~KOT Log: Bill Trail tab~~ — shipped S239, 2026-07-04 (not originally on this list — requested after seeing Reconciliation only surfaces exceptions). 3rd tab in `/pos/kot-log`: every paid/voided bill, expandable to its full KOT/BOT send history, with an amber "No KOT" badge for bills that never sent anything to the kitchen. No migration needed.
+- [x] ~~Payment Summary Report~~ — shipped S245, 2026-07-05 (not originally on this list). One of 8 tabs in `/pos/sales-report`: payment-method breakdown (Cash/Card/eSewa/Khalti/FonePay/Credit) over a BS date range.
 
 ## D. Known roadmap items
 
 - [ ] 🟡 Item-level Complimentary/comp (currently whole-order only)
 - [ ] 🔴 QR payment auto-confirmation (webhook, order auto-marks paid — low priority, needs per-client merchant onboarding)
 - [ ] 🔵 Payment QR rail coverage (eSewa rejecting NepalPay/NCHL QR — deferred, test Plan A later)
-- [ ] 🔴 Offline mode (IndexedDB queue for POS itself, not just Stock Count)
+- [x] ~~Offline mode (IndexedDB queue for POS itself, not just Stock Count)~~ — shipped S245, 2026-07-05. Order Taking (add items, edit covers, send KOT/BOT) now uses the same offline-queue pattern as IMS Stock Count. Billing/Charge deliberately stays online-only (sequential invoice numbering can't be assigned offline).
 - [ ] 🔴 Barcode support (structural, no current need identified)
 
 ## Not on this list (deliberately out of scope)
@@ -54,6 +55,8 @@ Full double-entry accounting / Chart of Accounts / Debtors-Creditors, multi-ware
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~Offline mode (Order Taking)~~ — shipped S245, 2026-07-05. Extends the IMS Stock Count offline-queue pattern (`src/utils/offlineQueue.js`) to `PosOrders.jsx`: add items, edit covers, send KOT/BOT all work through a wifi drop mid-service. Billing/Charge stays online-only — sequential invoice numbering can't be assigned while offline.
+- [x] ~~Payment Summary Report~~ — shipped S245, 2026-07-05. One of 8 tabs in `SalesReport.jsx`, `/pos/sales-report`. Payment-method breakdown (Cash/Card/eSewa/Khalti/FonePay/Credit) over a BS date range.
 - [x] ~~KOT Log: Bill Trail tab~~ — shipped S239, 2026-07-04. `/pos/kot-log` 3rd tab. One row per paid/voided bill, expandable (accordion pattern from `PosShifts.jsx`) into its full KOT/BOT trail. Amber "No KOT" badge for zero-send bills, red "Discrepancy" badge shares logic with Reconciliation via extracted `sumSentQtyByOrderItem`/`flagOrderDiscrepancies` helpers.
 - [x] ~~Printed letterhead baked into Excel exports~~ — shipped S238, 2026-07-04. New `withLetterhead()` helper in `SalesReport.jsx` (uses `XLSX.utils.aoa_to_sheet` + `sheet_add_json` with `origin: -1` to prepend rows ahead of the existing per-tab data). Fetches `clients.name` + `settings.vat_number`/`property_address` once per client, independent of the date-range fetch.
 - [x] ~~Bill Register / Voucher Wise Sales Report~~ — shipped S237, 2026-07-04. 7th tab in `SalesReport.jsx`, `/pos/sales-report`. One row per bill (Voucher#, Invoice#, Customer, Payment Mode, Order Mode, amounts, Remarks, Entered By), with a "Credit Noted" badge for bills later corrected instead of excluding them (unlike Daily). No migration needed — reused existing `pos_orders` columns.
