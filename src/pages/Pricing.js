@@ -1,90 +1,20 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_BUNDLES } from '../data/pricingPlans'
 
 // ── Change this to the contact email when ready ──────────────────────────────
 const CONTACT_EMAIL = 'hello@cresthospitality.com'
 
 const GOLD   = 'var(--theme-accent)'
 const GREEN  = 'var(--theme-green)'
-const INDIGO = '#4a6fa3'
 const BG     = 'var(--theme-bg)'
 const CARD   = 'var(--theme-card)'
 const BORDER = 'var(--theme-border)'
 
-const STARTER_FEATURES = [
-  'Dashboard & KPI Overview',
-  'Item Master with Unit Conversion',
-  'Vendor Management',
-  'BS Calendar Periods',
-  'Purchases + Vendor Returns',
-  'Stock Count (Opening / Closing / Wastage)',
-  'Mobile App — Installable PWA, Offline Stock Counting',
-  'Sales Entry (Bulk or Daily)',
-  'Payment Summary (Cash / Credit / FonePay)',
-  'Monthly & Annual Summary (COGS, BS Fiscal Year)',
-  'Reorder Report & Par Levels',
-  'VAT & Non-VAT Reports',
-  'Wastage Report with Excel Export',
-  'Settings & Outlet Customisation',
-]
-
-const GROWTH_EXTRAS = [
-  'Recipe Costing & Live Food Cost %',
-  'Variance Report (Theoretical vs Actual)',
-  'Recipe Contribution Margin Report',
-  'Menu Repricing (Underpriced Dish Finder)',
-  'Best & Worst Sellers Analysis',
-  'Budget vs Actual per Category',
-  'Outstanding Payables with Aging',
-  'Internal Requisitions (Store → Department)',
-  'Dead Stock & Slow Mover Detection',
-  'Staff Meals Tracking',
-  'Nutrition Facts & Allergen Labels',
-  'Purchase Orders (PO → GRN Workflow)',
-]
-
-const PRO_EXTRAS = [
-  'Menu Engineering (Star / Puzzle / Plowhorse / Dog)',
-  'Theoretical vs Actual Food Cost Variance',
-  'Period Comparison (6 / 12 / 24 / All Periods)',
-  'Shrinkage Report (Multi-Period Consistency)',
-  'FIFO / Expiry Tracking',
-  'Vendor Spend Report',
-  'Supplier Price Tracker & Rate Alerts',
-  'Overheads & True Margin Analysis',
-]
-
-const PLANS = [
-  {
-    name: 'Starter', icon: '◎', color: GOLD,
-    tagline: 'Get your inventory under control',
-    badge: '1 Month Free', badgeBg: GOLD,
-    monthly: 5000, annual: 3750,
-    features: STARTER_FEATURES, highlight: false,
-    cta: 'Start Free Trial',
-  },
-  {
-    name: 'Growth', icon: '◈', color: GREEN,
-    tagline: 'Understand your food cost',
-    badge: 'Most Popular', badgeBg: 'rgba(52,211,153,0.9)',
-    monthly: 8000, annual: 6000,
-    features: GROWTH_EXTRAS, highlight: true,
-    cta: 'Get Growth',
-  },
-  {
-    name: 'Pro', icon: '⬢', color: INDIGO,
-    tagline: 'Run your kitchen like a business',
-    badge: 'Full Suite', badgeBg: INDIGO,
-    monthly: 12000, annual: 9000,
-    features: PRO_EXTRAS, highlight: false,
-    cta: 'Get Pro',
-  },
-]
-
 const FAQS = [
   {
     q: 'Is the 1-month trial really free?',
-    a: 'Yes — the Starter plan is completely free for the first month with no credit card and no hidden fees. After 1 month it continues at NPR 5,000/mo, or you can upgrade to Growth or Pro at any time.',
+    a: 'Yes — the IMS Starter plan is completely free for the first month with no credit card and no hidden fees. After 1 month it continues at its listed monthly rate, or you can upgrade to Growth or Pro at any time.',
   },
   {
     q: 'Can I negotiate the price?',
@@ -107,6 +37,32 @@ const FAQS = [
     a: 'Your data is stored in Supabase (PostgreSQL) with row-level security — each property can only see its own data. No other client can access your records.',
   },
 ]
+
+// Shared feature-list rendering, colored by whichever module owns the card.
+function FeatureList({ features, color }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+      {features.map((f, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
+          <span style={{ color, fontSize: 13, flexShrink: 0, marginTop: 1 }}>✓</span>
+          <span style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.45 }}>{f}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SectionHeading({ color, title, subtitle }) {
+  return (
+    <div style={{ textAlign: 'center', marginBottom: 28 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 6 }}>
+        <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
+        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>{title}</h2>
+      </div>
+      {subtitle && <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>{subtitle}</p>}
+    </div>
+  )
+}
 
 export default function Pricing() {
   const [annual, setAnnual]   = useState(false)
@@ -137,8 +93,9 @@ export default function Pricing() {
         <h1 style={{ fontSize: 44, fontWeight: 800, margin: '0 0 16px', fontFamily: 'Georgia, serif', lineHeight: 1.15, color: 'var(--theme-text1)' }}>
           Simple, honest pricing
         </h1>
-        <p style={{ fontSize: 16, color: 'var(--theme-text2)', margin: '0 auto 44px', maxWidth: 500, lineHeight: 1.7 }}>
+        <p style={{ fontSize: 16, color: 'var(--theme-text2)', margin: '0 auto 44px', maxWidth: 560, lineHeight: 1.7 }}>
           Built for Nepal's restaurants and cafes. Works in BS calendar, NPR, and FonePay — no Western SaaS workarounds needed.
+          Buy Crest IMS, Crest HR, and Crest POS separately, or bundle all three as Crest Suite for a discount.
         </p>
 
         {/* Billing toggle */}
@@ -159,76 +116,145 @@ export default function Pricing() {
         </div>
       </div>
 
-      {/* Plan cards */}
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 80px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
-        {PLANS.map(plan => (
-          <div key={plan.name} style={{
-            background: CARD,
-            border: plan.highlight ? `1px solid rgba(201,168,76,0.45)` : `1px solid ${BORDER}`,
-            borderRadius: 14, padding: '36px 28px 28px', position: 'relative',
-            display: 'flex', flexDirection: 'column',
-            boxShadow: plan.highlight ? '0 4px 48px rgba(201,168,76,0.08)' : 'none',
-          }}>
-            <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', background: plan.badgeBg, color: 'var(--theme-bg)', fontSize: 10, fontWeight: 800, padding: '4px 14px', borderRadius: 10, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-              {plan.badge}
-            </div>
-
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                <span style={{ fontSize: 22, color: plan.color }}>{plan.icon}</span>
-                <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{plan.name}</span>
-              </div>
-              <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.5 }}>{plan.tagline}</p>
-            </div>
-
-            {/* Price */}
-            <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
-              {plan.name === 'Starter' && !annual ? (
-                <>
-                  <div style={{ fontSize: 11, color: GOLD, fontWeight: 800, marginBottom: 5, letterSpacing: '0.07em' }}>FREE FOR 1 MONTH</div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
-                    NPR {plan.monthly.toLocaleString()}
-                    <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo after</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
-                    NPR {(annual ? plan.annual : plan.monthly).toLocaleString()}
-                    <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
-                  </div>
-                  {annual && (
-                    <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
-                      Billed annually · NPR {((annual ? plan.annual : plan.monthly) * 12).toLocaleString()}/yr
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            <button
-              onClick={() => plan.name === 'Starter' ? navigate('/login?trial=1') : navigate('/login')}
-              style={{ background: plan.highlight ? GOLD : 'rgba(201,168,76,0.08)', border: `1px solid ${plan.highlight ? GOLD : 'rgba(201,168,76,0.25)'}`, color: plan.highlight ? 'var(--theme-bg)' : GOLD, padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
-              {plan.cta} →
-            </button>
-
-            <div style={{ flex: 1 }}>
-              {plan.name !== 'Starter' && (
-                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                  {plan.name === 'Growth' ? '+ Everything in Starter' : '+ Everything in Growth'}
+      {/* ── Crest IMS — 3 tiers ── */}
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
+        <SectionHeading color={MODULE_COLORS.ims} title="Crest IMS" subtitle="Inventory, recipe costing & food-cost intelligence" />
+      </div>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+        {IMS_TIERS.map(plan => {
+          const highlight = plan.key === 'growth'
+          const price = annual ? plan.annual : plan.monthly
+          return (
+            <div key={plan.key} style={{
+              background: CARD,
+              border: highlight ? `1px solid ${MODULE_COLORS.ims}70` : `1px solid ${BORDER}`,
+              borderRadius: 14, padding: '36px 28px 28px', position: 'relative',
+              display: 'flex', flexDirection: 'column',
+              boxShadow: highlight ? `0 4px 48px ${MODULE_COLORS.ims}22` : 'none',
+            }}>
+              {highlight && (
+                <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', background: MODULE_COLORS.ims, color: '#0b0b0b', fontSize: 10, fontWeight: 800, padding: '4px 14px', borderRadius: 10, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                  Most Popular
                 </div>
               )}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-                {plan.features.map((f, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
-                    <span style={{ color: plan.color, fontSize: 13, flexShrink: 0, marginTop: 1 }}>✓</span>
-                    <span style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.45 }}>{f}</span>
+
+              <div style={{ marginBottom: 20 }}>
+                <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{plan.label}</span>
+              </div>
+
+              <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
+                {plan.key === 'starter' && !annual ? (
+                  <>
+                    <div style={{ fontSize: 11, color: MODULE_COLORS.ims, fontWeight: 800, marginBottom: 5, letterSpacing: '0.07em' }}>FREE FOR 1 MONTH</div>
+                    <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
+                      NPR {plan.monthly.toLocaleString()}
+                      <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo after</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
+                      NPR {price.toLocaleString()}
+                      <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
+                    </div>
+                    {annual && (
+                      <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
+                        Billed annually · NPR {(price * 12).toLocaleString()}/yr
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <button
+                onClick={() => plan.key === 'starter' ? navigate('/login?trial=1') : navigate('/login')}
+                style={{ background: highlight ? MODULE_COLORS.ims : `${MODULE_COLORS.ims}14`, border: `1px solid ${highlight ? MODULE_COLORS.ims : MODULE_COLORS.ims + '40'}`, color: highlight ? '#0b0b0b' : MODULE_COLORS.ims, padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
+                {plan.key === 'starter' ? 'Start Free Trial' : `Get ${plan.label}`} →
+              </button>
+
+              <div style={{ flex: 1 }}>
+                {plan.includesLabel && (
+                  <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    {plan.includesLabel}
                   </div>
-                ))}
+                )}
+                <FeatureList features={plan.features} color={MODULE_COLORS.ims} />
               </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
+      </div>
+
+      {/* ── Crest HR + Crest POS — flat modules ── */}
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
+        <SectionHeading color={MODULE_COLORS.hr} title="Crest HR & Crest POS" subtitle="Payroll and floor operations — buy either one on its own" />
+      </div>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20 }}>
+        {[
+          { key: 'hr',  name: 'Crest HR',  color: MODULE_COLORS.hr,  tagline: 'Nepal-compliant payroll, attendance, and staff management.', pricing: HR_PRICING },
+          { key: 'pos', name: 'Crest POS', color: MODULE_COLORS.pos, tagline: 'Tables, orders, billing, and shift reconciliation.',             pricing: POS_PRICING },
+        ].map(mod => {
+          const price = annual ? mod.pricing.annual : mod.pricing.monthly
+          return (
+            <div key={mod.key} style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: '36px 28px 28px', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ marginBottom: 8 }}>
+                <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{mod.name}</span>
+              </div>
+              <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px', lineHeight: 1.5 }}>{mod.tagline}</p>
+
+              <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
+                <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
+                  NPR {price.toLocaleString()}
+                  <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
+                </div>
+                {annual && (
+                  <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
+                    Billed annually · NPR {(price * 12).toLocaleString()}/yr
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={() => navigate('/login')}
+                style={{ background: `${mod.color}14`, border: `1px solid ${mod.color}40`, color: mod.color, padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
+                Get {mod.name} →
+              </button>
+
+              <FeatureList features={mod.pricing.features} color={mod.color} />
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ── Crest Suite — bundle ── */}
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
+        <SectionHeading color={GOLD} title="Crest Suite" subtitle="IMS + HR + POS together, at a discount vs buying each separately" />
+      </div>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 80px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+        {SUITE_BUNDLES.map((bundle, i) => {
+          const imsTier = IMS_TIERS[i]
+          const price = annual ? bundle.annual : bundle.monthly
+          const sumMonthly = imsTier.monthly + HR_PRICING.monthly + POS_PRICING.monthly
+          const sumPrice = annual ? Math.round((imsTier.annual + HR_PRICING.annual + POS_PRICING.annual)) : sumMonthly
+          return (
+            <div key={bundle.key} style={{ background: CARD, border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 14, padding: '30px 24px', textAlign: 'center' }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 12 }}>{bundle.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textDecoration: 'line-through', marginBottom: 2 }}>NPR {sumPrice.toLocaleString()}/mo separately</div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>
+                NPR {price.toLocaleString()}<span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
+              </div>
+              {annual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 14 }}>Billed annually · NPR {(price * 12).toLocaleString()}/yr</div>}
+              <div style={{ fontSize: 11, fontWeight: 700, color: GREEN, marginBottom: 18 }}>
+                Save NPR {(sumMonthly - bundle.monthly).toLocaleString()}/mo vs buying separately
+              </div>
+              <button
+                onClick={() => navigate('/login')}
+                style={{ background: i === 2 ? GOLD : `${GOLD}14`, border: `1px solid ${GOLD}`, color: i === 2 ? '#0b0b0b' : GOLD, padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, width: '100%' }}>
+                Get {bundle.label} →
+              </button>
+            </div>
+          )
+        })}
       </div>
 
       {/* FAQ button */}

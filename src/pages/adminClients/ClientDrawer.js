@@ -9,6 +9,7 @@ import { getDateStatus } from '../../utils/subscription'
 import { validateEmvQr } from '../../utils/emvQr'
 import Tip from '../../components/Tip'
 import { adminOp } from './adminOp'
+import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING } from '../../data/pricingPlans'
 
 const EMPTY_USER = { email: '', password: '', full_name: '' }
 
@@ -646,11 +647,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 ].map(mod => {
                   if (!mod.enabled) return null
                   const s = getDateStatus(mod.endsAt)
-                  const PLANS = [
-                    { key: 'starter', label: 'Starter', monthly: 5000,  annual: 3750 },
-                    { key: 'growth',  label: 'Growth',  monthly: 8000,  annual: 6000 },
-                    { key: 'pro',     label: 'Pro',     monthly: 12000, annual: 9000 },
-                  ]
+                  const flatPricing = mod.key === 'hr' ? HR_PRICING : mod.key === 'pos' ? POS_PRICING : null
+                  const accentBase = MODULE_COLORS[mod.key]
                   return (
                     <div key={mod.key} style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)' }}>
                       {/* Header */}
@@ -662,31 +660,49 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                           </span>
                         )}
                       </div>
-                      {/* Plan cards */}
-                      <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-                        {PLANS.map(p => {
-                          const price = billingCycle === 'annual' ? p.annual : p.monthly
-                          const active = mod.plan === p.key
-                          const accentColor = p.key === 'pro' ? 'var(--theme-accent)' : p.key === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)'
-                          return (
-                            <button key={p.key} onClick={() => mod.setPlan(p.key)} style={{
-                              flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
-                              border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
-                              background: active ? (p.key === 'pro' ? 'rgba(201,168,76,0.12)' : p.key === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(120,113,108,0.10)') : 'none',
-                              color: active ? accentColor : 'var(--theme-text3)',
-                            }}>
-                              <div>{p.label}</div>
-                              <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>NPR {price.toLocaleString('en-NP')}/mo</div>
-                            </button>
-                          )
-                        })}
-                      </div>
-                      <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
-                        {billingCycle === 'annual'
-                          ? `Annual · NPR ${{ starter: 3750, growth: 6000, pro: 9000 }[mod.plan].toLocaleString('en-NP')}/mo × 12 = NPR ${{ starter: 45000, growth: 72000, pro: 108000 }[mod.plan].toLocaleString('en-NP')}/yr`
-                          : `Monthly · NPR ${{ starter: 5000, growth: 8000, pro: 12000 }[mod.plan].toLocaleString('en-NP')}/mo`
-                        }
-                      </p>
+                      {flatPricing ? (
+                        /* HR/POS — flat single price, no tier picker (hr_plan/pos_plan aren't wired to any feature gating) */
+                        <div style={{ padding: '10px 12px', borderRadius: 6, border: `1px solid ${accentBase}40`, background: `${accentBase}12`, marginBottom: 12 }}>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: accentBase }}>
+                            NPR {(billingCycle === 'annual' ? flatPricing.annual : flatPricing.monthly).toLocaleString('en-NP')}/mo
+                          </div>
+                          {billingCycle === 'annual' && (
+                            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 2 }}>
+                              NPR {flatPricing.annual.toLocaleString('en-NP')}/mo × 12 = NPR {(flatPricing.annual * 12).toLocaleString('en-NP')}/yr
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          {/* Plan cards — IMS only, real tiers */}
+                          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                            {IMS_TIERS.map(p => {
+                              const price = billingCycle === 'annual' ? p.annual : p.monthly
+                              const active = mod.plan === p.key
+                              const accentColor = p.key === 'pro' ? 'var(--theme-accent)' : p.key === 'growth' ? MODULE_COLORS.ims : 'var(--theme-text2)'
+                              return (
+                                <button key={p.key} onClick={() => mod.setPlan(p.key)} style={{
+                                  flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
+                                  border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
+                                  background: active ? `${accentColor}1a` : 'none',
+                                  color: active ? accentColor : 'var(--theme-text3)',
+                                }}>
+                                  <div>{p.label}</div>
+                                  <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>NPR {price.toLocaleString('en-NP')}/mo</div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
+                            {(() => {
+                              const tier = IMS_TIERS.find(p => p.key === mod.plan) || IMS_TIERS[0]
+                              return billingCycle === 'annual'
+                                ? `Annual · NPR ${tier.annual.toLocaleString('en-NP')}/mo × 12 = NPR ${(tier.annual * 12).toLocaleString('en-NP')}/yr`
+                                : `Monthly · NPR ${tier.monthly.toLocaleString('en-NP')}/mo`
+                            })()}
+                          </p>
+                        </>
+                      )}
                       {/* Date picker */}
                       <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 6px' }}>
                         <Tip text="Date when this module's subscription expires. Client sees a warning in the last 7 days and is blocked after expiry." width={300}>Subscription end date</Tip>

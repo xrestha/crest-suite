@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
+import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_BUNDLES } from '../data/pricingPlans'
 
-// ── IMS feature data, grouped by plan tier ───────────────────────────────────
-const IMS_TIERS = [
+// ── IMS feature data, grouped by plan tier (Getting Started module guide — distinct from the
+// IMS_TIERS pricing data imported above) ─────────────────────────────────────
+const IMS_FEATURE_TIERS = [
   {
     tier: 'core', label: 'Core — All Plans', planLabel: null, planColor: 'var(--theme-text2)',
     features: [
@@ -382,53 +384,8 @@ const GLOSSARY = [
   { term: 'Requisition',      def: 'An internal stock transfer from the main store to a department (e.g. kitchen, bar), tracked separately from external purchases.' },
 ]
 
-const STARTER_FEATURES = [
-  'Dashboard & KPI Overview',
-  'Periods (BS Calendar)',
-  'Item Master with Unit Conversion',
-  'Vendor Management',
-  'Purchases & Vendor Returns',
-  'Stock Count (Opening / Closing / Wastage)',
-  'Mobile App — Installable PWA, Offline Stock Counting',
-  'Sales Entry (Bulk or Daily)',
-  'Payment Summary (Cash / Credit / FonePay)',
-  'Monthly Summary & COGS by Category',
-  'Annual Summary (BS Fiscal Year Rollup)',
-  'Reorder Report & Par Levels',
-  'VAT & Non-VAT Reports',
-  'Wastage Report with Excel Export',
-  'Settings & Outlet Customisation',
-  'Staff Meals Tracking',
-]
-const GROWTH_EXTRAS = [
-  'Recipe Costing & Live FC%',
-  'Variance Report (Theoretical vs Actual)',
-  'Outstanding Payables with Aging Buckets',
-  'Budget vs Actual per Category',
-  'Internal Requisitions (Store to Department)',
-  'Dead Stock & Slow Mover Detection',
-  'Recipe Contribution Margin Report',
-  'Menu Repricing (Underpriced Dish Finder)',
-  'Best & Worst Sellers Analysis',
-  'Purchase Orders',
-  'Nutrition Facts & Allergen Labels',
-]
-const PRO_EXTRAS = [
-  'Period Comparison (6 / 12 / 24 / All Periods)',
-  'Shrinkage Report (Multi-Period Consistency)',
-  'Menu Engineering (Star / Puzzle / Dog)',
-  'FIFO / Expiry Batch Tracking',
-  'Vendor Spend Report',
-  'Supplier Price Tracker & Rate Alerts',
-  'Overheads, P&L, and Break-Even Analysis',
-  'Theoretical Variance (Advanced Drill-Down)',
-  'Demand Forecast (7/30-Day Covers & Revenue Prediction)',
-]
-const PRICE_PLANS = [
-  { name: 'Starter', icon: '◎', color: 'var(--theme-accent)', badge: '1 Month Free', badgeBg: 'var(--theme-accent)',               monthly: 5000,  annual: 3750, features: STARTER_FEATURES, highlight: false, cta: 'Start Free Trial' },
-  { name: 'Growth',  icon: '◈', color: 'var(--theme-green)', badge: 'Most Popular',   badgeBg: 'rgba(52,211,153,0.9)', monthly: 8000,  annual: 6000, features: GROWTH_EXTRAS,   highlight: true,  cta: 'Get Growth' },
-  { name: 'Pro',     icon: '⬢', color: '#818cf8', badge: 'Full Suite',     badgeBg: '#818cf8',               monthly: 12000, annual: 9000, features: PRO_EXTRAS,      highlight: false, cta: 'Get Pro' },
-]
+// IMS_TIERS / HR_PRICING / POS_PRICING / SUITE_BUNDLES / MODULE_COLORS now come from
+// ../data/pricingPlans — the single source of truth shared with Pricing.js and ClientDrawer.js.
 
 const FAQ = [
   { q: 'How does the sidebar work? I have a lot of pages.', a: 'The sidebar has two parts: a narrow icon rail on the far left with one icon per module (Crest IMS, Crest HR, Crest POS), and a panel beside it showing only the selected module\'s pages. Click a module icon to switch panels — the panel also follows you automatically when you navigate (e.g. opening a POS page selects the POS panel). Inside the panel, pages are grouped by task (Operations, Costing, report categories) — click a group header to expand or collapse it; your choices are remembered on this device. The ‹ button near the bottom of the rail hides the panel entirely, leaving just the icon rail; Help and Sign out live on the rail too.' },
@@ -903,7 +860,7 @@ export default function Help() {
                 <span style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('ims') ? '▲' : '▼'}</span>
               </div>
 
-              {moduleOpen('ims') && IMS_TIERS.map(tier => {
+              {moduleOpen('ims') && IMS_FEATURE_TIERS.map(tier => {
                 const unlocked = isTierUnlocked(tier.tier, plan, isAdmin)
                 return (
                   <div key={tier.tier} style={{ marginBottom: 20 }}>
@@ -1244,44 +1201,98 @@ export default function Help() {
             </div>
           </div>
 
+          {/* Crest IMS — 3 tiers */}
+          <p style={{ fontSize: 11, color: MODULE_COLORS.ims, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest IMS</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-            {PRICE_PLANS.map(plan => (
-              <div key={plan.name} className="card" style={{ border: plan.highlight ? '1px solid rgba(201,168,76,0.45)' : '1px solid var(--theme-border)', position: 'relative', display: 'flex', flexDirection: 'column', padding: '32px 22px 22px', boxShadow: plan.highlight ? '0 4px 32px rgba(201,168,76,0.07)' : 'none' }}>
-                <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: plan.badgeBg, color: 'var(--theme-bg)', fontSize: 9, fontWeight: 800, padding: '3px 12px', borderRadius: 8, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                  {plan.badge}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 18, color: plan.color }}>{plan.icon}</span>
-                  <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{plan.name}</span>
-                </div>
-                <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--theme-border)' }}>
-                  {plan.name === 'Starter' && !pricingAnnual ? (
-                    <>
-                      <div style={{ fontSize: 10, color: 'var(--theme-accent)', fontWeight: 800, marginBottom: 4, letterSpacing: '0.07em' }}>FREE FOR 1 MONTH</div>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {plan.monthly.toLocaleString()}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo after</span></div>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {(pricingAnnual ? plan.annual : plan.monthly).toLocaleString()}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span></div>
-                      {pricingAnnual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Billed annually · NPR {((pricingAnnual ? plan.annual : plan.monthly) * 12).toLocaleString()}/yr</div>}
-                    </>
-                  )}
-                </div>
-                {plan.name !== 'Starter' && (
-                  <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginBottom: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                    {plan.name === 'Growth' ? '+ Everything in Starter' : '+ Everything in Growth'}
-                  </div>
-                )}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
-                  {plan.features.map((f, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
-                      <span style={{ color: plan.color, fontSize: 12, flexShrink: 0, marginTop: 1 }}>✓</span>
-                      <span style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.4 }}>{f}</span>
+            {IMS_TIERS.map(plan => {
+              const highlight = plan.key === 'growth'
+              const price = pricingAnnual ? plan.annual : plan.monthly
+              return (
+                <div key={plan.key} className="card" style={{ border: highlight ? `1px solid ${MODULE_COLORS.ims}70` : '1px solid var(--theme-border)', position: 'relative', display: 'flex', flexDirection: 'column', padding: '32px 22px 22px', boxShadow: highlight ? `0 4px 32px ${MODULE_COLORS.ims}18` : 'none' }}>
+                  {highlight && (
+                    <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: MODULE_COLORS.ims, color: '#0b0b0b', fontSize: 9, fontWeight: 800, padding: '3px 12px', borderRadius: 8, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                      Most Popular
                     </div>
-                  ))}
+                  )}
+                  <div style={{ marginBottom: 6 }}>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{plan.label}</span>
+                  </div>
+                  <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--theme-border)' }}>
+                    {plan.key === 'starter' && !pricingAnnual ? (
+                      <>
+                        <div style={{ fontSize: 10, color: MODULE_COLORS.ims, fontWeight: 800, marginBottom: 4, letterSpacing: '0.07em' }}>FREE FOR 1 MONTH</div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {plan.monthly.toLocaleString()}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo after</span></div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString()}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span></div>
+                        {pricingAnnual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Billed annually · NPR {(price * 12).toLocaleString()}/yr</div>}
+                      </>
+                    )}
+                  </div>
+                  {plan.includesLabel && (
+                    <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginBottom: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                      {plan.includesLabel}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
+                    {plan.features.map((f, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+                        <span style={{ color: MODULE_COLORS.ims, fontSize: 12, flexShrink: 0, marginTop: 1 }}>✓</span>
+                        <span style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.4 }}>{f}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
+          </div>
+
+          {/* Crest HR + Crest POS — flat modules */}
+          <p style={{ fontSize: 11, color: MODULE_COLORS.hr, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest HR &amp; Crest POS</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 24 }}>
+            {[
+              { key: 'hr',  name: 'Crest HR',  color: MODULE_COLORS.hr,  pricing: HR_PRICING },
+              { key: 'pos', name: 'Crest POS', color: MODULE_COLORS.pos, pricing: POS_PRICING },
+            ].map(mod => {
+              const price = pricingAnnual ? mod.pricing.annual : mod.pricing.monthly
+              return (
+                <div key={mod.key} className="card" style={{ display: 'flex', flexDirection: 'column', padding: '32px 22px 22px' }}>
+                  <div style={{ marginBottom: 6 }}>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{mod.name}</span>
+                  </div>
+                  <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--theme-border)' }}>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString()}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span></div>
+                    {pricingAnnual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Billed annually · NPR {(price * 12).toLocaleString()}/yr</div>}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
+                    {mod.pricing.features.map((f, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+                        <span style={{ color: mod.color, fontSize: 12, flexShrink: 0, marginTop: 1 }}>✓</span>
+                        <span style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.4 }}>{f}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Crest Suite — bundle */}
+          <p style={{ fontSize: 11, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest Suite — IMS + HR + POS bundled</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+            {SUITE_BUNDLES.map((bundle, i) => {
+              const imsTier = IMS_TIERS[i]
+              const price = pricingAnnual ? bundle.annual : bundle.monthly
+              const sumMonthly = imsTier.monthly + HR_PRICING.monthly + POS_PRICING.monthly
+              return (
+                <div key={bundle.key} className="card" style={{ textAlign: 'center', padding: '20px 16px' }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 8 }}>{bundle.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString()}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span></div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-green)', marginTop: 6 }}>Save NPR {(sumMonthly - bundle.monthly).toLocaleString()}/mo vs separately</div>
+                </div>
+              )
+            })}
           </div>
 
           <div className="card" style={{ borderColor: 'rgba(201,168,76,0.2)' }}>

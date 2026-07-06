@@ -132,6 +132,16 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S263 — 2026-07-06 — Pricing rollout: new IMS/HR/POS numbers, one shared pricing data file, module colors
+
+Three independent hand-maintained copies of pricing had already drifted from each other and from the real tier assignments in `AuthContext.js`: the public `/pricing` page, Help.js's logged-in Pricing tab, and `ClientDrawer.js`'s admin billing panel (which applies the same Starter/Growth/Pro ladder to every module tab, including HR/POS even though neither has ever actually been tier-gated). Consolidated all three onto one new file, **`src/data/pricingPlans.js`** — `MODULE_COLORS` (blue `#60a5fa` IMS / green `#34d399` HR / violet `#a78bfa` POS, matching the pill convention from S260-262), `IMS_TIERS` (Starter NPR 2,000 / Growth 2,600 / Pro 3,500 monthly, 25% off annual), `HR_PRICING` and `POS_PRICING` (flat NPR 2,600 and 2,000/mo — never real tiers), and `SUITE_BUNDLES` (IMS+HR+POS bundled at ~20% off buying separately: 5,300 / 5,800 / 6,500).
+
+`Pricing.js` and Help.js's Pricing tab now both import from this file instead of keeping their own `PLANS`/`STARTER_FEATURES`/`PRICE_PLANS` arrays, and render three sections — IMS's 3-tier grid, an HR+POS flat-price pair, and the Suite bundle row — colored by module instead of the old per-tier gold/green/indigo scheme. `ClientDrawer.js`'s billing panel now branches per module: IMS keeps its Starter/Growth/Pro picker (sourced from `IMS_TIERS`), HR and POS render a flat NPR box with no picker at all, since selecting a "plan" for a flat-priced module was never meaningful. `hr_plan`/`pos_plan` DB columns are untouched — still harmless unused strings.
+
+Caught mid-implementation: Help.js already had an unrelated array also named `IMS_TIERS` (the Getting Started/Module Guide feature-by-tier breakdown, predates this change) — renamed that one to `IMS_FEATURE_TIERS` to resolve the collision with the newly-imported pricing `IMS_TIERS`.
+
+**Files:** `src/data/pricingPlans.js` (new), `src/pages/Pricing.js`, `src/pages/Help.js`, `src/pages/adminClients/ClientDrawer.js`
+
 ### S262 — 2026-07-06 — Getting Started tagline colors corrected to match the module-pill convention
 
 Follow-up to S261: the IMS and HR tagline boxes were gold and blue respectively, which don't actually match the app's established IMS/HR/POS module-pill colors (`AdminDashboardOverview.jsx`'s client-list pills: IMS `#60a5fa` blue, HR `#34d399` green, POS `#a78bfa` violet — the same reference used to color POS's tagline in S261, but not yet applied back to IMS/HR at the time). Corrected: IMS tagline → blue, HR tagline → green. POS was already correct.
