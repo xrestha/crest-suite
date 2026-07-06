@@ -64,21 +64,30 @@ export function validateEmvQr(str) {
 
 /**
  * Build a per-bill dynamic QR payload from the merchant's static payload:
- * tag 01 → "12" (one-time/dynamic), tag 54 → exact amount, CRC recomputed.
- * Returns the new payload string, or null if the base is invalid.
+ * tag 01 → "12" (one-time/dynamic), tag 54 → exact amount, CRC recomputed. An optional
+ * `reference` is embedded as tag 62 subfield 05 (EMVCo's "Additional Data — Reference
+ * Label") so a provider webhook that echoes it back can be matched to a POS order — see
+ * supabase/functions/pos-payment-webhook. Returns the new payload string, or null if the
+ * base is invalid.
  */
-export function buildDynamicQr(baseStr, amount) {
+export function buildDynamicQr(baseStr, amount, reference) {
   const check = validateEmvQr(baseStr)
   if (!check.ok) return null
-  let tags = parseEmvQr(baseStr.trim()).filter(t => t.id !== '63' && t.id !== '54')
+  let tags = parseEmvQr(baseStr.trim()).filter(t => t.id !== '63' && t.id !== '54' && t.id !== '62')
   const poi = tags.find(t => t.id === '01')
   if (poi) poi.value = '12'
   else tags.splice(1, 0, { id: '01', value: '12' })
   // Insert amount (tag 54) keeping tags in ascending numeric order, as the spec prefers
   const amtTag = { id: '54', value: Math.round(amount).toFixed(2) }
-  const idx = tags.findIndex(t => parseInt(t.id, 10) > 54)
-  if (idx === -1) tags.push(amtTag)
-  else tags.splice(idx, 0, amtTag)
+  const idx54 = tags.findIndex(t => parseInt(t.id, 10) > 54)
+  if (idx54 === -1) tags.push(amtTag)
+  else tags.splice(idx54, 0, amtTag)
+  if (reference) {
+    const refTag = { id: '62', value: serialize([{ id: '05', value: String(reference).slice(0, 25) }]) }
+    const idx62 = tags.findIndex(t => parseInt(t.id, 10) > 62)
+    if (idx62 === -1) tags.push(refTag)
+    else tags.splice(idx62, 0, refTag)
+  }
   const body = serialize(tags) + '6304'
   return body + crc16(body)
 }

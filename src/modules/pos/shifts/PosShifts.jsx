@@ -284,7 +284,11 @@ export default function PosShifts() {
   useEffect(() => {
     if (!clientId) return
     loadOpenShift()
-    supabase.from('profiles').select('id, full_name').eq('client_id', clientId)
+    // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin) —
+    // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
+    // DEFINER RPC. A raw query here silently showed "—" for every staff member except
+    // whoever was logged in.
+    supabase.rpc('get_client_profile_names', { p_client_id: clientId })
       .then(({ data }) => setStaffNames(Object.fromEntries((data || []).map(p => [p.id, p.full_name]))))
     supabase.from('clients').select('name').eq('id', clientId).single()
       .then(({ data }) => setOutletName(data?.name || ''))

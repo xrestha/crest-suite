@@ -19,7 +19,10 @@ export function buildDailyHistory(orders, itemsByOrder, computeOrderAmounts) {
     const d = new Date(o.closed_at)
     const key = d.toDateString()
     const items = itemsByOrder[o.id] || []
-    const amounts = computeOrderAmounts(o, items, true)
+    // Revenue excludes item-level comps (never billed at menu price — see PosOrders.jsx); the
+    // qtyByRecipe loop below still counts them, since a comped dish was still prepared/consumed
+    // and demand planning cares about that regardless of what it billed for.
+    const amounts = computeOrderAmounts(o, items.filter(i => !i.comped), true)
     const row = byDay[key] = byDay[key] || { date: new Date(d.getFullYear(), d.getMonth(), d.getDate()), weekday: d.getDay(), covers: 0, revenue: 0, qtyByRecipe: {}, basis: 'pos' }
     row.covers += o.covers || 1
     row.revenue += amounts.net
@@ -115,7 +118,7 @@ export async function runForecast(clientId, horizonDays = 7) {
 
     let itemsByOrder = {}
     if (orderList.length > 0) {
-      const { data: items } = await scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, qty, unit_price, vat_rate')
+      const { data: items } = await scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, qty, unit_price, vat_rate, comped')
         .in('order_id', orderList.map(o => o.id))
       itemsByOrder = (items || []).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)

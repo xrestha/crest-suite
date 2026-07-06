@@ -40,7 +40,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   useEffect(() => {
     if (!clientId) return
     Promise.all([
-      scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate').eq('order_id', order.id),
+      scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped').eq('order_id', order.id),
       supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
       supabase.from('clients').select('name').eq('id', clientId).single(),
     ]).then(([{ data: its }, { data: st }, { data: cl }]) => {
@@ -75,7 +75,13 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   }
 
   const vatReg = settings.is_vat_registered
-  const amounts = !loading ? computeOrderAmounts(order, items, vatReg) : null
+  // Item-level comps were never billed at menu price (they printed on their own Complimentary
+  // Slip — see PosOrders.jsx), so a Credit Note correcting this bill's revenue must exclude them
+  // too, or its face value overstates what the party actually paid. The sales_entries reversal
+  // below still uses the full, unfiltered `items` — it mirrors the original write, which counted
+  // every item (comped or not) as qty_sold.
+  const payableItems = items.filter(i => !i.comped)
+  const amounts = !loading ? computeOrderAmounts(order, payableItems, vatReg) : null
 
   async function handleConfirm() {
     if (!reason.trim()) { setMsg('error:Enter a reason for this Credit Note.'); return }
@@ -129,7 +135,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       console.error('credit note sales_entries reversal failed:', err)
     }
 
-    await printCreditNote(clientId, created, items, settings, outletName, hscMap)
+    await printCreditNote(clientId, created, payableItems, settings, outletName, hscMap)
 
     setSubmitting(false)
     onIssued?.(created)
@@ -149,7 +155,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
               <table className="data-table" style={{ fontSize: 12 }}>
                 <thead><tr><th>Item</th><th>Qty</th><th>Amount</th></tr></thead>
                 <tbody>
-                  {items.map((i, idx) => (
+                  {payableItems.map((i, idx) => (
                     <tr key={idx}><td>{i.name}</td><td>{i.qty}</td><td>{fmtNpr(i.qty * i.unit_price)}</td></tr>
                   ))}
                 </tbody>

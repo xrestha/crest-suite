@@ -10,6 +10,8 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
 import { getBsToday, formatAd, adToBs, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { computeOrderAmounts, computeCategoryAmounts, computeItemAmounts } from '../../../utils/posBillingMath'
+import { viewPosBill } from '../../../utils/viewPosBill'
+import { computeRecipeCosts } from '../../../utils/recipeCost'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const WALKIN_KEY = '__CASH_SALES__'
@@ -23,6 +25,7 @@ const TABS = [
   { key: 'daily',    label: 'Daily' },
   { key: 'hourly',   label: 'Hourly' },
   { key: 'voucher',  label: 'Bill Register' },
+  { key: 'compxref', label: 'Comped Bills' },
   { key: 'payment',  label: 'Payment Summary' },
   { key: 'category', label: 'Category Wise' },
   { key: 'item',     label: 'Item Wise' },
@@ -56,6 +59,7 @@ export default function SalesReport() {
   const [toIso,   setToIso]   = useState(formatAd(new Date()))
   const [orders, setOrders] = useState([])
   const [itemsByOrder, setItemsByOrder] = useState({})
+  const [compsByOrder, setCompsByOrder] = useState({}) // { order_id: [{ compNo, reason, items, foodCost, potentialValue }] }
   const [vatReg, setVatReg] = useState(true)
   const [staffNames, setStaffNames] = useState({})
   const [rangeLoading, setRangeLoading] = useState(true)
@@ -71,7 +75,11 @@ export default function SalesReport() {
         .eq('close_type', 'paid')
         .gte('closed_at', fromTs).lte('closed_at', toTs),
       supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
-      supabase.from('profiles').select('id, full_name').eq('client_id', clientId),
+      // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin)
+      // — resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
+      // DEFINER RPC. A raw query here silently showed "—" for every staff member except
+      // whoever was logged in.
+      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
     setVatReg(settings?.is_vat_registered ?? true)
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
@@ -79,14 +87,42 @@ export default function SalesReport() {
     setOrders(orderList)
 
     let byOrder = {}
+    let compsByOrderNext = {}
     if (orderList.length > 0) {
-      const { data: items } = await scopedFrom('pos_order_items', 'order_id, recipe_id, name, category, qty, unit_price, vat_rate').in('order_id', orderList.map(o => o.id))
-      byOrder = (items || []).reduce((acc, i) => {
+      // Excludes item-level comps (comped=true) — those never billed at menu price (they print
+      // on their own Complimentary Slip instead, see PosOrders.jsx), so every tab built from
+      // itemsByOrder must exclude them too or Gross/Taxable/Net overstate actual revenue.
+      const { data: items } = await scopedFrom('pos_order_items', 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, comp_reason').in('order_id', orderList.map(o => o.id))
+      byOrder = (items || []).filter(i => !i.comped).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
       }, {})
+
+      // Comped-out rows aren't discarded — they feed the "Comped Bills" cross-reference tab and
+      // the Bill Register badge, both of which need to know which paid bills had an item comped
+      // out of them and what NC number that comp got.
+      const compedItems = (items || []).filter(i => i.comped)
+      if (compedItems.length > 0) {
+        const recipeIds = [...new Set(compedItems.map(i => i.recipe_id).filter(Boolean))]
+        const costMap = recipeIds.length > 0 ? await computeRecipeCosts(supabase, recipeIds) : {}
+        const groups = {}
+        for (const i of compedItems) {
+          const key = `${i.order_id}:${i.comp_no}`
+          const g = groups[key] = groups[key] || {
+            orderId: i.order_id, compNo: i.comp_no, reason: i.comp_reason || '—',
+            items: [], foodCost: 0, potentialValue: 0,
+          }
+          g.items.push(i)
+          g.foodCost += i.qty * (costMap[i.recipe_id] || 0)
+          g.potentialValue += i.qty * i.unit_price * (1 + (i.vat_rate ?? 0))
+        }
+        for (const g of Object.values(groups)) {
+          (compsByOrderNext[g.orderId] = compsByOrderNext[g.orderId] || []).push(g)
+        }
+      }
     }
     setItemsByOrder(byOrder)
+    setCompsByOrder(compsByOrderNext)
     setRangeLoading(false)
   }, [clientId, fromIso, toIso, scopedFrom])
 
@@ -132,11 +168,12 @@ export default function SalesReport() {
         orderMode: o.table_name && o.table_name !== 'Takeaway' ? `Dine-In: ${o.table_name}` : 'Takeaway',
         remarks: o.bill_remarks || '', enteredBy: staffNames[o.closed_by] || '—',
         credited: !!o.credit_note_id,
+        compNos: (compsByOrder[o.id] || []).map(c => c.compNo),
         gross: amounts.grossAmt, discount: amounts.discount, taxable: amounts.taxableBase,
         nonTaxable: amounts.nonTaxableBase, vat: amounts.vatAmt, net: amounts.net,
       }
     }).sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt))
-  }, [orders, itemsByOrder, vatReg, staffNames])
+  }, [orders, itemsByOrder, compsByOrder, vatReg, staffNames])
 
   const paymentRows = useMemo(() => {
     const grouped = {}
@@ -208,6 +245,25 @@ export default function SalesReport() {
     return Object.values(grouped).sort((a, b) => b.net - a.net)
   }, [orders, itemsByOrder, vatReg])
 
+  // Bill ↔ Comp cross-reference — one row per comp event (an order can have more than one, though
+  // rare), joined back to the paid bill it was carved out of. `orders` here is already scoped to
+  // close_type='paid' within the date range (see loadRange), so every order in it has a real
+  // invoice_no to show.
+  const compedBillRows = useMemo(() => {
+    const rows = []
+    for (const o of orders) {
+      for (const c of compsByOrder[o.id] || []) {
+        rows.push({
+          key: `${o.id}:${c.compNo}`, orderId: o.id, orderNo: o.order_no, invoiceNo: o.invoice_no,
+          closedAt: o.closed_at, tableName: o.table_name, compNo: c.compNo, reason: c.reason,
+          itemNames: c.items.map(i => `${i.qty}x ${i.name}`).join(', '),
+          foodCost: c.foodCost, potentialValue: c.potentialValue,
+        })
+      }
+    }
+    return rows.sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt))
+  }, [orders, compsByOrder])
+
   /* ── One Lakh Above (Annexure 13) — fiscal-year scoped, separate from the date-range pipeline ── */
   const [fyOptions, setFyOptions] = useState([currentFy])
   const [selectedFy, setSelectedFy] = useState(currentFy)
@@ -243,8 +299,10 @@ export default function SalesReport() {
 
     let byOrder = {}
     if (list.length > 0) {
-      const { data: items } = await scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate').in('order_id', list.map(o => o.id))
-      byOrder = (items || []).reduce((acc, i) => {
+      // Same comped exclusion as loadRange above — an item-level comp isn't part of what the
+      // party actually paid, so it can't count toward their Annexure 13 one-lakh threshold.
+      const { data: items } = await scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', list.map(o => o.id))
+      byOrder = (items || []).filter(i => !i.comped).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
       }, {})
@@ -282,6 +340,7 @@ export default function SalesReport() {
   const itemNetOf = i => i.gross - i.discount + i.vat
   const itemTotals = itemRows.reduce((s, i) => ({ qtySales: s.qtySales + i.qtySales, qtyReturn: s.qtyReturn + i.qtyReturn, gross: s.gross + i.gross, discount: s.discount + i.discount, taxable: s.taxable + i.taxable, nonTaxable: s.nonTaxable + i.nonTaxable, vat: s.vat + i.vat }), { qtySales: 0, qtyReturn: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0 })
   const customerTotals = customerRows.reduce((s, c) => ({ gross: s.gross + c.gross, discount: s.discount + c.discount, taxable: s.taxable + c.taxable, nonTaxable: s.nonTaxable + c.nonTaxable, vat: s.vat + c.vat, net: s.net + c.net }), { gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
+  const compedBillTotals = compedBillRows.reduce((s, c) => ({ foodCost: s.foodCost + c.foodCost, potentialValue: s.potentialValue + c.potentialValue }), { foodCost: 0, potentialValue: 0 })
   const oneLakhTotals = parties.reduce((s, p) => ({ gross: s.gross + p.gross, vat: s.vat + p.vat, net: s.net + p.net }), { gross: 0, vat: 0, net: 0 })
 
   const hourlyChartData = hourlyRows.map(h => ({ name: hourLabel(h.hour), value: h.net }))
@@ -333,6 +392,21 @@ export default function SalesReport() {
       }))
       XLSX.utils.book_append_sheet(wb, ws, 'Bill Register')
       XLSX.writeFile(wb, `bill-register-${fromIso}-to-${toIso}.xlsx`)
+    } else if (tab === 'compxref') {
+      const ws = withLetterhead('Comped Bills', dateRangeLine, compedBillRows.map(c => {
+        const bs = adToBs(new Date(c.closedAt))
+        return {
+          'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
+          'Bill No': c.invoiceNo != null ? `#${c.invoiceNo}` : `Order #${c.orderNo}`,
+          'NC No': `NC-${String(c.compNo).padStart(2, '0')}`, 'Table': c.tableName || 'Takeaway',
+          'Items Comped': c.itemNames,
+          'Food Cost (NPR)': Math.round(c.foodCost * 100) / 100,
+          'Potential Value (NPR)': Math.round(c.potentialValue * 100) / 100,
+          'Reason': c.reason,
+        }
+      }))
+      XLSX.utils.book_append_sheet(wb, ws, 'Comped Bills')
+      XLSX.writeFile(wb, `comped-bills-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'payment') {
       const ws = withLetterhead('Sales Report - Payment Summary', dateRangeLine, paymentRows.map(p => ({
         'Payment Method': p.method, 'Bills': p.bills,
@@ -388,6 +462,7 @@ export default function SalesReport() {
     (tab === 'daily' && dailyRows.length === 0) ||
     (tab === 'hourly' && hourlyTotals.bills === 0) ||
     (tab === 'voucher' && voucherRows.length === 0) ||
+    (tab === 'compxref' && compedBillRows.length === 0) ||
     (tab === 'payment' && paymentRows.length === 0) ||
     (tab === 'category' && categoryRows.length === 0) ||
     (tab === 'item' && itemRows.length === 0) ||
@@ -398,10 +473,10 @@ export default function SalesReport() {
     <div style={{ padding: '24px 28px', maxWidth: 1150 }}>
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
-          Sales Report <Tip text="Eight views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Payment Summary breaks it down by how customers paid, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={320}>ⓘ</Tip>
+          Sales Report <Tip text="Nine views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
         </h2>
         <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
-          One report, eight ways to slice it.
+          One report, nine ways to slice it.
         </p>
       </div>
 
@@ -438,7 +513,7 @@ export default function SalesReport() {
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : isEmpty ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-          {tab === 'onelakh' ? `No paid bills in FY ${selectedFy}.` : 'No paid bills in this range.'}
+          {tab === 'onelakh' ? `No paid bills in FY ${selectedFy}.` : tab === 'compxref' ? 'No bills had an item comped out of them in this range.' : 'No paid bills in this range.'}
         </div>
       ) : tab === 'daily' ? (
         <div className="table-wrap">
@@ -524,6 +599,8 @@ export default function SalesReport() {
           </div>
         </>
       ) : tab === 'voucher' ? (
+        <div>
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--theme-text3)' }}>Click any row to view the actual bill.</p>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -539,11 +616,21 @@ export default function SalesReport() {
               {voucherRows.map(v => {
                 const bs = adToBs(new Date(v.closedAt))
                 return (
-                  <tr key={v.id}>
+                  <tr key={v.id} onClick={() => viewPosBill(clientId, { id: v.id })} style={{ cursor: 'pointer' }}>
                     <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{v.orderNo}</td>
                     <td>{v.invoiceNo || '—'}</td>
-                    <td>{v.customer}{v.credited && <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>Credit Noted</span>}</td>
+                    <td>
+                      {v.customer}
+                      {v.credited && <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>Credit Noted</span>}
+                      {v.compNos.length > 0 && (
+                        <Tip text="This bill had one or more items comped out of it — see the Comped Bills tab for detail. Excluded from the Gross/Net figures shown here.">
+                          <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>
+                            Comped ({v.compNos.map(n => `NC-${String(n).padStart(2, '0')}`).join(', ')})
+                          </span>
+                        </Tip>
+                      )}
+                    </td>
                     <td>{v.payMethod}</td>
                     <td>{v.orderMode}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(v.gross)}</td>
@@ -571,6 +658,54 @@ export default function SalesReport() {
               </tr>
             </tfoot>
           </table>
+        </div>
+        </div>
+      ) : tab === 'compxref' ? (
+        <div>
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--theme-text3)' }}>
+          Every bill that had one or more items comped out of it — click a row to view the mini Complimentary Slip for that comp.
+        </p>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Date (BS)</th><th>Bill No</th><th>NC No</th><th>Table</th><th>Items Comped</th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="Ingredient cost of the comped item(s) — matches the Complimentary Slip valuation" width={240}>Food Cost</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="What the comped item(s) would have sold for at menu price incl. VAT" width={240}>Potential Value</Tip>
+                </th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {compedBillRows.map(c => {
+                const bs = adToBs(new Date(c.closedAt))
+                return (
+                  <tr key={c.key} onClick={() => viewPosBill(clientId, { isItemComp: true, parentOrderId: c.orderId, compNo: c.compNo })} style={{ cursor: 'pointer' }}>
+                    <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{c.invoiceNo != null ? `#${c.invoiceNo}` : `Order #${c.orderNo}`}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-amber)' }}>NC-{String(c.compNo).padStart(2, '0')}</td>
+                    <td>{c.tableName || 'Takeaway'}</td>
+                    <td>{c.itemNames}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtNpr(c.foodCost)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtNpr(c.potentialValue)}</td>
+                    <td>{c.reason}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ fontWeight: 700 }}>
+                <td colSpan={5}>TOTAL</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(compedBillTotals.foodCost)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(compedBillTotals.potentialValue)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
         </div>
       ) : tab === 'payment' ? (
         <div className="table-wrap">

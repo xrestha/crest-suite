@@ -18,7 +18,15 @@ const SETTINGS_DEFAULTS = {
   property_email: '', vat_number: '', fc_warning_pct: 35, fc_critical_pct: 45,
   expiry_warning_days: 7, variance_flag_pct: 10, item_code_prefix: 'ITM',
   contact_phone: '', contact_email: '', contact_website: '',
-  is_vat_registered: true, invoice_prefix: '', payment_qr_data: ''
+  is_vat_registered: true, invoice_prefix: '', payment_qr_data: '', pos_webhook_secret: ''
+}
+
+// 32 random bytes, hex-encoded — pasted into the merchant's webhook-signing-secret field once
+// a real FonePay/eSewa integration exists (see supabase/functions/pos-payment-webhook).
+function generateWebhookSecret() {
+  const bytes = new Uint8Array(32)
+  window.crypto.getRandomValues(bytes)
+  return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
 // Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
@@ -945,13 +953,45 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     )
                   )}
 
+                  <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 16 }} onClick={handleSaveSettings} disabled={savingSettings}>
+                    {savingSettings ? 'Saving…' : 'Save QR'}
+                  </button>
+
+                  <hr style={{ border: 'none', borderTop: '1px solid var(--theme-border-lt)', margin: '20px 0' }} />
+
+                  <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 6px' }}>
+                    Payment Webhook <span style={{ textTransform: 'none', letterSpacing: 0 }}>(advanced)</span>
+                  </p>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text3)', display: 'block', marginBottom: 6 }}>
+                    <Tip text="Verifies incoming calls to the pos-payment-webhook Edge Function so a QR payment can auto-confirm without staff tapping Pay. Only matters once a real FonePay/eSewa merchant webhook is onboarded and configured to sign its calls with this secret — until then it just sits here unused. Leave blank if this client has no such integration yet." width={340}>
+                      Webhook Secret
+                    </Tip>
+                  </label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      type="text"
+                      value={clientSettings.pos_webhook_secret || ''}
+                      onChange={e => setClientSettings({ ...clientSettings, pos_webhook_secret: e.target.value })}
+                      placeholder="blank = auto-confirmation disabled for this client"
+                      style={{ flex: 1, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', color: 'var(--theme-text1)', outline: 'none' }}
+                    />
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                      onClick={() => setClientSettings(prev => ({ ...prev, pos_webhook_secret: generateWebhookSecret() }))}
+                    >
+                      Generate
+                    </button>
+                  </div>
+
                   {settingsMsg && (
                     <p style={{ fontSize: 12, margin: '16px 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
                       {settingsMsg.replace(/^(ok|error):/, '')}
                     </p>
                   )}
                   <button className="btn btn-primary" style={{ fontSize: 13, marginTop: settingsMsg ? 0 : 16 }} onClick={handleSaveSettings} disabled={savingSettings}>
-                    {savingSettings ? 'Saving…' : 'Save QR'}
+                    {savingSettings ? 'Saving…' : 'Save Webhook Secret'}
                   </button>
                 </>
               )}

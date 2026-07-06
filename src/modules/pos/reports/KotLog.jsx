@@ -65,7 +65,11 @@ export default function KotLog() {
       scopedFrom('pos_kot_log')
         .gte('sent_at', fromTs).lte('sent_at', toTs)
         .order('sent_at', { ascending: false }),
-      supabase.from('profiles').select('id, full_name').eq('client_id', clientId),
+      // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin) —
+      // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
+      // DEFINER RPC. A raw query here silently showed "—" for every staff member except
+      // whoever was logged in.
+      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
     setLogRows(logs || [])
@@ -132,7 +136,11 @@ export default function KotLog() {
       scopedFrom('pos_kot_log', 'id, order_id, station, items, sent_at, sent_by')
         .in('order_id', orderIds).order('sent_at', { ascending: true }),
       scopedFrom('pos_order_items', 'order_id, recipe_id, name, qty').in('order_id', orderIds),
-      supabase.from('profiles').select('id, full_name').eq('client_id', clientId),
+      // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin) —
+      // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
+      // DEFINER RPC. A raw query here silently showed "—" for every staff member except
+      // whoever was logged in.
+      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
 

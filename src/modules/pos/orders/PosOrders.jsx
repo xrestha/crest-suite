@@ -80,6 +80,19 @@ export default function PosOrders() {
   const [closing,     setClosing]     = useState(false)
   const [closeMsg,    setCloseMsg]    = useState('')
   const [compCostMap, setCompCostMap] = useState({}) // { recipeId: foodCostPerPortion } — fetched when Complimentary tab opens
+  // Item-level comp (Pay tab, Supervisor+) — { [recipe_id]: qty comped }, excluded from this bill
+  // and printed on a separate mini Complimentary Slip instead, while the rest (the remaining qty
+  // on that same line, if any) bills normally. Distinct from the whole-order Complimentary tab.
+  // Keyed by recipe_id, not the item row's own id — cart items freshly added this session (via
+  // addItem()) never carry a real pos_order_items.id until re-fetched from the DB, so keying on
+  // .id meant every item shared the same `undefined` key and toggling one ticked them all.
+  // recipe_id is safe: addItem() always merges a re-tapped recipe into its existing line, so it's
+  // unique per order regardless of whether the row has synced yet. A qty less than the line's
+  // full qty is a partial comp — closeOrder splits that line's DB row in two (paid remainder +
+  // a new comped row) rather than marking the whole thing comped.
+  const [compQtyByRecipe, setCompQtyByRecipe] = useState({})
+  const [itemCompReason, setItemCompReason] = useState('')
+  const [itemsExpanded,  setItemsExpanded]  = useState(false) // collapsed by default — see render site
   const [discountMode,    setDiscountMode]    = useState('amount') // 'amount' | 'percent'
   const [discountStr,     setDiscountStr]     = useState('')
   const [discountReason,  setDiscountReason]  = useState('')
@@ -99,6 +112,7 @@ export default function PosOrders() {
   const [recentBillsOpen, setRecentBillsOpen] = useState(false)
   const [recentBills,     setRecentBills]     = useState([])
   const [recentBillsLoad, setRecentBillsLoad] = useState(false)
+  const [ordersWithItemComp, setOrdersWithItemComp] = useState(() => new Set()) // pos_orders.id with any item-level comp — see loadRecentBills
   const [creditNoteOrder, setCreditNoteOrder] = useState(null) // order row currently in the Issue Credit Note modal
 
   /* ── offline mode (Order Taking only — Billing stays online-only, see closeOrder/openBilling gates) ── */
@@ -173,16 +187,41 @@ export default function PosOrders() {
   const total    = Math.round(subEx + vatAmt) // rounded to the nearest rupee — matches the bill's Net Amount/Round Off line
   const compTotal = orderItems.reduce((s, i) => s + i.qty * (compCostMap[i.recipe_id] || 0), 0)
 
+  // Item-level comp — only ever populated in the Pay tab, so `subEx`/`vatAmt`/`total`/`compTotal`
+  // above (used by the Void and whole-order Complimentary tabs) stay exactly as they were: full
+  // order, unaffected. The Pay tab's own totals are computed separately from the non-comped subset.
+  // A line with a partial comp qty (less than its full qty) contributes to BOTH arrays below —
+  // e.g. "3 x Veg Momo" with 1 comped becomes a comped row of qty 1 and a payable row of qty 2.
+  const compedOrderItems = orderItems
+    .filter(i => (compQtyByRecipe[i.recipe_id] || 0) > 0)
+    .map(i => ({ ...i, qty: Math.min(compQtyByRecipe[i.recipe_id], i.qty) }))
+  const payableOrderItems = orderItems
+    .map(i => {
+      const compQty = Math.min(compQtyByRecipe[i.recipe_id] || 0, i.qty)
+      return compQty > 0 ? { ...i, qty: i.qty - compQty } : i
+    })
+    .filter(i => i.qty > 0)
+  const itemCompFoodCost  = compedOrderItems.reduce((s, i) => s + i.qty * (compCostMap[i.recipe_id] || 0), 0)
+  const itemCompCount     = compedOrderItems.length
+  const hasItemComp       = itemCompCount > 0
+  // Every item comped out — nothing left to actually bill. Confirm Payment gets blocked for this
+  // (see closeOrder's guard) rather than issuing a real ₨0 Tax Invoice/PAN Bill with zero line
+  // items, which would waste a sequential invoice number on an empty document — the
+  // whole-order Complimentary tab already exists for exactly this case.
+  const allItemsComped    = orderItems.length > 0 && payableOrderItems.length === 0
+  const paySubEx     = payableOrderItems.reduce((s, i) => s + i.qty * i.unit_price, 0)
+  const payVatAmtRaw = vatReg ? payableOrderItems.reduce((s, i) => s + i.qty * i.unit_price * (i.vat_rate ?? 0), 0) : 0
+
   // Discount reduces the pre-VAT taxable base, then VAT is recalculated on the discounted amount
   // (same rule as purchase_entries.discount_amount in Purchases.js) — not a flat subtraction off total.
   const discountAmt = (() => {
     const v = parseFloat(discountStr) || 0
-    if (v <= 0 || subEx <= 0) return 0
-    return discountMode === 'percent' ? Math.min(subEx, subEx * v / 100) : Math.min(subEx, v)
+    if (v <= 0 || paySubEx <= 0) return 0
+    return discountMode === 'percent' ? Math.min(paySubEx, paySubEx * v / 100) : Math.min(paySubEx, v)
   })()
-  const discRatio = subEx > 0 ? discountAmt / subEx : 0
-  const payVatAmt = vatAmt * (1 - discRatio)
-  const payTotal  = Math.round(subEx - discountAmt + payVatAmt)
+  const discRatio = paySubEx > 0 ? discountAmt / paySubEx : 0
+  const payVatAmt = payVatAmtRaw * (1 - discRatio)
+  const payTotal  = Math.round(paySubEx - discountAmt + payVatAmt)
   // Buyer Name + Phone become compulsory (not just optional) whenever a discount is applied, or
   // when the bill is going on Credit — both cases need an identifiable, audited record.
   const requireBuyerId = discountAmt > 0 || payMethod === 'Credit'
@@ -202,9 +241,30 @@ export default function PosOrders() {
     const qrAmount = splitMode ? (parseFloat(tenderAmtStr) || remaining) : payTotal
     if (!QR_PAY_METHODS.includes(qrMethod) || !billingSettings.payment_qr_data || !(qrAmount > 0)) { setBillQrUrl(''); return }
     let cancelled = false
-    makeBillQr(qrAmount).then(url => { if (!cancelled) setBillQrUrl(url) })
+    makeBillQr(qrAmount, orderNo ? `CR${orderNo}` : null).then(url => { if (!cancelled) setBillQrUrl(url) })
     return () => { cancelled = true }
-  }, [billingOpen, splitMode, payMethod, tenderMethod, tenderAmtStr, remaining, payTotal, billingSettings.payment_qr_data]) // eslint-disable-line
+  }, [billingOpen, splitMode, payMethod, tenderMethod, tenderAmtStr, remaining, payTotal, orderNo, billingSettings.payment_qr_data]) // eslint-disable-line
+
+  // Poll for an auto-confirmed QR payment while the Charge modal is showing one. The webhook
+  // scaffold (supabase/functions/pos-payment-webhook) only ever produces a row once a
+  // per-client pos_webhook_secret is set and a real provider is wired up to call it — until
+  // then this simply never finds anything. Split payments are excluded; auto-closing one leg
+  // of a partial tender is out of scope for v1 (see product-roadmap memory).
+  useEffect(() => {
+    if (!billingOpen || splitMode || !orderId || !QR_PAY_METHODS.includes(payMethod) || !billQrUrl) return
+    let cancelled = false
+    const poll = setInterval(async () => {
+      const { data } = await scopedFrom('pos_payment_confirmations', 'id, provider, amount')
+        .eq('matched_order_id', orderId).is('consumed_at', null)
+        .order('received_at', { ascending: false }).limit(1)
+      const hit = data?.[0]
+      if (!hit || cancelled) return
+      if (hit.provider !== payMethod || Math.abs(hit.amount - payTotal) > 1) return
+      await scopedUpdate('pos_payment_confirmations', { consumed_at: new Date().toISOString() }).eq('id', hit.id)
+      if (!cancelled) closeOrder('paid')
+    }, 4000)
+    return () => { cancelled = true; clearInterval(poll) }
+  }, [billingOpen, splitMode, orderId, payMethod, billQrUrl, payTotal]) // eslint-disable-line
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
 
@@ -775,6 +835,7 @@ export default function PosOrders() {
     setDiscountStr(''); setDiscountMode('amount'); setDiscountReason('')
     setCloseMsg('')
     setCompCostMap({})
+    setCompQtyByRecipe({}); setItemCompReason(''); setItemsExpanded(false)
     setHscMap({})
     setSplitMode(false); setTenders([]); setTenderMethod('Cash'); setTenderAmtStr('')
     setBillingOpen(true)
@@ -782,6 +843,10 @@ export default function PosOrders() {
     if (recipeIds.length > 0) {
       const { data } = await scopedFrom('recipes', 'id, hsc_code').in('id', recipeIds)
       setHscMap(Object.fromEntries((data || []).map(r => [r.id, r.hsc_code])))
+      // Food-cost map, needed up front for item-level comp in the Pay tab (not just the
+      // Complimentary tab, which used to be the only consumer — see openCompTab).
+      const costMap = await computeRecipeCosts(supabase, recipeIds)
+      setCompCostMap(costMap)
     }
   }
 
@@ -812,7 +877,7 @@ export default function PosOrders() {
     setTenders(t => t.slice(0, -1))
   }
 
-  async function writeSalesEntries(closeType) {
+  async function writeSalesEntries(closeType, compQtyMap = compQtyByRecipe) {
     const { data: periods } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
     const open = (periods || []).find(p => p.status === 'open')
@@ -825,21 +890,29 @@ export default function PosOrders() {
     if (rows.length > 0) await supabase.from('sales_entries').insert(rows)
 
     // Best-effort stock depletion — never blocks or fails the close (matches the sales_entries
-    // insert above, which also discards its error rather than rolling back the bill).
+    // insert above, which also discards its error rather than rolling back the bill). An item
+    // individually comped within an otherwise-paid order posts as 'pos_comp' just like a
+    // whole-order Complimentary close does — food cost was still lost even though this specific
+    // line collected no revenue. A partially-comped line (e.g. 1 of 3) splits its ingredient
+    // usage proportionally between the two buckets, since only part of that line was comped.
     try {
       const recipeIds = [...new Set(soldItems.map(i => i.recipe_id))]
       if (recipeIds.length > 0) {
         const breakdown = await explodeRecipeIngredients(supabase, recipeIds)
-        const agg = {}
+        const aggBySource = { pos_sale: {}, pos_comp: {} }
         soldItems.forEach(i => {
-          (breakdown[i.recipe_id] || []).forEach(({ item_id, qty }) => {
-            agg[item_id] = (agg[item_id] || 0) + qty * i.qty
+          const compQty = closeType === 'writeoff' ? i.qty : Math.min(compQtyMap[i.recipe_id] || 0, i.qty)
+          const saleQty = i.qty - compQty
+          ;(breakdown[i.recipe_id] || []).forEach(({ item_id, qty }) => {
+            if (saleQty > 0) aggBySource.pos_sale[item_id] = (aggBySource.pos_sale[item_id] || 0) + qty * saleQty
+            if (compQty > 0) aggBySource.pos_comp[item_id] = (aggBySource.pos_comp[item_id] || 0) + qty * compQty
           })
         })
-        const movementRows = Object.entries(agg).map(([item_id, qty]) => ({
-          item_id, period_id: open.id, bs_day: today.day, qty: -qty,
-          source: closeType === 'writeoff' ? 'pos_comp' : 'pos_sale', ref_id: orderId,
-        }))
+        const movementRows = Object.entries(aggBySource).flatMap(([source, agg]) =>
+          Object.entries(agg).map(([item_id, qty]) => ({
+            item_id, period_id: open.id, bs_day: today.day, qty: -qty, source, ref_id: orderId,
+          }))
+        )
         if (movementRows.length > 0) {
           const { error: moveErr } = await scopedInsert('stock_movements', movementRows)
           if (moveErr) console.error('stock_movements write failed:', moveErr)
@@ -863,6 +936,12 @@ export default function PosOrders() {
     }
     if (closeType === 'paid' && splitMode && (remaining > 0 || tenders.length === 0)) {
       setCloseMsg('error:Split payment is not fully collected yet.'); return
+    }
+    if (closeType === 'paid' && hasItemComp && !itemCompReason) {
+      setCloseMsg('error:Select a reason for the complimentary item(s).'); return
+    }
+    if (closeType === 'paid' && orderItems.length > 0 && payableOrderItems.length === 0) {
+      setCloseMsg('error:Every item is comped — use the Complimentary tab instead of issuing a ₨0 bill.'); return
     }
     setClosing(true); setCloseMsg('')
 
@@ -909,6 +988,59 @@ export default function PosOrders() {
 
     if (closeType !== 'void') await writeSalesEntries(closeType)
 
+    // Item-level comp: mark the comped rows so they carry a reason/audit trail, and pull one
+    // shared comp-slip number for all of them from the same series a whole-order Complimentary
+    // Slip uses (see get_next_pos_comp_slip_no + assign_pos_invoice_no's writeoff branch) — one
+    // Charge action, one slip/one number, not one per line. Best-effort: if this fails, the paid
+    // items still bill correctly; the comp slip just won't have anything to print.
+    let compedItemRows = []
+    if (closeType === 'paid' && hasItemComp) {
+      const compFy = getBsFiscalYear(today.year, today.month)
+      const { data: nextNo, error: noErr } = await supabase.rpc('get_next_pos_comp_slip_no', { p_client_id: clientId, p_fy: compFy })
+      if (noErr) {
+        console.error('comp slip numbering failed:', noErr)
+      } else {
+        const compMeta = {
+          comped: true, comp_reason: itemCompReason, comped_by: profile?.id || null,
+          comped_at: new Date().toISOString(), comp_fy: compFy, comp_no: nextNo,
+        }
+        // A fully-comped line (compQty === the line's whole qty) just gets marked comped in
+        // place. A partially-comped line (e.g. 1 of 3) needs splitting: shrink the existing row
+        // to the paid remainder, and insert a new row for the comped portion — there's no single
+        // DB row that represents "1 of these 3" until this split creates one.
+        const fullCompRecipeIds = []
+        const partialComps = []
+        for (const i of orderItems) {
+          const compQty = Math.min(compQtyByRecipe[i.recipe_id] || 0, i.qty)
+          if (compQty <= 0) continue
+          if (compQty === i.qty) fullCompRecipeIds.push(i.recipe_id)
+          else partialComps.push({ item: i, compQty })
+        }
+
+        if (fullCompRecipeIds.length > 0) {
+          // Matched by (order_id, recipe_id), not row id — the row may not have synced to the DB
+          // under this component's eyes yet (see compQtyByRecipe above), but it's always saved by
+          // the time Charge runs (performSave/saveOrder already persisted it before billing opens).
+          const { data, error: compErr } = await scopedUpdate('pos_order_items', compMeta)
+            .eq('order_id', orderId).in('recipe_id', fullCompRecipeIds).select('*')
+          if (compErr) console.error('item comp write failed:', compErr)
+          else compedItemRows.push(...(data || []))
+        }
+        for (const { item, compQty } of partialComps) {
+          const { error: shrinkErr } = await scopedUpdate('pos_order_items', { qty: item.qty - compQty })
+            .eq('order_id', orderId).eq('recipe_id', item.recipe_id)
+          if (shrinkErr) { console.error('partial comp split (paid remainder) failed:', shrinkErr); continue }
+          const { data, error: insErr } = await scopedInsert('pos_order_items', {
+            order_id: orderId, recipe_id: item.recipe_id, name: item.name, category: item.category,
+            qty: compQty, unit_price: item.unit_price, vat_rate: item.vat_rate, sent_to_kot: item.sent_to_kot,
+            ...compMeta,
+          })
+          if (insErr) console.error('partial comp split (new comped row) failed:', insErr)
+          else compedItemRows.push(...(data || []))
+        }
+      }
+    }
+
     // Auto-build the customer book: any bill with buyer Name + Phone (required for discounts and
     // Credit sales) adds/updates a pos_customers row keyed by phone. Non-fatal — never blocks billing.
     if (buyerName.trim() && buyerPhone.trim()) {
@@ -922,8 +1054,9 @@ export default function PosOrders() {
       await scopedUpdate('pos_tables', { status: 'available' }).eq('id', activeTable.id)
     }
 
-    if (closeType === 'paid') await printBill(updated, orderItems)
+    if (closeType === 'paid') await printBill(updated, payableOrderItems)
     if (closeType === 'writeoff') await printCompSlip(updated, orderItems)
+    if (closeType === 'paid' && compedItemRows.length > 0) await printItemCompSlip(updated, compedItemRows)
 
     setClosing(false)
     setBillingOpen(false)
@@ -937,9 +1070,9 @@ export default function PosOrders() {
   // this bill's exact amount injected (EMVCo tag 54) and the checksum recomputed — customer
   // scans and the amount arrives pre-filled/locked in their banking app. Pure string work, no
   // provider API. Returns a data-URL image, or '' if not configured / payload invalid.
-  async function makeBillQr(amount) {
+  async function makeBillQr(amount, reference) {
     if (!billingSettings.payment_qr_data || !(amount > 0)) return ''
-    const payload = buildDynamicQr(billingSettings.payment_qr_data, amount)
+    const payload = buildDynamicQr(billingSettings.payment_qr_data, amount, reference)
     if (!payload) return ''
     try { return await QRCode.toDataURL(payload, { margin: 1, width: 200 }) } catch { return '' }
   }
@@ -947,7 +1080,8 @@ export default function PosOrders() {
   async function printBill(order, items) {
     const newCount = (order.print_count || 0) + 1
     await scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id)
-    const qrUrl = QR_PAY_METHODS.includes(order.payment_method) ? await makeBillQr(order.paid_amount) : ''
+    const qrUrl = QR_PAY_METHODS.includes(order.payment_method)
+      ? await makeBillQr(order.paid_amount, order.order_no ? `CR${order.order_no}` : null) : ''
     let payments
     if (order.payment_method === 'Split') {
       const { data } = await scopedFrom('pos_order_payments', 'payment_method, amount').eq('order_id', order.id).order('recorded_at')
@@ -978,6 +1112,36 @@ export default function PosOrders() {
     }))
   }
 
+  // One item-level Complimentary Slip per Charge action, covering every item comped in that
+  // action (not one per line) — shares the whole-order Complimentary Slip's NC-series (see the
+  // get_next_pos_comp_slip_no migration), so `order.invoice_no` (this order's Tax Invoice/PAN
+  // Bill number) is swapped out for the comp-specific number the comped rows just got assigned.
+  // Uses its own `comp_print_count` counter (not the main bill's `print_count`) so reprinting
+  // one document never mislabels the other's copy number — see reprintItemCompSlip.
+  async function printItemCompSlip(order, compedItems) {
+    const newCount = (order.comp_print_count || 0) + 1
+    await scopedUpdate('pos_orders', { comp_print_count: newCount }).eq('id', order.id)
+    const recipeIds = compedItems.map(i => i.recipe_id).filter(Boolean)
+    const costMap = await computeRecipeCosts(supabase, recipeIds)
+    printHtml(buildCompSlipHtml({
+      order: { ...order, invoice_no: compedItems[0]?.comp_no ?? null, close_reason: compedItems[0]?.comp_reason || itemCompReason, bill_remarks: '' },
+      items: compedItems, costMap, copyLabel: COPY_LABEL(newCount),
+      outletName,
+      tableName: activeTable?.name || order.table_name || 'Takeaway',
+      authorizedBy: profile?.full_name || '',
+    }))
+  }
+
+  // Reprint just the item-comp slip for an order from Recent Bills — the main Tax Invoice/Bill's
+  // own Reprint button (below) only ever re-sends the non-comped items, so a bill with any
+  // comped items needs this separate action to get a duplicate of that slip.
+  async function reprintItemCompSlip(orderRow) {
+    const { data: order } = await scopedFrom('pos_orders').eq('id', orderRow.id).single()
+    const { data: items } = await scopedFrom('pos_order_items', '*').eq('order_id', orderRow.id).eq('comped', true)
+    if (!order || !items || items.length === 0) return
+    await printItemCompSlip(order, items)
+  }
+
   async function loadRecentBills() {
     setRecentBillsLoad(true)
     const today = getBsToday()
@@ -985,11 +1149,21 @@ export default function PosOrders() {
       .in('status', ['billed', 'voided'])
       .order('closed_at', { ascending: false })
       .limit(30)
-    setRecentBills((data || []).filter(o => {
+    const todays = (data || []).filter(o => {
       if (!o.closed_at) return false
       const bs = adToBs(new Date(o.closed_at))
       return bs.year === today.year && bs.month === today.month && bs.day === today.day
-    }))
+    })
+    setRecentBills(todays)
+
+    // Which of today's paid bills have any item-level comp — most don't, so the "Comp Slip"
+    // reprint action only shows up where there's actually something to reprint.
+    const paidIds = todays.filter(o => o.close_type === 'paid').map(o => o.id)
+    const { data: compedRows } = paidIds.length > 0
+      ? await scopedFrom('pos_order_items', 'order_id').eq('comped', true).in('order_id', paidIds)
+      : { data: [] }
+    setOrdersWithItemComp(new Set((compedRows || []).map(r => r.order_id)))
+
     setRecentBillsLoad(false)
   }
 
@@ -1000,7 +1174,9 @@ export default function PosOrders() {
     if (order.close_type === 'writeoff') {
       await printCompSlip(order, items || [])
     } else {
-      await printBill(order, items || [])
+      // Exclude any individually-comped lines from the reprinted Tax Invoice/PAN Bill — they
+      // were never on the original bill either (see closeOrder's payableOrderItems).
+      await printBill(order, (items || []).filter(i => !i.comped))
     }
     setRecentBills(prev => prev.map(o => o.id === orderRow.id ? { ...o, print_count: (o.print_count || 0) + 1 } : o))
   }
@@ -1038,7 +1214,7 @@ export default function PosOrders() {
   }
   const previewHtml = !billingOpen ? null
     : billingTab === 'pay' ? buildBillHtml({
-        order: previewDraftOrder, items: orderItems, copyLabel: 'PREVIEW', qrUrl: billQrUrl, payments: tenders,
+        order: previewDraftOrder, items: payableOrderItems, copyLabel: 'PREVIEW', qrUrl: billQrUrl, payments: tenders,
         qrAmount: splitMode ? (parseFloat(tenderAmtStr) || remaining) : payTotal,
         outletName, billingSettings, hscMap,
         tableName: activeTable?.name || 'Takeaway',
@@ -1500,18 +1676,20 @@ export default function PosOrders() {
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '24px 28px' }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: 18, color: 'var(--theme-text1)' }}>
-              {activeTable ? activeTable.name : 'Takeaway'}
-            </h3>
-            <p style={{ margin: '0 0 14px', fontSize: 20, fontWeight: 700, color: 'var(--theme-accent)' }}>
-              {fmtNpr(billingTab === 'writeoff' ? compTotal : billingTab === 'pay' ? payTotal : total)}
-              {billingTab === 'writeoff' && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>(food cost, not menu price)</span>}
-              {billingTab === 'pay' && discountAmt > 0 && (
-                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>
-                  ({fmtNpr(total)} − {fmtNpr(discountAmt)} discount)
-                </span>
-              )}
-            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 14 }}>
+              <h3 style={{ margin: 0, fontSize: 18, color: 'var(--theme-text1)' }}>
+                {activeTable ? activeTable.name : 'Takeaway'}
+              </h3>
+              <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--theme-accent)', textAlign: 'right' }}>
+                {fmtNpr(billingTab === 'writeoff' ? compTotal : billingTab === 'pay' ? payTotal : total)}
+                {billingTab === 'writeoff' && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>(food cost, not menu price)</span>}
+                {billingTab === 'pay' && discountAmt > 0 && (
+                  <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>
+                    ({fmtNpr(total)} − {fmtNpr(discountAmt)} discount)
+                  </span>
+                )}
+              </p>
+            </div>
 
             {(kotCount + botCount) > 0 && (
               <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber)', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 6, padding: '8px 10px' }}>
@@ -1551,6 +1729,75 @@ export default function PosOrders() {
                     style={{ ...billInput, borderColor: requireBuyerId && !buyerPhone.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                 </div>
                 <input placeholder="Remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%' }} />
+              </div>
+            )}
+
+            {billingTab === 'pay' && hasPosAccess('supervisor') && orderItems.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                {/* Collapsed by default — a comp checkbox on every item, visible on every single
+                    payment, reads as a standing suggestion to comp something. Folding it behind a
+                    deliberate tap keeps it available without pushing it in front of every cashier
+                    on every bill. */}
+                <button type="button" onClick={() => setItemsExpanded(v => !v)} style={{
+                  display: 'flex', alignItems: 'center', gap: 6, width: '100%', background: 'none', border: 'none',
+                  padding: 0, marginBottom: itemsExpanded ? 8 : 0, cursor: 'pointer', textAlign: 'left',
+                }}>
+                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                    {itemsExpanded ? '▾' : '▸'} Items <Tip text="Comp an individual item — including just part of its quantity, e.g. 1 of 3 — it's removed from this bill and printed on its own internal Complimentary Slip instead, while the rest of the table (and the rest of that line's qty, if any) bills normally. Supervisor+ only.">(tap to comp)</Tip>
+                  </span>
+                  {hasItemComp && (
+                    <span style={{ fontSize: 11, color: 'var(--theme-amber)', fontWeight: 600 }}>
+                      · {itemCompCount} comped
+                    </span>
+                  )}
+                </button>
+                {allItemsComped && (
+                  <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-amber)', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 6, padding: '8px 10px' }}>
+                    ⚠ Every item is comped — nothing left to bill. Switch to the Complimentary tab to close this table instead of issuing a ₨0 Tax Invoice/PAN Bill.
+                  </p>
+                )}
+                {itemsExpanded && (
+                <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: hasItemComp ? 10 : 0 }}>
+                  {orderItems.map(i => {
+                    const compQty = Math.min(compQtyByRecipe[i.recipe_id] || 0, i.qty)
+                    const comped = compQty > 0
+                    const setQty = next => setCompQtyByRecipe(prev => ({ ...prev, [i.recipe_id]: Math.max(0, Math.min(i.qty, next)) }))
+                    return (
+                      <div key={i.recipe_id} style={{
+                        display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '5px 8px', borderRadius: 6,
+                        background: comped ? 'var(--theme-input-bg)' : 'transparent',
+                        color: comped ? 'var(--theme-amber)' : 'var(--theme-text2)',
+                        fontWeight: comped ? 600 : 400,
+                      }}>
+                        <span style={{ flex: 1 }}>{i.qty} x {i.name}</span>
+                        <span>{fmtNpr(i.qty * i.unit_price)}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <button type="button" onClick={() => setQty(compQty - 1)} disabled={compQty <= 0}
+                            style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 4, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty <= 0 ? 'default' : 'pointer', opacity: compQty <= 0 ? 0.4 : 1 }}>−</button>
+                          <span style={{ minWidth: 14, textAlign: 'center' }}>{compQty}</span>
+                          <button type="button" onClick={() => setQty(compQty + 1)} disabled={compQty >= i.qty}
+                            style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 4, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty >= i.qty ? 'default' : 'pointer', opacity: compQty >= i.qty ? 0.4 : 1 }}>+</button>
+                          <span style={{ fontSize: 10, minWidth: 44 }}>{comped ? `/${i.qty} comped` : 'comped'}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                {hasItemComp && (
+                  <div>
+                    <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
+                      {fmtNpr(itemCompFoodCost)} in food cost across {itemCompCount} comped item{itemCompCount !== 1 ? 's' : ''} — printed on a separate Complimentary Slip, not this bill.
+                    </p>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Comp Reason</label>
+                    <select className="form-select" style={{ width: '100%' }} value={itemCompReason} onChange={e => setItemCompReason(e.target.value)}>
+                      <option value="">— Select —</option>
+                      {COMP_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                )}
+                </>
+                )}
               </div>
             )}
 
@@ -1763,7 +2010,7 @@ export default function PosOrders() {
             {billingTab === 'pay' && (
               <button className="btn btn-primary" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
                 onClick={() => closeOrder('paid')}
-                disabled={closing || (splitMode && (remaining > 0 || tenders.length === 0)) || (discountAmt > 0 && !discountReason) || (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim()))}>
+                disabled={closing || (splitMode && (remaining > 0 || tenders.length === 0)) || (discountAmt > 0 && !discountReason) || (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim())) || (hasItemComp && !itemCompReason) || allItemsComped}>
                 {closing ? 'Processing…'
                   : splitMode ? (remaining > 0 ? `Remaining ${fmtNpr(remaining)}` : `Complete Order — ${fmtNpr(payTotal)}`)
                   : `Confirm Payment — ${fmtNpr(payTotal)}`}
@@ -2052,6 +2299,11 @@ export default function PosOrders() {
                   {o.paid_amount != null && <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{fmtNpr(o.paid_amount)}</span>}
                   {o.close_type !== 'void' && (
                     <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintBill(o)}>Reprint</button>
+                  )}
+                  {o.close_type === 'paid' && ordersWithItemComp.has(o.id) && (
+                    <Tip text="Reprint the mini Complimentary Slip for the item(s) comped on this bill — separate from the Tax Invoice/Bill above, which only ever covers the non-comped items.">
+                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => reprintItemCompSlip(o)}>Comp Slip</button>
+                    </Tip>
                   )}
                   {o.close_type === 'paid' && !o.credit_note_id && hasPosAccess('manager') && (
                     <Tip text="Issue a formal Credit Note against this bill — corrects revenue for a billing/price/tax error. Does not affect stock.">

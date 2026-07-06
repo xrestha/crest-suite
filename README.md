@@ -132,6 +132,130 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S285 — 2026-07-06 — Guard against a ₨0 Tax Invoice when every item gets comped
+
+User asked what happens if a staff member accidentally comps every item on a bill — the payable total hits ₨0, but Confirm Payment was still enabled, and would have issued a real Tax Invoice/PAN Bill with zero line items, consuming a sequential invoice number on an empty document. Confirmed with the user: block it instead. Confirm Payment is now disabled whenever `payableOrderItems` is empty (everything comped), with an amber warning telling the cashier to use the Complimentary tab instead — the tab that already exists for exactly this case. Guard is enforced in both the button's `disabled` and `closeOrder`'s own validation (defense in depth, matches the pattern of every other Pay-tab guard).
+
+**Files:** `src/modules/pos/orders/PosOrders.jsx`
+
+### S284 — 2026-07-06 — Item-level comp: partial quantity (e.g. 1 of 3)
+
+User asked how to comp just 1 of "3 x Veg Momo" while billing the other 2 — item-level comp only supported whole-line comping until now. Replaced the per-item checkbox with +/− qty steppers (0 to the line's full qty). State changed from a `Set` of fully-comped recipe_ids to `{ [recipe_id]: qtyComped }`.
+
+- `payableOrderItems`/`compedOrderItems` now split a partially-comped line into two virtual rows (qty reduced on the payable side, qty=compedQty on the comp side) — everything downstream (bill total, live preview, food-cost calc) already consumed these two arrays, so no other changes needed there.
+- Charge-time DB write branches per line: a fully-comped line (compQty === full qty) still just gets marked `comped=true` in place; a partially-comped line shrinks the existing row to the paid remainder and inserts a new row for the comped portion (there's no single existing DB row that represents "1 of these 3" until this split creates one).
+- `writeSalesEntries()`'s stock_movements split changed from a boolean (whole line sale vs. comp) to proportional — the same ingredient's usage is divided between `pos_sale` and `pos_comp` by qty ratio when a line is only partially comped.
+- Sales Report / Sales Exceptions / Comped Bills tab needed no changes — they read `pos_order_items` back fresh, and by then the split into two rows (one comped, one not) already exists at the correct quantities.
+
+**Files:** `src/modules/pos/orders/PosOrders.jsx`, `src/pages/Help.js`
+
+### S283 — 2026-07-06 — Real bug: staff names were blank for every non-admin login, in 6 reports
+
+Following up on S282 ("Authorized by" still blank after the first fix) — the real root cause is bigger than that one function. `profiles_select` RLS only allows `id = auth.uid() OR is_admin()`: a raw `supabase.from('profiles').eq('client_id', clientId)` query, run by any real (non-admin) client login — the actual Owner/Manager/Supervisor accounts, not Crest's own admin "view as" session — silently returns only the caller's own row. Every other staff member's name has been rendering as "—" in: `SalesReport.jsx` (Entered By), `PosExceptionReport.jsx` (Closed By + staff rollup), `PosShifts.jsx` (shift history), `KotLog.jsx` (Register + Bill Trail, two call sites), `CreditNotes.jsx` (Issued By), and the new `viewPosBill.js` drill-down (Authorized by/Cashier). This likely went unnoticed because testing happens mostly via Crest admin sessions, which bypass RLS entirely.
+
+`get_pos_staff_list()` already existed as a SECURITY DEFINER escape hatch for exactly this RLS wall, but it deliberately filters to `pos_email IS NOT NULL` for the Staff Management page (PIN-based POS staff only) — an Owner logs in with a normal email/password, so they'd still be missing. Added a new, unfiltered sibling: `get_client_profile_names(p_client_id)` (same admin-or-same-client security check, no staff-only filter), migration `20260706160000_get_client_profile_names.sql`. Swapped all 7 sites above from the raw `profiles` query to this RPC.
+
+**Files:** `supabase/migrations/20260706160000_get_client_profile_names.sql`, `src/utils/viewPosBill.js`, `src/modules/pos/reports/SalesReport.jsx`, `src/modules/pos/reports/PosExceptionReport.jsx`, `src/modules/pos/shifts/PosShifts.jsx`, `src/modules/pos/reports/KotLog.jsx`, `src/modules/pos/creditnotes/CreditNotes.jsx`
+
+### S282 — 2026-07-06 — Fixed: drill-down bill view never showed who issued/authorized it
+
+User caught it live: the "Authorized by" line on a drilled-down Complimentary Slip was blank. `viewPosBill.js` had hardcoded `authorizedBy: ''` (and `cashierName: ''` on the Tax Invoice/Bill branch) instead of ever looking up the staff member — a copy-paste gap from when the function was first written, not something that touched the real print path. Now looks up `profiles.full_name` for whichever staff member actually acted (`comped_by` for an item-level comp, `closed_by` for everything else) and passes it through.
+
+**Files:** `src/utils/viewPosBill.js`
+
+### S281 — 2026-07-06 — Charge modal: amount moved next to the table name
+
+Cosmetic layout tweak per user request: the bill total ("NPR 260") now sits on the same row as the table/takeaway name, right-aligned opposite it, instead of stacked below on its own line. The Pay/Void/Complimentary tab buttons shift up into the space that freed.
+
+**Files:** `src/modules/pos/orders/PosOrders.jsx`
+
+### S280 — 2026-07-06 — Bill ↔ Comp cross-referencing + new "Comped Bills" tab
+
+User asked to tag a bill if it has a comped item (and vice versa — tag the comp with the bill it came from), plus a dedicated Sales Report tab for it.
+
+- **Bill Register** (`/pos/sales-report`): a paid bill with an item comped out of it now shows a "Comped (NC-xx)" badge next to the customer name, same style as the existing "Credit Noted" badge. `loadRange()` no longer discards comped rows after filtering them out of revenue math — it groups them by (order_id, comp_no) into `compsByOrder`, computing food cost + menu-price potential value per comp event (same valuation as Sales Exceptions).
+- **Sales Exceptions** (`/pos/exceptions`): the "vice versa" side — an item-comp row's Bill No cell now shows a small "on TI13-BC-82/83" line underneath its NC number, so you can trace a comp back to the bill it was carved out of. Also added to the Excel export as an "On Bill" column.
+- **New "Comped Bills" tab** on `/pos/sales-report` (now 9 tabs): one row per comp event — Date, Bill No, NC No, Table, Items Comped, Food Cost, Potential Value, Reason — click any row to view that comp's mini Complimentary Slip via `viewPosBill`. Whole-order Complimentary orders don't appear here (no separate paid bill to cross-reference) — those stay in Sales Exceptions only.
+
+**Files:** `src/modules/pos/reports/SalesReport.jsx`, `src/modules/pos/reports/PosExceptionReport.jsx`, `src/pages/Help.js`
+
+### S279 — 2026-07-06 — Click-to-drill-down: view the actual bill from Exceptions/Sales Report
+
+User asked to click a row in Sales Exceptions and drill down to the underlying bill, then asked for the same in Sales Report. Built a shared, read-only drill-down: `src/utils/viewPosBill.js` reuses the exact same `buildBillHtml`/`buildCompSlipHtml` pure builders the real print already uses (from `PosOrders.jsx`'s `posOrderPrintHtml.js`), opening the identical layout in a new browser tab — never calls `window.print()`, so it's a look, not a reprint. Handles three row shapes: a normal paid/void order (Tax Invoice/PAN Bill, comped lines excluded same as the real bill), a whole-order Complimentary row (Complimentary Slip), and an item-level comp row (mini Complimentary Slip for just that comp event's items, matched by `comp_no`).
+
+Wired into: `/pos/exceptions` detail table (every row — discount, void, comp, item-comp) and `/pos/sales-report`'s Bill Register tab (the only one of its 8 tabs with one-row-per-order granularity; the rest are aggregates with no single bill to show). Both just pass `clientId` + minimal row identifiers; all data fetching happens inside `viewPosBill` itself.
+
+**Files:** `src/utils/viewPosBill.js` (new), `src/modules/pos/reports/PosExceptionReport.jsx`, `src/modules/pos/reports/SalesReport.jsx`, `src/pages/Help.js`
+
+### S278 — 2026-07-06 — Item-level comp: fixed the "tick one, all tick" bug + folded the Items list
+
+User caught it live: ticking one item's Comp checkbox ticked all of them. Root cause — the checkbox Set was keyed by `item.id`, but cart items added via `addItem()` (the only path onto the cart) never carry a real `pos_order_items.id` until re-fetched from the DB; every item's `.id` was `undefined`, so they all shared one Set key. Switched the key to `recipe_id` instead (stable regardless of DB-sync state, and already guaranteed unique per order — `addItem()` merges a re-tapped recipe into its existing line rather than duplicating it). The Charge-time DB write changed to match `(order_id, recipe_id)` instead of a row id for the same reason.
+
+Also folded the Items list behind a collapsed-by-default header (▸ Items · tap to expand, shows an "N comped" count even collapsed) — per user feedback, a comp checkbox visible on every single item on every payment read as a standing suggestion to comp something; folding it behind a deliberate tap keeps the feature available without pushing it in front of every cashier on every bill.
+
+**Files:** `src/modules/pos/orders/PosOrders.jsx`
+
+### S277 — 2026-07-06 — Sales Exceptions: Comp Potential Sales Value
+
+User recalled wanting a report showing what comped (NC) items would have sold for at menu price, not just their food cost. No such page existed yet — searched code/memory to confirm, then scoped it with the user: extend the existing `/pos/exceptions` Comp rows/stat card rather than build a new page. Added a "Comp Potential Sales Value" stat card and a "Potential Value" detail-table column (menu price incl. VAT, same formula as the Void bucket's forgone-value) alongside the existing food-cost figure — covers both whole-order Complimentary and item-level comps. Also in the Excel export.
+
+**Files:** `src/modules/pos/reports/PosExceptionReport.jsx`, `src/pages/Help.js`
+
+### S276 — 2026-07-06 — Item-level comp: fixed revenue-reporting fallout
+
+User asked to cross-check whether item-comp (S274) needed addressing elsewhere. An Explore audit found it did — several reports read `pos_order_items` without excluding `comped=true` rows, so a comped item (never actually billed) was still counted at full menu price:
+
+- **`SalesReport.jsx`** (`/pos/sales-report`) — both item queries feeding Daily/Hourly/Bill Register/Payment Summary/Category/Item/Customer/1L+ now select `comped` and filter it out before building `itemsByOrder`. Real bug: every one of those 8 tabs was overstating Gross/Taxable/Net/VAT by the comped item's menu value.
+- **`demandForecastData.js`** — `buildDailyHistory`'s revenue figure now excludes comped items; the per-recipe `qtyByRecipe` breakdown deliberately still includes them (a comped dish was still prepared — demand planning cares about that regardless of billing).
+- **Credit Notes** (`IssueCreditNoteModal.jsx`, `CreditNotes.jsx`) — face value, printed itemization, and reprints now exclude comped items (they were never billed, so crediting them back overstated the correction). The `sales_entries` reversal on issuance intentionally still covers every item, comped or not — it mirrors the original write.
+- **`PosExceptionReport.jsx`** (`/pos/exceptions`) — this was a visibility gap, not a wrong number: item-level comps live inside `close_type='paid'` orders, which the report's query never fetched at all. Added a second query for `comped=true` rows, grouped by (order_id, comp_no) into one exception row per Charge action (matching how a whole-order Comp is already one row per order), merged into the same "Comp" bucket/stat card/staff rollup.
+
+Known pre-existing characteristic, not a new bug: Menu Engineering's "Revenue" column is `sellingPrice × qty_sold`, and `sales_entries.qty_sold` has always counted comped items (by design, for the quantity-ranking math) — this already overstated $ revenue for whole-order comps before item-level comp existed, unchanged by this feature.
+
+**Files:** `src/modules/pos/reports/SalesReport.jsx`, `src/modules/pos/reports/PosExceptionReport.jsx`, `src/utils/demandForecastData.js`, `src/modules/pos/creditnotes/IssueCreditNoteModal.jsx`, `src/modules/pos/creditnotes/CreditNotes.jsx`
+
+### S275 — 2026-07-06 — Recent Bills: reprint the item-comp slip
+
+Closed the gap noted when S274 shipped: only the main bill could be reprinted from Recent Bills, not the mini Complimentary Slip for any item(s) comped on it. Added `pos_orders.comp_print_count` — a counter dedicated to that slip, separate from `print_count` (the main bill's own), since a 'paid' order with a comped item now carries both documents and sharing one counter would mislabel whichever one didn't actually get reprinted. `loadRecentBills()` now also fetches which of today's paid bills have any comped item and shows a "Comp Slip" reprint button only there.
+
+**Files:** `supabase/migrations/20260706150000_pos_item_comp_slip_reprint.sql`, `src/modules/pos/orders/PosOrders.jsx`
+
+### S274 — 2026-07-06 — Item-level Complimentary/comp
+
+Whole-order Complimentary was the only comp path — no way to comp one dish while charging normally for the rest of the table (product-roadmap memory, Medium priority). Added an Items list to the Pay tab (Supervisor+ only): ticking an item removes it from that bill entirely and prints it on its own mini Complimentary Slip instead, while the rest of the table still bills and prints as one normal Tax Invoice/Bill.
+
+- Design decisions (confirmed with user): authority stays Supervisor+ only with no NPR/qty caps (matches today's whole-order rule, just finer-grained); printed as a separate mini Complimentary Slip (not a ₨0 line on the main bill).
+- Migration `20260706140000_pos_item_level_comp.sql`: `pos_order_items` gets `comped/comp_reason/comped_by/comped_at/comp_fy/comp_no` + a check constraint. New RPC `get_next_pos_comp_slip_no(client_id, fy)` hands out one number per Charge action (all items comped together share one slip/one number, not one per line) from the **same NC-series** a whole-order Complimentary Slip uses — `assign_pos_invoice_no()`'s `close_type='writeoff'` branch was updated (only that branch) to lock on and consider the same combined pool, so the two paths can never hand out the same number to two different documents.
+- `PosOrders.jsx`: new `paySubEx`/`payVatAmtRaw`/`payTotal` computed from non-comped items only (the existing whole-order `subEx`/`vatAmt`/`total`/`compTotal` used by Void and whole-order Complimentary are untouched); `writeSalesEntries()` now aggregates stock_movements into two buckets (`pos_sale`/`pos_comp`) since the same ingredient can appear in both a comped and a paid dish on one ticket; printed Tax Invoice/Bill and live preview both build from the non-comped subset; a new `printItemCompSlip()` reuses the existing `buildCompSlipHtml()` builder with the comp-specific number swapped in for `invoice_no`.
+- Help.js and `pos_order_items` reprint path (`reprintBill`) updated to exclude comped lines from a reprinted Tax Invoice.
+- Not yet wired: reprinting the item-comp slip itself from Recent Bills (only the main bill reprints today).
+
+**Files:** `supabase/migrations/20260706140000_pos_item_level_comp.sql`, `src/modules/pos/orders/PosOrders.jsx`, `src/pages/Help.js`
+
+### S273 — 2026-07-06 — QR tab: gave the webhook secret its own Save button
+
+Follow-up to S272: "Save QR" was sitting under the new Payment Webhook section, not the Payment QR section it's named for. Moved it back directly under the Payment QR block, and added a second "Save Webhook Secret" button under the webhook section — both call the same `handleSaveSettings` (saves the whole settings row either way), but each section now visually owns its own save action.
+
+**Files:** `src/pages/adminClients/ClientDrawer.js`
+
+### S272 — 2026-07-06 — Admin UI for the per-client payment webhook secret
+
+Follow-up to S271: the webhook receiver scaffold needed a way to actually set `settings.pos_webhook_secret` per client. Added a "Payment Webhook (advanced)" section to Manage Clients → a client → QR tab, right below the existing Payment QR field — a text input plus a "Generate" button (random 32-byte hex via `crypto.getRandomValues`). Saves through the QR tab's existing "Save QR" button/`saveClientSettings()` call; no new save path, since it's just another column on the same `settings` row.
+
+**Files:** `src/pages/adminClients/ClientDrawer.js`
+
+### S271 — 2026-07-06 — QR payment auto-confirmation: webhook receiver scaffold
+
+First half of the "QR payment auto-confirmation" roadmap item (Low priority). Lands the receiving side only — no real merchant account is onboarded yet, so nothing calls this in production until a provider is wired up.
+
+- New table `pos_payment_confirmations` (client_id, provider, amount, reference, txn_ref, matched_order_id, consumed_at, raw_payload) + `settings.pos_webhook_secret` — migration `20260706120000_pos_payment_webhook_scaffold.sql`
+- New Edge Function `pos-payment-webhook`: verifies a placeholder HMAC signature against the client's `pos_webhook_secret`, is idempotent on (client_id, provider, txn_ref), and best-effort matches the payment to an open `pos_orders` row via a `reference` string (`CR<order_no>`). Deliberately does **not** close the order itself — that needs the app's BS-fiscal-year/invoice-numbering logic, which shouldn't be re-implemented a second time in Deno.
+- `emvQr.js`'s `buildDynamicQr()` now takes an optional `reference`, embedded as EMVCo tag 62/05, so a real provider webhook that echoes a reference can be matched back to the order that generated the QR.
+- `PosOrders.jsx`: the bill QR now carries `CR<order_no>` as that reference. While the Charge modal shows a QR (non-split, eSewa/Khalti/FonePay), it polls `pos_payment_confirmations` every 4s for a matching, unconsumed row and — if found — auto-runs the existing `closeOrder('paid')` path, the same one the manual Pay button calls. No duplicated billing/close logic.
+- Still needed before this does anything live: an admin UI to set `pos_webhook_secret` per client, and the actual FonePay/eSewa merchant API onboarding + real signature scheme (see product-roadmap memory).
+
+**Files:** `supabase/migrations/20260706120000_pos_payment_webhook_scaffold.sql`, `supabase/functions/pos-payment-webhook/index.ts`, `src/utils/emvQr.js`, `src/modules/pos/orders/PosOrders.jsx`, `src/shared/scopedDb.js`
+
 ### S270 — 2026-07-06 — Login page: View Pricing styled as a solid button
 
 Follow-up to S268: the "View Pricing" link was plain text, easy to miss next to the branding. Restyled it as a solid green pill using the same `login-btn login-btn--trial` classes as the "Start Free Trial" button below it, just scaled down (smaller padding/font) to fit the corner.

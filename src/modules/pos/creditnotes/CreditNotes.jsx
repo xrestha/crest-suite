@@ -56,7 +56,11 @@ export default function CreditNotes() {
     const [{ data: cn }, { data: profs }, { data: settings }, { data: cl }] = await Promise.all([
       scopedFrom('pos_credit_notes')
         .gte('created_at', fromTs).lte('created_at', toTs).order('created_at', { ascending: false }),
-      supabase.from('profiles').select('id, full_name').eq('client_id', clientId),
+      // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin) —
+      // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
+      // DEFINER RPC. A raw query here silently showed "—" for every staff member except
+      // whoever was logged in.
+      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
       supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
       supabase.from('clients').select('name').eq('id', clientId).single(),
     ])
@@ -79,14 +83,17 @@ export default function CreditNotes() {
   if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
 
   async function reprintNote(note) {
-    const { data: items } = await scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate').eq('order_id', note.order_id)
-    const recipeIds = [...new Set((items || []).map(i => i.recipe_id).filter(Boolean))]
+    const { data: items } = await scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped').eq('order_id', note.order_id)
+    // Same exclusion as the original issuance (IssueCreditNoteModal.jsx) — item-level comps were
+    // never billed, so they were never on this Credit Note in the first place.
+    const payableItems = (items || []).filter(i => !i.comped)
+    const recipeIds = [...new Set(payableItems.map(i => i.recipe_id).filter(Boolean))]
     let hscMap = {}
     if (recipeIds.length > 0) {
       const { data } = await scopedFrom('recipes', 'id, hsc_code').in('id', recipeIds)
       hscMap = Object.fromEntries((data || []).map(r => [r.id, r.hsc_code]))
     }
-    await printCreditNote(clientId, note, items || [], billingSettings, outletName, hscMap)
+    await printCreditNote(clientId, note, payableItems, billingSettings, outletName, hscMap)
     setNotes(prev => prev.map(n => n.id === note.id ? { ...n, print_count: (n.print_count || 0) + 1 } : n))
   }
 
