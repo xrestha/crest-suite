@@ -138,6 +138,16 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S294 — 2026-07-07 — Guest QR menu: live Sent/Started/Ready kitchen-status badge
+
+Picked off the POS roadmap's "blocked" backlog item — turned out not to actually be blocked. The original plan assumed the guest needed to have placed their order via QR for "their order" to be identifiable, which depends on a guest ordering-with-placement flow that doesn't exist yet. But a table has at most one `'open'` `pos_orders` row at a time regardless of who entered it (staff via `PosOrders.jsx` today), so the guest's order for badge purposes is simply whatever's currently open on the table their QR code already points to.
+
+New public RPC `get_guest_table_status(p_table_id)` — same anonymous-caller pattern as `get_guest_menu` (no internal auth check, only whitelisted non-sensitive fields: a status enum, nothing else). Resolves table → client → `pos_enabled`, finds the table's open order, then worst-status-wins across its `pos_kot_log` rows (same logic as the staff floor-view badge). `GuestMenu.jsx` polls it every 5s and shows a Sent / Being prepared / Ready to serve badge under the outlet/table header, reusing the existing `badge-red/amber/green` classes.
+
+Guest-placed ordering (cart, submit) remains out of scope — a separate, larger future feature.
+
+**Files:** `supabase/migrations/20260707160000_guest_table_kot_status.sql` (applied ✓), `src/modules/pos/guestmenu/GuestMenu.jsx`, `src/pages/Help.js`
+
 ### S293 — 2026-07-07 — Supabase Security Advisor pass: closed 2 real RLS-bypass gaps
 
 User ran the Supabase Security Advisor/linter and pasted its findings. Most of the `SECURITY DEFINER` "callable by anon/authenticated" warnings turned out to be by design (`get_guest_menu`, `get_pos_staff`, `get_pos_staff_list`, `get_client_profile_names`, `client_user_emails`, `find_user_id_by_email` all already gate on admin-or-same-client or self-scope via `auth.uid()`) or non-issues (`assign_pos_*_no` are trigger functions — Postgres refuses to invoke a `RETURNS trigger` function directly via RPC, so that warning is a false positive). Went through every `SECURITY DEFINER` function taking a `p_client_id`-shaped parameter one by one to be sure, rather than taking the linter's severity labels at face value.

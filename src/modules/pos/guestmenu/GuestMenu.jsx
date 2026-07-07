@@ -6,6 +6,12 @@ import { NUTRIENTS } from '../../../utils/nutrition'
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const fmtNutrient = (def, value) => `${(Number(value) || 0).toFixed(def.dp)} ${def.unit}`
 
+// Same three stages + wording as the staff-side floor-view badge (PosOrders.jsx) and KDS board —
+// worded from the guest's point of view: their order was Sent to the kitchen, is being Prepared,
+// or is Ready to be served.
+const KOT_STATUS_BADGE = { new: 'badge-red', in_progress: 'badge-amber', ready: 'badge-green' }
+const KOT_STATUS_LABEL = { new: 'Order sent to kitchen', in_progress: 'Being prepared', ready: 'Ready to serve' }
+
 // Fully public, unauthenticated page — reached by a guest scanning a table's QR code (see
 // PosTableManagement.jsx's "Print QR" action). View-only: shows the live POS menu for that
 // table's client, no ordering. All data comes from one RPC (get_guest_menu) that does its own
@@ -16,6 +22,7 @@ export default function GuestMenu() {
   const { tableId } = useParams()
   const [rows, setRows] = useState(null) // null = loading, [] = loaded-but-empty
   const [error, setError] = useState(false)
+  const [kotStatus, setKotStatus] = useState(null) // null = no open order / nothing sent yet
 
   useEffect(() => {
     let cancelled = false
@@ -25,6 +32,19 @@ export default function GuestMenu() {
       setRows(data || [])
     })
     return () => { cancelled = true }
+  }, [tableId])
+
+  // 5s poll while the guest has the menu open — same cadence as the staff floor-view badge.
+  useEffect(() => {
+    let cancelled = false
+    const poll = () => supabase.rpc('get_guest_table_status', { p_table_id: tableId }).then(({ data }) => {
+      if (cancelled) return
+      const row = data?.[0]
+      setKotStatus(row?.has_open_order ? row.kot_status : null)
+    })
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => { cancelled = true; clearInterval(id) }
   }, [tableId])
 
   if (rows === null) {
@@ -54,6 +74,11 @@ export default function GuestMenu() {
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <h1 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 700 }}>{outletName}</h1>
           <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>{tableName}</p>
+          {kotStatus && (
+            <span className={KOT_STATUS_BADGE[kotStatus]} style={{ display: 'inline-block', marginTop: 10, fontSize: 11 }}>
+              {KOT_STATUS_LABEL[kotStatus]}
+            </span>
+          )}
         </div>
 
         {categories.map(cat => (
