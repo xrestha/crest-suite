@@ -68,7 +68,9 @@ const FEATURE_GROUPS = [
     { key: 'period_comparison',    label: 'Period Comparison' },
     { key: 'shrinkage_report',     label: 'Shrinkage Report' },
     { key: 'demand_forecast',      label: 'Demand Forecast' },
-    { key: 'guest_ordering',       label: 'Guest QR Self-Ordering' },
+    // A POS feature, not an IMS one — its "included in plan" check below uses client.pos_plan,
+    // not clientPlan (the IMS plan), so it doesn't incorrectly key off IMS/POS plan mismatches.
+    { key: 'guest_ordering',       label: 'Guest QR Self-Ordering', planSource: 'pos' },
   ]},
 ]
 
@@ -159,27 +161,42 @@ export default function FeatureAccessModal({ client, onClose }) {
         <div style={{ padding: '16px 24px 24px' }}>
           <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text2)' }}>POS feature overrides — grant features above this client's POS plan tier.</p>
           {loading ? <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
-            : [{ key: 'menu_pricing', label: 'Menu Pricing' }].map(feat => {
-                const isAdminGranted = flags[feat.key] === true
+            : [
+                { key: 'menu_pricing',   label: 'Menu Pricing' },
+                { key: 'guest_ordering', label: 'Guest QR Self-Ordering', tier: 'pro' },
+              ].map(feat => {
+                // Only guest_ordering declares a tier — menu_pricing keeps its original
+                // always-a-toggle behavior (pre-existing, unrelated to this feature).
+                const planIncluded = feat.tier ? isPlanIncluded(feat.tier, client.pos_plan || 'starter') : false
+                const locked = planIncluded
+                const isAdminGranted = !locked && flags[feat.key] === true
+                const isOn = locked || isAdminGranted
                 return (
                   <div key={feat.key}
-                    onClick={() => toggleFeat(feat.key, isAdminGranted)}
+                    onClick={() => !locked && toggleFeat(feat.key, isAdminGranted)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10,
                       background: 'var(--theme-bg)', borderRadius: 6, padding: '6px 8px', maxWidth: 220,
-                      border: `1px solid ${isAdminGranted ? 'var(--theme-accent)50' : 'var(--theme-border)'}`,
-                      cursor: 'pointer', transition: 'border-color 0.15s',
+                      border: `1px solid ${locked ? 'var(--theme-accent)22' : isAdminGranted ? 'var(--theme-accent)50' : 'var(--theme-border)'}`,
+                      cursor: locked ? 'default' : 'pointer', transition: 'border-color 0.15s',
                     }}>
                     <div style={{
                       width: 16, height: 16, borderRadius: 3, flexShrink: 0,
-                      background: isAdminGranted ? 'var(--theme-accent)' : 'transparent',
-                      border: `2px solid ${isAdminGranted ? 'var(--theme-accent)' : 'var(--theme-text3)'}`,
+                      background: isOn ? 'var(--theme-accent)' : 'transparent',
+                      border: `2px solid ${isOn ? 'var(--theme-accent)' : 'var(--theme-text3)'}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s',
                     }}>
-                      {isAdminGranted && <span style={{ color: '#000', fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                      {isOn && <span style={{ color: '#000', fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
                     </div>
                     <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: 12, color: isAdminGranted ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{feat.label}</span>
+                      <span style={{ fontSize: 12, color: isOn ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{feat.label}</span>
+                      {locked && (
+                        <span style={{
+                          marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)',
+                          background: 'var(--theme-accent)18', border: '1px solid var(--theme-accent)35',
+                          borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle',
+                        }}>Plan</span>
+                      )}
                       {isAdminGranted && (
                         <span style={{
                           marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)',
@@ -219,7 +236,13 @@ export default function FeatureAccessModal({ client, onClose }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {group.features.map(feat => {
                     const isCore = feat.key === null
-                    const locked = isCore || planIncluded  // plan features are always on, non-clickable
+                    // Most features check the IMS plan (planIncluded, computed once per group
+                    // above); a feature with planSource: 'pos' checks the client's POS plan
+                    // instead — see guest_ordering above.
+                    const featPlanIncluded = feat.planSource === 'pos'
+                      ? isPlanIncluded(group.tier, client.pos_plan || 'starter')
+                      : planIncluded
+                    const locked = isCore || featPlanIncluded  // plan features are always on, non-clickable
                     const isAdminGranted = !locked && flags[feat.key] === true
                     const isOn = locked || isAdminGranted
 
