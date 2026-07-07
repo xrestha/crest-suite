@@ -14,7 +14,8 @@ npm run build    # Production build
 ```
 
 **Env vars required:**
-```
+
+```text
 REACT_APP_SUPABASE_URL
 REACT_APP_SUPABASE_ANON_KEY
 REACT_APP_SUPABASE_SERVICE_ROLE_KEY
@@ -28,8 +29,9 @@ Hospitality inventory & food cost management SaaS for Nepal's F&B industry.
 Works natively in Bikram Sambat (BS) calendar · NPR currency · FonePay payment tracking.
 
 ### Plans
+
 | Plan | Monthly | Annual /mo | Includes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Starter | NPR 5,000 | NPR 3,750 | Dashboard, Items, Vendors, Periods, Purchases, Stock, Help + Sales Entry, Payment Summary, Monthly Summary, Annual Summary, Reorder Report, VAT Report, Non-VAT Report, Wastage Report, Settings, Stock Report, Menu Pricing |
 | Growth | NPR 8,000 | NPR 6,000 | + Recipes, Variance, Budget vs Actual, Best Sellers, Purchase Orders, Requisitions, Dead Stock, Recipe Margin, Outstanding Payables, Staff Meals, Menu Repricing |
 | Pro | NPR 12,000 | NPR 9,000 | + Menu Engineering, FIFO, Vendor Report, Supplier Price Tracker, Overheads, Period Comparison, Theoretical Variance, Shrinkage Report |
@@ -41,7 +43,7 @@ Starter: 1-month free trial. Annual = 25% off monthly.
 ## Routes
 
 | Route | Plan | Feature Flag |
-|---|---|---|
+| --- | --- | --- |
 | `/dashboard` | All | — |
 | `/periods` | All | — |
 | `/items` | All | — |
@@ -91,6 +93,7 @@ Starter: 1-month free trial. Annual = 25% off monthly.
 ## Pending Features
 
 ### Reports Backlog
+
 - **Done (S62):** Wastage Report — `/wastage-report`, Starter+, period wastage by item/category with NPR value and % of total
 - **Done (S62):** Dead Stock / Slow Movers — `/dead-stock`, Growth, Dead=Used=0 / Slow=Used<20% of available; Value at Risk
 - **Done (S63):** Recipe Contribution Margin — `/recipe-margin`, Growth, (Selling Price − Food Cost) × Qty Sold; sort by contribution/margin/FC%
@@ -100,6 +103,7 @@ Starter: 1-month free trial. Annual = 25% off monthly.
 - **Done:** Shrinkage Report — `/shrinkage`, Pro, last 3/6/12 closed periods selector, actual vs theoretical usage, Consistent/Occasional/Once/Clear status badges. No DB change needed.
 
 ### Features Backlog
+
 - **Done (S61):** PWA — installable shell. `manifest.json` updated (name, colors, scope), `public/service-worker.js` added (cache-first for assets, network-first for navigation, never caches Supabase calls), registered in `src/index.js`. Icons: replace `public/logo192.png` + `public/logo512.png` with actual Crest logo at those sizes.
 - **Done (S97):** PWA offline stock count — IndexedDB cache + sync queue; counts entered offline are queued and flushed automatically on reconnect
 - **Done (S93):** Staff meal & complimentary tracking — `staff_meals` table, new tab in Stock Count, deducted from Used/COGS separately from wastage. Staff Meals column added to Stock Summary and Monthly Summary. Variance updated. Growth plan, `staff_meals` flag. DB migration run ✓
@@ -108,17 +112,19 @@ Starter: 1-month free trial. Annual = 25% off monthly.
 - **Deferred (client):** Role-based users Owner/Manager
 
 ### Crest Suite — One Codebase, Three Modules
+
 Architecture: single React app, single Supabase project, feature flags per client. Sell IMS / HR / POS individually or as a bundle.
 
 | Module | Status | Routes |
-|---|---|---|
+| --- | --- | --- |
 | Crest IMS | ✅ Live | All existing routes |
 | Crest HR | ✅ Live | `/hr/dashboard`, `/hr/employees`, `/hr/pay-setup`, `/hr/attendance`, `/hr/leave`, `/hr/holidays`, `/hr/overtime`, `/hr/payroll`, `/hr/reports`, `/hr/festival`, `/hr/advances`, `/hr/gratuity`, `/hr/settlement`, `/hr/roster` |
 | Crest POS | 🔧 Building | `/pos` (setup/activation, manager+), `/pos/login` (public PIN picker), `/pos/tables` (supervisor+), `/pos/staff` (manager+); Orders, KOT, Billing, Shifts next |
 
 **Suite pricing:**
+
 | Suite Plan | Monthly | Annual /mo |
-|---|---|---|
+| --- | --- | --- |
 | Suite Starter | NPR 12,000 | NPR 9,000 |
 | Suite Growth | NPR 22,000 | NPR 16,500 |
 | Suite Pro | NPR 32,000 | NPR 24,000 |
@@ -509,13 +515,16 @@ No schema change, no changes to `payrollCompute.js` — the generator only ever 
 Closed the last item from the S249 architecture report: the six files over 1,200 lines. Two shapes of fix, chosen per file based on what was actually inside:
 
 **Mechanical extraction (already had self-contained sub-components sitting in the same file, just not physically separated):**
+
 - `AdminClients.js` 1813 → 448 lines. `ClientDrawer` (1036 lines) and `FeatureAccessModal` (216 lines) moved to `src/pages/adminClients/`, plus `adminOp.js` for the edge-function helper. Pure relocation — verified by a near-zero bundle size delta.
 - `Roster.jsx` 1254 → 839 lines. `ShiftPicker`, `SuggestPopover`, `ShiftSettingsPanel` moved to their own files under `src/modules/hr/roster/`, plus `rosterHelpers.js` for the shared `fmtTime`.
 
 **Split along a real internal boundary:**
+
 - `Dashboard.js` 1347 → 9 lines + 2 modules. It was two unrelated dashboards (`AdminDashboardOverview`, cross-tenant; `ClientDashboard`, per-client financial) gated by one boolean sharing almost no state. `Dashboard.js` is now a thin router; each half owns its own `useAuth()`/data-loading instead of prop-threading.
 
 **Genuine extraction — no pre-existing seams, had to design the split:**
+
 - `Purchases.js` 1262 → 659 lines + 3 modules. `PurchaseBillModal.jsx` (multi-row bill form, now owns its own header/line state, calls back `onSaved(validLines)` so the parent's rate-change-detection stays where the `items` cache lives) and `ReturnsTab.jsx` (return form + table, fully self-contained), plus `purchasesHelpers.js` for `getCf()`.
 - `Recipes.js` 2034 → 1225 lines + 4 modules. `recipeCostCalc.js` (pure cost/nutrition-filter functions), `RecipeCostCardPrint.jsx` (the A4 print card, previously duplicated verbatim in two places), `NutritionEditorModal.jsx` (per-ingredient nutrition editor with library-seed + Open Food Facts lookup), `RecipeImportButton.jsx` (the whole bulk-Excel-import feature).
 - `PosOrders.jsx` 2348 → 2085 lines + 2 modules — deliberately the smallest cut. This is the highest-traffic, highest-stakes live screen (order-taking, billing, offline sync), so only genuinely zero-behavior-risk moves were made: `posOrderPrintHtml.js` (the pure bill/comp-slip/tender-slip/KOT-BOT HTML builders, parameterized instead of closing over component state — same pattern as `printCreditNote` from S251) and `posOrdersConstants.js` (pure constants, confirmed zero-risk by an identical production bundle hash before/after). The floor/order/billing/offline-queue state stays one component — splitting it further risks subtle real-time bugs that need a live device to catch, not just a build check.
@@ -533,6 +542,7 @@ Closed out the last item from the S249 architecture report: migrated the remaini
 **POS (8 of 9 files changed; `PosStaff.jsx` only touches `settings`/an RPC, already correct).** Along the way, found `pos_order_items` and `pos_order_payments` actually carry `client_id NOT NULL` and were already in `CLIENT_SCOPED_TABLES` (confirmed by `PosOrders.jsx`, already on `scopedDb` from earlier POS work) — several reads across `CreditNotes.jsx`, `IssueCreditNoteModal.jsx`, `KotLog.jsx`, `PosExceptionReport.jsx`, and `SalesReport.jsx` had been left on raw `supabase.from()` under the wrong assumption they were `order_id`-only scoped like `recipe_ingredients`; corrected all of them for consistency with the allowlist. Also fixed `creditNoteHtml.js`'s `printCreditNote()`, which took a raw `supabase` client as a parameter and updated `pos_credit_notes` by id alone with no `client_id` filter at all — now takes `clientId` and goes through `scopedUpdate`.
 
 **Core/admin pages split into two real patterns**, not just "migrated" vs "not":
+
 - `Dashboard.js`, `Periods.js`, `Settings.js` — single-client views, migrated straight onto the `useScopedDb()` hook.
 - `Periods.js`'s admin "all clients" view and `Dashboard.js`'s `loadAdminStats()` are genuinely cross-tenant (every client's periods/profiles in one unscoped read to build an overview table) — those reads correctly stay on raw `supabase.from()`, but the per-client *actions* inside them (close/end/create a period for one specific `cid`) now go through the raw (non-hook) `scopedInsert`/`scopedUpdate` functions bound to that `cid` instead of hand-stamping `client_id`.
 - `AdminClients.js` has no `clientId` of its own at all — it's pure admin tooling looping over an explicit client list — so every action uses the raw scoped functions with `client.id` passed in per call (items unit-conversion cleanup, `feature_flags` wipe on delete, opening-period seed on create).
@@ -551,6 +561,7 @@ Also deleted `CREST_SUITE_PROJECT_CONTEXT_HR.md` (S250) — see prior entry.
 Follow-up to S249, which had only migrated `Items.js`/`Vendors.js` as the proof-of-concept and left ~68 files. Continued the same mechanical pattern (hand-written `.eq('client_id', ...)` → `scopedFrom`/`scopedUpdate`/`scopedDelete`, hand-stamped `client_id: X` on inserts/upserts → `scopedInsert`/`scopedUpsert`) across every remaining IMS file (34: purchases, recipes, sales, stockcount, variance, and all 13 flat reports) and every HR file (14: advances, attendance, employees, festival, gratuity, holidays, leave, overtime, pay, payroll reports, roster, settlement), verifying `CI=true npm run build` after each batch.
 
 Found and fixed two real bugs surfaced by the sweep, not just call-site mechanics:
+
 - `MenuEngineering.js` was fetching `recipe_ingredients` completely unfiltered — no `client_id` and no `recipe_id` scoping at all, meaning every tenant's ingredient rows loaded on every request (harmless today only because nothing downstream used the wrong rows by accident). Fixed by scoping to `.in('recipe_id', recipes.map(r => r.id))`.
 - `CLIENT_SCOPED_TABLES` was missing every `hr_*` and `pos_*` table (24 of them) — the original S134/S211-era audit only ever looked at IMS. Expanded to the full 37-table list, cross-checked against the live `NOT NULL` constraints in `supabase/migrations/20260705074838_baseline_schema.sql`.
 
@@ -611,6 +622,7 @@ Two of the 9 cross-module features from the S241 roadmap plan, picked as the "qu
 **Feature 7 — Combo Builder.** New `src/pages/ComboBuilder.js`, `/combo-builder`, Growth plan (`combo_builder` flag) — the first non-order-flow caller of the existing `get_cooccurrence(p_client_id, p_recipe_id, p_days)` RPC (previously only called from `PosOrders.jsx`'s live upsell suggestion chips). Pick an anchor menu item (`SearchableSelect`) and a window (30/90/180 days); the table ranks its most frequent real-bill pairings with a bills-together count/frequency bar, combined price, and a suggested combo price = combined price × (1 − Combo Discount %). Combo Discount % (`settings.combo_discount_pct`, default 10) is editable inline and saved per client. Insight-only, per plan — "Create as Menu Item →" links out to `/menu-pricing`; nothing is auto-created.
 
 **DB migration — run ✓ 2026-07-05:**
+
 ```sql
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS covers_per_staff_target numeric DEFAULT 20;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS combo_discount_pct numeric DEFAULT 10;
@@ -650,6 +662,7 @@ Fixed by deleting this client's rows for the target horizon before writing the n
 The `document.title`-before-print fix built for Demand Forecast (S242) had the same root cause everywhere: 20 other print buttons across IMS, HR, and POS all called `window.print()` directly, so every one of them also defaulted to "Crest Inventory" in the browser's "Save as PDF" dialog. Extracted the fix into a shared `src/utils/printTitle.js` (`printWithTitle(title)`) — one canonical implementation instead of 21 copies — and pointed every print button at it (including refactoring `DemandForecast.js`'s own bespoke version to use the shared one).
 
 Titles use whatever context is already in scope per page — no new data fetching added anywhere:
+
 - **IMS reports** (VAT, Non-VAT, Wastage, Stock, Stock Count Sheet, Dead Stock, Recipe Margin, Monthly/Annual Summary, Menu Repricing, Period Comparison, Supplier Price Tracker): `"{Report Name} - {periodLabel or equivalent}"`.
 - **Document prints** (Recipe Cost Card, Purchase Order, Requisition): recipe name / PO number / department+day, since these are single-document prints, not period reports.
 - **HR** (Staff Roster, TDS Certificate, Final Settlement, Payslip, Employee Joining Form): employee name / business name / fiscal year as applicable — Roster's already includes `bizInfo.name` from its S240 letterhead work.
@@ -675,6 +688,7 @@ New page `src/pages/DemandForecast.js` (`/demand-forecast`, Growth) — "Recompu
 **Also fixed `src/components/Tip.js`** (shared tooltip component, used app-wide) — it clamped horizontal position near screen edges but always rendered *above* its anchor with no vertical edge-detection, so a tooltip on a heading near the top of the page (e.g. this page's own title tooltip) rendered partly off-screen. Now flips below the anchor when `rect.top < 120`, the same edge-flip pattern `ShiftPicker`/`SearchableSelect` already use for their own dropdowns.
 
 **DB migration — run ✓ (confirmed 2026-07-05 via re-run hitting expected "policy already exists"):**
+
 ```sql
 CREATE TABLE IF NOT EXISTS demand_forecast_daily (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -717,6 +731,7 @@ Kicked off the founder-approved cross-module roadmap (see the plan doc for full 
 **`src/utils/phone.js`** (new) — `normalizePhone(raw)` strips non-digits, a leading `977` country code, and leading zeros, returning `null` if under 7 digits. `buyer_phone` on `pos_orders` has zero format validation today (raw free text), so this gives Loyalty/RFM/Digital-Receipts a consistent matching key.
 
 **DB migration — run ✓ 2026-07-05:**
+
 ```sql
 -- pos_customers.phone_canonical — mirrors src/utils/phone.js's normalizePhone() stripping
 -- logic (minus its <7-digit NULL guard, which only matters for validating new input, not
@@ -781,6 +796,7 @@ Compared Crest's POS reports against a competitor ERP's "Sales Report Item Wise"
 Next three items off `POS_TODO.md`: a plain Item Wise sales ledger, a KOT Register, and a KOT vs Prebill vs Sales reconciliation (anti-fraud). Investigating the existing KOT/BOT send mechanism first: `pos_order_items.sent_to_kot` is a live boolean, overwritten in place on every save, no timestamp/sender/persisted quantity — the "+N" delta badge (`sent_qty`) lives only in React state, never in the DB. No historical KOT log existed, so building a real Register or Reconciliation required a new table.
 
 **DB migration required:**
+
 ```sql
 CREATE TABLE IF NOT EXISTS pos_kot_log (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -804,6 +820,7 @@ NOTIFY pgrst, 'reload schema';
 **`pos_kot_log` writes (`PosOrders.jsx`)** — new `logKotSend(station, items, oid, oNo)` helper, called best-effort/non-blocking (same error-swallow pattern as `writeSalesEntries`) from both `saveOrder()`'s first-send auto-send and `sendTicket()`'s manual re-send. `items` jsonb captures exactly what was printed — `qty` is delta-aware (full quantity on first send, delta-only on a re-send, same logic `printTicket` itself already uses), so summing every log row's `items[].qty` per `(order_id, recipe_id)` gives the true cumulative quantity ever sent to the kitchen for that item.
 
 **KOT Log page (`src/modules/pos/reports/KotLog.jsx`, new, `/pos/kot-log`)** — shared BS date-range filter, two tabs:
+
 - **Register** — raw queryable log: Date/Time, Table, Order#, Station badge, Items×Qty, Sent By.
 - **Reconciliation** — the anti-fraud check. For every closed (`billed`/`voided`) order in range: sums total sent-to-kitchen qty per item from `pos_kot_log`, compares against the item's *current* qty on the order. Flags a row if (a) sent qty exceeds current qty (cooked, then reduced/removed before billing) or (b) the order ended up **Voided** at all (kitchen made food, zero revenue ever recorded) — regardless of quantity match in that case. Only flagged rows shown ("a quiet report is a healthy one," same philosophy as Sales Exceptions).
 
@@ -826,6 +843,7 @@ Continued the POS reporting backlog: built Category Wise, Customer Wise, and Hou
 Researched Nepal IRD's actual legal requirements for POS billing in-depth (VAT Rules 2053, Electronic Billing Procedure 2074, Computerized Invoicing Procedure 2072) to separate genuine compliance gaps from competitor-feature noise, then built the two items that turned out to be real legal requirements rather than nice-to-haves. Everything else (item/customer/category-wise sales reports, KOT-vs-Prebill reconciliation, full accounting-ledger parity) stays deferred — business-analytics convenience, not IRD-mandated.
 
 **DB migration required:**
+
 ```sql
 CREATE TABLE IF NOT EXISTS pos_credit_notes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -875,6 +893,7 @@ NOTIFY pgrst, 'reload schema';
 ```
 
 **Credit Note workflow (`src/modules/pos/creditnotes/`, new module)** — corrects an already-billed order per VAT Rules 2053, Rule 20, which requires a formal Credit Note (8 mandatory fields, one of which is the original invoice number+date) whenever the value of billed goods/services changes, plus a monthly record of every credit/debit note issued (Rule 20(2)). Only whole-order corrections in this v1 (matches "correcting an already-billed order"); item-level credit notes are a fast-follow, same as item-level Complimentary is already separately deferred.
+
 - `IssueCreditNoteModal.jsx` — shared modal (self-contained: fetches its own settings/outlet/HSC data so it works identically from either entry point below). Manager+ gated. On confirm: inserts `pos_credit_notes` (trigger assigns `credit_note_no`, partitioned by `client_id + invoice_fy` — same advisory-lock pattern as `assign_pos_invoice_no()`), stamps `pos_orders.credit_note_id` (also DB-unique-indexed so a bill can only ever be credited once), best-effort posts negative `sales_entries` for the credited items into **today's currently-open period** (source `pos_credit`) so Monthly Summary/Recipe Margin/Best Sellers reflect the correction, then prints the Credit Note. **Deliberately does not touch `stock_movements`** — the food was already served; this corrects billing/tax, not stock (confirmed decision, since credit notes here are price/billing corrections, not returned-food events).
 - `creditNoteHtml.js` — `buildCreditNoteHtml()`/`printCreditNote()`, same 80mm thermal layout family and ORIGINAL-COPY/SECOND-COPY/THIRD-COPY reprint convention as `buildBillHtml`/`buildCompSlipHtml`. Prints all 8 Rule 20(1) fields: serial no. (`CN{n}-{prefix}-{fy}`), issue date, supplier name/address/registration, recipient name/address/registration, original invoice number+date, itemized goods/services, credited amount, credited VAT.
 - Two entry points into the same modal: a "Credit Note" quick action next to Reprint in `PosOrders.jsx`'s Recent Bills modal (same-day corrections, `PosOrders.jsx`), and a full `CreditNotes.jsx` page (`/pos/credit-notes`) with an "Issue New" tab (BS date-range + invoice-number search across *any* date, not just today) and a "Credit Note Book" tab — the Rule 20(2) monthly register, with reprint + Excel export + TOTAL footer, laid out to match the competitor Credit Note Book Report referenced during research.
@@ -893,6 +912,7 @@ NOTIFY pgrst, 'reload schema';
 No DB migration. Two-file bug fix from the user noticing a POS-subscribed client (BHATTI CHOILA) wasn't showing up as such anywhere in Admin.
 
 **`src/pages/Dashboard.js`**
+
 - Root cause: the Admin Dashboard's `clients` query never selected `pos_enabled`/`pos_plan`/`pos_ends_at` at all — POS was structurally invisible to every calculation on the page, not just a display bug. Added all three columns.
 - Top KPI card's `POS {posCount}` was a **hardcoded literal `POS 0`**, never actually computed — added a real `posCount = active.filter(c => c.pos_enabled).length`, same pattern as the existing `imsCount`/`hrCount`.
 - Per-property **Modules** column pill list only ever rendered IMS/HR — added the missing POS pill.
@@ -907,6 +927,7 @@ No DB migration. Two-file bug fix from the user noticing a POS-subscribed client
 DB migration required: `pos_order_payments` table + widened `pos_orders.payment_method` CHECK to add `'Split'` (run ✓ 2026-07-03).
 
 **Split Payment (`src/modules/pos/orders/PosOrders.jsx`, `src/modules/pos/shifts/PosShifts.jsx`)** — the big feature this session. Researched restaurant POS bill-splitting conventions (Toast/Square/Lightspeed/Shopify/Commerce7) and deliberately built **split payment** (multiple tenders against one bill/one Tax Invoice number), not **split bill** (multiple orders/multiple invoice numbers) — the latter would force an unresolved Nepal IRD compliance question (is it fine to issue several sequential Tax Invoices for one table's meal?) that needs an accountant's answer, not an engineering one. Went through full plan-mode review before building.
+
 - New `pos_order_payments` table (order_id, client_id, payment_method, amount, tendered_amount, recorded_by) — one row per tender. `pos_orders.payment_method` gets a `'Split'` sentinel when used; `paid_amount` keeps meaning "grand total" regardless, so every downstream reader that only cares about the total needed zero changes (confirmed via grep — Sales Exception Report, Reorder Report, Recent Bills all read `paid_amount`, never `payment_method`).
 - Pay tab gets a persistent **Single Payment / Split Payment** toggle (styled with the same `pay-method-btn` hover as Cash/Card/etc, not a plain text link) — "Single Payment" disables once any tender exists, so a mid-split table can't silently lose collected tenders. In split mode: add tenders one at a time (method + amount), running **Remaining** balance, cash change computed against the *remaining* balance (not the original total, matching researched Toast/Square behavior), **↩ Undo** only on the most recent tender (correcting an earlier one means void + re-ring, same as any other billing mistake — deliberately not building general edit/reconciliation logic), optional 🖨 per-tender courtesy slip (small "Payment Received" receipt, not a Tax Invoice).
 - Printed bill (`buildBillHtml`) lists each tender's method+amount instead of one payment line when split; the scan-to-pay QR in split mode targets whichever tender is currently being entered (defaulting to the remaining balance) — fixed a bug where the live-preview QR caption text stayed hardcoded to the full bill total even though the QR image itself (and the modal's own caption) correctly showed the in-progress tender amount.
@@ -929,20 +950,24 @@ DB migration required: `pos_order_payments` table + widened `pos_orders.payment_
 Migration required: `ALTER TABLE recipes ADD COLUMN IF NOT EXISTS cost_price numeric;` (run ✓ 2026-07-03).
 
 **Payment QR moved from client Settings → Admin (`src/pages/AdminClients.js`, `src/pages/Settings.js`)**
+
 - The "Payment QR (merchant payload)" field used to live in Settings → Property (an admin-only tab, edited while impersonating a client). Moved to a new **QR tab** in Manage Clients → a client's drawer — same validate/preview/save behavior (`validateEmvQr`, live QR preview via the `qrcode` lib), now scoped correctly to admin-side per-client setup instead of a client-facing settings page.
 - No change to what POS reads — still `settings.payment_qr_data`, same table/column.
 
 **POS non-VAT-registered total bug (`src/modules/pos/orders/PosOrders.jsx`)**
+
 - Found via a real bill: a non-VAT-registered (PAN Bill) client's live cart total, Confirm Payment amount, and Tender/Change defaults were silently adding 13% VAT regardless of the client's `is_vat_registered` flag — only the *printed* bill correctly excluded VAT. A ₨354 PAN Bill was about to be charged/recorded as ₨400.
 - Fix: a `vatReg` flag now threads through the cart total, per-line item price, menu tile prices, "pair with" suggestion price, and the floor-plan table badge — all gate VAT on `billingSettings.is_vat_registered`, matching what `buildBillHtml()` already did for the printed bill.
 - Same investigation: the printed/preview bill was showing a "Scan to pay" QR even on Cash payments. QR generation is now gated to eSewa/Khalti/FonePay only (`QR_PAY_METHODS` constant), matching the on-screen payment panel.
 
 **POS role gates reworked (`src/modules/pos/orders/PosOrders.jsx`)**
+
 - **Credit**: Manager+ → **Supervisor+**
 - **Complimentary**: Manager+ → **Supervisor+**
 - **Void**: Supervisor+ → **owner/admin login only** — no PIN-based role (Staff/Supervisor/Manager), including Manager, can void a bill anymore. Uses `isAdmin || isOwner` directly instead of `hasPosAccess()`, deliberately bypassing the PIN rank system.
 
 **Menu Pricing — Cost Price + Edit for POS-only clients (`src/pages/MenuPricing.js`, `src/utils/recipeCost.js`)**
+
 - POS-only clients (no IMS) can never reach `Recipes.js` (ModuleGate-locked) to link an ingredient, so every item added via Menu Pricing was permanently food-cost-blind — Complimentary Slips always valued at ₨0.
 - New `recipes.cost_price` column (nullable numeric) — a manual cost entered in the POS-only "Add Item" modal, used as the food-cost fallback wherever ingredient-derived cost is unavailable.
 - `computeRecipeCosts()` (feeds Complimentary Slip, Sales Exception Report Comp column, Shift reports) now falls back to `cost_price` when a recipe has no ingredient breakdown; ingredient-derived cost still wins when present, so IMS clients are unaffected.
@@ -955,11 +980,13 @@ Migration required: `ALTER TABLE recipes ADD COLUMN IF NOT EXISTS cost_price num
 No DB migration. One-file fix from live testing of the dynamic bill QR (S225 feature) with a real merchant payload (C.M.S. Hospitality, NCHL).
 
 **`src/utils/emvQr.js` — `validateEmvQr` no longer rejects payloads missing tag 00**
+
 - Real-world NepalPay/NCHL merchant QRs ship **without** the EMVCo-mandatory payload format indicator (tag 00) — the CRC is computed over the tag-00-less body and banking apps accept them. Settings rejected the pasted payload with "Missing payload format indicator (tag 00)" even though the CRC check (which runs first) proved the string was byte-for-byte what the bank issued.
 - Fix: dropped the hard tag-00 rejection. All checks that catch real paste errors remain: TLV structure parse, missing checksum (tag 63), CRC mismatch, missing merchant name (tag 59).
 - Verified with a Node test harness: tag-00-less payload validates + `buildDynamicQr` on it produces a correct dynamic QR (tag 01 → '12', amount tag 54 inserted in order, CRC recomputed); standard tag-00 payloads still validate.
 
 **Live scan results (real bill, real apps):**
+
 - **Bank app (NepalPay member): ✓** — dynamic QR scans, amount pre-filled and locked
 - **eSewa: ✗** — "Sorry, this QR is not supported. Please scan Fonepay Business QR." Not a bug: Nepal has two QR rails (NepalPay/NCHL vs FonePay/F1Soft) and eSewa only accepts the FonePay rail — it would reject the bank's own printed standee QR identically.
 - **Deferred decision** (user: "later"): Plan A — swap the stored payload to the merchant's FonePay Business QR (covers eSewa + most bank apps, no code); Plan B — second QR field in Settings, print per payment method. Test Plan A first.
@@ -971,17 +998,20 @@ No DB migration. One-file fix from live testing of the dynamic bill QR (S225 fea
 **⚠ Redeploy edge function** — paste updated `supabase/functions/admin-user-ops/index.ts` into Supabase Dashboard → Edge Functions → admin-user-ops → editor. **Redeployed ✓ + verified live 2026-07-03** (Clear POS Transactions on Casa Acai: orders/shifts/customers/ledger wiped, tables + staff kept).
 
 **SQL run (grants — discovered during live verification):** tables created via raw SQL in this project get **no table-level privileges for any API role**, so the edge function (service_role) hit `42501 permission denied` on `stock_movements`, then `pos_orders`. Fixed with a blanket grant, run ✓:
+
 ```sql
 grant select, insert, update, delete on public.stock_movements to authenticated; -- also lets Reorder Report's admin "Clear Book Stock" delete
 grant all on all tables in schema public to service_role;
 alter default privileges in schema public grant all on tables to service_role;   -- future tables covered
 notify pgrst, 'reload schema';
 ```
+
 `authenticated` still needs an explicit per-table GRANT after every future `CREATE TABLE` (see S228's stock_movements grant); `service_role` is now covered permanently. Note: partial failed runs are safe — `clearModuleData` deletes child tables first and is idempotent, so re-clicking after a grant fix completes the job.
 
 Admin → Clients → ⚠ Danger previously had one "Clear Client Data" action that was **IMS-only** — it never touched any of the 14 `hr_*` tables or 5 `pos_*` tables, and even for IMS it missed `staff_meals`, `payable_payments`, `stock_movements`, and `recipe_suggestions`. For a client running multiple modules there was no way to reset just one of them.
 
 **New edge-function action `clearModuleData` (`{ clientId, module: 'ims'|'hr'|'pos' }`)** — clears one module's *transactions* while keeping its setup/master data:
+
 - **IMS**: deletes purchases (+ `payable_payments` first), vendor returns, opening/closing stock, wastages, staff meals, sales entries, budgets, stock movements, POs + items, requisitions + lines, overheads. **Keeps** items, vendors, categories, recipes, par levels, and `monthly_periods` — periods are deliberately kept because **HR shares the same `monthly_periods` table** (`hr_attendance.period_id`, `hr_payroll_runs.period_id`); deleting them on an IMS clear would orphan HR data.
 - **HR**: deletes payslips (by run ids first), payroll runs, attendance, leave requests, overtime, festival allowances, advance repayments, advances, roster. **Keeps** employees, salary components, leave types, holiday calendar, shift types.
 - **POS**: deletes order items (by order ids first), the `stock_movements` ledger, POS-sourced `sales_entries` (`source = 'pos'` only — manual sales survive), orders, shifts, customers. **Keeps** tables/floor plan and staff accounts/PINs; any table left "occupied" by a deleted order is reset to available. Invoice numbering restarts (sequence derives from existing rows).
@@ -995,6 +1025,7 @@ Admin → Clients → ⚠ Danger previously had one "Clear Client Data" action t
 ### S228 — 2026-07-03 — IMS stock deduction trigger: `stock_movements` ledger + Reorder Report Book Stock
 
 **SQL run:**
+
 ```sql
 create table stock_movements (
   id uuid primary key default gen_random_uuid(),
@@ -1032,11 +1063,13 @@ dependent. This adds a perpetual append-only depletion ledger, written on every 
 and Complimentary close, plus a first visible payoff in Reorder Report.
 
 **New shared helper — `src/utils/recipeCost.js`: `explodeRecipeIngredients(supabase, recipeIds)`**
+
 - Batch API (avoids N+1): takes an array of recipe ids, returns `{ [recipeId]: {item_id, qty}[] }` — raw-ingredient quantities per one unit/portion, yield_pct-trimmed, sub-recipe yield_qty-scaled
 - Recurses through `recipe_ingredients.sub_recipe_id` to **arbitrary depth** via an iterative frontier-fetch loop (capped at 5 rounds)
 - Used by the new POS depletion writer, the Reorder Report fix below, **and** `computeRecipeCosts` (rewritten to build on top of this helper instead of its own one-level-deep sub-recipe fetch — fixes a confirmed bug where a sub-recipe nested inside another sub-recipe silently costed ₨0; affected Complimentary Slip valuation for any client with 2+ levels of sub-recipe nesting)
 
 **POS close → ledger — `src/modules/pos/orders/PosOrders.jsx`**
+
 - `writeSalesEntries()` (already ran on both `'paid'` and `'writeoff'` closes for `sales_entries`) now also explodes each order item's recipe, aggregates ingredient qty across the whole order, and bulk-inserts negative `stock_movements` rows (`source: 'pos_sale'` or `'pos_comp'`, `ref_id: orderId`)
 - Best-effort — wrapped in try/catch, never blocks or fails the bill close (matches the existing `sales_entries` insert's own error-discarding posture). Fixed a real bug found during live testing: the initial version didn't destructure `{ error }` from the `stock_movements` insert — Supabase-js doesn't throw on a failed insert (RLS/permission/constraint errors resolve as `{ data: null, error }`, not a rejected promise), so the try/catch never saw the 42501 permission error below and failures were completely silent. Now explicitly checks `{ error: moveErr }` and `console.error`s it.
 - No negative-stock blocking — ledger can drift, physical count remains the source of truth (existing product philosophy)
@@ -1044,6 +1077,7 @@ and Complimentary close, plus a first visible payoff in Reorder Report.
 - **Verified live 2026-07-03**: real POS sale → `stock_movements` row written → Reorder Report Book Stock decremented correctly on the next sale (63 → 62). One deployment gotcha hit and documented above (missing `GRANT`/schema-cache reload) — several test sales made during that troubleshooting window wrote to `sales_entries` (unaffected, unconditional) but not `stock_movements` (blocked), so Book Stock and Current Stock started from different baselines for this item; expected one-time artifact of today's testing, not a bug — resolved itself going forward once the grant took effect.
 
 **Reorder Report bug fix + Book Stock column — `src/pages/ReorderReport.js`**
+
 - Fixed: the inline `usageMap` calc only counted direct-item recipe ingredients and silently skipped any ingredient that was itself a sub-recipe (`if (sold > 0 && ri.item_id)` dropped `sub_recipe_id` rows entirely, no `yield_pct` trim applied either) — under-reported usage, over-stated Current Stock, for any recipe built on a sub-recipe. Now uses `explodeRecipeIngredients` for correct recursive usage. Same bug exists in `Variance.js` — not touched this session, separate future fix.
 - New **Book Stock** column: live running stock from `stock_movements` (`openQty + netPurch − wasteQty + Σmovements`), shown only when the item has ≥1 movement row this period (else "—", so non-POS/IMS-only clients never see a misleading "0 used"). Deliberately kept separate from "Current Stock" (still `sales_entries`-sourced, covers manual entries too) rather than replacing it — replacing would zero out usage tracking for clients without POS
 - Excel export and Tip tooltips updated to match
@@ -1057,26 +1091,32 @@ and Complimentary close, plus a first visible payoff in Reorder Report.
 No DB migration. UI/print polish pass on `/pos/orders`, driven by iterative screenshot feedback.
 
 **Payment method buttons (Billing modal)**
+
 - Cash/Card/eSewa/Khalti/FonePay/Credit no longer show a persistent accent fill for the selected method (previously Cash was always gold, Credit always had a red border, even when idle) — new `.pay-method-btn` class family in `Layout.css`: neutral at rest, accent/red color only on `:hover`/`:active`, selected method shown via bold text + subtle border instead
 
 **KOT/BOT/Charge redesign**
+
 - New `.ticket-btn` class (`Layout.css`) replaces ad-hoc `btn btn-ghost` overrides — same hover/active-only color philosophy as payment buttons, plus `:focus` outline suppressed (kept for `:focus-visible`/keyboard) so the button no longer shows a lingering gold border after a mouse click
 - "Charge →" renamed to **Payment**, recolored green (`var(--theme-green)`), moved into its own row alongside **Send Order** (each 48% width, matching size/placement)
 - KOT and BOT resized to match (48/48 split in their own row below); bold text + badge (no color fill) when a station has unsent items (`ticket-btn--pending`)
 - Send Order width tuned down from 100% → 80% → 40% → 48% across the session, left-aligned (no longer centered)
 
 **Tip.js positioning bug (found + fixed)**
+
 - Root cause: `Tip`'s wrapper `<span>` was hardcoded `display:inline`, which sizes to a thin text-line "strut" instead of its actual content height — invisible for small text labels, but once KOT/BOT/Payment became full-height buttons the tooltip's `getBoundingClientRect()` anchor was ~13px too low, so the tooltip rendered overlapping the button instead of floating above it
 - Verified with an isolated headless-browser (Playwright) reproduction of the exact DOM/CSS before touching the real component — no login or live data needed, since the app's Supabase project has no seeded test credentials available in this environment
 - Fix: `Tip.js` now accepts an optional `style` prop merged onto the wrapper span (opt-in — every other existing `<Tip>` call site across the app is unaffected). Applied `style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}` to KOT, BOT, and Payment's `Tip` wrappers
 
 **Print documents — black fonts**
+
 - Tax Invoice/PAN Bill, KOT/BOT kitchen/bar tickets, and the Complimentary Slip all had gray accent text (`#555`/`#333`) on timestamp/cashier/table lines — changed to pure black (`#000`) for consistent thermal-print legibility; shift X/Z reports were left untouched (out of scope)
 
 **Tax Invoice — Covers on the bill**
+
 - The table/timestamp row and Cashier row were combined: row 1 now shows `Dine-In: Table N` + `Covers: #N` (was table + timestamp); row 2 shows `Cashier: {name}` + the timestamp (was cashier alone, no row partner). Uses `order.covers`, already present on the `pos_orders` row for both the live-close and reprint paths
 
 **Complimentary Slip — signature line**
+
 - Added a blank signature + date line at the bottom (`buildCompSlipHtml`) — 60%-width underline for the signature, 32%-width underline for the date, labeled underneath. Feeds both the live in-modal preview and the actual print
 - Verified the "no outlet name shown" claim in the Mark Complimentary confirmation copy against the actual slip HTML — found `outletName` was still being printed (leftover from copy-pasting the Tax Invoice template, contradicts the documented Complimentary Slip design of no outlet name/PAN/invoice number). **Left as-is per user decision** — not fixed this session.
 
@@ -1087,16 +1127,19 @@ No DB migration. UI/print polish pass on `/pos/orders`, driven by iterative scre
 No DB migration. Full code audit of `src/modules/hr/` (payroll/TDS engines, payroll runner, attendance, advances, settlement, gratuity, every insert path). TDS slabs, SSF cap/waiver math, YTD projection, and advance auto-repayment idempotency all verified correct against the Nepal payroll-law reference. Fixes:
 
 **High (silent failures)**
+
 - **Final Settlement never deducted outstanding advances** — it queried `hr_advances` columns that don't exist (`balance`, `issue_date`, `description`; the table has `issued_date`, `purpose`, and no balance column). The query errored silently and every settlement showed zero advance recovery. Now fetches advances + repayments and derives outstanding = amount − repaid, same as PayrollRun's advance map; UI rows show `amount − repaid` per advance.
 - **Payroll Generate broke the OT refetch** — `generate()` called `loadAll(period.id)` without the bs_year/bs_month args, so the overtime-entries query ran `.eq('bs_year', undefined)`, errored, and cleared the OT list; clicking Regenerate right after Generate silently dropped all approved overtime from payslips. One-line fix (pass all three args).
 
 **Medium**
+
 - **OT double-pay flagging** — overtime can be recorded in both the attendance sheet's OT column and the Overtime module, and both are paid. Rather than silently dropping one source, the payroll register now shows an amber **⚠ OT ×2?** badge on any employee with hours in both sources for the period, with a Tip explaining the fix; matching warnings added to the attendance OT column Tip and Help.
 - **Settlement gratuity now nets out the SSF-funded portion** — for SSF-enrolled staff, the employer's monthly contribution already funds gratuity (3.33% of capped basic), so paying full accrual at settlement double-paid it. Now `gratuity = accrued − SSF-covered` (matching GratuityTracker's own model), with the formula shown on the settlement statement.
 - **Missing `if (!clientId)` guards added** on HolidayCalendar save/seed, LeaveManagement submit/approve/decide/addType, Overtime save, FestivalAllowance generate/regenerate — the known NULL-client_id hydration bug class (records saved during an admin client-switch went invisible).
 - **Absence deduction now on gross, not basic** — previously an employee absent the whole month still received 100% of allowances. Unpaid days now forfeit the full day's pay (gross ÷ month days × unpaid days).
 
 **Low**
+
 - SSF is now contributed on the basic actually earned (prorated by unpaid days, capped) — deductions can no longer exceed pay in heavy-absence months.
 - Daily-wage staff now get paid for `paid_leave` days (that's what makes the leave paid); hourly staff get a standard 8-hour day credited per paid-leave day.
 - Payslip absence row relabelled "Absence / Unpaid Leave" (the old label showed only absent days while the amount also covered unpaid leave and half-days).
@@ -1107,6 +1150,7 @@ No DB migration. Full code audit of `src/modules/hr/` (payroll/TDS engines, payr
 ### S225 — 2026-07-02 — Dynamic payment QR on bills + Billing modal (NepalPay/FonePay EMVCo)
 
 **DB migration run ✓:**
+
 ```sql
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS payment_qr_data text;
 ```
@@ -1120,6 +1164,7 @@ Closes the last "Coming soon" item (QR payments) at the **dynamic QR** tier — 
 **`src/pages/Settings.js` — Property tab (one-time setup)** — new "Payment QR (merchant payload)" textarea: the owner scans their counter standee with any QR-reader app (yields the raw `000201…` text) and pastes it. Live validation shows "✓ Valid payment QR — merchant: {name}" (parsed from tag 59) plus a rendered preview QR to scan-test with a banking app *before* saving, or a specific error (malformed / checksum mismatch / not a payment QR). Invalid saved data is harmless — generation re-validates and simply renders no QR.
 
 **`src/modules/pos/orders/PosOrders.jsx`**
+
 - **Billing modal (Pay tab)** — when the payment method is eSewa/Khalti/FonePay and a merchant payload is configured, a scan-to-pay QR card appears above Confirm Payment, regenerating live as the total changes (e.g. while a discount is typed) — always encodes the exact current `payTotal`.
 - **Printed bill** — `buildBillHtml()` gained an optional `qrUrl` param: a "Scan to pay — amount pre-filled" QR block prints between the amount-in-words and the thank-you line. `printBill()` (and therefore reprints) generates it from the order's actual `paid_amount`; the live preview iframe shows the same QR via the shared builder, so preview and print can't drift. Complimentary slips get no QR (nothing to pay).
 - Data-URL images render instantly in the print window (no network fetch), so the existing 300ms print delay is safe.
@@ -1129,6 +1174,7 @@ Closes the last "Coming soon" item (QR payments) at the **dynamic QR** tier — 
 ### S224 — 2026-07-02 — POS Shift Management (X/Z reports, denomination-based cash drawer counts)
 
 **DB migration run ✓:**
+
 ```sql
 CREATE TABLE IF NOT EXISTS pos_shifts (
   id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1157,6 +1203,7 @@ ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS shift_id uuid REFERENCES pos_shi
 Last of the three agreed fast-follows (Customers ✓ → Sales Exception Report ✓ → **Shift Management**). `src/modules/pos/Pos.js`'s "Coming soon" footer literally listed "Shift Z-reports" — now removed since it's shipped (KOT printing and Billing were also stale on that list and removed at the same time; QR payments is the only genuinely-still-pending item left).
 
 **`src/modules/pos/shifts/PosShifts.jsx`** (new page, route `/pos/shifts`, Supervisor+, `pos-floor` sidebar group)
+
 - **Denomination-based counting** — both Open Shift and Close Shift count NPR notes/coins individually (1000, 500, 100, 50, 20, 10, 5, 2, 1 × quantity, auto-summed) rather than a single total, per explicit user decision — more audit-accurate, matches real cash-counting practice.
 - **Current Shift tab (X-report)** — live, non-destructive, repeatable snapshot of the open shift: order count, sales by payment method, total discount given, total void value, total comp food cost (same per-type valuation as the Sales Exception Report — Discount = `discount_amount`, Void = menu value incl. VAT, Comp = food cost via `computeRecipeCosts()`), and a Cash Reconciliation section showing Expected Cash = opening count + cash sales so far. If no shift is open, an **Open Shift** button starts one.
 - **Close Shift (Z-Report)** — one-time, final: enter the closing count, and the report locks in `closing_cash` and the variance (`counted − expected`, signed: green "Balanced" near zero, red if short, amber if over).
@@ -1183,6 +1230,7 @@ No DB migration — every field this report reads (`close_type`, `close_reason`,
 Second of the three agreed fast-follows (Customers ✓ → **Exception Report** → Shift management). Follows the industry-standard single-report pattern (SpotOn/Rezku/Toast "sales exception report"): Discounts, Voids, and Comps together — all three are revenue that leaked — rather than three siloed reports.
 
 **`src/modules/pos/reports/PosExceptionReport.jsx`** (new page, route `/pos/exceptions`, Manager+, new "Reports" sidebar group under POS — shift management's X/Z reports will join it later)
+
 - **Filters**: BS date range (two `BsCalendarPicker`s, defaults to current BS month → today), exception type pills (All/Discounts/Voids/Comps), staff dropdown (populated only with staff who actually closed exceptions in range).
 - **Valuation per type** — each means something different, deliberately: Discount = NPR knocked off (`discount_amount`); Void = full menu value forgone incl. VAT (summed live from `pos_order_items`); Comp = **food cost** via `computeRecipeCosts()` (one batched call across all comp orders' recipe ids), matching how the Complimentary Slip itself values comps.
 - **Stat cards**: Discounts total, Voided Value, Comp Food Cost, Total Exceptions — each with count + Tip explaining what the number means.
@@ -1193,6 +1241,7 @@ Second of the three agreed fast-follows (Customers ✓ → **Exception Report** 
 ### S221 — 2026-07-02 — POS Customers page + Credit collection tracking
 
 **DB migration run ✓:**
+
 ```sql
 CREATE TABLE IF NOT EXISTS pos_customers (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1219,6 +1268,7 @@ ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS credit_settled_method text CHECK
 First of the three agreed fast-follows (Customers + Credit collection → Sales Exception Report → Shift management).
 
 **`src/modules/pos/customers/PosCustomers.jsx`** (new page, route `/pos/customers`, Supervisor+, sidebar "Floor" group)
+
 - **Customers tab** — customer book built automatically, zero manual entry: `closeOrder()` in PosOrders.jsx now upserts a `pos_customers` row (keyed `client_id + phone`) whenever a bill closes with buyer Name + Phone filled in — which every discount and Credit sale requires. Address/PAN only overwrite when provided, so a later bill with blank address doesn't wipe a saved one. Non-fatal: if the upsert fails (e.g. migration not yet run), billing itself is unaffected. Searchable by name/phone; clicking a row lazy-loads that customer's full order history (matched by `buyer_phone`) with per-order payment method and Credit collected/outstanding badges.
 - **Outstanding Credit tab** — lists unsettled Credit bills (`payment_method='Credit'`, `credit_settled_at IS NULL`) with stat cards (total outstanding, bill count), bill age ("chase the old ones first"), and a **Settle** action: pick the method the customer actually paid with (Cash/Card/eSewa/Khalti/FonePay) → writes `credit_settled_at/by/method`. Full settle only (no partial payments — per user decision). Collected bills show below as history. Settling is Supervisor+ (routine cashier work); *issuing* credit stays Manager+.
 - No backfill of old orders (per user decision) — the book fills organically from now on.
@@ -1227,6 +1277,7 @@ First of the three agreed fast-follows (Customers + Credit collection → Sales 
 ### S220 — 2026-07-02 — POS Billing: Credit payment method (Manager+, mandatory buyer ID)
 
 **DB migration run ✓:**
+
 ```sql
 ALTER TABLE pos_orders DROP CONSTRAINT IF EXISTS pos_orders_payment_method_check;
 ALTER TABLE pos_orders ADD CONSTRAINT pos_orders_payment_method_check
@@ -1234,6 +1285,7 @@ ALTER TABLE pos_orders ADD CONSTRAINT pos_orders_payment_method_check
 ```
 
 **`src/modules/pos/orders/PosOrders.jsx` — Pay tab**
+
 - New **Credit** button on the payment-method row, styled red to stand out from Cash/Card/eSewa/Khalti/FonePay, visible only to Manager+ (`hasPosAccess('manager')`) — stricter than Discount's Supervisor+.
 - Researched how Toast/Lightspeed handle this (House Accounts / Customer Credit): the order **closes normally as a real sale** — consumes a Tax Invoice/Bill number, writes `sales_entries`, counts in revenue reporting immediately — only the *collection* is deferred, not the sale itself. Crest's Credit button follows the same accrual pattern: `payment_method: 'Credit'`, `paid_amount` is the full billed total (not the amount actually collected), no Tender/Change shown (same as Card/eSewa/etc).
 - New shared `requireBuyerId` computed flag (`discountAmt > 0 || payMethod === 'Credit'`) — buyer Name + Phone become compulsory under either condition, reusing the exact same red-border/disabled-Confirm-button mechanism built for Discount in S219 rather than duplicating it.
@@ -1242,6 +1294,7 @@ ALTER TABLE pos_orders ADD CONSTRAINT pos_orders_payment_method_check
 ### S219 — 2026-07-02 — POS Billing: order-level Discount (₨/% toggle, mandatory reason + buyer ID)
 
 **DB migration run ✓:**
+
 ```sql
 ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS discount_amount numeric;
 ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS discount_reason text;
@@ -1250,6 +1303,7 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS pos_discount_reasons text[];
 ```
 
 **`src/modules/pos/orders/PosOrders.jsx` — Pay tab**
+
 - New Discount input on the Pay tab: a `₨`/`%` mode toggle + amount field. Percent mode shows a live "≈ NPR X" hint. Discount reduces the pre-VAT taxable base, and VAT is recalculated on the discounted amount (matches the existing `purchase_entries.discount_amount` convention in Purchases.js — *"Applied before VAT, VAT is levied only on the net taxable amount"*), not a flat subtraction off the total.
 - **Applying any discount makes buyer Name and Phone compulsory** (they're normally optional under the IRD ≤NPR 10,000 abbreviated-invoice exemption) and requires selecting a **Discount Reason** — Confirm Payment stays disabled until both are filled in, giving an identifiable, audited record of who received every discount.
 - Discount reasons are admin-customizable (new **Discounts** tab in Table Management — see below), not a hardcoded list, but ship with sensible built-in defaults (Loyalty customer, Promo/coupon code, Manager goodwill, Bulk/corporate order, Price match, Other) so the dropdown is never empty on a new client.
@@ -1265,6 +1319,7 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS pos_discount_reasons text[];
 No DB migration.
 
 **`src/modules/pos/orders/PosOrders.jsx` — Billing modal & print templates**
+
 - Billing modal restructured to a two-column layout: live bill/slip preview pinned on the left (sized to 100mm, with the 80mm receipt body centered inside — no lopsided blank gap), form fields/tabs/buttons scrollable on the right. Modal widened to `min(980px, 96vw)`.
 - **Fixed a real Gross Amount bug** — `buildBillHtml()` was computing `gross = subEx + vatAmt` and `net = gross`, so Gross Amount and Net Amount printed the identical VAT-inclusive figure. Gross Amount now correctly shows the ex-VAT sum (`subEx`), matching the reference Casa Acai invoice where Gross = Taxable when there's no discount.
 - Added a **Discount** row (hardcoded `0.00` — no discount feature exists yet, but IRD-format invoices expect the line) between Gross Amount and Taxable/VAT.
@@ -1282,6 +1337,7 @@ No DB migration.
 ### S217 — 2026-07-02 — Complimentary Slip polish: outlet name, NC sequence, more reasons, live bill preview
 
 **DB migration required** — re-run `assign_pos_invoice_no()` (idempotent `CREATE OR REPLACE`, safe to re-apply):
+
 ```sql
 CREATE OR REPLACE FUNCTION assign_pos_invoice_no()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -1294,9 +1350,11 @@ BEGIN
   RETURN NEW;
 END $$;
 ```
+
 Adds `close_type` to the partition key so Pay (TI/PB) and Complimentary (NC) get **independent counters** instead of sharing one sequence.
 
 **`src/modules/pos/orders/PosOrders.jsx`**
+
 - **Complimentary Slip now prints the outlet name** (reversing S216's "no company name" call) and a **sequential `NC-01`-style number**, same per-fiscal-year reset mechanic as Tax Invoice/PAN Bill numbers but its own counter (see migration above). `closeOrder()` now sets `invoice_fy` for Complimentary too, not just Pay.
 - **`COMP_REASONS`** gained `Owners` and `Company Guest` alongside the existing walkout/goodwill/complaint/staff-error/other options.
 - **Food-cost preview fix** — the modal's on-screen item list was always showing menu price, even on the Complimentary tab, so what the cashier saw didn't match what the slip would print. New `openCompTab()` fetches `computeRecipeCosts()` into `compCostMap` as soon as that tab opens; the header total and item list both switch to food-cost values while on it.
@@ -1307,6 +1365,7 @@ Adds `close_type` to the partition key so Pay (TI/PB) and Complimentary (NC) get
 Follow-on polish to S215's Billing/Charge screen, no DB migration needed.
 
 **`src/modules/pos/orders/PosOrders.jsx` — Billing modal**
+
 - **Itemized order review** — the modal previously showed only the grand total with no line items, so a cashier had no way to visually verify what they were about to charge/void/comp before confirming. Researched checkout UX practice ([Baymard](https://baymard.com/learn/checkout-flow-ux-optimization), [TouchBistro](https://www.touchbistro.com/blog/the-ultimate-guide-to-payment-processing-for-restaurants/)) — a visible order summary before payment is standard. Added a scrollable item list (`×N Name — NPR amount`, notes indented italic, same convention as KOT/BOT tickets) between the total and the tab bar, visible on all three tabs.
 - **Charge → is now Supervisor+ only, hidden entirely for Staff** — previously any staff could open the Pay tab. The button no longer renders at all (not just disabled) for `pos_role='staff'`, matching how Void/Write-off were already hidden for lower roles. Corrected the role-permission strip in `PosStaff.jsx` (`PERMISSION_LEVELS`) and Help.js copy to match — Staff = "Take orders, view floor" only, billing moved to Supervisor's description.
 - **Write-off renamed to Complimentary, and redesigned as an internal document — not a Tax Invoice or PAN Bill.** Researched restaurant accounting practice for comps: industry term is "NC" (No Charge), synonymous with "Comp" — an item that was made and served but not charged, which must still count in sales/inventory/food-cost reporting (unlike a Void, which never happened). Confirmed via [Restaurant365](https://www.restaurant365.com/blog/how-to-reduce-restaurant-comps-and-voids/) and [ARF Financial](https://www.arffinancial.com/restaurant-comps-on-the-pl/) that standard practice values comps **at food cost, not menu price**, so retail pricing doesn't distort the P&L.
@@ -1325,6 +1384,7 @@ Follow-on polish to S215's Billing/Charge screen, no DB migration needed.
 Researched IRD (Nepal Inland Revenue Department) VAT/PAN billing rules before building — see sources at the bottom of this entry. Built the entire close-a-table flow from scratch; previously `pos_orders.status` never left `'open'` and nothing released a table back to `'available'`.
 
 **`src/modules/pos/orders/PosOrders.jsx` — Charge → Billing modal**
+
 - Three tabs, role-gated with the existing `hasPosAccess()`: **Pay** (staff+ — Cash/Card/eSewa/Khalti/FonePay, Tender/Change for Cash), **Void** (supervisor+ — mistake/duplicate/test order, no revenue or food-cost impact, no invoice number consumed), **Write-off** (manager+ — walkout/comp/complaint, ₨0 collected but still counts as a sale so `sales_entries` still gets written for food-cost accuracy)
 - Optional buyer Name/Address/PAN/Phone/Remarks — IRD allows omitting these for bills ≤ NPR 10,000 (abbreviated invoice); fill in when a customer requests a full invoice
 - `closeOrder()` writes `close_type`/`payment_method`/`paid_amount`/`tendered_amount`/`close_reason`/buyer fields, releases the table, writes `sales_entries` (source `'pos'`) for Pay/Write-off by resolving the open BS period + today's `bs_day` (same pattern as `Sales.js`), then prints the bill
@@ -1340,6 +1400,7 @@ Researched IRD (Nepal Inland Revenue Department) VAT/PAN billing rules before bu
 **HSC Code — redesigned mid-session after a regression.** Originally added as a `recipes.hsc_code` field editable inline in both `MenuPricing.js` branches, denormalized onto `pos_order_items.hsc_code` at order-save time. That broke Menu Pricing (blank item list) **and silently broke core Order Taking** — `loadMenu()`, `openTable()`, and `performSave()` all referenced the not-yet-migrated columns, so menu loading, opening an existing order, and saving/updating any order all failed until the migration ran. Redesigned: `recipes.hsc_code` is now the only column (no `pos_order_items.hsc_code` — removed from the migration below); `printBill()` does a live `.in('id', recipeIds)` lookup by `recipe_id` at print time instead of denormalizing. Editing UI moved out of Menu Pricing entirely into a single new **HSC Codes** tab in `src/modules/pos/tables/PosTableManagement.jsx` (alongside Tables / Ticket Routing / Quick Notes), lazy-loaded so it can't break any other tab or screen if the migration hasn't run yet — only that one tab would show empty until then. Researched the actual IRD rule while fixing the tooltip copy too: HSC is only mandatory for items that are **imported goods sold as-is** (e.g. imported bottled drinks), never for freshly prepared dishes — the field stays optional/blank for the vast majority of any F&B menu.
 
 **DB migration (S215) — run ✓ 2026-07-02**
+
 ```sql
 ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS close_type      text CHECK (close_type IN ('paid','writeoff','void'));
 ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS payment_method  text CHECK (payment_method IN ('Cash','Card','eSewa','Khalti','FonePay'));
@@ -1380,6 +1441,7 @@ CREATE TRIGGER trg_assign_pos_invoice_no BEFORE UPDATE ON pos_orders FOR EACH RO
 ### S214 — 2026-07-02 — KOT/BOT remarks, BS ticket date, pending-ticket indicators, admin table reset
 
 **`src/modules/pos/orders/PosOrders.jsx`**
+
 - Ticket date now prints in Bikram Sambat (`adToBs`/`BS_MONTHS`) instead of AD
 - Per-item note field (`+ Add note`) on order lines — free-typed remark prints indented under that item on the KOT/BOT (`↳ no onion`). Editing a note after the item was already sent flips it back to unsent (same pattern as qty-change) so staff know to resend
 - Quick-note chips: while a note field is focused, preset chips from `settings.pos_note_presets` appear below it — tap to append instead of typing (`onMouseDown` `preventDefault` keeps focus so the click registers before blur)
@@ -1387,9 +1449,11 @@ CREATE TRIGGER trg_assign_pos_invoice_no BEFORE UPDATE ON pos_orders FOR EACH RO
 - Admin-only `⚠ Clear Occupied` button (testing utility) — confirms, then deletes all open orders/items for the client and releases occupied tables back to `available`. Gated on `isAdmin` from AuthContext, not POS role
 
 **`src/modules/pos/tables/PosTableManagement.jsx`**
+
 - New **Quick Notes** tab (alongside Tables / Ticket Routing) — manager types a phrase, saves to `settings.pos_note_presets text[]`, staff see it as a tappable chip in Order Taking
 
 **DB migration (S214) — run ✓**
+
 ```sql
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS pos_note_presets text[];
 ```
@@ -1411,6 +1475,7 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS pos_note_presets text[];
 Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; added the three fields it had that we lacked. Kept our advantages: `+N` addition deltas, station-specific titles (KOT/BOT), `×N` qty format, wrap-safe flex rows.
 
 **`src/modules/pos/orders/PosOrders.jsx`**
+
 - `pos_orders.order_no` — per-client sequential order number, assigned by DB trigger on insert (advisory-lock serialized, race-safe)
 - Order number threaded through: `openTable` (existing order select), `performSave` (returns `{ oid, oNo }` so first-save tickets have it before state flushes), reset in `confirmCovers`/`openTakeaway`/`backToFloor`
 - Ticket header now prints: outlet name (`clients.name`, centered top) → station title → table name + bold `#N` → `Taken by: <staff full_name>` + `Covers: N` → date/time
@@ -1420,9 +1485,11 @@ Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; a
 **`src/pages/Help.js`** — Order Taking entry: 2 new tips (order number, outlet name/Taken by on tickets)
 
 **DB migration (S211) — `pos_order_no.sql`**
+
 - `ALTER TABLE pos_orders ADD COLUMN order_no integer` + `assign_pos_order_no()` BEFORE INSERT trigger (per-client `MAX+1` under `pg_advisory_xact_lock`) + backfill of existing orders by `created_at`
 
 **IMS debug sweep (same session)**
+
 - `Dashboard.js` — `recipe_ingredients` was fetched UNSCOPED (no `.in('recipe_id', …)`); pulled every client's rows into the browser (results were filtered client-side so numbers were correct, but it was a cross-tenant leak surface + growing payload). Now fetched after recipes, scoped by recipe IDs.
 - NULL `client_id` guard added to 5 unguarded inserts: `Dashboard.closeAndAdvancePeriod` (monthly_periods), `ReorderReport.savePar` (par_levels), `MenuPricing.saveNewItem` (recipes), `MenuPricing.savePairings` (recipe_suggestions), `OutstandingPayables.addPayment` (payable_payments)
 - Verified clean: `is_sub_recipe` filters (all 6 required pages), `per_uom_rate` never in write payloads, Sales/Stock/Purchases inserts period-scoped (no client_id column exposure)
@@ -1430,10 +1497,12 @@ Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; a
 ### S210 — 2026-07-02 — Upsell/Cross-sell ME suggestion engine (all 3 layers)
 
 **`src/pages/MenuEngineering.js` — me_class writeback**
+
 - After classifying all recipes, fires background upsert of `me_class` to DB per item (`r.quadrant.toLowerCase()`)
 - Silent, no UI impact — next POS menu load picks up quadrant data automatically
 
 **`src/modules/pos/orders/PosOrders.jsx` — suggestion chips (3 layers)**
+
 - `me_class` added to menu select query; `manualSuggestions` state loaded from `recipe_suggestions` table alongside menu
 - `menuLoaded` reset in `backToFloor()` so menu reloads fresh on each table open (picks up new me_class writes)
 - `computeSuggestions(recipe)` — async, fires on every `addItem()`:
@@ -1443,28 +1512,33 @@ Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; a
 - "Pair with" chip strip shown between order items and totals; ✕ dismiss; chips show name + price + badge
 
 **`src/pages/MenuPricing.js` — manual pairings UI (POS-only view only)**
+
 - "Pair" inline link added to each row in the POS-only slim table (clients without IMS)
 - Clicking opens "Pair with" modal: searchable checklist of all other items, checkbox multi-select, Save (N) button
 - `suggMap` state loaded in `load()` from `recipe_suggestions`; updates locally on save
 - IMS view unchanged (IMS+POS clients use ME intelligence; manual pairings not needed)
 
 **DB migrations run (S210)**
+
 - `ALTER TABLE recipes ADD COLUMN IF NOT EXISTS me_class text CHECK (me_class IN ('star','plowhouse','puzzle','dog'))`
 - `CREATE TABLE recipe_suggestions (...)` with RLS + policy + GRANT
 - `CREATE OR REPLACE FUNCTION get_cooccurrence(...)` RPC — co-occurrence join on `pos_order_items` + `pos_orders`, 90-day window, top 10
 
 **Memory**
+
 - `feedback_menu_pricing_branches.md` — always ask which branch (POS-only or IMS) before editing MenuPricing.js
 
 ### S209 — 2026-07-02 — Auto-send KOT/BOT + Tooltips + Help page + Upsell/ME design
 
 **`src/modules/pos/orders/PosOrders.jsx` — auto-send on new order**
+
 - `Send Order` (new table) now auto-fires KOT and BOT tickets immediately on first save — no extra button press needed
 - `Update Order` (existing order) saves only; staff press KOT/BOT manually for additions (delta tracking unchanged)
 - Button label changed: "Save Order" → "Send Order" for new orders; spinner shows "Sending…"
 - `saveOrder()`: captures `wasNew = !orderId` before `performSave()`; on new order marks all items `sent_to_kot: true` in DB, updates local state, prints both tickets
 
 **Tooltips added**
+
 - KOT button: "Kitchen Order Ticket — sends unsent food items to the kitchen printer. Badge shows how many items are waiting."
 - BOT button: "Bar Order Ticket — sends unsent bar/beverage items to the bar printer."
 - ✓ KOT/BOT sent badge: explains ticket already sent, only press again for additions
@@ -1472,10 +1546,12 @@ Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; a
 - Ticket Routing tab: explains KOT/BOT concept on hover
 
 **`src/pages/Help.js` — new Order Taking entry + Table Management update**
+
 - Added full Order Taking entry with 6 tips covering Send Order auto-send, +N badge, ✓ badge, routing config
 - Updated Table Management entry to describe Ticket Routing tab and default Beverage → BOT behaviour
 
 **Research & design: Upsell / Cross-sell + Menu Engineering integration**
+
 - Researched ME quadrant strategies (Stars, Plowhorses, Puzzles, Dogs) and their point-of-sale implications
 - Designed three-layer suggestion engine: co-occurrence (Layer 1) + ME filter overlay (Layer 2) + chips UI (Layer 3)
 - Key insight: ME filter corrects co-occurrence — suppresses Dogs, redirects Plowhorse cross-sells to high-margin categories, injects Puzzles that never appear in co-occurrence because nobody orders them unprompted
@@ -1485,12 +1561,14 @@ Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; a
 ### S208 — 2026-07-02 — KOT \& BOT + Ticket Routing + Menu Pricing food cost fix
 
 **`src/pages/MenuPricing.js` — sub-recipe food cost fix**
+
 - IMS clients whose recipes use sub-recipe ingredients (e.g. AMERICANO with "2 sub") showed "—" for food cost
 - Root cause: `load()` only read `items.per_uom_rate` directly; sub-recipe ingredients have `sub_recipe_id` not `item_id`, so `ri.items` was null → cost = 0
 - Fix: fetches sub-recipes + their ingredients in parallel; recursive `subCostPerUnit()` computes cost per sub-recipe unit (same logic as Recipe Costing); main recipe cost accumulates both item and sub-recipe costs
 - Food costs in Menu Pricing now match Recipe Costing exactly
 
 **`src/modules/pos/orders/PosOrders.jsx` — KOT \& BOT**
+
 - **DB:** `ALTER TABLE pos_order_items ADD COLUMN IF NOT EXISTS category text;`
 - `category` stored per order item (from `recipe.category` at add time; preserved on `performSave`; loaded when resuming existing orders)
 - KOT button → Food/Dessert/Snack/Other categories; BOT button → Beverage (routing configurable via Ticket Routing tab)
@@ -1500,12 +1578,14 @@ Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; a
 - Print: 80mm thermal-ready pop-up window, `window.print()`
 
 **KOT/BOT — qty bump delta tracking**
+
 - `sent_qty` field tracks how many of each item have already been sent to a station
 - Bumping qty on a sent item → amber **+N** badge next to item name (e.g. "+1") in the order panel
 - Print ticket: bumped items print as `+1 Pasta` not `×3 Pasta` — kitchen knows to make 1 more, not restart
 - `sent_qty` updates to current `qty` when KOT/BOT is sent
 
 **`src/modules/pos/tables/PosTableManagement.jsx` — Ticket Routing tab**
+
 - **DB:** `ALTER TABLE settings ADD COLUMN IF NOT EXISTS pos_bot_categories text[];`
 - New top-level tab bar on Table Management: **Tables** | **Ticket Routing**
 - Ticket Routing lists all POS-enabled recipe categories with a KOT/BOT pill toggle per row
@@ -1518,12 +1598,12 @@ Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; a
 
 ---
 
-
 ### S207 — 2026-07-01 — Menu Pricing: POS-only view + Add Item + DB fix
 
 **DB fix:** `feature_flags` table was missing the `menu_pricing` column — admin Save was failing with schema cache error. Fix: `ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS menu_pricing boolean;`
 
 **`src/pages/MenuPricing.js` — dual-mode rendering**
+
 - POS-only clients (no IMS) saw "No menu items found. Add recipes in Recipe Costing first." — unusable since they can't access Recipe Costing
 - Added `clientModules` to `useAuth()` destructure; `!clientModules.ims` triggers a separate early return for POS-only clients
 - **POS-only view**: slim table (# | On POS | Item | Price) + `+ Add Item` button + modal to create menu items directly (name, category, VAT toggle, price incl-VAT). Items inserted into `recipes` table with `pos_enabled: true`
@@ -1535,11 +1615,13 @@ Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; a
 ### S206 — 2026-07-01 — POS order-taking polish + admin feature access fix
 
 **`src/pages/AdminClients.js` — FeatureAccessModal**
+
 - Previously blocked admin from granting any feature flags when `ims_enabled = false` ("Crest IMS only" wall)
 - Replaced single `!imsEnabled` guard with three-branch ternary: (1) neither IMS nor POS → updated block message; (2) POS-only → slim grid showing only `menu_pricing` toggle (manually grantable, not plan-locked); (3) IMS enabled → full `FEATURE_GROUPS` grid as before
 - Added `posEnabled = !!client.pos_enabled`; header `activeModule` now reads `POS` for POS-only clients; Save button + hint text shown in POS-only mode too
 
 **`src/modules/pos/orders/PosOrders.jsx` — covers modal + UI polish**
+
 - **Covers modal on new table**: tapping an available table now shows a modal asking for cover count before entering the order screen; tables with an existing open order skip the modal
 - **Numpad input**: replaced +/− stepper with a full 3×3 digit pad (1–9, CLR, 0, ⌫); digits append to string display; caps at 99; defaults to 1 if confirmed empty
 - **Button centering**: all full-width buttons use `justifyContent: 'center'` (`.btn` is `inline-flex`; `textAlign` alone had no effect)
@@ -1552,6 +1634,7 @@ Benchmarked our ticket against a real CMS Hospitality (competitor) order slip; a
 New page for taking table orders. Full-screen two-panel UI: left = menu browser, right = live order bill.
 
 **SQL run (Supabase):**
+
 ```sql
 CREATE TABLE pos_orders (id uuid PK, client_id, table_id, table_name, status DEFAULT 'open', covers DEFAULT 1, notes, opened_by, opened_at, closed_at, created_at)
 CREATE TABLE pos_order_items (id uuid PK, order_id FK→pos_orders CASCADE, client_id, recipe_id, name, qty, unit_price ex-VAT, vat_rate, notes, sent_to_kot bool DEFAULT false, created_at)
@@ -1559,6 +1642,7 @@ CREATE TABLE pos_order_items (id uuid PK, order_id FK→pos_orders CASCADE, clie
 ```
 
 **`src/modules/pos/orders/PosOrders.jsx`** (new)
+
 - **Floor view** — table grid showing running total + item count on occupied tables; accent border on tables with open orders; "Takeaway" button for non-table orders
 - **Order screen** — `position: fixed` full-screen overlay (hides sidebar entirely for max screen space)
   - Top bar: back button, section label, covers stepper
@@ -1578,11 +1662,13 @@ CREATE TABLE pos_order_items (id uuid PK, order_id FK→pos_orders CASCADE, clie
 ### S204 — 2026-07-01 — Memory sync + Stock.css CSS variable cleanup
 
 **Memory files updated** to reflect full current state (S193–S203):
+
 - `memory/product_roadmap.md` — HR marked fully complete (all 12 sessions done S177); POS status changed from "Planned" to "Building Now" with built-features table (Tables, PIN Login, Staff CRUD, Custom Roles, Menu Pricing), DB columns, edge function actions, RPCs, and ordered next-build list; Owner Dashboard gate confirmed (build last, Suite-only); HR deferred list updated (TADA, incentives, self-service PWA, biometric, roster publish/swap/forecast)
 - `memory/project_modules.md` — Routes table updated with `/menu-pricing`, `/stock-report`, `/menu-repricing`, `/pos`, `/pos/login`, `/pos/tables`, `/pos/staff`; STARTER_KEYS updated to include `menu_pricing` + `stock_report`; GROWTH_KEYS updated to include `menu_repricing`; POS section expanded with full role system, edge function actions, RPC signatures, and DB column additions; HR pending list added; note corrected: `clients.pos_enabled` column NOW EXISTS (added S193)
 - `memory/MEMORY.md` index — Product Roadmap description updated
 
 **`src/pages/Stock.css` — CSS variable cleanup**
+
 - All 12 hardcoded hex values replaced with CSS variables (25 total occurrences)
 - `#181c27` → `var(--theme-card)` · `#2a2f3d` → `var(--theme-border)` · `#9ca3af` → `var(--theme-text3)` · `#c9a84c` → `var(--theme-accent)` · `#e8e0d0` → `var(--theme-text1)` · `#6b7280` → `var(--theme-text2)` · `#0f1117` (input) → `var(--theme-input-bg)` · `#0f1117` (save bar bg) → `var(--theme-bg)` · `rgba(201,168,76,0.15)` → `var(--theme-focus-ring)`
 - Three rgba tints with no direct variable use `color-mix()`: `rgba(201,168,76,0.25)` → `color-mix(in srgb, var(--theme-accent) 25%, transparent)` · `rgba(201,168,76,0.35)` → `color-mix(in srgb, var(--theme-accent) 35%, transparent)` · `rgba(251,191,36,0.5)` → `color-mix(in srgb, var(--theme-amber) 50%, transparent)`
@@ -1596,10 +1682,12 @@ CREATE TABLE pos_order_items (id uuid PK, order_id FK→pos_orders CASCADE, clie
 Bug fixes for POS staff role mismatches and sign-out UX. No DB changes.
 
 **`src/modules/pos/staff/PosStaff.jsx`**
+
 - Merged `load()` + `loadRoles()` into a single `init()` that runs both in parallel on mount. After loading, it silently detects and fixes any staff whose `pos_role` in the DB doesn't match the permission level configured for their `pos_job_title` (e.g. staff created before custom roles were properly configured all had `pos_role = 'staff'`). Fixes are applied via the `update_pos_role` edge function and reflected in local state immediately.
 - Removed dead `loadRoles()` function (superseded by `init()`).
 
 **`src/components/Layout.js`**
+
 - `handleSignOut`: POS staff (has `posRole`, device bound via `pos_device_client_id` in localStorage) now redirect to `/pos/login` instead of `/login` after signing out. Owner and admin still go to `/login`. Matches standard POS shift-handoff behavior — staff tap lock and land back at the PIN picker.
 - Sign-out button tooltip updated to "Lock POS" for staff, "Sign out" for everyone else.
 
@@ -1610,19 +1698,24 @@ Bug fixes for POS staff role mismatches and sign-out UX. No DB changes.
 Bug fixes discovered while onboarding the first real POS client (Choila Bhatti). No DB changes.
 
 **`src/components/Layout.js`**
+
 - POS sidebar was hidden for the client owner because the guard `(isAdmin || posRole)` excluded owners (`posRole = null` by design). Fixed to `(isAdmin || posRole || isOwner)`.
 
 **`src/context/AuthContext.js`**
+
 - `plan` was reading the legacy `plan` column only, so POS-only clients (IMS off) showed "Starter" in the sidebar. Now derives the highest tier across all enabled module plans (`ims_plan`, `hr_plan`, `pos_plan`).
 
 **`src/pages/Dashboard.js`**
+
 - "No open period" banner was showing for IMS-off clients (HR-only, POS-only) because `loadStats()` is skipped when IMS is off, leaving `activePeriod = null`. Gated the banner on `clientModules.ims`.
 - Page `<h1>` title is now dynamic: Admin → `Admin Dashboard`; single-module clients → `Inventory / HR / POS Dashboard`; multi-module → `Dashboard`.
 
 **`src/modules/pos/login/PosLogin.jsx`**
+
 - Removed unused `deactivate()` function left over from S197 (was causing CI build failure).
 
 **`src/modules/pos/staff/PosStaff.jsx`**
+
 - Manage Roles modal: replaced static level badge with an editable dropdown per row — changing permission level auto-saves without needing to remove and re-add.
 - Errors from `saveRoles` now surface inside the modal via `rolesError` state (was writing to `msg` state behind the modal overlay, effectively invisible).
 
@@ -1633,6 +1726,7 @@ Bug fixes discovered while onboarding the first real POS client (Choila Bhatti).
 Full sweep of all pages and HR/POS modules for missing `<Tip>` tooltips. All gaps filled. No DB changes.
 
 **Tooltip additions:**
+
 - **Vendors.js** — Code column, PAN/VAT No. column, Status column; form: Contact Person, PAN/VAT No. labels
 - **Settings.js** — FC Warning %, FC Critical %, Expiry Warning, Variance Flag % thresholds; Item/Vendor/Sub-Recipe Code Prefix labels; VAT Registration Number
 - **AuditLog.js** — all 6 table headers: Time, Client, User, Action, Area, Summary
@@ -1642,6 +1736,7 @@ Full sweep of all pages and HR/POS modules for missing `<Tip>` tooltips. All gap
 - **EmployeeList.jsx** — Code, Supervisor, and Type column headers
 
 **Help.js additions:**
+
 - **Roster** entry added to HR module guide (planning vs attendance, shift types, export)
 - **POS Login** entry added to POS module guide (PIN login screen, Owner button, role requirement)
 - **Audit Log** entry added in a new admin-only "Admin Tools" section (only rendered for `isAdmin`)
@@ -1655,6 +1750,7 @@ Full sweep of all pages and HR/POS modules for missing `<Tip>` tooltips. All gap
 Serves as the single source of truth for both internal pricing review and the future POS menu. The POS will query `recipes WHERE pos_enabled = true` rather than reading from Recipe Costing directly — so items can be hidden from POS without deactivating the recipe or losing history.
 
 **Changes:**
+
 - **`src/pages/MenuPricing.js`** (new) — category tabs (Food/Beverage/Dessert/Other), table with Food Cost · Current Price (incl VAT) · FC% · New Price input (live FC% + change diff) · On POS toggle · Save per row.
 - **`recipes.pos_enabled boolean DEFAULT true`** — new column (migration run). NULL treated as true for existing rows.
 - **On POS toggle** — checkbox per row; saves instantly. Rows with `pos_enabled = false` are dimmed (opacity 0.45). Summary strip shows how many items are on/off POS.
@@ -1668,6 +1764,7 @@ Serves as the single source of truth for both internal pricing review and the fu
 **Problem:** Expiry date and shelf-life fields were stacked below the item dropdown in a sub-row (or inline div), making the bill form feel cramped and disconnected from the other fields.
 
 **Changes (`src/pages/Purchases.js`):**
+
 - **Removed sub-row / inline-div layout** — expiry date and shelf life no longer live beneath the item dropdown.
 - **Two new table columns** — `Expiry Date` (140 px) and `Days` (95 px) added after Amount, before the delete button. Both sit on the same `<tr>` as Item, Qty, Rate, VAT, Total, Amount.
 - **Modal widened** — `maxWidth` raised from 960 → 1160 px.
@@ -1681,6 +1778,7 @@ Serves as the single source of truth for both internal pricing review and the fu
 **Problem:** The "Add Purchase Bill" form had a single bill-level VAT toggle — all items on a bill were either all-taxable or all-non-taxable. Real vendor invoices can have mixed items (e.g. 4 of 10 items VAT-able).
 
 **Changes (`src/pages/Purchases.js`):**
+
 - **Per-line VAT checkbox** — new column in the bill form table between Rate and Total. Each line independently controls its own `vat_inclusive` flag. Shows a small "13%" label below the checkbox when checked.
 - **Header VAT toggle** → "apply to all" mass action. Visual state derived from lines: gold (all on), amber "VAT Mixed" (some on), off (none). Clicking toggles all lines at once for convenience.
 - **Totals breakdown** — now shows Taxable (ex-VAT) and Non-taxable subtotals separately; VAT 13% applies only to the taxable portion; discount is prorated proportionally across all lines before VAT is levied (Nepal IRD practice).
@@ -1693,11 +1791,13 @@ Serves as the single source of truth for both internal pricing review and the fu
 ### S197 — 2026-07-01 — Owner Access, Custom Roles, PIN Login UI, Staff CRUD (complete)
 
 **Access model:**
+
 - Owner (client user with no `pos_role`) logs in via `/login` (email+password)
 - All POS staff (including managers) log in via PIN on `/pos/login`
 - `isOwner` exposed from AuthContext; owner gets `posRole = 'manager'` for access control, shows "Owner" label in sidebar footer
 
 **Custom role names per client (`Manage Roles`):**
+
 - `pos_custom_roles jsonb DEFAULT '[]'` added to `settings` table
 - Manager opens "Manage Roles" modal → defines custom names (e.g. Cashier, Barista) mapping to permission levels (staff/supervisor/manager)
 - `effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES` — falls back to Staff/Supervisor/Manager if none defined
@@ -1705,23 +1805,27 @@ Serves as the single source of truth for both internal pricing review and the fu
 - Role updates go through `update_pos_role` edge function action (service role — no RLS issues)
 
 **Staff list via SECURITY DEFINER RPC (`get_pos_staff_list`):**
+
 - Direct `profiles` SELECT blocked for owner JWT (no same-client SELECT policy; adding one caused infinite recursion since policy subquery re-entered itself)
 - Fix: `get_pos_staff_list(p_client_id uuid)` SECURITY DEFINER function — verifies caller is admin or same-client, then reads profiles bypassing RLS
 - Returns `id, full_name, pos_role, pos_job_title, last_seen_at` filtered by `pos_email IS NOT NULL`
 
 **PIN login UI improvements:**
+
 - Circular numpad buttons (`borderRadius: 50%`), `scale(0.92)` press effect, glow on filled PIN dots
 - "Enter PIN for {name}" — 18px, weight 600, prominent
 - Back (108px) + Login (120px) as a flex row
 - Removed "Deactivate device" from footer (security risk)
 
 **`admin-user-ops` edge function additions:**
+
 - `isCallerOwner`: `role === 'client' && !pos_role` — owner can create/delete/reset staff
 - `pos_job_title` included in `create_pos_staff` upsert
 - `update_pos_role` action: updates `pos_role` + `pos_job_title` with same-client guard
 - `delete_pos_staff` action: managers can delete staff/supervisors; only admin can delete managers
 
 **DB (run in Supabase):**
+
 ```sql
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS pos_job_title text;
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hr_employee_id uuid REFERENCES hr_employees(id) ON DELETE SET NULL;
@@ -1767,6 +1871,7 @@ ALTER TABLE profiles
 ```
 
 **Integration design (deferred until order-taking is built):**
+
 - POS writes to `sales_entries` with `source = 'pos'` → IMS Best Sellers, Variance, Recipe Margin light up automatically
 - `stock_movements` perpetual ledger (new table, not yet created) — POS sale explodes recipe → negative movements per ingredient
 - `pos_orders` / `pos_order_items` tables — to be created when `/pos/orders` is built
@@ -1775,20 +1880,24 @@ ALTER TABLE profiles
 ### S197 — 2026-07-01 — POS Login Model Clarification + Delete Staff
 
 **Access model clarified:**
+
 - Main client (owner) logs in with email + password via `/login`
 - Everyone else (manager / supervisor / staff) logs in via PIN on `/pos/login`
 - All POS accounts are created via "Add Staff" (name + PIN + role) — no email required
 
 **`src/modules/pos/login/PosLogin.jsx`:**
+
 - Reverted manager filter — managers now appear on the PIN picker (they use PINs like everyone else)
 - "Manager login" footer link renamed to "Owner login" — clarifies it's for the main client account only
 
 **`src/modules/pos/staff/PosStaff.jsx`:**
+
 - Delete button added (red, alongside Reset PIN); triggers `window.confirm` before proceeding
 - "PIN" column header renamed to "Actions"
 - Managers can delete staff/supervisors; only admin can delete managers
 
 **`supabase/functions/admin-user-ops/index.ts`:**
+
 - `delete_pos_staff` action added (before admin-only guard): calls `admin.auth.admin.deleteUser()` which cascades profile deletion; managers blocked from deleting other managers
 
 ---
@@ -1800,18 +1909,21 @@ ALTER TABLE profiles
 Manager can now create staff accounts directly from POS Staff → "+ Add Staff". No email required — staff log in with name + PIN only. Auto-generated internal email (`slug_xxxxx@pos.internal`) is stored in `profiles.pos_email` and never shown to staff.
 
 **`supabase/functions/admin-user-ops/index.ts`:**
+
 - `create_pos_staff` action: accepts `{ full_name, pin, pos_role, client_id }`, auto-generates internal email, creates Supabase Auth user, upserts profile with `pos_email` stored
 - `reset_pos_pin` action: manager can reset any same-client staff PIN; cross-checks `client_id` to prevent cross-client resets
 - Profile fetch changed to use service-role (`admin`) client — anon+JWT fetch was returning null due to RLS, causing "client_id required" error
 - Admin callers must pass `client_id` in request body; manager callers use `profile.client_id` server-side
 
 **`src/modules/pos/staff/PosStaff.jsx`:**
+
 - "+ Add Staff" button (manager only) opens modal: Full Name + PIN (4–6 digits, masked) + POS Role
 - PIN input strips non-digits, max 6 chars
 - "Reset PIN" column added to staff table — opens modal to set a new PIN for any staff member
 - `client_id` now passed in edge function call body (fixes admin-viewing-as-client case)
 
 **DB (run in Supabase):**
+
 ```sql
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS pos_email text;
 
@@ -1828,12 +1940,14 @@ GRANT EXECUTE ON FUNCTION get_pos_staff(uuid) TO anon;
 ```
 
 **Device activation (`src/modules/pos/Pos.js` — rewritten):**
+
 - Manager sees "Activate for [Client Name]" card on `/pos`
 - On click: saves `pos_device_client_id` + `pos_device_client_name` to `localStorage`
 - Activated state shows "Device activated · Bound to: X" with "Open POS Login Screen" + "Deactivate Device" buttons
 - Only visible to managers; Staff/Supervisor see Coming Soon text only
 
 **POS PIN login screen (`src/modules/pos/login/PosLogin.jsx` — new):**
+
 - Public route (`/pos/login`) — no auth required
 - Reads `pos_device_client_id` from `localStorage`; redirects to `/login` if not set
 - Calls `supabase.rpc('get_pos_staff', { p_client_id })` to fetch staff list without auth (SECURITY DEFINER + anon grant)
@@ -1843,10 +1957,12 @@ GRANT EXECUTE ON FUNCTION get_pos_staff(uuid) TO anon;
 - Footer links: "Deactivate device" (clears localStorage) · "Manager login" (goes to `/login`)
 
 **`src/App.js`:**
+
 - Added `import PosLogin` + `<Route path="/pos/login" element={<PosLogin />} />` as public route (outside ProtectedRoute)
 - `RootRedirect` component: checks `localStorage` for `pos_device_client_id` — bound devices go to `/pos/login`, others go to `/dashboard`
 
 **`src/components/Layout.js`:**
+
 - Added `pos-setup` group to `POS_GROUPS`: "POS Setup" link → `/pos` (manager+)
 
 ---
@@ -1856,6 +1972,7 @@ GRANT EXECUTE ON FUNCTION get_pos_staff(uuid) TO anon;
 **POS 4-tier role model** (`staff` / `supervisor` / `manager` / admin):
 
 **DB (run in Supabase):**
+
 ```sql
 ALTER TABLE profiles
   ADD COLUMN IF NOT EXISTS pos_role text
@@ -1873,18 +1990,21 @@ WITH CHECK (
 ```
 
 **`src/context/AuthContext.js`:**
+
 - Added `pos_role` to profiles `.select()` string
 - `posEnabled` extracted as a variable (was inline in context value only)
 - `posRole` exposed: admin gets `'manager'`; client users get `profile.pos_role || null`
 - `hasPosAccess(minLevel)` exported — returns true for admin, checks `POS_RANK` for client users; returns false if `pos_role` is null
 
 **`src/components/Layout.js`:**
+
 - `POS_GROUPS` updated: Tables gets `minPosRole: 'supervisor'`; new "Admin" group with POS Staff (`minPosRole: 'manager'`)
 - POS sidebar block now hidden entirely if `posRole` is null (no role assigned)
 - Nav items filtered per `hasPosAccess(item.minPosRole)` before rendering
 - Sidebar footer now shows `POS · Supervisor` etc. instead of plain "Client"
 
 **`src/modules/pos/staff/PosStaff.jsx`** (new — `/pos/staff`):
+
 - Manager-only screen listing all client profiles
 - Dropdown to assign `staff / supervisor / manager` (or revoke access) per user
 - Live save on change with saving indicator
@@ -1894,6 +2014,7 @@ WITH CHECK (
 - Redirects to `/pos/tables` if below manager
 
 **`src/modules/pos/tables/PosTableManagement.jsx`:**
+
 - Added `Navigate` import and `hasPosAccess('supervisor')` gate (redirects to `/pos` if below supervisor)
 - Fixed Section input in Add Table modal: removed pre-fill with `existingSections[0]` (was appearing as locked dropdown); replaced `form-select` class with plain text-input styles so dropdown arrow is gone
 
@@ -1902,6 +2023,7 @@ WITH CHECK (
 **`src/pages/Help.js`:** Added POS Staff feature card with 4 tips
 
 **`src/utils/subscription.js`** (bug fix):
+
 - `getSubStatus` was only checking `ims_ends_at || subscription_ends_at` — POS-only clients with `pos_ends_at` set still showed "Trial · Xmo"
 - Fixed to take `Math.max` across all of `ims_ends_at`, `hr_ends_at`, `pos_ends_at`, `subscription_ends_at`
 
@@ -1912,6 +2034,7 @@ WITH CHECK (
 ### S194 — 2026-06-30 — Crest POS: Table Management
 
 **`src/modules/pos/tables/PosTableManagement.jsx`** (new page — `/pos/tables`):
+
 - **⚡ Quick Setup panel** — bulk generator: Prefix + Start# + Count + Section + Seats → one click creates e.g. "Table 1 … Table 10". Auto-expands on first visit (no tables yet), collapses once tables exist. Live preview line shows exactly what will be created. Max 50 per batch; run multiple times for different sections/prefixes. No drag-drop — faster than Toast/Square for initial setup.
 - Floor-plan grid of table cards: name, section, capacity, status badge
 - Status badge clickable directly on the card to cycle Available → Reserved → Occupied → Inactive (no modal needed)
@@ -1924,12 +2047,14 @@ WITH CHECK (
 **`src/App.js`:** Added `/pos/tables` route + imported `PosTableManagement`
 
 **`src/components/Layout.js`:**
+
 - Replaced `POS_DASHBOARD` single link with `POS_GROUPS` collapsible group structure (mirrors HR pattern)
 - Currently: one group "Floor" with Tables; will grow as Orders, Shifts, Reports are added
 
 **`src/pages/Help.js`:** Added Crest POS section (gated on `posEnabled`) with Table Management feature card + 4 tips
 
 **DB (run in Supabase):**
+
 ```sql
 CREATE TABLE IF NOT EXISTS pos_tables (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -1955,27 +2080,33 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_tables TO authenticated;
 **Goal:** Wire up the POS module so it can be toggled on per client and routed to — before building any POS UI.
 
 **DB (run in Supabase):**
+
 - `ALTER TABLE clients ADD COLUMN IF NOT EXISTS pos_enabled boolean DEFAULT false`
 - `ALTER TABLE clients ADD COLUMN IF NOT EXISTS pos_plan text CHECK (pos_plan IN ('starter','growth','pro'))`
 
 **`src/context/AuthContext.js`:**
+
 - Added `pos_enabled, pos_plan` to clients `.select()` string
 - `posEnabled` now reads `profile?.clients?.pos_enabled ?? false` (was hardcoded false)
 - `posPlan` added to context value
 - `viewModules` effect now fetches `pos_enabled` and reflects it in `clientModules.pos`
 
 **`src/components/ModuleGate.js`:**
+
 - Added `posEnabled` from `useAuth()` + `if (module === 'pos' && !posEnabled) → /dashboard` guard
 
 **`src/App.js`:**
+
 - Imported `Pos` from `./modules/pos/Pos`
 - Added `/pos` route wrapped in `<ModuleGate module="pos">`
 
 **`src/components/Layout.js`:**
+
 - Added `POS_DASHBOARD = { to: '/pos', label: 'Point of Sale', icon: '⊕' }`
 - Added sidebar block gated on `clientModules.pos` (renders after HR nav block)
 
 **`src/pages/AdminClients.js`:**
+
 - Added `posEnabled` / `posPlan` state initialized from `client.pos_enabled` / `client.pos_plan`
 - `posEndsAt` converted from `const` to stateful (setter needed for billing date picker)
 - Added `handleTogglePos()` — instant save to `clients.pos_enabled`
@@ -1991,12 +2122,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_tables TO authenticated;
 ### S192 — 2026-06-30 — Display improvements: purchase-unit in Stock & Variance + HR audit
 
 **Display improvements — purchase-unit equivalent in Net Purchased / Purchased columns:**
+
 - Added `dispPurch(baseQty, item)` helper to `src/pages/Stock.js` and `src/pages/Variance.js`
 - For items with `conversion_factor > 1` and `purchase_unit` set, shows `10 CTN (240 BTL)` format instead of raw base-unit qty
 - Applied to: **Net Purchased** column in Variance report, **Purchased** column in Stock Summary per-item table, **Purchased** ref on mobile stock cards
 - Falls back to plain base-unit display for items without conversion
 
 **HR module audit (code verified, memory corrected):**
+
 - All 7 of 8 "pending" HR features confirmed built: Gratuity Tracker, Final Settlement, OT Logging, Advances/Recovery, Annual TDS Certificate, Insurance+married-schedule TDS, TDS on festival allowance
 - Additional untracked features found: HR Dashboard, PaySetup/PayForm, Roster, Holiday Calendar, Employee Joining Form
 - **Service-charge pool distribution removed from scope** — will not be built in Crest HR
@@ -2008,6 +2141,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_tables TO authenticated;
 ### S191 — 2026-06-30 — Hotfix: restore admin_clear_audit_logs for authenticated users
 
 **Supabase SQL (dashboard):**
+
 - S188 over-revoked `admin_clear_audit_logs` from `authenticated` — broke the Audit Log "Clear" button with "permission denied" error
 - Fix: `GRANT EXECUTE ON FUNCTION public.admin_clear_audit_logs(uuid, text, timestamptz) TO authenticated;`
 - Linter will still flag it as a warning (acceptable — function is the security boundary)
@@ -2015,19 +2149,23 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_tables TO authenticated;
 ### S190 — 2026-06-30 — Items: per-UOM rate fix when Total is used
 
 **Item Master (`src/pages/Items.js`):**
+
 - Fixed "Per GM rate" showing wrong value when Total field is used: when Total is entered, Rate is back-calculated as `Total ÷ Purchase Qty` (already per base unit) — dividing by Qty again was wrong (e.g. 0.70 showed as 0.0007)
 - Now: when `amtDraft` is set, Per UOM rate displays `Rate` directly; when Total is blank and Rate entered directly (conversion setup), old `Rate ÷ Qty` formula still applies
 
 ### S189 — 2026-06-30 — Trial signup fixes + Danger Zone tooltips + Admin Clients dedup
 
 **Trial signup (`supabase/functions/admin-user-ops/index.ts`):**
+
 - Fixed `profiles_pkey` violation on all trial signups — `handle_new_user` trigger auto-inserts a bare profile on auth user creation; switched edge function from `insert` to `upsert` (onConflict: id) so our values always win
 - Friendly error message when email already registered: "An account with this email already exists. Please sign in instead." (detected via `code === '23505'` or `profiles_pkey` in message)
 
 **Login page (`src/pages/Login.js`):**
+
 - Frontend maps "already exists / already registered / profiles_pkey" errors to: "An account with this email already exists. Use the sign-in form above."
 
 **Admin Clients (`src/pages/AdminClients.js`):**
+
 - Trial clients now excluded from main client list (`filter(c => !c.is_trial)`) — they only appear in the Trial Accounts section at top
 - Added `Tip` tooltips to all three Danger Zone buttons: Clear All Conversions, Clear Client Data, Delete Client
 - Sidebar amber badge auto-clears after 7 days from signup; also clears immediately on Convert to Paid
@@ -2035,28 +2173,34 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_tables TO authenticated;
 ### S188 — 2026-06-30 — Security hardening + sidebar trial badge redesign + orphaned user delete fix
 
 **Supabase security hardening (SQL run in dashboard — no code changes):**
+
 - Revoked `EXECUTE` from `PUBLIC` on 6 sensitive functions: `admin_clear_audit_logs`, `client_user_emails`, `find_user_id_by_email`, `request_subscription`, `handle_new_user`, `log_audit`
 - Granted back `EXECUTE` to `authenticated` on `request_subscription` (called by logged-in trial users)
 - Added `SET search_path = public` to 4 functions with mutable search_path: `my_client_id`, `is_admin`, `admin_clear_audit_logs`, `request_subscription`
 - Remaining acceptable warnings: `is_admin` + `my_client_id` (RLS dependency), Logos bucket listing, leaked password protection (Pro plan required)
 
 **Admin Clients (`src/pages/AdminClients.js`):**
+
 - Delete user now handles orphaned profiles gracefully — if auth user is already gone ("not found"), falls through and deletes the `profiles` row instead of blocking with an error
 
 **Sidebar (`src/components/Layout.js`):**
+
 - New trial badge redesigned for strong visual presence: number badge on icon (not tiny dot), amber left border + background tint on entire Clients row, bold "N NEW" pill (expanded) / number on icon (collapsed)
 - Red variant shows "N want to sub" when `subscribe_requested` clients exist; amber shows when new trials in last 7 days
 
 ### S187 — 2026-06-30 — Trial signup awareness: contact_person, signup time display, sidebar amber badge
 
 **Edge Function (`supabase/functions/admin-user-ops/index.ts`):**
+
 - `register_trial` action now saves `contact_person: full_name || business_name` to the `clients` row on signup
 
 **Admin Clients (`src/pages/AdminClients.js`):**
+
 - Trial rows now show "Signed up X ago · [contact_person]" using the existing `relativeTime()` helper
 - Contact person only shown when it differs from the business name
 
 **Sidebar (`src/components/Layout.js`):**
+
 - Added `newTrialCount` state — counts trial clients with `trial_start_date` in the last 7 days
 - Amber badge `"N new"` appended to Clients nav label when `newTrialCount > 0` (distinct from the red subscribe-requested badge)
 - Collapsed-mode: amber dot shown when `newTrialCount > 0` and no pending red badge already showing
@@ -2065,12 +2209,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_tables TO authenticated;
 ### S186 — 2026-06-30 — Purchases + Non-VAT Report: discount header field, footer buttons, Non-VAT discount handling
 
 **Add Purchase Bill (`src/pages/Purchases.js`):**
+
 - **Discount field moved to header row** — always visible as a 90px fixed-width input (was hidden in totals section behind `subTotal > 0` gate); header grid now `2fr 1fr 1.4fr auto 90px 1fr`
 - **Footer row restructured** — 3-column grid: Cancel (left) · + Add Item (center) · Save Entries (right)
 - **+ Add Item button** — moved from table sub-row into footer; amber background, black font, `fontSize: 13`
 - **Cancel button** — red ghost style (matches Delete All); natural width via `justifySelf: start`; `fontSize: 13` on all three footer buttons for uniformity
 
 **Non-VAT Report (`src/pages/NonVatReport.js`):**
+
 - Bill-level `discount_amount` now subtracted from gross to produce net total (mirrors VatReport logic)
 - CA Summary gains conditional Gross / Discount / Net columns (Discount column only when any bill has a discount)
 - Empty state copy updated: references VAT toggle, not old per-line checkbox
@@ -2093,11 +2239,13 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_tables TO authenticated;
 ### S183 — 2026-06-30 — Items + Purchases: UI polish — Total field, VAT toggle, layout cleanup
 
 **Item Master (`src/pages/Items.js`):**
+
 - Total (NPR) always visible (removed qty > 0 condition); promoted to standalone grid field beside Rate
 - Form field order changed: Item Name → Category → Yield % → UOM → Purchase Qty → Rate → Total
 - Per-UOM rate display: dynamic decimal precision — up to 6 dp for values < 0.01 (fixes "NPR 0.00" for small rates)
 
 **Add Purchase Bill (`src/pages/Purchases.js`):**
+
 - Total (NPR) always visible (removed qty > 0 condition); given its own column
 - VAT checkbox replaced with a pill toggle button below Rate (`+ VAT` / `✓ VAT 13%`); VAT column removed
 - Each bill line split into two `<tr>` rows: main inputs on row 1; Expiry date + Shelf life on row 2 — same input height/font as all other fields
@@ -2105,6 +2253,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_tables TO authenticated;
 ### S182 — 2026-06-30 — Item Master: Total-amount back-calculate Rate
 
 **Add/Edit Item modal — "Total" sub-input below Rate field:**
+
 - New `amtDraft` state tracks the user's typed total; clears when Rate or Purchase Qty is edited directly
 - `setTotalAmount(val)` handler: `rate = totalAmount ÷ purchaseQty` (no VAT — Item Master rates are base rates)
 - Total input placeholder shows computed total (`rate × purchase_qty`) when draft is empty
@@ -2114,6 +2263,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_tables TO authenticated;
 ### S181 — 2026-06-30 — HR: Advances & Loans — payroll integration (auto-recovery)
 
 **Advance/loan deduction wired into payroll generation and finalize:**
+
 - `payrollCompute.js`: `computePayslip` gains 7th param `advanceDeduction = 0` — subtracted from `net_pay` in all three pay bases (monthly/daily/hourly); stored as `advance_deduction` on result object
 - `PayrollRun.jsx`:
   - Fetches `hr_advances` + `hr_advance_repayments` on every `loadAll`
@@ -2126,10 +2276,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_tables TO authenticated;
 - `Help.js`: Advances & Loans entry rewritten to describe auto-deduction flow
 
 **DB migrations run:**
+
 ```sql
 ALTER TABLE hr_payslips ADD COLUMN IF NOT EXISTS advance_deduction numeric DEFAULT 0;
 ALTER TABLE hr_advance_repayments ADD COLUMN IF NOT EXISTS payroll_run_id uuid REFERENCES hr_payroll_runs(id);
 ```
+
 **RLS policies added** (were missing — "permission denied" on insert): standard client-own policy + `GRANT ALL TO authenticated` on both `hr_advances` and `hr_advance_repayments`.
 
 **Note:** S165 entry "Repayments are manually recorded" is superseded by this session — repayments are now auto-recorded on Finalize.
@@ -2141,6 +2293,7 @@ ALTER TABLE hr_advance_repayments ADD COLUMN IF NOT EXISTS payroll_run_id uuid R
 ### S180 — 2026-06-30 — Purchases: Total-amount back-calculate rate
 
 **Reverse-rate calculator in Purchase Bill form (`src/pages/Purchases.js`):**
+
 - Added **Total** helper input below the Rate field (visible once QTY is entered)
 - User types the total amount paid → Rate is back-calculated: `rate = total ÷ qty ÷ (1.13 if VAT)`
 - Placeholder shows the current computed total so the field doubles as a live readout
@@ -2155,12 +2308,14 @@ ALTER TABLE hr_advance_repayments ADD COLUMN IF NOT EXISTS payroll_run_id uuid R
 ### S179 — 2026-06-30 — HR sidebar groups + Overtime Est. Amount column
 
 **HR sidebar rearranged into collapsible groups (`src/components/Layout.js`):**
+
 - Replaced flat `HR_ITEMS` (14 items in one group) with `HR_DASHBOARD` (pinned) + `HR_GROUPS` (4 collapsible sections)
 - Groups: **People** (Employees, Pay Setup, Holiday Calendar) · **Attendance** (Staff Roster, Attendance, Leave, Overtime) · **Payroll** (Payroll, Festival Allowance, Advances & Loans) · **Reports** (HR Reports, Gratuity, Final Settlement)
 - HR Dashboard pinned above the groups (mirrors IMS Dashboard pinned above `IMS_GROUPS`)
 - Active-route force-open and icon-collapsed mode work unchanged via existing `renderGroup` / `renderNavItem`
 
 **Overtime: Est. Amount column + Est. OT Cost stat card (`src/modules/hr/overtime/Overtime.jsx`):**
+
 - Employee fetch now includes `basic_salary`
 - `otAmt(entry, emp)` helper: `hours × (basic ÷ daysInMonth ÷ 8) × multiplier` (monthly); `hours × (basic ÷ 8) × multiplier` (daily); `hours × basic × multiplier` (hourly); returns `null` if no salary on file
 - New **Est. Amount** column in table — amber, right-aligned; shows `—` when salary missing
@@ -2175,17 +2330,20 @@ ALTER TABLE hr_advance_repayments ADD COLUMN IF NOT EXISTS payroll_run_id uuid R
 **Updated `src/modules/hr/festival/FestivalAllowance.jsx`:**
 
 **Core change — YTD-based TDS instead of salary × 12 estimate:**
+
 - `load()` now fetches all finalized payslips for the current FY (`hr_payslips` + `hr_payroll_runs!inner` + `monthly_periods!inner`) and builds a `ytdMap` (employee_id → `{ gross, ssf, months }`)
 - New `calcFestivalTds({ emp, amount, ytd, fyStart })` helper: projects annual income as `ytdGross + basic × remainingMonths`, deducts SSF + insurance caps (NPR 40k life / NPR 20k health), then applies `computeBonusTds()` at the resulting `annualTaxable`. Falls back to salary projection if no finalized payroll months exist.
 - Shows **"YTD"** badge on the TDS KPI card and column header when real payslip data was used; tooltip explains the source.
 
 **TDS saved to DB (new column):**
+
 - `hr_festival_allowances.tds integer not null default 0` — run SQL migration below
 - `buildRows()` includes computed `tds` in the upsert
 - `updateAmount()` recomputes + saves both `amount` and `tds` on blur
 - `updateTds()` allows manual TDS override (same pattern as PayrollRun); TDS input uses `key={r.tds}` so it re-mounts with the new computed value when amount changes
 
 **UI additions:**
+
 - TDS column is now an editable input (while draft) — allows CA override
 - New **Net** column in table = gross − TDS (the bank transfer amount)
 - KPI cards: TDS Withheld + Net Payout now reflect saved `r.tds` values from state
@@ -2194,6 +2352,7 @@ ALTER TABLE hr_advance_repayments ADD COLUMN IF NOT EXISTS payroll_run_id uuid R
 **Also fixed:** removed unused `fiscalYearOf` import from `src/modules/hr/overtime/Overtime.jsx` (caused ESLint build failure)
 
 **DB migration (run in Supabase SQL editor):**
+
 ```sql
 alter table hr_festival_allowances
   add column if not exists tds integer not null default 0;
@@ -2210,6 +2369,7 @@ Existing rows default to `tds = 0`; hit **Regenerate** on any existing festival 
 **New page — `src/modules/hr/dashboard/HrDashboard.jsx`** (`/hr/dashboard`, HR module gate, top of HR sidebar):
 
 **Headcount KPI row (6 cards):**
+
 - Active Staff (+ probation sub-label) → `/hr/employees`
 - Basic Payroll / Month (active + probation basic salary total) → `/hr/payroll`
 - Leave Pending (count, amber when >0) → `/hr/leave`
@@ -2218,12 +2378,14 @@ Existing rows default to `tds = 0`; hit **Regenerate** on any existing festival 
 - Retiring Soon (active/probation retiring within 180 days, amber when >0) → `/hr/employees`
 
 **Last Finalized Payroll section (4 cards, only when a finalized run exists):**
+
 - Net Payable (total take-home from last finalized payroll)
 - SSF Employee (11% total)
 - SSF Employer (20% total)
 - SSF Total to Deposit (31% combined, amber, deposit deadline = 15th of next BS month) → `/hr/reports`
 
 **Pending queues (2-column layout):**
+
 - Left: pending leave requests table (employee / type / from / to) → click row or button → `/hr/leave`
 - Right: pending OT entries table (employee / BS date / hours / weekday or holiday) → click → `/hr/overtime`
 
@@ -2234,6 +2396,7 @@ No DB migration needed — reads existing tables.
 ### S176 — 2026-06-30 — Overtime Management
 
 **New page — `src/modules/hr/overtime/Overtime.jsx`** (`/hr/overtime`, HR module gate):
+
 - Log OT entries per employee per BS date with an approval flow: Pending → Approved / Rejected
 - Two OT rates (Nepal Labour Act): Weekday = 1.5×, Public Holiday = 2×
 - Date auto-detects holiday type from `hr_holiday_calendar` — pre-selects "Public Holiday (2×)" when date matches a gazetted holiday
@@ -2243,11 +2406,13 @@ No DB migration needed — reads existing tables.
 - Note on page: only Approved entries feed into payroll; Regenerate payroll after approving
 
 **Payroll integration (`src/modules/hr/payroll/`):**
+
 - `payrollConstants.js` — added `OT_HOLIDAY_MULTIPLIER = 2.0`
 - `payrollCompute.js` — refactored to accept `approvedOtEntries[]` as 6th param; entry OT computed at end: weekday hours × 1.5× + holiday hours × 2× of employee's hourly rate; stacks on top of attendance OT; backward-compatible (empty array = no change)
 - `PayrollRun.jsx` — `loadAll()` now accepts `bsYear, bsMonth`; fetches approved `hr_overtime_entries` for the period; passes per-employee entries to `computePayslip`
 
 **DB migration required:**
+
 ```sql
 create table hr_overtime_entries (
   id uuid default gen_random_uuid() primary key,
@@ -2282,6 +2447,7 @@ grant select, insert, update, delete on hr_overtime_entries to authenticated, an
 ### S175 — 2026-06-30 — Holiday Calendar
 
 **New page — `src/modules/hr/holidays/HolidayCalendar.jsx`** (`/hr/holidays`, HR module gate):
+
 - Per-client Nepal public holiday list, grouped by BS fiscal year (Shrawan–Ashadh)
 - Two holiday types: **Public** (gazetted — 2× OT rate, all staff entitled to day off) and **Optional** (floating, employer discretion)
 - FY selector auto-defaults to current FY; prior-year FYs appear once holidays exist for them
@@ -2298,6 +2464,7 @@ grant select, insert, update, delete on hr_overtime_entries to authenticated, an
 - Nav entry added to HR sidebar between Leave and Payroll
 
 **DB migration required — run in Supabase SQL editor:**
+
 ```sql
 create table hr_holiday_calendar (
   id uuid default gen_random_uuid() primary key,
@@ -2327,17 +2494,20 @@ create policy "client_rw" on hr_holiday_calendar
 ### S174 — 2026-06-30 — Monthly roster split, duplicate shift fix, employee joining print form
 
 **Monthly roster — two-half split (`src/modules/hr/roster/Roster.jsx`):**
+
 - Monthly board now renders two stacked tables: days 1–16 (top) + days 17–end (bottom)
 - Fixes overflow — all 28–32 BS days visible on screen and in print without horizontal scroll
 - Weekly view unchanged (single-table). "Hrs" total column appears only on second-half table (monthly total = sum over all days via full `columns` array)
 - `colChunks` computed from `columns` before render; `isLast` flag controls Hrs th/td and colgroup extra col
 
 **Duplicate shift types auto-heal (`src/modules/hr/roster/Roster.jsx`):**
+
 - Bug: React 18 Strict Mode double-invokes effects in dev → two concurrent seed inserts when `hr_shift_types` is empty → 12 rows (6 duplicates)
 - Fix: on load, deduplicate by `name` (keep first per name), delete extras from DB via `.delete().in('id', toDelete)`
 - Self-healing: runs once on next page load; no migration or manual cleanup needed
 
 **Employee Joining Form — new printable physical form:**
+
 - New file: `src/modules/hr/employees/EmployeeJoiningForm.jsx`
 - Button: "🖨 Print Joining Form" in Employees page header; opens full-screen preview → Print / Save PDF → `window.print()`
 - A4 portrait, forced B&W via `@media print`; dark theme fully overridden
@@ -2363,6 +2533,7 @@ create policy "client_rw" on hr_holiday_calendar
 **New page — `src/modules/hr/roster/Roster.jsx`** (`/hr/roster`, HR module gate):
 
 **Roster Board tab:**
+
 - Weekly view (Sun–Sat, week starts Sunday) + Monthly view (full BS month, like Attendance Sheet)
 - Navigation: prev/next week or month with "Today / This Month" shortcut
 - Department filter dropdown (auto-hidden when no departments defined)
@@ -2373,6 +2544,7 @@ create policy "client_rw" on hr_holiday_calendar
 - Print button (🖨 Print) → `window.print()`; A4 landscape, forced B&W (white background, #111 text, shift cells print as light gray `#e8e8e8`); print-only header shows period label + full shift legend with times
 
 **Shift Types tab (per-client, fully customizable):**
+
 - Table of shift templates: color (color picker), name, start time, end time, hours
 - Hours auto-hint computes from start/end in real time; enter manually for flexible (Split) shifts
 - Overnight shifts (e.g. Night 21:00–07:00) handled correctly (next-day wrap in `calcHours`)
@@ -2380,6 +2552,7 @@ create policy "client_rw" on hr_holiday_calendar
 - Default shifts seeded on first visit: Morning 7–3 (8h), Afternoon 1–9 (8h), Evening 5–1am (8h), Night 9–7am (8h), Full Day 9–6 (9h), Split (manual hours)
 
 **DB tables required (run in Supabase SQL editor):**
+
 ```sql
 -- hr_shift_types: per-client shift templates
 CREATE TABLE hr_shift_types (
@@ -2414,6 +2587,7 @@ GRANT ALL ON hr_roster TO authenticated;
 ```
 
 **Other changes:**
+
 - `src/shared/constants/shiftTypes.js` — now superseded by DB-driven `hr_shift_types` (file kept but unused)
 - Route `/hr/roster` added to `src/App.js`
 - Nav entry "📅 Staff Roster" added between Employees and Attendance in `src/components/Layout.js`
@@ -2421,17 +2595,20 @@ GRANT ALL ON hr_roster TO authenticated;
 ### S172 — 2026-06-29 — Chart expand modals + daily trend 10-day window
 
 **New component — `src/components/ChartCard.js`:**
+
 - Reusable card wrapper with `renderChart(height)` render prop — chart JSX written once, called at card size and modal size
 - Expand button (⛶ icon) in every chart header opens a `createPortal` fullscreen modal (92% viewport, max 1100px wide, 440px chart height)
 - `titleStyle` + `cardStyle` props allow override for non-standard card layouts
 - Modal uses `h > 200` check inside renderChart to scale dot sizes, bar counts, font sizes, margins
 
 **Charts upgraded across 3 files:**
+
 - `Dashboard.js`: Spend by Category (pie scales inner/outer radius in modal) · Daily Purchases vs Sales · Top Items by Spend (modal shows all 10 vs 6) · Food Cost % Monthly Trend
 - `MenuEngineering.js`: Popularity vs Profitability scatter · Top Items by Revenue bar
 - `BestSellers.js`: Top 10 bar
 
 **Daily Purchases vs Sales — 10-day window (`Dashboard.js`):**
+
 - Current month: chart shows only day (today−6) → day (today+3); projected month-end revenue footer still uses full-month trend math
 - Past/closed months: show full actuals as before
 
@@ -2440,10 +2617,12 @@ GRANT ALL ON hr_roster TO authenticated;
 ### S171 — 2026-06-29 — Admin dashboard rebuild + ESLint fixes + login page polish
 
 **ESLint fixes (`src/pages/AdminClients.js`):**
+
 - `[posEndsAt]` — removed unused setter from destructure (POS has no billing UI yet; state initialises from DB)
 - `toggleImsEnabled` / `toggleHrEnabled` — deleted both; dead code, duplicates of the wired-up `handleToggleIms` / `handleToggleHr`
 
 **Admin dashboard rebuild (`src/pages/Dashboard.js`):**
+
 - Query extended to include `ims_enabled`, `hr_enabled`, `is_trial`, `subscribe_requested`, `trial_expires_at`
 - **6 KPI cards** (was 4): Active Properties (with IMS/HR/POS module adoption pills) · Active Today (own card, green pulse, names listed) · Expiring ≤30 Days (turns red + "X critical ≤7 days" when churn risk detected) · No Open Period · MRR + ARR · Trial Signups
 - MRR now sums IMS + HR billing (`ims_ends_at || subscription_ends_at` + `hr_ends_at`); ARR = MRR × 12 shown as sub-line
@@ -2451,6 +2630,7 @@ GRANT ALL ON hr_roster TO authenticated;
 - Trial Signups card: amber border when trials exist, red border + pulsing dot when any trial user clicked "Subscribe"; clicking navigates to `/admin/clients`
 
 **Login page (`src/pages/Login.css`):**
+
 - Modal widened: `max-width` 840px → 1020px (more rectangular landscape shape)
 - All font sizes +1pt (10→11, 11→12, 12→13, 13→14, 16→17, 20→21, 22→23)
 - Height reduced: panel padding 32px → 22px, brand/pitch/highlights/form gaps and margins all tightened
@@ -2458,16 +2638,19 @@ GRANT ALL ON hr_roster TO authenticated;
 ### S170 — 2026-06-29 — Crest HR: Phase 2 Compliance — married TDS, festival TDS, gratuity tracker, final settlement
 
 **TDS engine (`src/modules/hr/payroll/tds.js`):**
+
 - Added `SLABS_2082_83_MARRIED` — married/couple schedule for FY 2082/83: first 3 bands are +1L wider than single (6L/8L/11L vs 5L/7L/10L); the distinction was removed in FY 2083/84 (unified `SLABS_2083_84` already in place)
 - `slabsFor(fyStart, isMarried)` — returns married slabs for FY ≤ 2082, unified slabs for FY ≥ 2083 regardless of marital status
 - `computeMonthlyTds` — added `isMarried` and `festivalBonus` params to the signature
 - `computeBonusTds({ annualTaxable, bonusAmount, isSsf, isMarried, fyStart })` — new export: incremental marginal TDS on lump-sum payments using tax(base+bonus) − tax(base)
 
 **PayrollRun (`src/modules/hr/payroll/PayrollRun.jsx`):**
+
 - Employee fetch now includes `marital_status`
 - `buildRows()` detects `isMarried = emp.marital_status === 'married'` and passes it to `computeMonthlyTds`
 
 **FestivalAllowance (`src/modules/hr/festival/FestivalAllowance.jsx`):**
+
 - Employee fetch now includes `marital_status`, `ssf_enrolled`
 - TDS estimated per employee via `computeBonusTds` using annual basic as the taxable income baseline and marginal rate on the bonus amount
 - 5 stat cards (was 3): Gross Payout, Total TDS (red), Net Payout (green), Employees, Average Gross
@@ -2476,6 +2659,7 @@ GRANT ALL ON hr_roster TO authenticated;
 - Footer note updated explaining TDS computation and married/single schedule
 
 **New: GratuityTracker (`src/modules/hr/gratuity/GratuityTracker.jsx`) — route `/hr/gratuity`:**
+
 - Read-only accrual tracker for all active monthly-paid employees
 - Per-employee: service months, monthly accrual (basic ÷ 12), Labour Act total accrued, SSF-covered portion (3.33% of capped basic × months), net cash liability
 - 4 stat cards: Total Liability (net), Monthly Accrual, Vested Employees, SSF Fund (est.)
@@ -2483,11 +2667,13 @@ GRANT ALL ON hr_roster TO authenticated;
 - Excel export; daily/hourly staff excluded with banner warning
 
 **New: FinalSettlement (`src/modules/hr/settlement/FinalSettlement.jsx`) — route `/hr/settlement`:**
+
 - Pure calculator — no DB writes; inputs: employee, separation reason, last BS working date, leave days, notice served, festival paid this FY
 - Computes: partial-month salary (basic ÷ BS month days × days worked), leave encashment (basic ÷ 26 × days), gratuity (if vested), festival pro-ration (if not paid), notice deduction, advance recovery (auto-fetched outstanding balances), TDS on lump sum via `computeBonusTds`
 - Earnings table + Deductions table + Net payout card with printable output
 
 **Wiring:**
+
 - Routes added to `src/App.js`: `/hr/gratuity` and `/hr/settlement`, both wrapped in `<ModuleGate module="hr">`
 - Nav entries added to `HR_ITEMS` in `src/components/Layout.js`: Gratuity 💰, Final Settlement 🧾
 - Help entries added for Gratuity and Final Settlement with tips in `src/pages/Help.js`
@@ -2496,6 +2682,7 @@ GRANT ALL ON hr_roster TO authenticated;
 **Files:** `src/modules/hr/payroll/tds.js`, `src/modules/hr/payroll/PayrollRun.jsx`, `src/modules/hr/festival/FestivalAllowance.jsx`, `src/modules/hr/gratuity/GratuityTracker.jsx` (new), `src/modules/hr/settlement/FinalSettlement.jsx` (new), `src/App.js`, `src/components/Layout.js`, `src/pages/Help.js`
 
 **Admin Dashboard bug fixes (`src/pages/Dashboard.js`):**
+
 - `loadAdminStats()` query was missing `ims_ends_at`, `hr_ends_at`, `billing_cycle`, `hr_plan` — `getSubStatus()` always fell back to the legacy `subscription_ends_at`, showing wrong subscription badges/expiry for all clients on per-module billing
 - `PLAN_MRR` was `{ starter: 8000, growth: 18000, pro: 25000 }` — corrected to actual plan prices `{ starter: 5000, growth: 8000, pro: 12000 }`
 - `estMRR`, `isPaying`, `expiryIso`, and the "paying clients" count all checked `c.subscription_ends_at` directly, missing `ims_ends_at` — all updated to use `c.ims_ends_at || c.subscription_ends_at`
@@ -2505,6 +2692,7 @@ GRANT ALL ON hr_roster TO authenticated;
 ### S169 — 2026-06-29 — Admin: Billing tab overhaul — module toggles, per-module subscriptions, compact cards
 
 **Modules tab removed; Billing tab consolidated:**
+
 - Modules tab removed from admin client drawer entirely
 - New Modules section at top of Billing tab: on/off toggle switches for Crest IMS, Crest HR, Crest POS (coming soon); toggles instantly save `ims_enabled`/`hr_enabled` to DB
 - Plan pills removed from module toggle rows — plan selection moved to dedicated plan card sections below
@@ -2512,6 +2700,7 @@ GRANT ALL ON hr_roster TO authenticated;
 - Admin Free Trial (1-month) card removed — disconnected legacy mechanism; real trial is the 7-day self-service flow via `register_trial` Edge Function (`is_trial`, `trial_expires_at`, `trial_purge_at`)
 
 **Per-module subscription end dates:**
+
 - `clients` table: new columns `ims_ends_at timestamptz`, `hr_ends_at timestamptz`, `pos_ends_at timestamptz`
 - Billing tab now shows a separate section per enabled module (IMS / HR): plan cards + date picker + quick extend (+7 Days / +1 Month / +3 Months / +1 Year) + Clear button + inline status badge (green / amber / red / Expired)
 - `handleSaveSub` saves all three module dates instead of global `subscription_ends_at`
@@ -2521,6 +2710,7 @@ GRANT ALL ON hr_roster TO authenticated;
 - AuthContext + Layout `allClients` query updated to include the three new columns
 
 **Compact client cards:**
+
 - Removed 3-column module strip (toggles, plan labels) and separate action footer
 - Module status now shown as inline pills in the main row: `IMS · Pro`, `HR · Starter`, `HR · off` (color-coded by plan tier)
 - Manage → button moved into the main row alongside Sub badge + Annual badge
@@ -2528,6 +2718,7 @@ GRANT ALL ON hr_roster TO authenticated;
 - Card height roughly halved; all clients fit without scrolling
 
 **DB migrations:**
+
 ```sql
 ALTER TABLE clients
   ADD COLUMN ims_ends_at timestamptz,
@@ -2542,6 +2733,7 @@ ALTER TABLE clients
 ### S168 — 2026-06-29 — Admin: Billing cycle + corrected plan prices
 
 **Billing cycle (monthly vs annual) added to admin client billing:**
+
 - `clients` table: new `billing_cycle text DEFAULT 'monthly'` column
 - Billing tab: Monthly / Annual toggle above plan selector — "Annual · Save 25%" lights up in accent gold when selected
 - Plan cards now show correct prices matching the public Pricing page: Starter NPR 5,000/8,000 · Growth NPR 6,000/8,000 → wait, corrected: Starter 5k/3.75k · Growth 8k/6k · Pro 12k/9k (monthly/annual)
@@ -2559,6 +2751,7 @@ ALTER TABLE clients
 ### S167 — 2026-06-29 — HR: Annual TDS Certificate
 
 **Annual TDS Certificate (new tab in HR Reports):**
+
 - New "TDS Certificate" tab in `HrReports.jsx` — independent of the monthly period selector
 - Fiscal year dropdown (derived from existing periods via `fiscalYearOf`) + employee dropdown
 - Fetches all finalized payslips for the selected employee + FY, sorted by month in FY order
@@ -2575,6 +2768,7 @@ ALTER TABLE clients
 ### S166 — 2026-06-29 — HR: Insurance premium TDS deductions
 
 **Insurance premium TDS deductions (life + health):**
+
 - `hr_employees`: two new columns — `life_insurance_premium numeric DEFAULT 0`, `health_insurance_premium numeric DEFAULT 0`
 - `tds.js`: `computeMonthlyTds` now accepts `annualLifeInsurance` + `annualHealthInsurance`; caps at NPR 40,000 (life) and NPR 20,000 (health) per Nepal Income Tax Act 2058 Section 12; deducted from `annualTaxable` before slab computation
 - `PayForm.jsx`: new "Tax Deduction Declarations" section in Bank/SSF tab — two number fields (annual NPR amounts, with cap warnings); saved to `hr_employees`
@@ -2590,6 +2784,7 @@ ALTER TABLE clients
 ### S165 — 2026-06-29 — HR: SSF enrollment gate + Advances & Loans ledger
 
 **SSF enrollment gate decoupled (`payrollCompute.js`, `PayrollRun.jsx`, `HrReports.jsx`, `PayForm.jsx`, `EmployeeForm.jsx`):**
+
 - Added `ssf_enrolled boolean DEFAULT false` column to `hr_employees`; auto-migrated existing rows with `ssf_no` set to `true`
 - `payrollCompute.js`: gate now uses `employee.ssf_enrolled` (not `ssf_no`) — SSF computed for all enrolled employees regardless of whether a registration number is on file
 - `PayForm.jsx`: Bank/SSF tab now has an "SSF Enrolled" checkbox (with 11%/20% rate reminder); SSF No. field only shows when enrolled is checked
@@ -2598,6 +2793,7 @@ ALTER TABLE clients
 - Fix: Employer Cost in HR Reports is now accurate even before SSF numbers are entered
 
 **Advances & Loans ledger (new feature):**
+
 - New DB tables: `hr_advances` + `hr_advance_repayments` with RLS
 - New page `src/modules/hr/advances/Advances.jsx` — issue advances/loans, filter by type/status, click row to see repayment history + progress bar, record repayments, settle with confirmation
 - Route `/hr/advances` (ModuleGate hr); nav entry "Advances & Loans 💳"; Help entry added
@@ -2613,6 +2809,7 @@ ALTER TABLE clients
 Connected Google Stitch to Claude Code via MCP (Model Context Protocol).
 
 **What was done:**
+
 - Located the correct Claude Code config file (`~/.claude.json` project `mcpServers` object) and created `.mcp.json` at the project root — the VS Code extension reads `.mcp.json`, not `settings.json`
 - Stitch connected successfully and all 14 MCP tools loaded (`list_projects`, `list_screens`, `get_screen`, `generate_screen_from_text`, etc.)
 - Listed the existing Stitch project "Inventory Management Dashboard" with 5 HTML screens: Stock Count Operation, Item Master List, Dashboard YOLO: Tactile Organic / Command Center / Minimalist Canvas
@@ -2627,6 +2824,7 @@ No code changes. No commit.
 ### S163 — 2026-06-29 — HR: Pay Setup overhaul — dearness, CTC, Cash in Hand, compact calendar
 
 **Pay Setup overhaul (`src/modules/hr/pay/PayForm.jsx`, `src/modules/hr/pay/PaySetup.jsx`):**
+
 - Replaced the old "split from gross" helper with three dedicated fields: **Basic Salary**, **Dearness Allowance (महँगी भत्ता)**, and **Other Allowances** — dearness is stored as a named `hr_salary_components` row (no DB migration needed)
 - Modal widened to 780px; two-column layout — inputs left, live Monthly Summary right
 - Monthly Summary now shows: Basic → Dearness → Other Allowances → Gross → −SSF → **Net (Cash in Hand)** → **Cost to Company (CTC)** (blue) → Employer SSF. CTC = Gross + Employer SSF
@@ -2640,6 +2838,7 @@ No code changes. No commit.
 **payrollCompute.js:** removed stale comment referencing deleted SalaryList.jsx
 
 **BsCalendarPicker compact (`src/components/BsCalendarPicker.js`):**
+
 - Day buttons: `aspectRatio: 1` (square ~40px) → `height: 26px` fixed — reduces popup from ~320px to ~230px tall
 - Popover width capped at 280px regardless of input width; left-edge clamped to viewport
 - `above` threshold 300px → 240px; `bottom` anchor corrected for above-mode; `maxHeight: calc(100vh - 16px)` + `overflowY: auto` prevents viewport clip
@@ -2689,12 +2888,15 @@ No service-worker bump needed (JS-only change). Build clean.
 ### S160 — 2026-06-29 — Login redesign (split layout + trial); signup phone field; full BS calendar picker
 
 **Login page — two-column split layout (`src/pages/Login.js`, `Login.css`):**
+
 - Left panel: brand + tagline **"Smarter menus. Better margins."** + 4 feature highlights (live recipe FC% on every purchase, stock/variance, BS calendar + supplier tracking + payables aging, menu engineering) + the trial signup form. Right panel: clean "Welcome back" sign-in. Vertical divider; stacks vertically on mobile (sign-in on top). Tabs removed entirely; plain `/login` works as a shareable link for both prospects and existing users. `?trial=1` still focuses the trial form first. Layout compressed to fit a single viewport without scrolling.
 
 **Trial signup — phone field:**
+
 - Added required **Phone** field to the trial form, stored on `clients.contact_phone` (Edge Function `register_trial` passes it through). Admin Trial Accounts panel shows the phone as a clickable `wa.me/977…` WhatsApp link for instant outreach.
 
 **Full Bikram Sambat calendar picker (`src/components/BsCalendarPicker.js` — NEW):**
+
 - Visual month-grid picker (Su–Sa headers, click-to-select day, Today highlight, prev/next month nav, optional Clear). Uses `createPortal` + fixed positioning so it never clips inside modals/cards; flips above the trigger near the viewport bottom.
 - **Two modes:** *free* (value = AD ISO `YYYY-MM-DD`, month nav enabled) and *period-locked* (`lockYear`+`lockMonth` → value = day-number, grid pinned to the open period, no month nav — a drop-in for the old `BsDatePicker` dropdown so entries can't escape their accounting period).
 - **Replaced free-mode AD `type="date"` inputs:** PurchaseOrders expected delivery, OutstandingPayables paid date, EmployeeForm date_of_birth / join_date / contract end_date / retirement_date, LeaveManagement start/end (was `BsFullDatePicker`). Dropped "(AD)" labels.
@@ -2722,6 +2924,7 @@ Inserted between P&L and break-even: revenue cost stack bar (CSS flexbox, segmen
 Previously "Enter cost data to calculate" appeared for both zero overheads AND negative contribution margin (FC% > 100%). Now: FC > revenue → "Purchase cost X% FC exceeds revenue — break-even is undefined"; no overheads → "Enter overhead costs above and save to calculate".
 
 **Free trial system (full implementation):**
+
 - **Pricing page** (`src/pages/Pricing.js`) — FAQ button/modal, Starter CTA → `/login?trial=1`, `CONTACT_EMAIL` constant for easy swap, footer email link.
 - **Login page** (`src/pages/Login.js`) — rewritten: detects `?trial=1`, shows two-tab layout (Start Free Trial | Sign In); trial form (Business Name, Your Name optional, Email, Password); calls `register_trial` Edge Function then auto-signs in.
 - **Edge Function** (`supabase/functions/admin-user-ops/index.ts`) — `register_trial` action handled before admin JWT check: creates auth user → client (`is_trial=true`, `plan='starter'`, `trial_expires_at=+7d`, `trial_purge_at=+22d`) → profile; rolls back on partial failure. All other actions still require admin role.
@@ -2730,6 +2933,7 @@ Previously "Enter cost data to calculate" appeared for both zero overheads AND n
 - **AdminClients** (`src/pages/AdminClients.js`) — "Trial Accounts" panel (red border, dark-red gradient header, count badge); per-row: business name, days left/expired, purge deadline, pulsing dot for subscribe_requested; actions: "Convert to Paid" (clears trial flags, opens drawer), "+7 Days" (extends both timestamps), "✓ Dismiss" (clears subscribe flag), "Manage" (opens drawer).
 
 **DB migration required (run in Supabase SQL editor):**
+
 ```sql
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS is_trial boolean DEFAULT false;
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS trial_start_date date;
@@ -2890,6 +3094,7 @@ New owner-facing report (the gap industry sources rank #1: "Menu Price Analysis"
 - Wired the feature flag across `AuthContext` (GROWTH_KEYS), `SettingsContext`, `AdminClients` (Growth group), `App.js` route, `Layout.js` REPORTS nav, and `Help.js`.
 
 **DB migration required:**
+
 ```sql
 ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS menu_repricing boolean;
 ```
@@ -2996,6 +3201,7 @@ Added a **Recipe Categories** tab to Settings (visible to clients with `recipe_c
 - Sub-Recipe / Prep Item is excluded from the user list — it remains system-managed
 
 **DB migration required:**
+
 ```sql
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS recipe_categories text[];
 ```
@@ -3191,6 +3397,7 @@ New standalone **Stock Report** ([src/pages/StockReport.js](src/pages/StockRepor
 - Wired like `reorder_report`: STARTER_KEYS + both DEFAULT_FLAGS + AdminClients Starter group; route in App.js; nav entry in the Reports group ([Layout.js](src/components/Layout.js)).
 
 **DB migration (run in Supabase):**
+
 ```sql
 ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS stock_report boolean DEFAULT false;
 ```
@@ -3239,6 +3446,7 @@ Reworked the **client** dashboard ([src/pages/Dashboard.js](src/pages/Dashboard.
 ### S125 — 2026-06-23 — Item delete: surface blocks + admin force-delete
 
 Deleting an item silently did nothing when the DB rejected it (FK reference) — the error only rendered inside the closed Add/Edit modal. Fixes in [src/pages/Items.js](src/pages/Items.js):
+
 - **Surfaced the failure** via `alert` (list view has no inline error), explaining it's still referenced and even a zero-qty row counts.
 - **Broadened the usage check** (`checkAllUsage`) to also cover `staff_meals`, `requisition_lines`, `vendor_returns` (was only recipes/purchases/opening/closing/wastage), and to skip tables that error rather than break; added `SM`/`RQ`/`VR` to `USAGE_LABELS`.
 - **Admin-only `forceDeleteItem`** — when a referenced item is deleted, an admin gets a force-delete confirm that clears every FK reference (`vendor_returns` → `recipe_ingredients` → `requisition_lines` → `staff_meals` → `wastages` → `opening_stock` → `closing_stock` → `purchase_entries`, in that order) then deletes the item. Non-admins still get "Hide it instead." Triggers audit-log delete rows for the audited tables.
@@ -3290,10 +3498,12 @@ Per-portion **nutrition label** (energy, protein, carbs, fat, sugar, sodium) + *
 - **Gating:** new `nutrition_facts` flag at **Growth** tier (added to `GROWTH_KEYS`, both `DEFAULT_FLAGS`, and the Growth group in AdminClients `FEATURE_GROUPS`) — individually grantable.
 
 **SQL applied in Supabase:**
+
 ```sql
 ALTER TABLE items ADD COLUMN IF NOT EXISTS nutrition jsonb;
 ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS nutrition_facts boolean DEFAULT false;
 ```
+
 `items.nutrition` shape: `{ basis_qty, basis_unit, energy_kcal, protein_g, carbs_g, fat_g, sugar_g, sodium_mg, allergens }`. NULL = no data (counts against a recipe's coverage). No RLS change (both tables already client-scoped).
 
 **Files:** `src/utils/nutrition.js` (new, pure engine — verified: 150 g item = ×1.5 not yield-adjusted, sub-recipe ÷ yield, coverage count), `src/data/nutritionSeed.js` (new, **124-row multi-source library** USDA/IFCT 2017/DFTQC Nepal + `suggestSeeds`/`suggestSeed`), `src/pages/Recipes.js` (join select + detail/live/print panels + **inline per-ingredient nutrition editor Modal** writing to `items.nutrition`, with **library Suggest** + **Open Food Facts fetch**), `src/context/AuthContext.js`, `src/context/SettingsContext.js`, `src/pages/AdminClients.js`, `src/pages/Help.js`. (`src/pages/Items.js` had a Nutrition tab in the first pass — removed when entry moved to Recipe Costing.)
@@ -3311,6 +3521,7 @@ Audit logging is **trigger-based** (`audit_<table>` → `log_audit()`; source-ag
 `log_audit()` is safe to attach anywhere — it ends with `EXCEPTION WHEN OTHERS THEN RETURN NULL`, so a trigger can never break the underlying write; for non-stock tables it reads `NEW.id` + `NEW.client_id` (all HR tables + profiles have both).
 
 **SQL applied in Supabase:**
+
 ```sql
 -- UPDATE added to the two partial triggers
 DROP TRIGGER IF EXISTS audit_wastages ON public.wastages;
@@ -3338,12 +3549,14 @@ CREATE OR REPLACE TRIGGER audit_profiles               AFTER INSERT OR UPDATE OR
 Admins can now point a client login at any client, and broken/missing profile links self-heal.
 
 **Code (`AdminClients.js`):**
+
 - `adminOp` now surfaces the **real** edge-function error (reads `error.context` body) instead of the generic "non-2xx status code", so failures are diagnosable.
 - **Add User reassigns:** an existing email is **moved** to the current client (admin-guarded — refuses `role='admin'` accounts; confirms before moving). Uses the SQL function `find_user_id_by_email` for the email→id lookup (no edge redeploy).
 - **Upsert self-heal:** new-user link and reassign use `upsert` (not `update`), so an auth user with **no `profiles` row** (orphan from before the profile trigger) gets a row created instead of a silent 0-row no-op.
 - **Delete hardened:** stops if the auth deletion fails (no orphaned login keeping the email locked).
 
 **Database (run in Supabase — already applied):**
+
 ```sql
 -- Admin-guarded email→id lookup (reassignment)
 CREATE OR REPLACE FUNCTION public.find_user_id_by_email(p_email text)
@@ -3387,6 +3600,7 @@ GRANT EXECUTE ON FUNCTION public.client_user_emails(uuid) TO authenticated;
 Wastage can now be logged **per day with a reason**, on top of the existing monthly figure.
 
 **Migration (run in Supabase):**
+
 ```sql
 ALTER TABLE wastages ADD COLUMN IF NOT EXISTS bs_day     integer;      -- NULL = monthly catch-all; set = daily entry
 ALTER TABLE wastages ADD COLUMN IF NOT EXISTS reason     text;         -- dropdown value (daily entries)
@@ -3396,6 +3610,7 @@ ALTER TABLE wastages ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now
 **Model:** `wastages` rows with `bs_day = NULL` are the **monthly catch-all** (the existing Wastage tab); rows with a `bs_day` are **daily entries** with a reason. Period total wastage = catch-all + daily, so COGS is unchanged. Existing rows become the catch-all automatically.
 
 **Stock Count (`Stock.js`):**
+
 - New **Daily Wastage** tab — BS day selector, add-entry row (item · qty · reason dropdown: Spoilage / Expiry / Over-prep / Breakage / Spillage / Customer return / Other), that day's entries list with delete + day total, and a "days with wastage" strip showing per-day NPR.
 - The **Wastage tab** now edits only the catch-all (`bs_day IS NULL`); `getUsed`, the Summary tab, and the Excel register all use catch-all + daily. Daily entries are online-only (not in the offline queue).
 
@@ -3426,6 +3641,7 @@ UX pass: every create page now uses a single **floating action button** (fixed b
 New HR feature `/hr/leave` — leave entitlements, requests, and balances, with automatic Attendance integration. Closes the gap where paid/unpaid leave had to be hand-marked day-by-day in the Attendance sheet.
 
 **Tables (migration — run in Supabase):**
+
 ```sql
 CREATE TABLE IF NOT EXISTS hr_leave_types (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -3465,6 +3681,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_leave_requests TO authenticate
 ```
 
 **Page (`/hr/leave`):** three tabs.
+
 - **Requests** — apply via BS date pickers (`BsFullDatePicker`); working days counted excluding Saturdays; admin Approve/Reject/Cancel. Per-row remaining balance shown.
 - **Balances** — employee × leave-type grid (used / annual quota) for the selected BS year; Excel export.
 - **Leave Types** (admin) — inline-editable name / paid / quota / carry-forward / active.
@@ -3482,6 +3699,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_leave_requests TO authenticate
 ### S115 — 2026-06-22 — Add-User Duplicate-Email Handling + Festival Tooltips
 
 **Add User (AdminClients):** trying to add a user whose email already exists (e.g. the admin's own email) failed with a raw Supabase error. Root cause is structural — one login = one profile = one `client_id` + role, so an email can't be both the platform admin and a client user. Rather than demote/lock out the admin, the form now:
+
 - Detects the "already registered" error and shows an actionable message suggesting a **plus-addressed** separate login (e.g. `you+casa@gmail.com` — same inbox, distinct account).
 - Adds an inline hint under the Email field explaining the one-login-one-account rule and the `+name` trick.
 - No edge-function change; admin access is never altered.
@@ -3497,6 +3715,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_leave_requests TO authenticate
 The legally-required annual festival bonus (Dashain / पर्व खर्च) — broadly one month's basic, pro-rated for mid-year joiners.
 
 **DB migration (run in Supabase SQL editor):**
+
 ```sql
 CREATE TABLE IF NOT EXISTS hr_festival_allowances (
   id            uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -3521,6 +3740,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_festival_allowances TO authent
 ```
 
 **FestivalAllowance (`/hr/festival`):**
+
 - Keyed by **BS year + festival name** (default Dashain), not a monthly period. Generate→review→Finalize flow (mirrors Payroll); admin Reopen.
 - **Generate:** per active employee — `monthsWorked = clamp(0..12, full months from join_date to bsToAd(bsYear, 6, 15))`; **monthly** `amount = round(basic × monthsWorked/12)`; **daily/hourly** default 0 (editable). Upsert `onConflict: client_id,employee_id,bs_year,festival_name`.
 - Inline-editable Amount + Note while draft; stat cards (Total / Headcount / Average); register Excel + **bank-transfer Excel/CSV** (generic columns, missing-bank flag).
@@ -3537,6 +3757,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_festival_allowances TO authent
 Turns finalized payroll into filing/disbursement artefacts. **No DB migration** — read-only aggregation over `hr_payslips` + `hr_employees`.
 
 **HrReports (`/hr/reports`):** period selector loads the run + payslips + employees (for bank/SSF/PAN fields). Empty state if no run; amber note if the run is a draft. Four tabs, each with Excel export + print-clean layout:
+
 - **Payroll Summary** — stat cards (Total Gross / Deductions / Net Payable / **Employer Cost** = gross + OT + employer SSF) + by-department table.
 - **SSF Challan** — SSF-enrolled employees only: SSF No · SSF Basic (min(basic, 100k)) · 11% · 20% · 31%, with grand total to deposit and a count of excluded (no-SSF) staff.
 - **Bank Transfer / Salary Disbursement** — Employee · Bank · Account No · Net Pay; missing bank details flagged amber; **Excel + CSV** export (generic columns: Name, Bank, Account No, Amount).
@@ -3555,6 +3776,7 @@ Nav "HR Reports" (📊) under Human Resources; Help HR_FEATURES entry added.
 Replaces the manual TDS field on payslips with an automatic income-tax engine. **No DB migration** — TDS already exists on `hr_payslips` and year-to-date figures are derived from existing columns.
 
 **Tax engine — `src/modules/hr/payroll/tds.js` (pure):**
+
 - Slab sets: **FY 2083/84** unified (1% ≤10L · 10% 10–15L · 20% 15–25L · 27% 25–40L · 29% >40L) and **FY 2082/83** single-person schedule. `slabsFor(fyStart)` picks by fiscal year.
 - `fiscalYearOf(bsYear, bsMonth)` — Nepal FY runs Shrawan (month 4) → Ashadh; returns `{ fyStart, monthInFy }`.
 - `applySlabs(taxable, slabs, isSsf)` — marginal tax; **SSF contributors get the 1% first slab (SST) waived**.
@@ -3563,6 +3785,7 @@ Replaces the manual TDS field on payslips with an automatic income-tax engine. *
 **Decisions (this session):** YTD-projection method; **no insurance** deductions yet; **single schedule only** (no married/single field). So no new employee columns.
 
 **PayrollRun integration:**
+
 - `fetchYtdMap()` sums `(gross − ssf_employee)` and `tds` from **prior finalized** payslips in the same fiscal year (embedded query `hr_payslips → hr_payroll_runs!inner → monthly_periods!inner`, filtered to finalized + earlier months).
 - `buildRows()` now computes TDS per employee via `computeMonthlyTds` and nets it out. TDS is auto-filled but stays **editable inline as an override** while draft; Regenerate recomputes.
 - Column tooltip + footer note updated; Help Payroll tips updated.
@@ -3578,6 +3801,7 @@ Replaces the manual TDS field on payslips with an automatic income-tax engine. *
 HR roadmap session 4 — the keystone. Combines salary structure (S105) + pay basis (S108) + SSF/min-wage (S106–S108) + attendance (S110) into actual pay, frozen as payslips.
 
 **DB migration (run in Supabase SQL editor):**
+
 ```sql
 CREATE TABLE IF NOT EXISTS hr_payroll_runs (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -3613,6 +3837,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_payslips     TO authenticated;
 ```
 
 **Computation — `src/modules/hr/payroll/payrollCompute.js` (pure):**
+
 - `computePayslip(employee, components, attendanceRows, period, tds)` per pay basis:
   - **Monthly:** gross = basic + allowances; absence deduction = `basic ÷ daysInBsMonth × unpaid days` (unpaid = absent + unpaid_leave + ½·half-day); OT = `otHrs × (basic ÷ (days×8)) × 1.5`; net = gross + OT − absence − SSF − other − TDS
   - **Daily:** earned = rate × worked days (present + ½·half); OT = `otHrs × (rate÷8) × 1.5`
@@ -3620,6 +3845,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_payslips     TO authenticated;
   - **SSF only for employees with an `ssf_no`** (11%/20% on capped basic/earned)
 
 **PayrollRun (`/hr/payroll`):**
+
 - Generate (draft) → review register → Finalize (locks, frozen snapshot). Regenerate recomputes from current salary/attendance; admin can Reopen a finalized run.
 - Stat cards (Total Gross / Deductions / Net Payable / Employer SSF); register table with per-row inline **TDS** edit (draft only) + tfoot totals.
 - Per-employee **printable payslip** (modal + `.print-only` block using existing print CSS); **Excel export**.
@@ -3636,6 +3862,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_payslips     TO authenticated;
 HR roadmap session 3. Builds the daily attendance sheet — the data source the future Payroll module needs to compute pay for daily/hourly staff and apply overtime.
 
 **DB migration (run in Supabase SQL editor):**
+
 ```sql
 CREATE TABLE IF NOT EXISTS hr_attendance (
   id           uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -3659,6 +3886,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_attendance TO authenticated;
 ```
 
 **AttendanceSheet (`/hr/attendance`) — new page:**
+
 - Period selector (reuses `monthly_periods`); fetches active/probation employees + the period's attendance once
 - **Mark Attendance tab:** BS day selector (defaults to today in the current month); per-employee status dropdown (Present / Half-day / Absent / Paid Leave / Unpaid Leave / Weekly Off / Holiday), Hours input (hourly staff only), OT hours, Note. Bulk buttons (All Present / All Weekly Off / All Holiday). **Save Day** upserts a complete row set for every active employee (`onConflict: 'employee_id,period_id,bs_day'`)
 - **Saturday auto weekly-off:** derived from `bsToAd(...).getDay() === 6` — Saturdays default to Weekly Off with an amber banner; no holiday calendar stored
@@ -3679,6 +3907,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_attendance TO authenticated;
 **Root cause:** The PWA service worker (`public/service-worker.js`) uses a **cache-first** strategy for JS/CSS. In production that's fine — CRA emits hashed filenames, so a new build = new URL = cache miss = fresh fetch. But the SW was also registered in **development** (`npm start`), where the dev bundle has a *stable* filename. The SW cached the dev bundle once and served it forever, ignoring all subsequent code changes — so the UI "fell back" to whatever was first cached.
 
 **Fix:**
+
 - `src/index.js`: register the service worker **only when `process.env.NODE_ENV === 'production'`**. In development, actively `unregister()` any existing SW and clear all caches — so a dev browser that was already stuck self-heals on next load.
 - `public/service-worker.js`: bumped `CACHE_NAME` `crest-v3` → `crest-v4`. Browsers always re-fetch the SW script itself (bypassing the cache), detect the change, install the new SW, and its `activate` handler deletes the old `crest-v3` cache.
 
@@ -3697,12 +3926,14 @@ Researched Nepal minimum wage (FY 2082/83): NPR 19,550/month = 12,170 basic + 7,
 **Bug 2 — No absolute minimum-wage check.** S106 only validated the basic ≥ 60% *ratio*, never the *amount*. Added warnings for basic/rate below the statutory minimum and gross below NPR 19,550 (monthly).
 
 **Structural gap — part-time/contract on daily/hourly rates had no home.** The engine assumed everyone is monthly-salaried.
+
 - New `pay_basis` column on `hr_employees` (`monthly` / `daily` / `hourly`) — **DB migration required** (see below)
 - New shared constants module `src/modules/hr/payrollConstants.js` (SSF rates+cap, minimum wage by basis, 60% rule, `minRateFor()`)
 - EmployeeForm Salary tab: Pay Basis selector at top; basis-aware label (Basic /month vs Rate /day vs /hour); split helper + allowances + deductions + monthly summary shown **only for monthly**; daily/hourly show a rate field + minimum-rate warning + "paid via Payroll from attendance (coming soon)" note
 - SalaryList: daily/hourly rows show a "per day/hour" badge and their rate spanning the numeric columns ("paid via payroll from attendance"); excluded from monthly payroll totals; stat cards/footer now count monthly employees only; Excel export emits rate + note for non-monthly
 
 **DB migration (run in Supabase SQL editor):**
+
 ```sql
 ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS pay_basis text DEFAULT 'monthly' CHECK(pay_basis IN ('monthly','daily','hourly'));
 ```
@@ -3718,6 +3949,7 @@ ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS pay_basis text DEFAULT 'monthl
 Employers hire on a gross/total figure then split it — the form previously forced bottom-up entry from basic. Added a one-shot calculator.
 
 **EmployeeForm — Salary tab:**
+
 - Collapsible "⚡ Split from gross salary" helper above the Basic Salary field
 - Inputs: Gross (NPR/month) + Basic % (60/70/80/100, 60% floor per Labour Act)
 - Live preview: "→ Basic NPR X · Other Allowances NPR Y"
@@ -3736,15 +3968,18 @@ Deliberately a populate-once helper, not a separate "gross mode" — avoids the 
 Researched current Nepal payroll law (FY 2082/83 and the new FY 2083/84 budget) and corrected the salary engine.
 
 **Research findings (sources in memory):**
+
 - SSF: 11% employee + 20% employer, computed on **basic salary capped at NPR 100,000/month** (the cap was missing in S105)
 - Labour Act: basic salary must be **≥ 60% of gross pay**
 - Income tax FY 2083/84 (effective mid-July 2026): unified single schedule (no married/single split), first slab NPR 10L @ 1%, top rate cut 39% → 29%. SSF contributors get the 1% first-slab tax waived → most F&B staff under ~NPR 83k/month gross pay **zero income tax**. (Informs the future TDS module — not built this session.)
 
 **Fix 1 — SSF cap (NPR 100,000 basic)**
+
 - `EmployeeForm.jsx` + `SalaryList.jsx`: `ssf_base = Math.min(basic, 100000)`; SSF employee/employer computed on `ssf_base` not raw basic
 - SSF auto-row label shows "· capped" when basic exceeds the cap
 
 **Fix 2 — Basic salary 60%-of-gross validation**
+
 - Amber warning under the Basic Salary field when `basic < 0.6 × gross` (gross = basic + allowances)
 
 **Deferred (planned, not built):** TDS module (`/hr/tds`), Festival Allowance (annual 1× basic at Dashain — deliberately kept out of monthly chips to avoid corrupting monthly net), Gratuity accrual tracker.
@@ -3758,6 +3993,7 @@ Researched current Nepal payroll law (FY 2082/83 and the new FY 2083/84 budget) 
 First HR session after Employee Master. Builds the Salary Structure feature (HR roadmap session 2).
 
 **DB migration required (run in Supabase SQL editor):**
+
 ```sql
 CREATE TABLE IF NOT EXISTS hr_salary_components (
   id          uuid    DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -3777,6 +4013,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_salary_components TO authentic
 ```
 
 **EmployeeForm — Salary tab rebuilt:**
+
 - Loads existing `hr_salary_components` on edit (useEffect)
 - Add/remove Allowances (earnings) and Deductions with inline rows; `calc_type` = Fixed NPR or % of Basic (live computed display)
 - Quick-add chips: Housing, Transport, Medical, Food, Grade Pay (earnings); CIT/PF, Advance Recovery, Other (deductions)
@@ -3785,6 +4022,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_salary_components TO authentic
 - Components synced on Save (delete-all + re-insert, same pattern as overheads/wastages)
 
 **SalaryList (`/hr/salary`) — new page:**
+
 - Fetches all employees + all salary components for the client
 - Per-employee computed: Basic / Allowances / Gross / Deductions / Net / SSF Employer
 - Stat cards: Total Gross Payroll, SSF Employee, SSF Employer, Net Payroll
@@ -3800,8 +4038,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_salary_components TO authentic
 Three fixes for the HR Employee Master after first real-world Add Employee attempt.
 
 **Fix 1 — hr_employees RLS policy used `my_client_id()` function (doesn't exist)**
+
 - The original `CREATE POLICY` used `client_id = my_client_id()` — a custom function that was never created, causing all writes to be blocked with "new row violates row-level security policy".
 - Fix: Run the following in Supabase SQL Editor to replace with safe inline subquery pattern (same as all other tables):
+
 ```sql
 DROP POLICY IF EXISTS "client_owns_employees" ON public.hr_employees;
 CREATE POLICY "hr_employees_select" ON public.hr_employees FOR SELECT USING (
@@ -3823,10 +4063,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.hr_employees TO authenticated;
 ```
 
 **Fix 2 — Gender CHECK constraint rejected empty string**
+
 - DB constraint: `CHECK(gender IN ('male','female','other'))`. When no gender is selected the form sends `''` (empty string), which the constraint rejects.
 - Fix: `EmployeeForm.jsx` payload now converts empty strings to `null` for `gender`, `pan_no`, and `citizenship_no` before the DB call (`form.gender || null`).
 
 **Fix 3 — Added Delete Employee (hard delete with double confirm)**
+
 - Added `handleDelete()` function: two `window.confirm` prompts → `supabase.from('hr_employees').delete().eq('id', employee.id)` → `onSave()`.
 - Added **Delete** button in the form footer next to the existing Deactivate button. Only visible in edit mode.
 - Hard delete — row is permanently removed. Future linked tables (payroll, leave, etc.) will cascade-delete automatically via `ON DELETE CASCADE` on the FK.
@@ -3842,6 +4084,7 @@ Full rewrite of `src/pages/Help.js` — the Module Guide tab is now module-aware
 **Problem:** The previous Help page had a flat MODULES array with all features listed in order of plan tier, regardless of which modules the client had enabled. A client with only IMS would still see Crest HR features listed, and there was no visual distinction between features the client could access vs features locked behind a higher plan.
 
 **Change — Module Guide tab:**
+
 - Added `useAuth()` import to extract `imsEnabled`, `hrEnabled`, `plan`, `isAdmin`
 - Replaced flat `MODULES` array with two structured collections:
   - `IMS_TIERS`: array of 4 tiers — Core (All Plans), Starter Plan, Growth Plan, Pro Plan — each containing their feature entries (icon, name, guide text, tips)
@@ -3864,19 +4107,23 @@ Full rewrite of `src/pages/Help.js` — the Module Guide tab is now module-aware
 Full cross-check of all pages, feature functions, and logic. No new features — pure bug fixes.
 
 **Bug 1 — Dashboard.js: `canSales`/`canReorder` wrong for Starter plan users**
+
 - `canSales = isAdmin || isPremium || isFeatureEnabled('sales_entry')` evaluated to `false` for Starter users because `isFeatureEnabled` (SettingsContext) only returns `true` for admin or premium (Growth/Pro) users. But `sales_entry` is in `STARTER_KEYS` — all plans should see Revenue, FC%, Net Margin, and related charts.
 - Same bug for `canReorder` (`reorder_report` ∈ `STARTER_KEYS`).
 - Fix: replaced all four `can*` variables with `hasFeature(key)` from AuthContext, which correctly respects STARTER_KEYS/GROWTH_KEYS/PRO_KEYS tier logic. Removed now-unused `useSettings` import and `isPremium` destructure from Dashboard.
 
 **Bug 2 — AdminClients.js: `handleSaveHr` wrote stale `hr_enabled` snapshot**
+
 - `ClientDrawer` captured `hr_enabled` in a read-only `useState` snapshot at drawer-open time. If the card toggle changed `hr_enabled` while the drawer was open, clicking Save in the Modules tab would write the stale snapshot value back to the DB, overwriting the toggle's change.
 - Fix: `handleSaveHr` now only saves `{ hr_plan: hrPlan }`. The `hr_enabled` flag is owned exclusively by the card toggle (`toggleHrEnabled`) — the drawer Modules tab only controls plan tier.
 
 **Bug 3 — Stock.js: Staff Meals tab always visible regardless of plan**
+
 - The `TABS` array included `{ id: 'staff_meal', ... }` unconditionally. `staff_meals` is a Growth-plan feature — Starter users should not see or use this tab.
 - Fix: added `hasFeature` to `useAuth()` destructure; the `staff_meal` entry is now spread into TABS only when `hasFeature('staff_meals')` is true.
 
 **Bug 4 — Help.js: No HR / Employees documentation**
+
 - The HR Employee Master (S100) and HR module (S101) were never documented in the Help page, violating the project rule "update Help after every new feature".
 - Fix: added `Employees (HR)` entry to the Module Guide MODULES array with full guide text and 4 tips. Added `'Crest HR'` plan badge case (blue `#60a5fa`) to the plan badge colour renderer alongside the existing Pro/Growth+/Starter+ cases.
 
@@ -3887,13 +4134,16 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ### S101 — 2026-06-21 — Module Access Control: IMS Toggle + AdminClients Redesign + Conditional Dashboard
 
 **DB migration (run S101):**
+
 - `ALTER TABLE clients ADD COLUMN IF NOT EXISTS ims_enabled boolean DEFAULT true` — existing clients unaffected (null treated as true via `?? true` fallback)
 
 **EmployeeForm.jsx (polish):**
+
 - Added `fontFamily: 'inherit'` to the `inp` style constant → date/number inputs now use Georgia (brand font) instead of browser default
 - Renamed "Citizenship No." → "National Identity No." (placeholder: "NID / Citizenship No."); DB column `citizenship_no` unchanged
 
 **AdminClients.js — full redesign:**
+
 - Replaced flat table with **card-per-client layout** — each card has: header (name, sub badge, last seen, contact), 3-column module strip, footer actions
 - **Module strip (IMS / HR / POS):** each column shows toggle switch + current plan; toggle fires immediately (no Save needed for on/off)
 - `toggleImsEnabled()`: confirmation dialog when disabling IMS ("No data is deleted. Re-enabling restores full access instantly."); uses `client.ims_enabled !== false ? false : true` to safely handle null legacy rows
@@ -3901,19 +4151,23 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 - **Modules tab in drawer** redesigned: purely plan-tier selectors (IMS plan / HR plan / POS plan — Coming Soon), with individual **Save** buttons per module (`handleSaveIms`, `handleSaveHr`)
 
 **AuthContext.js:**
+
 - Added `ims_enabled` to `clients` select query
 - Exposed `imsEnabled`: `isAdmin || (profile?.clients?.ims_enabled ?? true)` — admin always true; `?? true` ensures null legacy rows = on
 
 **Layout.js:**
+
 - Imports `imsEnabled` from `useAuth()`
 - Entire IMS nav block gated on `imsEnabled` — clients with IMS off see no IMS pages in sidebar
 
 **ModuleGate.js (new — `src/components/ModuleGate.js`):**
+
 - Route-level guard: `isAdmin` always passes; `module="ims"` redirects to `/dashboard` if `!imsEnabled`; `module="hr"` redirects if `!hrEnabled`
 - Applied to every IMS route and the HR `/hr/employees` route in App.js
 - IMS + PremiumGate stacked: `<ModuleGate module="ims"><PremiumGate ...><Page /></PremiumGate></ModuleGate>`
 
 **Dashboard.js — conditional rendering:**
+
 - `imsEnabled && hrEnabled` both read from `useAuth()`
 - `loadStats()` (IMS data fetch) only called when `imsEnabled`; otherwise `setLoading(false)` immediately
 - `loadHrStats()` fetches `hr_employees` (total / active / probation / basic_salary sum) when `hrEnabled`
@@ -3922,6 +4176,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 - **Both off:** "No modules enabled — contact your consultant to activate your subscription." message
 
 **Toggle safety — data integrity:**
+
 - Toggling IMS off sets `ims_enabled = false` only; zero data deleted, zero cascade
 - Re-enabling restores full access instantly (just a boolean flip)
 
@@ -3934,26 +4189,31 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 **Architecture confirmed:** Crest Suite is ONE React app, ONE Supabase project, ONE Vercel deployment. Three modules (IMS, HR, POS) controlled by per-client feature flags. Sell individually or as a bundle.
 
 **DB migrations (run S100):**
+
 - `ALTER TABLE clients ADD COLUMN hr_enabled boolean DEFAULT false, ADD COLUMN hr_plan text DEFAULT null`
 - `CREATE TABLE hr_employees` — 24 columns: identity (code, name, gender, DOB, PAN, citizenship), employment (designation, department, type, join_date, end_date, status), contact (phone, email, address, emergency contact), banking (bank name/account/branch), SSF no., basic_salary, notes
 - RLS: `client_id = my_client_id()` policy on hr_employees
 
 **AuthContext.js:**
+
 - `clients` select query extended to include `hr_enabled`, `hr_plan`
 - Context now exposes `hrEnabled` (true for admin, or `clients.hr_enabled` for client) and `hrPlan`
 
 **AdminClients.js — Modules tab (initial):**
+
 - New **Modules** tab added to client drawer (between Users and Billing)
 - Shows all three modules: Crest IMS (plan selector), Crest HR (toggle + plan selector), Crest POS (coming soon)
 - `handleSaveModules()` saves `plan`, `hr_enabled`, `hr_plan`; Billing tab = subscription/trial only
 - *(Note: card layout + individual Save buttons + IMS toggle added in S101)*
 
 **Layout.js:**
+
 - Imports `hrEnabled` from `useAuth()`
 - HR nav section renders below IMS nav when `hrEnabled && (!isAdmin || adminViewClientId)`
 - Shows: Human Resources section header + Employees link (`/hr/employees`)
 
 **HR Session 1 — Employee Master:**
+
 - `src/modules/hr/employees/EmployeeList.jsx` (new): stat cards (total / active / basic payroll), search input, status filter tabs (All / Active / Probation / Resigned / Terminated / Inactive), table with code / name / designation / department / type / join date / basic salary / status badge / Edit button
 - `src/modules/hr/employees/EmployeeForm.jsx` (new): slide-in drawer, 4 tabs:
   - Personal — code, name, gender, DOB, PAN, citizenship, phone, email, address, emergency contact
@@ -3964,6 +4224,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 - `App.js`: `import EmployeeList` + `<Route path="/hr/employees" element={<EmployeeList />} />`
 
 **How to enable HR for a client:**
+
 1. `/admin/clients` → open client drawer → **Modules** tab
 2. Toggle Crest HR on → select plan → **Save Modules**
 3. Client re-logs in → Human Resources → Employees appears in sidebar
@@ -3975,21 +4236,25 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ### S99 — 2026-06-21 — Cross-Client Data Leak Fixes + Admin Impersonation + Bug Fixes
 
 **recipe_ingredients cross-client data leak (no client_id column):**
+
 - `recipe_ingredients` has no `client_id` — was being fetched with no filter, returning all clients' ingredient data
 - Fix pattern: first fetch client-scoped recipes, extract `recipeIds`, then fetch `recipe_ingredients.in('recipe_id', recipeIds)`
 - Applied to: `Recipes.js`, `Variance.js`, `ReorderReport.js`, `ShrinkageReport.js`, `TheoreticalVariance.js`
 - `Dashboard.js`: parallel fetch retained (performance), post-load JS filter using `clientRecipeIdSet`
 
 **Admin impersonation bug (effectiveClientId pattern):**
+
 - 7 pages were using `clientId` directly — admins (who have no `client_id` of their own) saw empty data
 - Fix: `const effectiveClientId = clientId || profile?.client_id` on every affected page
 - Applied to: `BestSellers.js`, `DeadStock.js`, `VatReport.js`, `WastageReport.js`, `RecipeMargin.js`, `NonVatReport.js`, `PeriodComparison.js`
 
 **MonthlySummary tfoot column offset:**
+
 - `tfoot` had 9 `<td>` cells vs 10 `<thead>` columns — Staff Meals total was missing, shifting all totals right of Wastage under wrong headers
 - Fix: inserted Staff Meals `<td>` in correct position; updated COGS formula text to include "Staff Meals"
 
 **Layout.js nav plan flag corrections:**
+
 - `/sales` (Sales Entry): `minPlan: 'growth'` → `'starter'` — Sales Entry is a Starter feature
 - `/payments` (Payment Summary): `minPlan: 'growth'` → `'starter'` — Payment Summary is a Starter feature
 
@@ -4000,11 +4265,13 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ### S94 — 2026-06-20 — Help Page: All 28 Modules + Corrected Pricing
 
 **Module Guide expanded from 9 to 28 modules (`src/pages/Help.js`):**
+
 - Every page in the app now has a full entry with guide text, tips, and a colour-coded plan badge: no badge = All plans; grey `Starter+`; green `Growth+`; purple `Pro`
 - Newly documented: Payment Summary, Annual Summary, Reorder Report, VAT Report, Non-VAT Report, Wastage Report, Outstanding Payables, Budget vs Actual, Requisitions, Dead Stock, Recipe Margin, Best Sellers, Purchase Orders, Period Comparison, Shrinkage Report, Menu Engineering, FIFO, Vendor Report, Supplier Price Tracker, Overheads, Theoretical Variance
 - Updated existing: Stock Count now describes all 4 tabs (Opening / Closing / Wastage / Staff Meals); Purchases notes bill-level discount
 
 **Pricing tab corrections:**
+
 - Prices fixed: Starter NPR 5,000 / Growth 8,000 / Pro 12,000 (monthly); 3,750 / 6,000 / 9,000 (annual)
 - "Save 40%" → "Save 25%" on annual billing toggle
 - Starter feature list expanded to 14 items (was 6 — was only listing Basic-tier features)
@@ -4013,6 +4280,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 **Monthly Workflow — Sales Entry plan badge corrected:** Growth+ → Starter+
 
 **Outstanding Payables — Partial Payment Ledger:**
+
 - Added `payable_payments` table: one row per payment installment, FK to `purchase_entries(id) ON DELETE CASCADE`
 - RLS policy joins through `purchase_entries → monthly_periods → client_id`
 - New `Paid History` tab added to Outstanding Payables page
@@ -4029,6 +4297,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ### S98 — 2026-06-21 — Plans & Pricing + Help: Title Case Standardisation
 
 **Capitalization audit — all feature list items standardised to Title Case:**
+
 - `src/pages/Pricing.js`: fixed 20 items across `STARTER_FEATURES`, `GROWTH_EXTRAS`, `PRO_EXTRAS`
   - Examples: `'Vendor management'` → `'Vendor Management'`, `'Best & Worst Sellers analysis'` → `'Best & Worst Sellers Analysis'`, `'FIFO / expiry tracking'` → `'FIFO / Expiry Tracking'`
 - `src/pages/Help.js`: fixed 33 items across its own `STARTER_FEATURES`, `GROWTH_EXTRAS`, `PRO_EXTRAS` lists
@@ -4043,6 +4312,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ### S97 — 2026-06-21 — PWA Offline Stock Count (IndexedDB + Sync Queue)
 
 **Offline-first stock counting (no DB change):**
+
 - `src/utils/offlineQueue.js` (new): IndexedDB wrapper (`crest-offline` DB, 5 object stores)
   - `items_cache`, `categories_cache`, `periods_cache` — full list cache, keyed by `client_id`
   - `stock_cache` — full stock data snapshot (stockData + purchases + returns + requisitioned), keyed by `period_id`
@@ -4062,6 +4332,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
   - Mobile cards: dashed amber border (`mobile-stock-card.pending`) for items with queued offline entries
 
 **Help page updates (same session):**
+
 - `Mobile App` module added (All Plans, no badge) — PWA install instructions + offline counting flow + banner/badge explanations
 - `Dashboard` module added (All Plans) — was missing entirely
 - `Settings` module added (Starter+) — was missing entirely
@@ -4078,6 +4349,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ### S96 — 2026-06-21 — GHC Logo + Mobile-First Stock Count UX
 
 **GHC gold hexagon logo added:**
+
 - `GHC.png` (gold hexagon brand asset) moved from repo root to `src/assets/logo.png`
 - Login page: replaced `⬡` placeholder with `<img>` using the real logo
 - Sidebar: replaced `⬡` fallback (shown when no `settings.logo_url`) with the real logo
@@ -4085,6 +4357,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 - Browser tab favicon updated in `public/index.html` to reference `logo192.png` (PNG, replaces default CRA `.ico`)
 
 **Mobile-first Stock Count UX (no DB change):**
+
 - `Layout.js` / `Layout.css`: responsive sidebar added — sidebar hides on viewports <768px; hamburger ☰ button (position fixed, top-left) slides the sidebar in; overlay tap closes it; all NavLinks close sidebar on tap
 - `Stock.js` / `Stock.css` (new): `isMobile` state via `window.innerWidth` + resize listener; on mobile, entry tabs (Opening / Closing / Wastage / Staff Meals) switch from table layout to:
   - Full-width search input
@@ -4103,6 +4376,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ### S95 — 2026-06-21 — Outstanding Payables Bug Fixes + Vercel Cache Fix
 
 **payable_payments RLS fix:**
+
 - Initial RLS policy used a two-level subquery (`purchase_entries → monthly_periods → client_id`) which caused 403 permission denied errors on both SELECT and INSERT
 - Fix: added `client_id` column directly to `payable_payments` (same denormalized pattern as `budgets`, `overheads`)
 - Dropped old policy, created new simple `client_id = (SELECT client_id FROM profiles WHERE id = auth.uid())` policy
@@ -4111,15 +4385,18 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 - **DB migration run ✓** (`ALTER TABLE payable_payments ADD COLUMN client_id` + new RLS policy + re-GRANT)
 
 **Outstanding Payables page-hang on browser refresh fixed:**
+
 - `useEffect` was watching `[clientId]` — regular client users never have `clientId` set (they use `profile.client_id`), so `effectiveClientId` was always undefined on mount and `load()` never fired
 - Fixed by changing dependency to `[effectiveClientId]`
 
 **Vercel cache fix (`vercel.json` added):**
+
 - Normal browser refresh was serving stale `index.html` from CDN cache → old JS bundle → old UI (e.g. Add Purchase button in wrong position)
 - Hard refresh (Ctrl+Shift+R) bypassed cache and loaded correct code
 - Fix: `vercel.json` sets `Cache-Control: no-cache, no-store, must-revalidate` on `/index.html` so it is always fetched fresh; content-hashed JS/CSS assets remain long-cached
 
 **VAT Report — returns now reflected:**
+
 - VAT report previously only queried `purchase_entries`; `vendor_returns` were invisible
 - Now fetches `vendor_returns` in parallel, filters to those where `purchase_entries.vat_inclusive = true`
 - Entries tab: new red "VAT-Inclusive Returns" section below purchases with `−qty / −Base / −VAT Reversed / −Total` columns and a net summary row
@@ -4136,6 +4413,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ### S93 — 2026-06-20 — Staff Meals Tracking + Purchase Rate Modal Fix
 
 **Staff Meals tracking (new feature):**
+
 - New `Staff Meals` tab in Stock Count alongside Wastage — enter qty consumed by staff/comps per item per period
 - New DB table `staff_meals` (period_id, item_id, qty, type CHECK IN ('staff','comp'))
 - Formula change across Stock, Variance, Monthly Summary: Used = Opening + Net Purchases − Wastage − **Staff Meals** − Closing
@@ -4154,6 +4432,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 **Purchase Rate Update — Multi-Item Modal:**
 
 **Rate change detection now covers all items in a bill:**
+
 - Previously: after saving a bill, only the first item with a changed rate triggered a toast prompt; the rest were silently skipped
 - Now: all changed items are collected, then shown in a centered checkbox modal — all pre-checked (opt-out model)
 - "Update N items" applies only checked items; "Skip all" dismisses without changes
@@ -4165,6 +4444,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ---
 
 **Plan structure alignment (S93 continuation):**
+
 - Audited all three sources of plan gating (AuthContext.js STARTER/GROWTH/PRO_KEYS, App.js PremiumGate minPlan, AdminClients.js FEATURE_GROUPS + DEFAULT_FLAGS) against canonical Feature Access modal screenshot
 - Fixed `minPlan` in App.js: `/sales` and `/payments` corrected from Growth → Starter; `/settings` confirmed Starter
 - Moved `/purchase-orders` route from the "Basic — all users" comment block to the Growth section in App.js (was gated correctly but visually misplaced)
@@ -4176,6 +4456,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ---
 
 **Settings — Sub-Recipe Codes tab hidden for Starter clients:**
+
 - Sub-Recipe Codes tab was visible to all clients even though sub-recipes require `recipe_costing` (Growth+)
 - Added `hasFeature('recipe_costing')` check to the TABS filter
 - Starter clients now see: Thresholds | Item Codes | Vendor Codes | Theme
@@ -4188,6 +4469,7 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 ### S92 — 2026-06-20 — Feature Access Modal Redesign + Feature Flag Fixes
 
 **Feature Access modal (standalone, per-client):**
+
 - Removed Feature Access tab from ClientDrawer; replaced with "Features ⊞" button per client row in the clients table
 - Modal opens standalone at `min(1120px, 96vw)` with 4-column CSS grid layout (Core / Starter / Growth / Pro) — no vertical scroll
 - Plan-included features locked ON (non-clickable, cursor: default) with a "Plan" badge in tier color
@@ -4195,20 +4477,24 @@ Full cross-check of all pages, feature functions, and logic. No new features —
 - Feature rows above plan tier show "Override" badge (gold) when explicitly granted by admin
 
 **Plan tier reorganization:**
+
 - `sales_entry` and `payment_summary` moved from Growth to Starter tier
 - `requisitions` moved from add-on to Growth tier (alongside `purchase_orders`)
 - Add-on tier eliminated entirely
 - `AuthContext.js` `STARTER_KEYS` / `GROWTH_KEYS` updated to match
 
 **Feature flag bug fixes:**
+
 - `SettingsContext.js` `saveFeatureFlags`: added explicit `{ error }` check on both update and insert paths — Supabase-js v2 never rejects promises, errors were swallowed silently
 - `hasFeature` in `AuthContext.js`: removed `flagVal === false` revoke check — plan-granted features can no longer be revoked by admin flag
 - `DEFAULT_FLAGS` in `AdminClients.js`: all values changed from `false` to `null` (no override by default)
 
 **Add Purchase button relocated:**
+
 - Moved from page header to same row as "All Days / All Items" filters, right-aligned
 
 **DB migration required (run in Supabase SQL Editor if not already done):**
+
 ```sql
 ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS annual_summary boolean;
 ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS outstanding_payables boolean;
@@ -4233,6 +4519,7 @@ BEGIN FOREACH col IN ARRAY cols LOOP EXECUTE format('ALTER TABLE feature_flags A
 **Commits:** `0cca7b7`, `9610d21`, `f9f4896`
 
 **S92 cross-check (same date):**
+
 - Full page-by-page audit of all 37 pages and route/navigate calls
 - Fixed `Dashboard.js`: Wastage Value KPI card navigated to `/wastage` (404) → corrected to `/wastage-report`
 - Noted `is_sub_recipe` and `yield_pct` as undocumented columns on `items` table (DB schema memory updated)
@@ -4242,10 +4529,12 @@ BEGIN FOREACH col IN ARRAY cols LOOP EXECUTE format('ALTER TABLE feature_flags A
 ### S91 — 2026-06-20 — Purchases: Bill-Form Redesign, VAT Fix, Daily Register + Items Filter
 
 **VAT formula corrections:**
+
 - `VatReport.js`: stored rates are ex-VAT bases (NetRate on vendor bill), not VAT-inclusive. Fixed all formulas from `total ÷ 1.13` to `base × 0.13`. Columns reordered to Base (ex-VAT) → VAT (13%) → Total (incl. VAT). Stat cards now show Grand Total = what was actually paid. Excel export updated to match.
 - `Purchases.js` group header: VAT hint was using `× 13/113` (extractive) — reverted to `× 0.13` (additive) matching vendor bill's "Tax Collected" figure.
 
 **Purchase form redesigned to match vendor bill layout:**
+
 - Rate field now takes **ex-VAT NetRate** (as printed on bill), not VAT-inclusive price. Removed `/1.13` division from `saveBill()` and rate-update check.
 - Added **Amount column** (qty × rate for non-VAT; qty × rate × 1.13 for VAT items — what you actually pay).
 - VAT hint changed from `ex-VAT: X` → `+VAT: X → total Y per unit`.
@@ -4253,17 +4542,20 @@ BEGIN FOREACH col IN ARRAY cols LOOP EXECUTE format('ALTER TABLE feature_flags A
 - Footer redesigned to 3-line bill breakdown: **Subtotal (ex-VAT) / VAT (13%) / Grand Total** matching the vendor's bill totals exactly.
 
 **Bill-level discount added:**
+
 - New `Discount (NPR)` input in the bill footer — deducted from Grand Total.
 - Stored as `discount_amount` column on every row in the group (denormalized like `purchase_group_id`).
 - Grouped bill view shows net Grand Total with red `−Disc: X` line below.
 - Edit flow loads discount from DB.
 
 **SQL required:**
+
 ```sql
 ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2) DEFAULT 0;
 ```
 
 **Daily Purchase Register tab added to Purchases page:**
+
 - New "Daily Register" tab — matrix view: rows = items (grouped by category), columns = days of the month.
 - Purchased days highlighted in amber with base-unit qty; empty days show `·`.
 - Columns: S.No | Item Name | UOM | Day 1 … Day N (P.Qty / Rate / Per UOM / Opening removed per user request).
@@ -4271,6 +4563,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12
 - Opening stock fetched from `stock_counts` on tab switch (kept in state, used for Excel export).
 
 **Items page — "With Conversion" filter:**
+
 - Toggle button next to the search box; when active (teal) floats all items with `purchase_unit + conversion_factor > 1` to the top of the list.
 
 **Files:** `src/pages/Purchases.js`, `src/pages/VatReport.js`, `src/pages/Items.js`  
@@ -4291,6 +4584,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12
 - `+VAT: NPR X.XX` shown below group total when any item in the group has VAT.
 
 **SQL required (run once in Supabase SQL Editor):**
+
 ```sql
 ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS purchase_group_id UUID;
 DO $$
@@ -4310,6 +4604,7 @@ ALTER TABLE purchase_entries ALTER COLUMN purchase_group_id SET DEFAULT gen_rand
 ```
 
 **Cross-page bug fixes (caught via audit):**
+
 - `SupplierPriceTracker.js`: removed `per_uom_rate` from `.update()` payload — it's a generated column, the write was silently failing.
 - `ShrinkageReport.js`, `Variance.js`, `TheoreticalVariance.js`, `MonthlySummary.js`, `AnnualSummary.js`: added `.eq('is_sub_recipe', false)` to items fetch — sub-recipe mirror items were leaking into cost calculations.
 
@@ -4362,6 +4657,7 @@ SR items are hidden from: Item Master, Purchases, Purchase Orders, Requisitions,
 "Kitchen Production" removed from default category list — pre-made purchased items go under Groceries; in-house made items become Sub-Recipes.
 
 **SQL required (run once in Supabase SQL Editor):**
+
 ```sql
 ALTER TABLE items ADD COLUMN IF NOT EXISTS is_sub_recipe boolean DEFAULT false;
 ALTER TABLE recipes ADD COLUMN IF NOT EXISTS linked_item_id uuid REFERENCES items(id);
@@ -4390,6 +4686,7 @@ Added "Show password" checkbox below the password field on the login page. Toggl
 - **Shrinkage Report** (`/shrinkage`, Pro) — Multi-period unexplained stock loss analysis. Computes variance (actual used − theoretical) across last 3/6/12 closed periods per item. Only items with recipe coverage included. Status badges: Consistent (≥67% of periods flagged), Occasional (2+ periods), Once, Clear. Sorted by total loss value NPR.
 
 **SQL required for Outstanding Payables (run once in Supabase SQL Editor):**
+
 ```sql
 ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ```
@@ -4402,6 +4699,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S83 — 2026-06-20 — Crest Suite Scaffold + IMS Pricing Corrected
 
 **Scaffolded Crest Suite module structure** based on `CREST_SUITE_PROJECT_CONTEXT.md`:
+
 - `src/modules/{ims,pos,hr}/` — 28 sub-directories with `.gitkeep` files
 - `src/shared/hooks/` — `useClientFeatures.js`, `useBS.js`, `index.js`
 - `src/shared/constants/` — `leaveTypes.js`, `taxSlabs.js` (computeAnnualTDS/Monthly), `ssfRates.js` (computeSSF), `shiftTypes.js`, `index.js`
@@ -4419,6 +4717,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S81 — 2026-06-20 — Getting Started Guide Expanded
 
 **Rewrote Help → Getting Started tab (`src/pages/Help.js`)**
+
 - Added welcome card with plain-English intro and the COGS formula highlighted in a callout box.
 - First-Time Setup steps now include a "Why this matters" line per step + Growth+ plan badges on relevant steps.
 - Monthly Workflow steps now note which are ongoing (steps 1–4) vs month-end (steps 5–9).
@@ -4432,6 +4731,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S80 — 2026-06-19 — PWA Icons Updated
 
 **Replaced default CRA icons with Crest gold hexagon logo (`public/`)**
+
 - `logo192.png`, `logo512.png`, `favicon.ico` all regenerated from `GHC.png` source file.
 - Icons use dark navy (`#0f1117`) background with logo centered at 84% of canvas (8% padding each side — maskable safe zone compliant).
 - Used `sharp` npm package for correct alpha compositing; uninstalled after use.
@@ -4445,6 +4745,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S79 — 2026-06-19 — Admin: Clear Audit Logs
 
 **Clear All button on Audit Log page (`src/pages/AuditLog.js`)**
+
 - Added `clearLogs()` function — builds filters matching the active Client / Area / Time selectors and calls a Supabase RPC to delete matching rows.
 - Direct `DELETE` on `audit_logs` was blocked by RLS → switched to `supabase.rpc('admin_clear_audit_logs', {...})` with a `SECURITY DEFINER` Postgres function that bypasses RLS.
 - "✕ Clear Logs" button appears in page header (red ghost style, next to Refresh) only when logs are visible.
@@ -4460,6 +4761,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S78 — 2026-06-19 — Table Column Padding Tightened
 
 **Reduced horizontal padding on all data tables (`src/components/Layout.css`)**
+
 - `table.data-table th` and `td` horizontal padding reduced: `14px → 5px`.
 - Vertical padding unchanged (`11px`) — only column spacing tightened.
 - Applies globally to all tables in the app (Item Master, Purchases, Stock, Vendors, Reports, etc.).
@@ -4483,6 +4785,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S76 — 2026-06-19 — Purchases Multi-Row Bill Entry Form
 
 **Redesigned Add Purchase form — bill-header + line-items (`src/pages/Purchases.js`)**
+
 - Replaced single-item-at-a-time entry with a two-section bill form matching real-world purchasing workflow.
 - **Header row** (shared across all items on the bill): Vendor · BS Day · Invoice Ref · Payment Method.
 - **Line table** (one row per item): Item dropdown (auto-fills rate from item master) · Qty (shows UOM, converts to base units if CF set) · Rate (shows ex-VAT amount below when VAT ticked, line total in gold) · Expiry Date · Shelf Life in days (auto-calculates expiry from header day; updates all lines when header day changes) · VAT checkbox per line (each item independently taxable) · × remove row.
@@ -4499,12 +4802,14 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S75 — 2026-06-19 — PO Admin Delete · Deploy to Vercel
 
 **PO delete restricted to admin only (`src/pages/PurchaseOrders.js`)**
+
 - Delete button now only visible when `isAdmin = true` — client users see no delete button at all.
 - Admin can delete any PO status (Draft, Sent, Partial, Received, Cancelled), not just drafts.
 - Cleanup order: deletes `purchase_order_items` first (FK constraint), then `purchase_orders`.
 - Non-draft deletions show a warning that linked purchase entries are not affected.
 
 **First production deployment to Vercel**
+
 - All changes since initial commit (S62–S73) committed and pushed to `xrestha/crest-inventory` on GitHub.
 - Vercel auto-deployed at `https://crest-inventory.vercel.app`.
 - Environment variables set in Vercel dashboard: `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY`, `REACT_APP_SUPABASE_SERVICE_ROLE_KEY` (legacy anon/service_role keys).
@@ -4517,6 +4822,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S74 — 2026-06-19 — First Production Deployment to Vercel
 
 **App deployed to Vercel — now live at `https://crest-inventory.vercel.app`**
+
 - Committed all changes since initial commit (S62–S73) in one bundle: 59 files, 18,040 insertions.
 - Pushed to `origin/master` (GitHub: `xrestha/crest-inventory`) — Vercel auto-deployed on push.
 - Environment variables set in Vercel dashboard:
@@ -4535,6 +4841,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S73 — 2026-06-19 — Dashboard Locked KPI Cleanup
 
 **Hide locked KPIs from client dashboard instead of showing blurred lock overlays (`src/pages/Dashboard.js`)**
+
 - Removed `LockedSection` component entirely — the blurred padlock overlay is gone.
 - Revenue, Food Cost %, Costed Recipes, Variance, and Reorder KPI cards now render `null` when the client's plan doesn't include them, instead of showing a greyed-out locked placeholder.
 - Row 1 and Row 2 KPI grids changed from `repeat(4, 1fr)` to `repeat(auto-fit, minmax(200px, 1fr))` — remaining visible cards expand naturally to fill the row with no empty slots.
@@ -4548,13 +4855,16 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S72 — 2026-06-19 — PurchaseOrders Select Theming · SW Cache Bump
 
 **PurchaseOrders dropdowns — browser-default white appearance fixed (`src/pages/PurchaseOrders.js`)**
+
 - 5 selects were unstyled: period header selector (`filter-select` — undefined class), vendor in PO form, period in PO form, item-per-line in PO form, payment method in receive panel.
 - Fixed: all converted to `className="form-select"`. Inline style on item select replaced with `className="form-select" style={{ width: '100%' }}`.
 
 **Service worker cache bump (`public/service-worker.js`)**
+
 - Bumped `CACHE_NAME` from `crest-v2` → `crest-v3` to evict cached JS bundles and make the new class names visible in browser.
 
 **Audit Log access verified (S71)**
+
 - Admin can see Audit Log while viewing a client workspace — expected, `isAdmin` remains true for the admin account regardless of which client is being viewed.
 - Confirmed: real client users cannot see Audit Log — link absent from sidebar, direct URL redirects to `/dashboard` via `ProtectedRoute adminOnly`. No fix required.
 
@@ -4565,6 +4875,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S71 — 2026-06-19 — Audit Log Access Verified
 
 **Audit Log access control confirmed correct**
+
 - Admin reported seeing Audit Log while viewing a client workspace — this is expected. The admin sidebar always shows admin-only links (`Clients`, `Periods`, `Audit Log`, `Settings`) regardless of which client is being viewed, because `isAdmin` remains true.
 - Verified by logging in as a real client user in a separate browser: Audit Log link does not appear in sidebar, and direct navigation to `/admin/audit` redirects to `/dashboard` via `ProtectedRoute adminOnly`. No fix required.
 
@@ -4573,6 +4884,7 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
 ### S70 — 2026-06-19 — Clear Client Data Bug Fix · Edge Function Hardening
 
 **Bug: Clear Client Data silently did nothing (`supabase/functions/admin-user-ops/index.ts`)**
+
 - Root cause 1 — Missing tables: `purchase_orders`, `purchase_order_items`, `requisitions`, `requisition_lines`, `budgets` were not in the delete sequence. These tables have FK references to `vendors` and `items`, so deleting `vendors`/`items` was silently blocked by PostgreSQL FK constraints.
 - Root cause 2 — No error checking: the Edge Function never checked `error` on any individual `.delete()` call. All deletions failed silently and the function returned `{ success: true }` regardless.
 - Root cause 3 — Non-2xx masking: the function returned 500 on errors, but `supabase.functions.invoke` swallows non-2xx bodies and replaces them with a generic "Edge Function returned a non-2xx status code" message — the real error was invisible. Fixed by always returning 200 with `{ error: string }` in the body.
@@ -4583,9 +4895,11 @@ ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
   4. `overheads`, `par_levels`, `monthly_periods`, `recipes`, `items`, `vendors`, `categories` (root client-keyed)
 
 **SQL run this session (Supabase SQL Editor):**
+
 ```sql
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 ```
+
 Required because tables created via SQL migrations (rather than Supabase dashboard) don't automatically get service_role grants. This allows the Edge Function (which runs as service_role) to DELETE from all tables.
 
 **Files:** `supabase/functions/admin-user-ops/index.ts` — redeployed via `npx supabase functions deploy admin-user-ops`
@@ -4595,13 +4909,16 @@ Required because tables created via SQL migrations (rather than Supabase dashboa
 ### S69 — 2026-06-19 — Scrollbar Theming · Print/Export Button Fix · Non-VAT Report · VAT & Non-VAT CA Summary Tab
 
 **Themed scrollbars (`src/components/Layout.css`)**
+
 - Added global `-webkit-scrollbar` + Firefox `scrollbar-width/color` rules. Track: `--theme-bg`, Thumb: `--theme-border` (6px slim), Hover: `--theme-text2`. Applies to sidebar, table overflows, and all scroll containers.
 
 **Print/Export button consistency (`src/pages/DeadStock.js`, `WastageReport.js`, `PeriodComparison.js`, `RecipeMargin.js`)**
+
 - These 4 pages used `btn btn-secondary` — a class with no definition in Layout.css, causing browser-default white button rendering.
 - Replaced with `btn btn-ghost` to match all other Print/Export buttons in the app.
 
 **Non-VAT Report — new page (`src/pages/NonVatReport.js`)**
+
 - New Starter+ report at `/non-vat-report` (feature flag: `non_vat_report`).
 - Fetches `purchase_entries` where `vat_inclusive = false` (server-side filter).
 - 4 stat cards: Total Non-VAT Purchases, Unique Vendors, Avg per Entry, Input VAT Credit (NIL).
@@ -4611,6 +4928,7 @@ Required because tables created via SQL migrations (rather than Supabase dashboa
 - Wired into: App.js, Layout.js (sidebar), AuthContext.js (STARTER_KEYS), AdminClients.js (DEFAULT_FLAGS + FLAG_LABELS).
 
 **VAT Report — CA Summary tab + Excel export added (`src/pages/VatReport.js`)**
+
 - Added "Entries" / "CA Summary" tab switcher (tab-btn pattern).
 - CA Summary: vendor-wise breakdown — Vendor, PAN/VAT No., # Bills, Total (incl. VAT), Base (ex-VAT), Input VAT (13%). Period total row at bottom. Missing PAN flagged in red.
 - Added Export Excel: produces two sheets — "VAT Entries" (full line-by-line) + "CA Summary" (vendor-wise) — in one file.
@@ -4619,6 +4937,7 @@ Required because tables created via SQL migrations (rather than Supabase dashboa
 - Replaced all hardcoded hex colours with CSS variables (`var(--theme-accent)` etc.) throughout.
 
 **Non-VAT Report — CA Summary tab (`src/pages/NonVatReport.js`)**
+
 - Same Entries / CA Summary tab pattern. CA Summary: Vendor, PAN/VAT No., # Bills, Total, VAT Credit = NIL per vendor.
 - Export Excel: two sheets — "Non-VAT Entries" + "CA Summary".
 
@@ -4629,22 +4948,27 @@ Required because tables created via SQL migrations (rather than Supabase dashboa
 ### S68 — 2026-06-19 — Pill/Select Consistency Sweep · Service Worker Cache Fix
 
 **Pill button consistency — all pages (`src/components/Layout.css`, multiple pages)**
+
 - Audited every page for filter/sort pill buttons. Found 5 pages using non-standard patterns: `btn-primary`/`btn-ghost` (FifoReport, Requisitions), custom inline `TAB()` styles (BestSellers), inline style objects (PurchaseOrders), and inline styles (MenuEngineering).
 - Converted all to `tab-btn` / `tab-btn--active` / `tab-bar` classes. Intentional underline-nav tabs (Items category tabs, PaymentReport Summary/Daily) left unchanged.
 
 **Select dropdown consistency — all pages**
+
 - Audited all select elements. Found 9 pages with inline `selectStyle` / `SEL` constant objects duplicating the same dark-theme styles.
 - Removed all `selectStyle`/`SEL` constants and replaced `style={...}` with `className="form-select"` across: AuditLog, Purchases, ReorderReport, VatReport, VendorReport, Variance, PaymentReport, FifoReport, SupplierPriceTracker, MenuEngineering, BestSellers.
 - `SupplierPriceTracker` had two selects with spread syntax (`{...selectStyle, minWidth:220}`) — converted to `className="form-select" style={{minWidth:220}}`.
 
 **`tab-btn` appearance fix (`src/components/Layout.css`)**
+
 - Added `-webkit-appearance: none; appearance: none` to prevent native OS button chrome from overriding the dark background.
 - Changed background from `rgba(255,255,255,0.04)` to `var(--theme-card)` for an explicit dark base.
 
 **Dead code removed (`src/pages/Periods.js`)**
+
 - Removed `adminReopenLatest()` — defined but never called anywhere (ESLint `no-unused-vars` warning).
 
 **Service worker cache bump (`public/service-worker.js`)**
+
 - Root cause of "no change" after CSS edits: the SW used a cache-first strategy with `CACHE_NAME = 'crest-v1'` — once a CSS bundle was cached it was served indefinitely, making all CSS changes invisible.
 - Bumped to `CACHE_NAME = 'crest-v2'`. On next SW install, old cache is purged and all assets are re-fetched fresh.
 
@@ -4655,23 +4979,28 @@ Required because tables created via SQL migrations (rather than Supabase dashboa
 ### S67 — 2026-06-19 — End Period · CSS Fixes · Tooltip Consistency
 
 **End Period button (`src/pages/Periods.js`)**
+
 - Added `adminEndPeriod(period, cid)` — closes the current period without creating a new one. Client is blocked from recording data until admin creates a new period.
 - Button sits next to "Close & Start Next" in the admin all-clients Periods table, styled darker red to signal higher destructiveness.
 - Fixed `adminCreatePeriod` — previously threw "A period for this month already exists" when clicking "+ Create Period" after ending a period (the closed record still existed). Now checks `allClientPeriods` for an existing closed period for the current BS month and reopens it instead of inserting a duplicate.
 - Info tooltip uses `Tip` component (not native `title`) — `ⓘ` icon beside the End Period button.
 
 **Tooltip consistency (`src/pages/ReorderReport.js`)**
+
 - "Set par" clickable span: replaced `title="Click to set par level"` with `<Tip>` wrapping the span.
 - Physical/Calc'd badge: replaced dynamic `title={...}` with `<Tip>` wrapping the badge.
 
 **Settings — Data tab hidden from clients (`src/pages/Settings.js`)**
+
 - Added `'Data'` to `CLIENT_HIDDEN` set. Clients now see: Thresholds, Item Codes, Vendor Codes, Sub-Recipe Codes, Theme. Data tab (Archive Periods, Data Export, Reset) is admin-only.
 
 **Sign-out button fix (`src/components/Layout.js`, `Layout.css`)**
+
 - Root cause: sidebar-footer was `display: flex` (row direction); Upgrade button had `width: 100%` which pushed sign-out button off-screen.
 - Fix: changed `.sidebar-footer` to `flex-direction: column; align-items: stretch`. Wrapped user info + sign-out button in a `display: flex; justify-content: space-between` row div so the ⎋ button is always visible.
 
 **Missing CSS classes — three classes used in newer pages but never defined (`src/components/Layout.css`)**
+
 - **`stats-row`** (undefined) → renamed to `stat-grid` in 4 pages: DeadStock, WastageReport, RecipeMargin, PeriodComparison. These cards were stacking vertically instead of in a horizontal grid.
 - **`.form-select`** (undefined) → added to Layout.css: dark background (`--theme-input-bg`), themed border and text — fixes white browser-default select boxes in the same 4 pages.
 - **`.tab-btn` / `.tab-btn--active` / `.tab-bar`** (undefined) → added to Layout.css: dark-themed pill filter/sort buttons with gold active state, matching the app design system. Used in DeadStock, WastageReport, RecipeMargin.
@@ -4683,34 +5012,42 @@ Required because tables created via SQL migrations (rather than Supabase dashboa
 ### S66 — 2026-06-19 — Last Seen Tracking · Admin Periods · Danger Zone Cleanup
 
 **Last Seen / Active Today tracking**
+
 - SQL: `ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;`
 - `src/context/AuthContext.js` — fire-and-forget presence ping after every successful `fetchProfile`. Uses `.then(() => {})` to trigger Supabase lazy promise execution (without `.then()` the HTTP request never fires). Updates `last_seen_at` to `now()` on every app load/tab focus.
 - `src/pages/Dashboard.js` — admin Active Properties stat card now shows "X active today" with a green dot and a name list of which clients have been seen in the last 24h. `loadAdminStats` queries profiles by `last_seen_at >= now - 24h`, cross-references with the clients array already fetched.
 - `src/pages/AdminClients.js` — "Last Seen" column added to the clients table. `loadLastSeen()` queries all profiles with `last_seen_at IS NOT NULL`, groups by `client_id` taking the max timestamp. Shows relative time: "Just now" / "Xm ago" / "Xh ago" / "Yesterday" / "Xd ago" / "Never". Green + bold when seen within 24h.
 
 **Service worker `clone` fix (`public/service-worker.js`)**
+
 - Bug: `res.clone()` was called inside an async `.then(caches.open(...).then(...))` callback — by the time `caches.open` resolved, the response body could already be consumed by the page, causing `TypeError: Failed to execute 'clone' on 'Response': Response body is already used`.
 - Fix: call `const toCache = res.clone()` synchronously before any async operation, then pass `toCache` into the cache write.
 
 **Admin drawer — Item Code Prefix removed (`src/pages/AdminClients.js`)**
+
 - Removed "Item Code Prefix" field from AdminClients → Settings tab. Clients manage their own prefixes via Settings → Item Codes. Admin doesn't need to set this.
 
 **Settings page — code prefix tabs moved to Starter tier (`src/context/AuthContext.js`)**
+
 - `'settings'` moved from `PRO_KEYS` to `STARTER_KEYS`. All clients on any plan now see Settings → Thresholds, Item Codes, Vendor Codes, Sub-Recipe Codes, Data, Theme tabs. Admin-only tabs (Branding, Contact, Property) remain hidden from clients via `CLIENT_HIDDEN`.
 - Routes table updated: `/settings` now Starter+.
 
 **Danger Zone simplified (`src/pages/AdminClients.js`)**
+
 - Removed two-step destruction guard (type property name + enter admin password). Replaced with a single `window.confirm()` dialog showing full warning text.
 - "Delete All Client Data" renamed to **"Clear Client Data"** — deletes operational data only, keeps client record and users.
 - Added **"Delete Client"** button — fully deletes the client: all user auth accounts (via `adminOp('deleteUser')` per profile), all operational data (`deleteClientData`), `settings`, `feature_flags`, and finally the `clients` row. Closes drawer on completion.
 
 **Expired period banner — admin button (`src/pages/Dashboard.js`)**
+
 - Admin now sees "Go to Periods →" button in the expired period banner (was info-only text). Navigates to `/periods` for the currently viewed client.
 
 **Admin sidebar — Periods always visible (`src/components/Layout.js`)**
+
 - Added `Periods` NavLink to the admin-only section of the sidebar (between Clients and Audit Log). Visible regardless of whether a client is selected.
 
 **Periods page — admin all-clients view (`src/pages/Periods.js`)**
+
 - When admin visits `/periods` with no client selected, shows a full table of all clients instead of "No periods yet."
 - Columns: Property (clickable — switches admin context), Open Period, Status (OPEN / EXPIRED / NO PERIOD), Total periods count, Actions.
 - Actions per row: **✏ Edit** (inline year/month fields with Save/Cancel), **Close & Start Next** (for open periods), **+ Create Period** (creates a period for the current BS month when none exists).
@@ -4718,6 +5055,7 @@ Required because tables created via SQL migrations (rather than Supabase dashboa
 - Clicking a client name calls `switchAdminClient()` and navigates to `/periods` — switches to per-client detailed view.
 
 **SQL run this session:**
+
 ```sql
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
 ```
@@ -4729,6 +5067,7 @@ ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
 ### S65 — 2026-06-19 — Sidebar UX · Admin Cleanup · Settings Fixes
 
 **Sidebar — hide locked pages for client users (`src/components/Layout.js`)**
+
 - Locked pages no longer appear in sidebar for client users — hidden entirely (was: shown at 40% opacity with 🔒)
 - `unlockedItems()` replaces `sortNavItems()` — simply filters to accessible items only
 - **Upgrade teaser card** appears below Reports section showing the next tier's features (Starter→Growth green card, Growth→Pro gold card). Lists up to 5 feature names + count + "Upgrade to X ↑" button → `/pricing`
@@ -4737,27 +5076,33 @@ ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
 - Admin-unlocked individual flags: those pages appear in the sidebar normally and are removed from the teaser list automatically
 
 **Admin sidebar simplified (`src/components/Layout.js`)**
+
 - When admin has no client selected (`!adminViewClientId`): sidebar shows only Dashboard, Clients, Audit Log, Settings, Help
 - When admin switches into a client: full operational nav appears (Periods, Items, Vendors, Purchases, Stock, Reports, etc.)
 
 **Settings tabs simplified for admin (`src/pages/Settings.js`)**
+
 - Admin Settings now shows 4 tabs only: **Branding · Contact · Theme · Data** (removed Property, Thresholds, Item Codes, Vendor Codes, Sub-Recipe Codes — these are per-client, managed via AdminClients drawer)
 - Client default tab fixed: was incorrectly initialising to 'Branding' (hidden tab); now defaults to 'Thresholds'
 - Logo upload moved into Settings → Branding (was: "Logo is managed via Admin → Clients → Settings drawer" note). Full upload UI: 64×64 preview, ↑ Upload Logo button, Remove button, success/error message. Saves immediately on upload; path: `Logos/{clientId||'admin'}/logo.{ext}`
 - Helper text removed from App Name and Tagline inputs
 
 **Settings save bug fixed (`src/context/SettingsContext.js`)**
+
 - Root cause: `saveSettings()` was sending the full `form` object (including DB metadata columns `id`, `client_id`, `created_at`, `updated_at`) in the UPDATE payload. PostgREST silently rejected updates to the primary key `id`, so saves never persisted but showed "✓ Saved"
 - Fix: destructure and strip metadata before UPDATE/INSERT. Also added `if (error) throw new Error(error.message)` so errors surface in the UI instead of being swallowed
 
 **Fix: Enable All in Feature Access not toggling Theoretical Variance (`src/pages/AdminClients.js`)**
+
 - `theoretical_variance` was in FLAG_LABELS but missing from DEFAULT_FLAGS. `toggleAllFlags()` iterates `Object.keys(DEFAULT_FLAGS)` so it silently skipped it
 - Fix: added `theoretical_variance: false` to DEFAULT_FLAGS
 
 **Back button on Pricing page (`src/pages/Pricing.js`)**
+
 - Added "← Back" button (ghost style) before "Start Free Trial →" in the CTA section. Uses `navigate(-1)` to return to wherever the user came from (sidebar upgrade link, login page, etc.)
 
 **SQL run in Supabase:**
+
 ```sql
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS sub_recipe_code_prefix text DEFAULT 'SRC';
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS vendor_code_prefix text DEFAULT 'VND';
@@ -4779,13 +5124,14 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS contact_website text;
 **Analysis:** Starter plan had zero reports — hard to justify NPR 8,000/mo. Growth was overloaded with basic compliance and operational reports that should be available to all. New classification:
 
 | Tier | Auto-unlocked features |
-|---|---|
+| --- | --- |
 | **Starter** | Monthly Summary, Reorder Report, VAT Report, Wastage Report |
 | **Growth** | Sales Entry, Recipe Costing, Variance, Payment Summary, Budget vs Actual, Best Sellers, Purchase Orders, Dead Stock, Recipe Margin |
 | **Pro** | Menu Engineering, FIFO, Vendor Report, Price Tracker, Overheads, Theoretical Variance, Period Comparison, Settings |
 | **Flag-only** | Requisitions (admin enables per client) |
 
 **Files changed:**
+
 - `src/context/AuthContext.js` — Added `STARTER_KEYS` set; removed monthly_summary/reorder_report/vat_report from GROWTH_KEYS; added wastage_report to STARTER_KEYS; added dead_stock/recipe_margin to GROWTH_KEYS; added period_comparison to PRO_KEYS; updated `hasFeature()` to check STARTER_KEYS first (returns true for all plans)
 - `src/components/Layout.js` — REPORTS array reordered by tier; removed minPlan from Starter reports; period_comparison moved to minPlan: 'pro'
 - `src/App.js` — PremiumGate minPlan updated: monthly_summary/reorder_report/vat_report/wastage_report → 'starter'; period_comparison → 'pro'
@@ -4797,6 +5143,7 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS contact_website text;
 ### S63 — 2026-06-19 — Recipe Contribution Margin + Period-over-Period Comparison
 
 **`src/pages/RecipeMargin.js`** (new) — Route `/recipe-margin`, Growth, `recipe_margin` flag
+
 - Period selector. 3 stat cards: Total Contribution (green), Weighted Avg FC%, Top Contributor recipe.
 - Sort tabs: Total Contribution | Margin/Portion | FC% (best first). Checkbox: "Only recipes with sales" (default on).
 - Category filter tabs. Table: # | Recipe | Category | Selling Price | Food Cost/Portion | Contribution/Portion (green/red) | Qty Sold | Total Contribution (gold) | FC% (colour-coded). Footer row with weighted totals.
@@ -4804,6 +5151,7 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS contact_website text;
 - Print + Export Excel. Filename: `RecipeMargin-YYYY-M.xlsx`.
 
 **`src/pages/PeriodComparison.js`** (new) — Route `/period-comparison`, Growth, `period_comparison` flag
+
 - No period selector — shows all periods. Limit dropdown: Last 6 / Last 12 / Last 24 / All.
 - 3 stat cards: Latest FC% + pp trend vs prev, Best FC% Period, Latest Revenue.
 - Table: Period | Net Purchases | Wastage | COGS | Revenue (ex-VAT) | FC% (colour-coded) | vs Prev (↑↓ pp change, green=improving/down, red=worsening/up).
@@ -4813,11 +5161,13 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS contact_website text;
 - Print + Export Excel. Filename: `PeriodComparison.xlsx`.
 
 **Supporting changes:**
+
 - `src/App.js` — imports + routes for both (Growth PremiumGate)
 - `src/components/Layout.js` — added Recipe Margin (◈) + Period Comparison (⇄) to REPORTS array
 - `src/pages/AdminClients.js` — `recipe_margin` + `period_comparison` in DEFAULT_FLAGS + FLAG_LABELS (Reports)
 
 **SQL to run in Supabase:**
+
 ```sql
 ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS recipe_margin boolean DEFAULT false;
 ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS period_comparison boolean DEFAULT false;
@@ -4828,6 +5178,7 @@ ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS period_comparison boolean DEF
 ### S62 — 2026-06-19 — Wastage Report + Dead Stock / Slow Movers
 
 **`src/pages/WastageReport.js`** (new) — Route `/wastage-report`, Growth plan, `wastage_report` flag
+
 - Period selector. 3 stat cards: Total Wastage Value (red), Items with Wastage count, Top Wastage Category + value.
 - Category filter tabs (auto-built from data).
 - Table: Item | Category | UOM | Qty Wasted | Value (NPR) | % of Total. Sorted by value descending.
@@ -4835,6 +5186,7 @@ ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS period_comparison boolean DEF
 - Print + Export Excel. Filename: `Wastage-YYYY-M.xlsx`.
 
 **`src/pages/DeadStock.js`** (new) — Route `/dead-stock`, Growth plan, `dead_stock` flag
+
 - Period selector. 3 stat cards: Dead count (red), Slow count (amber), Value at Risk (red).
 - Status filter tabs: All / Dead (N) / Slow (N). Category filter tabs alongside.
 - Dead = Used = 0 (zero consumption). Slow = Used < 20% of net available (opening + purchased − returned).
@@ -4843,11 +5195,13 @@ ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS period_comparison boolean DEF
 - Export Excel (12 columns). Print.
 
 **Supporting changes:**
+
 - `src/App.js` — added imports + routes for both pages (Growth plan PremiumGate)
 - `src/components/Layout.js` — added to REPORTS array above Best Sellers: Wastage Report (⚠), Dead Stock (⊘)
 - `src/pages/AdminClients.js` — added `wastage_report` + `dead_stock` to DEFAULT_FLAGS and FLAG_LABELS (Reports section)
 
 **SQL to run in Supabase:**
+
 ```sql
 ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS wastage_report boolean DEFAULT false;
 ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS dead_stock boolean DEFAULT false;
@@ -4858,12 +5212,14 @@ ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS dead_stock boolean DEFAULT fa
 ### S61 — 2026-06-19 — PWA Installable Shell
 
 **Files changed:**
+
 - `public/manifest.json` — renamed app to "Crest Inventory Management" / "Crest IMS", set `theme_color: #c9a84c` (gold accent), `background_color: #0f1117` (dark), `display: standalone`, `orientation: portrait-primary`, `scope: /`
 - `public/service-worker.js` — new vanilla service worker. Strategies: navigation requests = network-first (fallback to cached root); static assets = cache-first; Supabase API calls = never cached (pass-through). Cache name `crest-v1` — increment to bust on breaking deploys.
 - `src/index.js` — registers `/service-worker.js` on `window load` with silent `.catch(() => {})`
 - `public/index.html` — `<title>Crest Inventory</title>`, `theme-color` meta updated to `#c9a84c`, added `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `apple-mobile-web-app-title` metas for iOS
 
 **To do after deploy:**
+
 - Replace `public/logo192.png` + `public/logo512.png` with actual Crest logo at 192×192 and 512×512 px
 - On Chrome mobile: visit site → browser shows "Add to Home Screen" prompt automatically
 - On Safari iOS: Share → "Add to Home Screen" manually
@@ -4873,6 +5229,7 @@ ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS dead_stock boolean DEFAULT fa
 ### S60 — 2026-06-19 — Requisitions / Internal Transfers
 
 **Requisitions feature (`src/pages/Requisitions.js` — new)**
+
 - Route `/requisitions`, Growth plan, `requisitions` feature flag. Nav item "Requisitions ↔" between Stock Count and Sales Entry.
 - Internal stock transfers from main store to departments (Kitchen, Bar, Pastry, Banquet, Room Service, etc.).
 - **List view** — 4 stat cards (Total Requisitions / Issued / Draft count / Total Issued Value). Department filter tabs (auto-built from data). Table: Day, Dept, Items, Status badge (DRAFT yellow / ISSUED green), Value, View/Del actions.
@@ -4882,14 +5239,17 @@ ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS dead_stock boolean DEFAULT fa
 - **Export Excel** — downloads `Requisition-Day{N}-{Dept}-{Period}.xlsx` with columns: Item, Category, UOM, Qty Requested, Qty Issued, Rate, Value.
 
 **Stock.js — Requisitioned column**
+
 - `requisitioned` state added. `loadStockData` runs a try/catch query on `requisition_lines` joined to `requisitions` (filter: `period_id` + `status = 'issued'`) to build `reqMap` per item.
 - Summary tab: "Requisitioned" column (purple `#a78bfa`) added between Used and Opening Value. Tooltip: "Total qty issued from the store via requisition slips. Should align with Used quantity."
 - Excel export: "Requisitioned Qty" column added.
 
 **CSS fix — dark background on table-cell inputs/selects**
+
 - Added `table.data-table td select` + `table.data-table td input` rules to `Layout.css` using `var(--theme-input-bg)` / `var(--theme-border)` / `var(--theme-accent)` — fixes white dropdown background in Requisitions and any other editable table cells.
 
 **SQL to run in Supabase:**
+
 ```sql
 CREATE TABLE requisitions ( id uuid DEFAULT gen_random_uuid() PRIMARY KEY, client_id uuid REFERENCES clients(id) ON DELETE CASCADE, period_id uuid REFERENCES monthly_periods(id) ON DELETE CASCADE, bs_day integer NOT NULL, department text DEFAULT 'Kitchen', status text DEFAULT 'draft' CHECK (status IN ('draft','issued')), notes text, created_at timestamptz DEFAULT now() );
 ALTER TABLE requisitions ENABLE ROW LEVEL SECURITY;
@@ -4909,18 +5269,22 @@ ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS requisitions boolean DEFAULT 
 ### S59 — 2026-06-19 — Horizontal Scrollbar Fixes · GRN VAT Toggle · Purchases Column Merge
 
 **Horizontal scrollbar — root fix (`src/index.css`)**
+
 - Added `html, body { overflow-x: hidden }` to prevent page-level horizontal scroll. Internal `.table-wrap { overflow-x: auto }` still works correctly.
 
 **Purchases column merge (`src/pages/Purchases.js`)**
+
 - 13 columns → 11 columns. Invoice / VAT / Expiry merged: `<th>Invoice / Expiry</th>` + combined cell (invoice ref on top, expiry date below in amber). VAT shown as `+VAT` label inside the Payment badge column (no separate column). Totals row `colSpan` corrected from 4 → 2.
 
 **GRN VAT inclusive toggle (`src/pages/PurchaseOrders.js`)**
+
 - When a PO is confirmed received (GRN), items previously went straight to `purchase_entries` with `vat_inclusive: false` hardcoded — user had to go back to Purchases and manually tick VAT per item.
 - Fix: added `receiveVatInclusive` state + checkbox in the GRN receive form (styled gold when checked, Tip tooltip explaining 13% strip). `confirmReceive()` now sets `vat_inclusive: receiveVatInclusive` and stores `rate: receiveVatInclusive ? l.unit_price / 1.13 : l.unit_price` (ex-VAT, consistent with Purchases.js save logic).
 - Removed unused `remaining` variable that was causing an ESLint warning.
 
 **App-wide `table-wrap` audit — 11 tables fixed**
 All screen-visible tables that were missing `<div className="table-wrap">` wrappers were wrapped. Print-only tables (`print-sheet-table`, print cost cards, print PO document) correctly left alone.
+
 - `Help.js` — glossary table
 - `AuditLog.js` — help panel table (inside existing `overflow: hidden` div)
 - `Overheads.js` — main overheads table
@@ -4937,6 +5301,7 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 ### S58 — 2026-06-19 — Purchase Orders · Yield % Fixes · App-wide Tooltips
 
 **Purchase Order Workflow (`src/pages/PurchaseOrders.js` — new)**
+
 - Route `/purchase-orders`, Growth plan, `purchase_orders` feature key.
 - 3 views: PO list, PO create/edit form, Goods Receipt Note (GRN) receive form.
 - Status flow: Draft → Sent → Partial/Received/Cancelled. Auto PO number (PO-001, PO-002…).
@@ -4946,10 +5311,12 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 - Supporting changes: `AuthContext.js` adds `purchase_orders` to GROWTH_KEYS; `Layout.js` adds nav item; `App.js` adds route; `Pricing.js` adds to GROWTH_EXTRAS (now 10 items); `PremiumGate.js` growth description updated; `AdminClients.js` adds `purchase_orders: false` to DEFAULT_FLAGS and FLAG_LABELS.
 
 **Yield % Fixes (Variance.js + Dashboard.js)**
+
 - `Variance.js` — Added `yieldMap` from items. `theoreticalMap` now divides by `yieldFactor` per item. Added `if (!ri.item_id) return` guard for sub-recipe rows.
 - `Dashboard.js` — Items select updated to include `yield_pct`. Same yieldMap + yieldFactor pattern applied to theoreticalMap calculation.
 
 **App-wide Tooltips (8 additional pages)**
+
 - Added `Tip` import and tooltips to: `Purchases.js` (Invoice Ref, Expiry Date, Shelf Life, Payment, VAT Incl.), `Recipes.js` (FC % column, Selling Price, Menu Price, VAT Rate, Target FC %, Yield Qty/UOM labels), `Sales.js` (Total Revenue, % of Revenue), `BestSellers.js` (Revenue, Margin — both tables), `BudgetVsActual.js` (Budget, Actual Net, Variance NPR, Variance %), `VatReport.js` (Total incl. VAT, Base ex-VAT, VAT 13%), `VendorReport.js` (Returns, Net Spend, % of Net Total, Avg/Day), `SupplierPriceTracker.js` (Master Rate, Update Rate, Last Rate, Trend, Change %).
 - Memory updated: `feedback_tooltips.md` added — all future new modules must include Tip tooltips.
 
@@ -4960,6 +5327,7 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 ### S57 — 2026-06-18 — Yield % on Ingredients · Product Roadmap
 
 **Yield % on Ingredients (3 files + 1 DB migration)**
+
 - New `yield_pct` column on `items` table (`NUMERIC(5,2) NOT NULL DEFAULT 100`). DB migration: `ALTER TABLE items ADD COLUMN IF NOT EXISTS yield_pct NUMERIC(5,2) NOT NULL DEFAULT 100;`
 - Semantic: `qty_per_portion` = net (usable) qty needed. Effective as-purchased cost = `qty / (yield_pct / 100) × rate`. Default 100 = no trim loss, no change to existing data.
 - `Items.js` — `yield_pct` added to EMPTY_FORM, openEdit, save payload. New form field with `Tip` tooltip explaining trim loss with real examples (whole chicken 70%, spinach 60%, onion 85%). Shows in items table column, red when <100.
@@ -4967,10 +5335,12 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 - `TheoreticalVariance.js` — `expandIngredients` now accepts `itemList` parameter and divides each item's net qty by its `yield_pct` to produce gross (as-purchased) theoretical consumption. Recursive sub-recipe call also passes `itemList`. All 3 call sites updated.
 
 **Tip tooltip component**
+
 - `Tip` component (`src/components/Tip.js`) imported into Items.js for the first time.
 - Two tooltip placements: form field label (detailed with examples, width 260), table column header (short, width 240).
 
 **Product Roadmap (memory only — no code)**
+
 - Decided: Crest HR and Crest POS will be separate products, not built into Crest Inventory.
 - Crest HR scope documented: payroll, SSF (11%+20%) / EPF toggle, Dashain bonus, advance/loan tracking, gratuity, TDS, final settlement, service charge distribution.
 - Crest POS: integration point with Inventory for real-time recipe depletion and Sales Entry auto-population.
@@ -4983,6 +5353,7 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 ### S56 — 2026-06-18 — Theoretical vs Actual Food Cost · Package Classification Fix
 
 **Theoretical vs Actual Food Cost (`src/pages/TheoreticalVariance.js` — new)**
+
 - Route `/theoretical-variance`, Pro plan, `theoretical_variance` feature key.
 - Per-ingredient comparison: Theoretical consumption (recipes × qty sold, with sub-recipe expansion) vs. Actual consumption (opening + purchased − returned − wastage − closing).
 - Sub-recipe expansion is recursive — qty_per_portion / yield_qty cascades correctly into raw ingredients.
@@ -4994,6 +5365,7 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 - Shows empty state with guidance when no sales or recipe data exists for the period.
 
 **Package Classification Fix (3 files)**
+
 - `AuthContext.js` — added `budget_vs_actual`, `best_sellers`, `vat_report` to `GROWTH_KEYS`. These were gated correctly in App.js but missing from GROWTH_KEYS, causing Growth plan users to see them as 🔒 locked in the sidebar.
 - `AuthContext.js` — added `theoretical_variance` to `PRO_KEYS`.
 - `Pricing.js` — Growth extras expanded from 6 → 9 features (Budget vs Actual, Best & Worst Sellers, VAT Report added). Pro extras include Theoretical Variance.
@@ -5002,11 +5374,13 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 - `App.js` — route registered with PremiumGate Pro gate.
 
 **Stock Register Value Columns (from S56 plan — `src/pages/Stock.js`)**
+
 - 5 NPR value columns added to per-item Summary table: Open. Value, Purch. Value, Wastage Value, Close Value, COGS (NPR).
 - Left-border visual separator between qty block and value block.
 - Format: `NPR X,XXX` (en-NP locale), shows `—` when rate=0 or qty=0.
 
 **Sales.js fix**
+
 - `sortedRecipes` was computed but Bulk Entry table used `recipes.map` directly. Fixed — bulk entry table now uses `sortedRecipes.map` so sort controls take effect.
 
 **Files:** `src/pages/TheoreticalVariance.js` (new), `src/context/AuthContext.js`, `src/pages/Pricing.js`, `src/components/PremiumGate.js`, `src/components/Layout.js`, `src/App.js`, `src/pages/Stock.js`, `src/pages/Sales.js`
@@ -5016,6 +5390,7 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 ### S55 — 2026-06-18 — Sales Daily Entry Tab + Daily Breakdown Tab
 
 **Daily Entry tab restored (`Sales.js`)**
+
 - New "Daily Entry" tab added between Bulk Entry and Period Summary.
 - Day picker: ‹ / › arrow buttons + 1–32 dropdown. Defaults to today's BS day when the open period matches the current BS month (via `getBsToday()`); resets to 1 when switching to a past/future period.
 - Day count uses `daysInBsMonth(bs_year, bs_month)` instead of hardcoded 32 — accurate per period.
@@ -5026,6 +5401,7 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 - **Bug fix:** Clear button was not persisting — `parseFloat('')` returns `NaN`, causing `saveDaily()` to fall back to the saved DB value instead of deleting. Fixed by treating `''` explicitly as `0`.
 
 **Daily Breakdown tab (`Sales.js`)**
+
 - New 4th tab "Daily Breakdown" — pivot table view of all daily sales for the period.
 - Rows: menu items with any sales. Columns: only days that have data (compact, no empty columns), plus a "Bulk" column when `bs_day=0` entries exist.
 - Today's day column header highlighted gold with ⬤ dot when viewing the current BS month.
@@ -5039,6 +5415,7 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 ### S54 — 2026-06-18 — Recipe PDF Cost Card · Dashboard FC% Trend Chart
 
 **Recipe PDF Cost Card (`Recipes.js`)**
+
 - 🖶 Print Cost Card button added to every row in both the regular recipes and sub-recipes list tables (no need to open detail view).
 - 🖶 button also in detail view alongside Edit Recipe.
 - Print fires `window.print()` — app UI hides (`no-print`), cost card renders (`print-only`).
@@ -5049,6 +5426,7 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 - `printRecipe` state + 80ms `setTimeout` useEffect auto-fires print dialog after DOM renders.
 
 **Dashboard FC% Trend Chart (`Dashboard.js`)**
+
 - Full-width line chart added between the 3-chart row and Variance/Reorder panels.
 - Fetches last 11 closed periods in bulk (3 queries: `purchase_entries`, `vendor_returns`, `sales_entries` all using `.in('period_id', [...])`); appends current open period's already-computed FC%.
 - X-axis: abbreviated BS month + year ("Asa 2082", "Kar 2082"…), oldest → newest.
@@ -5063,16 +5441,19 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
 ### S53 — 2026-06-18 — Archive Periods · Best/Worst Sellers · VAT Report · Audit Improvements
 
 **Archive Periods (`Periods.js`)**
+
 - Periods closed >12 months ago are hidden by default. "Show Archived (N)" toggle in page header.
 - Open periods always visible regardless of age.
 
 **Best & Worst Sellers (`src/pages/BestSellers.js` — new)**
+
 - Route `/best-sellers`, Growth plan, `best_sellers` feature flag.
 - Period selector + rank toggle (By Revenue / By Volume / By Margin %).
 - Top 10 bar chart (Recharts). Top 10 + Bottom 10 tables: Rank, Item, Category, Qty, Revenue, Margin %.
 - Summary strip: Total Revenue, COGS, Gross Profit, Overall Margin %, Items Sold.
 
 **VAT on Purchases + VAT Report**
+
 - `purchase_entries.vat_inclusive boolean DEFAULT false` — new column.
 - Purchase form: "VAT Incl. (13%)" checkbox per entry. When checked, total breakdown shows Base (ex-VAT) + VAT (13%) live.
 - Purchases table: "VAT" column shows amber badge on VAT-inclusive rows.
@@ -5082,12 +5463,14 @@ All screen-visible tables that were missing `<div className="table-wrap">` wrapp
   - Non-VAT purchases summary below.
 
 **Audit Log improvements**
+
 - Help panel: collapsible "What does the Audit Log record?" toggle — table of 7 areas, operations tracked, notes.
 - Item Master now tracked: `CREATE TRIGGER audit_items AFTER INSERT OR UPDATE OR DELETE ON items`.
   - `TABLE_LABELS` + `getSummary()` updated for `items` — edit summaries show what changed (Name/Rate/UOM diffs).
 - Trigger bug fixed: nested IF for `monthly_periods` status check (prevented `record "old" has no field "status"` error on other tables).
 
 **SQL run this session:**
+
 ```sql
 ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS best_sellers boolean DEFAULT false;
 ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS vat_inclusive boolean DEFAULT false;
@@ -5105,6 +5488,7 @@ New admin-only page `/admin/audit`. Tracks all data changes across clients via P
 **Tracked tables:** `purchase_entries`, `vendor_returns`, `opening_stock`, `closing_stock`, `wastages`, `monthly_periods` (status changes only).
 
 **Supabase SQL required:**
+
 ```sql
 -- audit_logs table
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -5178,6 +5562,7 @@ CREATE TRIGGER audit_monthly_periods  AFTER UPDATE ON monthly_periods FOR EACH R
 New page `/budget` (Growth plan, `budget_vs_actual` feature flag). Per-category table: Budget (inline editable, auto-saves on blur), Actual Net Purchases, Variance NPR, Variance %, Status badge (Under/Over/No Budget). Totals row. Budgets stored in new `budgets` Supabase table (upsert on `period_id, category_id`). Wired into sidebar REPORTS, App.js route, AdminClients feature flags.
 
 **Supabase SQL required (run in dashboard):**
+
 ```sql
 CREATE TABLE IF NOT EXISTS budgets (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -5218,12 +5603,14 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 **Problem:** `conversion_factor` was stored on items but never applied — users had to manually convert before entering quantities (e.g. type 48 LTR instead of 2 CTN).
 
 **Storage convention:** Both qty and rate are stored in base units in `purchase_entries`.
+
 - qty stored = entered_qty × conversion_factor (e.g. 2 CTN × 24 = 48 LTR)
 - rate stored = entered_rate ÷ conversion_factor (e.g. NPR 500/CTN ÷ 24 = NPR 20.833/LTR)
 - Total = stored_qty × stored_rate = 48 × 20.833 = NPR 1,000 ✓
 - All downstream modules (Stock, Variance, FIFO, Reorder) sum `purchase_entries.qty` in base units — **no changes needed there**
 
 **Purchases entry form:**
+
 - Qty label shows `purchase_unit` (e.g. CTN) when conversion exists, `uom` otherwise
 - Sub-text under qty input: "= 48 LTR" conversion preview
 - Rate label shows "Rate /CTN (NPR)" when conversion exists
@@ -5231,11 +5618,13 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - `save()`: applies `getCf()` helper to convert qty and rate before storing
 
 **Purchases table:**
+
 - Qty column shows purchase units (stored ÷ cf) with base unit sub-text when conversion exists
 - Rate column shows per-purchase-unit rate (stored × cf) with per-base-unit sub-text
 - Total column (NPR) unchanged — qty × rate in base units = correct value
 
 **Returns form:**
+
 - Qty label shows purchase units when conversion exists
 - Max hint shows in purchase units (linked.qty ÷ cf)
 - "Original: 2 CTN (48 LTR)" helper text
@@ -5253,6 +5642,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 ### S47 — 2026-06-18 — CSS Variable Theme System + Settings Theme Tab
 
 **CSS variable theme engine (ThemeContext)**
+
 - Created `src/context/ThemeContext.js` — two presets (Dark / Light) with full color palettes; custom color override support
 - `applyTheme()` sets 18 CSS custom properties on `:root` (`--theme-bg`, `--theme-card`, `--theme-border`, `--theme-accent`, `--theme-sidebar`, etc.)
 - Stores in `localStorage` as `{ key: 'dark'|'light'|'custom', colors: {...} }` — persists across reloads
@@ -5260,11 +5650,13 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - `ThemeProvider` wrapped around entire app in `App.js`
 
 **CSS files rewritten with CSS variables**
+
 - `Layout.css` — full rewrite; `:root` defaults to dark palette; all structural classes use `var(--theme-*)` references
 - `Login.css` — full rewrite; login card/inputs/button all CSS-variable driven
 - `index.css` body background changed to `var(--theme-bg, #0f1117)`
 
 **Theme tab in Settings**
+
 - `'Theme'` added to `ALL_TABS` in `Settings.js`; tab visible to all users (admin + client)
 - **Presets section** — Dark / Light preset buttons with 4-swatch mini palette preview; active preset shows gold checkmark + gold border
 - **Customize Colors section** — 10 color pickers (Background, Card/Panel, Border, Sidebar, Primary Text, Secondary Text, Accent/Buttons, Button Text, Success/Green, Danger/Red) using `<input type="color">` native pickers behind a styled swatch div; live hex code displayed beside each row
@@ -5274,39 +5666,46 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - Sidebar hard-coded to `--theme-sidebar` dark (navy/charcoal) in both presets so nav stays legible
 
 **Sidebar label fix (previous session)**
+
 - Sidebar client-context label: "Crest Admin" when no client selected (was "— Select property —"), "Viewing" when viewing a client
 - `allClients.find(c => c.id === adminViewClientId)?.name || 'Crest Admin'` as dropdown trigger text
 
 - **Files:** `src/context/ThemeContext.js` (new), `src/components/Layout.css`, `src/pages/Login.css`, `src/index.css`, `src/App.js`, `src/pages/Settings.js`, `src/components/Layout.js` + all 21 page files (dark-theme inline colors restored)
 
 ### S23 — 2026 (earlier)
+
 - Purchase rate → item master toast (rate-change confirmation after saving a purchase)
 - Overhead panel in Recipe detail view (Overhead/Portion, True Cost, True Margin%, Suggested Price)
 - Per-recipe `target_fc_pct` field (admin-only, default 30%)
 - **Files:** `Purchases.js`, `Recipes.js`
 
 ### S24 — 2026 (earlier)
+
 - Periods inline edit for all users on open periods (pencil icon, BS year/month dropdowns, save guarded by `WHERE status='open'`)
 - **Files:** `Periods.js`
 
 ### S24/S25 — 2026 (earlier) — Vendor Returns System
+
 - Created `vendor_returns` table + RLS in Supabase
 - Returns tab in Purchases: purchase-linked, qty validated ≤ original, auto-inherited rate/vendor/payment/bs_day
 - Used formula + System Ref Qty updated in Stock to subtract returns
 - All 9 affected modules updated: `Purchases.js`, `Stock.js`, `MonthlySummary.js`, `Variance.js`, `PaymentReport.js`, `VendorReport.js`, `Dashboard.js`, `FifoReport.js`, `ReorderReport.js`
 
 ### S26 — 2026 (earlier) — Unit Conversion + Supplier Price Tracker Redesign
+
 - Conversion tab added to Items (purchase_unit, base_unit, conversion_factor, live preview badge)
 - `purchase_qty` auto-synced from `conversion_factor` on save
 - Supplier Price Tracker: replaced sidebar with vendor dropdown, full-width table, Print button, All Vendors option, Category column
 - **Files:** `Items.js`, `SupplierPriceTracker.js`
 
 ### S27 — 2026 (earlier) — Table Overflow Fix + Collapsible Sidebar
+
 - Fixed buttons clipped off-screen in Item Master table (root causes: flex on td, table width, min-width on main-content)
 - Sidebar now collapsible: 220px ↔ 56px (icon-only) with smooth CSS transition, gold toggle button, tooltips on hover
 - **Files:** `Items.js`, `Layout.js`, `Layout.css`
 
 ### S28 — 2026 (earlier) — Recipes Tab Layout + Decimal Precision
+
 - Replaced stacked tables with tab bar: All Recipes · per-category tabs · ⚙ Sub-Recipes
 - Live count badge on each tab; empty-category tabs hidden; Category column hidden on single-category tabs
 - All NPR amounts capped at 2 decimal places throughout Recipes.js
@@ -5315,16 +5714,19 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 ### S45 — 2026-06-17 — Admin Drawer Improvements + Pricing Cleanup
 
 **Settings stale data bug fix**
+
 - `SettingsContext.loadSettings()` was merging into previous state with `...prev` — switching clients bleed the previous client's name/logo through
 - Fixed: always reset to `DEFAULT_SETTINGS` first, then overlay DB row; `setSettings(data ? { ...DEFAULT_SETTINGS, ...data } : DEFAULT_SETTINGS)`
 
 **AdminClients drawer — Thresholds tab**
+
 - Split Thresholds out of the Settings tab into its own dedicated tab
 - Drawer tabs now: Users · Billing · Settings · Thresholds · Feature Access · ⚠ Danger
 - Thresholds tab has two sections: Food Cost Thresholds (FC Warning % / FC Critical %) and Alerts (Expiry Warning days / Variance Flag %) each with a short description
 - `fetchClientSettings` triggered on both `settings` and `thresholds` tab activation
 
 **AdminClients drawer — Billing tab subscription activation flow**
+
 - Added plan selector (Starter / Growth / Pro) with list price under each button
 - Annual rate hint updates live as plan is switched
 - `handleSaveSub` now saves `plan` alongside `subscription_ends_at` in one click
@@ -5332,6 +5734,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - Full flow: pick plan → set end date (or quick-extend) → Save — all in one tab
 
 **Pricing page + Help page — colour consistency**
+
 - Swapped badge colours: "1 Month Free" badge = gold, "Most Popular" badge = green
 - Starter card: ◎ icon + checkmarks + "FREE FOR 1 MONTH" inline text all changed to gold to match badge
 - Growth card: ◈ icon + checkmarks changed to green to match badge
@@ -5344,6 +5747,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 **Motivation:** Graffiti sidebar + dark background felt heavy; replaced with a minimal, elegant light theme inspired by slate blue + bronze accents.
 
 **New palette:**
+
 - Background: `#f7f4f0` (warm off-white) · Card: `#ffffff` · Border: `#ebe4de`
 - Sidebar: `#162032` (deep slate navy) — slate blue active states
 - Text: `#1c1917` / `#78716c` / `#a8a29e`
@@ -5351,6 +5755,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - Green: `#16a34a` · Red: `#dc2626` · Amber: `#d97706`
 
 **Changes:**
+
 - `Layout.css` — full rewrite: removed graffiti, warm off-white main content, slate navy sidebar, slate blue active nav states, custom dropdown CSS (`.sidebar-dropdown-*`), card/input/button/table/badge styles all light-theme
 - `index.css` — added `background: #f7f4f0` to body
 - `Login.css` — full rewrite: white card on warm bg, slate blue submit button, warm form inputs
@@ -5361,6 +5766,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - **Files:** `Layout.css`, `index.css`, `Login.css`, `Layout.js` + all 21 page files above
 
 ### S31 — 2026-06-17 — Graffiti UI + ESLint Fixes
+
 - **Dashboard graffiti background** — CSS-only spray-paint effect scoped to Dashboard page only via `.dashboard-bg` class
   - 7 layered `radial-gradient` blobs: neon green (top-left), hot pink (top-right), electric cyan (bottom-right), orange (bottom-left), purple (right), yellow (centre), magenta (upper-centre)
   - 52% dark overlay for readability
@@ -5381,6 +5787,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - **Files:** `Layout.css`, `Dashboard.js`, `AdminClients.js`
 
 ### S30 — 2026-06-17 — 3-Tier Plan System (Starter / Growth / Pro)
+
 - Implemented full 3-tier plan system replacing the old Basic/Premium binary
 - **DB:** `ALTER TABLE clients ADD COLUMN plan text CHECK('starter','growth','pro') DEFAULT 'starter'` + `trial_ends_at timestamptz`. Migration: `UPDATE clients SET plan = 'pro' WHERE is_premium = true`
 - **AuthContext.js:** Loads `plan` + `trial_ends_at` from clients table. `hasFeature(key)` now checks plan tier (GROWTH_KEYS / PRO_KEYS sets) before falling back to feature flag overrides. Exposes `plan`, `isTrialing`, `trialEndsAt`. `isPremium` = plan !== 'starter' (backward compat). Fallback: reads `is_premium` for pre-migration rows.
@@ -5391,6 +5798,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - **Files:** `AuthContext.js`, `PremiumGate.js`, `App.js`, `Layout.js`, `AdminClients.js`
 
 ### S29 — 2026-06-17 — 3-Tier Pricing & Landing Page
+
 - Designed 3-tier packaging: Starter / Growth / Pro with bargaining headroom in list prices
   - Starter: NPR 8,000/mo list (NPR 5,000/mo annual) — 3-month free trial
   - Growth: NPR 18,000/mo list (NPR 10,000/mo annual)
@@ -5410,6 +5818,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 ### S44 — 2026-06-17 — Admin Dashboard Revenue Table + Logo Upload + Branding Sync
 
 **Revenue & Billing table on admin dashboard**
+
 - New table above Client Health table showing per-client billing breakdown
 - Columns: Property, Plan badge, Monthly Value (NPR — only for paying clients), Billing Type (Subscription/Trial/Expired/No billing), Expires (BS month + year), Subscription badge
 - Total row at bottom sums MRR from paying clients only (trial clients excluded)
@@ -5418,6 +5827,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - Dashboard now re-fetches on every navigation (`location.key` dependency) — fixes stale data after subscription changes
 
 **Logo upload system**
+
 - Supabase Storage bucket `Logos` (public) with 4 RLS policies (INSERT/SELECT/UPDATE/DELETE for authenticated)
 - `logo_url text` column added to `settings` table
 - Settings → Branding tab: 80×80 preview box, file picker (PNG/JPG/SVG/WebP, max 2MB), Remove button
@@ -5426,21 +5836,25 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - Preview box in Settings also shows live logo image
 
 **Branding sync fixes**
+
 - `SettingsContext.js`: when admin is viewing a client (`clientId` set), loads/saves that client's settings instead of global admin settings — fixes admin seeing "Crest Inventory" when editing client branding
 - `AdminClients.js` `saveClientEdit()`: when client name is changed, auto-updates `settings.app_name` to match
 - `AdminClients.js` `createClient()`: seeds a `settings` row with `app_name = client name` on creation
 
 **Admin sidebar reorder**
+
 - Clients and Settings links moved to top of sidebar (below Dashboard) for admin users
 - Divider separates them from main operational nav (Periods, Items, Vendors, etc.)
 - Client users: Settings remains in original position after Reports
 
 **Billing tab additions**
+
 - "Start 30-day trial" button appears when no trial is set (fixes existing clients with no `trial_ends_at`)
 - "Cancel subscription" button inline in Paid Subscription box — confirm dialog explains fallback behavior
 - After cancel: `subscription_ends_at = null`, client falls back to trial or gets auto-deactivated
 
 **ESLint cleanup (end of session)**
+
 - Removed logo upload state (`logoUploading`, `logoMsg`) and functions (`handleLogoUpload`, `handleLogoRemove`) from `Settings.js` entirely — logo is now admin-only via AdminClients drawer
 - Removed unused `ADMIN_NAV` constant from `Layout.js` (was orphaned after sidebar reorder moved Clients link inline)
 - Client users see read-only branding panel (logo + name + tagline + "Contact your consultant" note) before the tab bar
@@ -5454,12 +5868,14 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 **Admin dashboard completely replaced** — when logged in as admin, Dashboard shows a platform health overview instead of single-client financial data.
 
 **Platform KPI row (4 cards):**
+
 - Active Properties — count active vs inactive vs total
 - Expiring Soon — count of active clients with subscription/trial ≤ 30 days (amber border when > 0)
 - No Open Period — count of active clients with no open BS period (red border when > 0)
 - Est. Monthly Revenue — sum of plan list prices for paying clients only (NPR)
 
 **Client Health table:**
+
 - Columns: Property (+ location), Plan badge, Subscription badge (from getSubStatus), Current Period (name + Open/Closed/⚠ No period yet), Status badge, Actions
 - Sorted: clients with issues first (expiring or no open period), then healthy active, then inactive
 - Row click → `switchAdminClient()` — sets sidebar to that property so admin can browse their data on other pages
@@ -5468,6 +5884,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - Inactive rows dimmed to 45% opacity
 
 **Client financial dashboard unchanged** — client users see the existing Net Purchases / Revenue / Food Cost etc. view. Admin never sees that view on Dashboard.
+
 - **Files:** `Dashboard.js`
 
 ### S42 — 2026-06-17 — Subscription Timer & Auto-Deactivation
@@ -5475,11 +5892,13 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 **SQL required:** `ALTER TABLE clients ADD COLUMN IF NOT EXISTS subscription_ends_at timestamptz;`
 
 **Subscription badge in Clients table**
+
 - New "Expires" column shows a colored badge per client: green (>30 days), amber (≤30 days), red (≤7 days or expired), gold (trial · X days), gray (no date set)
 - `getSubStatus(client)` helper — prefers `subscription_ends_at`, falls back to `trial_ends_at`
 - `SubBadge` component renders the badge inline
 
 **Billing tab in client drawer**
+
 - Shows free trial end date + days remaining/expired
 - Shows paid subscription status with current expiry
 - Date picker to set `subscription_ends_at` manually
@@ -5488,16 +5907,19 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - Saves directly to `clients.subscription_ends_at`
 
 **Auto-deactivation on page load**
+
 - `loadClients()` checks all active clients after fetching
 - Auto-sets `is_active = false` if: subscription expired OR (no subscription + trial expired)
 - Reloads client list after deactivating — no manual step needed
 
 **New client defaults**
+
 - `createClient()` now sets `trial_ends_at = today + 30 days` automatically (1-month free trial, down from 3 months)
 
 - **Files:** `AdminClients.js`, `AuthContext.js`, `Layout.js`, `Dashboard.js`, `utils/subscription.js` (new)
 
 **Subscription visible to client users**
+
 - **Sidebar** — small badge under property name, always visible: `Trial · 28d` (gold), `47d left` (green), `12d left` (amber), `3d left` / `Expired` (red)
 - **Dashboard banner** — only shown when ≤ 7 days remaining or already expired: "Your trial expires in 3 days — contact your consultant to renew"
 - `getSubStatus(client)` extracted to `src/utils/subscription.js` — shared across AdminClients, Layout, Dashboard
@@ -5505,11 +5927,13 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 ### S41 — 2026-06-17 — Auto-Period Management + Expired Period Banner
 
 **Auto-create period on client creation**
+
 - `AdminClients.js` — `createClient()` now uses `.select('id').single()` to capture the new client's ID after insert
 - After insert, calls `getBsToday()` from `bsCalendar.js` utility to get the current BS year/month and immediately inserts an `open` period into `monthly_periods` for the new client
 - Uses the exact BS calendar lookup table (not an approximation)
 
 **Close & Start Next Month button**
+
 - `Periods.js` — replaced "Close Period" button with "Close & Start Next Month" for open periods (admin only)
 - `closeAndAdvance(period)` — confirms with admin (shows month names), closes the current period, then inserts the next BS month as a new `open` period
 - Handles BS year rollover: Chaitra (12) → Baisakh (1) of the next BS year
@@ -5517,6 +5941,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - Edit (pencil) button restricted to admin only — clients don't need to change period BS dates
 
 **Expired period banner on Dashboard**
+
 - `Dashboard.js` — after each data load, compares open period's BS month against `getBsToday()` to detect if the period month has passed
 - **Client users**: see amber banner "Ashadh 2083 has ended" with action button "End Ashadh & Start Shrawan →" — closes period and opens the next one immediately, then reloads stats
 - **Admin**: sees same banner info-only (text only, no button) — "go to Periods to close and advance for this property"
@@ -5544,6 +5969,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 - **Files:** `Vendors.js`, `Settings.js`, `VendorReport.js`, `Items.js`, `Periods.js`
 
 ### S32 — 2026-06-17 — Item Master: Category Filter → Tab Bar
+
 - Replaced `<select>` category dropdown in Item Master with a tab bar matching the Recipe Costing pattern
 - Tabs: "All Items" + one tab per category that has at least one item (empty categories hidden)
 - Each tab shows a live count badge (respects the current search filter)
@@ -5555,19 +5981,23 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 ### S40 — 2026-06-17 — Admin/Client Role Separation + Settings Cleanup
 
 **Admin/client profile separation**
+
 - Admin profile `client_id` set to `NULL` in Supabase (`UPDATE profiles SET client_id = NULL WHERE role = 'admin'`) — pure consultant account, no property affiliation
 - Admin uses sidebar dropdown to switch between any client; client users stay locked to their own property
 
 **Client switcher persistence fix (localStorage)**
+
 - `AuthContext.js` — `adminViewClientId`/`adminViewClientName` now initialized from `localStorage` (`crest_admin_client_id`, `crest_admin_client_name`)
 - `switchAdminClient()` writes to localStorage on every change; `signOut()` clears both keys
 - Fixes: token refresh (Supabase re-fires `onAuthStateChange` on tab focus) was resetting the selection to null on every window switch
 
 **Pages not loading data after client switch**
+
 - Root bug: `Items.js`, `Vendors.js`, `Periods.js` were computing `clientId = profile?.client_id` locally instead of using AuthContext's exported `clientId`; `profile.client_id = NULL` now for admin so all three showed empty data
 - Fix: all three now destructure `clientId` directly from `useAuth()` and use `[clientId]` as the `useEffect` dep array
 
 **Settings page — client vs admin separation**
+
 - `Contact` tab hidden for client users (admin-only: consultant phone/email for upgrade prompts)
 - `Danger Zone` card hidden for client users in the Data tab; admin alert updated to point to Admin → Clients → ⚠ Danger
 - Branding tab: heading/label/placeholders now say "Property Branding / Property Name / e.g. Casa Acai Cafe" for client users instead of "App Branding / Crest Inventory"
@@ -5592,6 +6022,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 ### S38 — 2026-06-17 — Admin: Delete Client Data (Danger Zone)
 
 **New Danger Zone tab in ClientDrawer (AdminClients.js)**
+
 - 4th tab labelled "⚠ Danger" — styled red; resets on tab switch
 - **Two-step destruction guard:**
   1. Admin types the property name exactly (case-sensitive, must match `client.name`)
@@ -5609,6 +6040,7 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 ### S37 — 2026-06-17 — Security Fix: Service Role Key + Edge Function + RLS Audit
 
 **Security issue fixed: `REACT_APP_SUPABASE_SERVICE_ROLE_KEY` removed from frontend bundle**
+
 - Created `supabase/functions/admin-user-ops/index.ts` — Supabase Edge Function (Deno/TypeScript)
   - Handles 3 auth-admin operations: `getUser`, `createUser`, `deleteUser`
   - Verifies caller has `role = 'admin'` in profiles table using their JWT before executing
@@ -5621,12 +6053,14 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 **Edge function deployed ✓** — `admin-user-ops` live on Supabase Dashboard → Edge Functions (deployed via browser editor 2026-06-17).
 
 **RLS audit SQL**: `supabase/rls-audit.sql`
+
 - Run Section 1 in Supabase Dashboard → SQL Editor to check RLS status on all 18 tables
 - Section 2 lists all active policies
 - Sections 3–4 have corrective SQL if any table shows "RLS OFF"
 - Tables: clients, profiles, feature_flags, settings, categories, items, vendors, monthly_periods, purchase_entries, vendor_returns, opening_stock, closing_stock, wastages, sales_entries, recipes, recipe_ingredients, overheads, par_levels
 
 **RLS audit result (confirmed clean 2026-06-17):**
+
 - 18/18 tables have RLS ON
 - 3 security holes fixed: `feature_flags` (2 policies had `USING(true)`), `monthly_periods` (`periods_all` had `USING(true)`), `profiles` (`profiles_select_own` had `USING(true)`) — all exposed cross-client data to any authenticated user
 - Zero `USING(true)` policies remain; verified with `SELECT ... WHERE qual = 'true'` returning 0 rows
@@ -5639,17 +6073,20 @@ Compiled full column-level schema for all 18 Supabase tables into `memory/db_sch
 Audited all 30 source files. Build is now `0 warnings`.
 
 **Real bugs fixed:**
+
 - `Recipes.js` — 2 dead state declarations removed (`overheadPerPortion` with eslint-disable, `setFilterCat` replaced with constant `'all'`); unused `rErr` destructure removed; stale `// clientId removed` comment removed
 - `SettingsContext.js` — `isPremium` removed from `loadFeatureFlags` useEffect dep array (it was causing unnecessary re-fetches on login; the effect doesn't use `isPremium`)
 - `SupplierPriceTracker.js` — added `eslint-disable-line` on line 32 useEffect (missing `init` dep that would cause infinite loop if added)
 
 **False positives (verified & cleared):**
+
 - `AuthContext.js` `data.clients = client` — intentional mutation of profile object before `setProfile()`; correct
 - `Purchases.js` freshItem null guard — already present at line 183 (`if (freshItem)`)
 - `Stock.js` delete+upsert — paths are mutually exclusive (`if qty <= 0 delete; else upsert`); correct
 - All `[clientId]` dep arrays across pages — intentionally narrowed to avoid infinite re-render loops; eslint-disable already in place
 
 **Security note (not fixed — requires architectural change):**
+
 - `AdminClients.js` uses `REACT_APP_SUPABASE_SERVICE_ROLE_KEY` via `createClient()` on the frontend. This key is visible in the browser bundle. Proper fix = Supabase Edge Function for admin user creation. Left as-is since this page is admin-only and the risk is accepted for now.
 
 - **Files:** `Recipes.js`, `SettingsContext.js`, `SupplierPriceTracker.js`
@@ -5659,6 +6096,7 @@ Audited all 30 source files. Build is now `0 warnings`.
 **SQL run:** `ALTER TABLE overheads ADD COLUMN IF NOT EXISTS bucket text DEFAULT 'overhead'`
 
 **Overheads.js — complete rebuild**
+
 - 3-tab entry: **Fixed Overheads** (Rent, Utilities, Tech, Marketing, Insurance, Misc) · **Labor Costs** (Manager, Kitchen, Service, Part-time, Benefits) · **Tax & Fees** (VAT, Card Processing, Bank Charges, License, Accountant)
 - Each row saved with `bucket = 'overhead' | 'labor' | 'tax_fees'`
 - Preset category dropdowns per tab with context-aware placeholders; "+ Add Row" for custom entries
@@ -5672,17 +6110,20 @@ Audited all 30 source files. Build is now `0 warnings`.
 **Dashboard.js** — "Overheads % of Revenue" KPI renamed to **"Fixed Costs % of Revenue"**; tooltip updated; threshold now ≤50% green / ≤65% yellow / >65% red (was 20/30 — wrong for total fixed costs)
 
 **Recipes.js** — Overhead allocation query now filters `.eq('bucket', 'overhead')` so labor and tax rows don't inflate the overhead-per-portion in recipe costing
+
 - **Files:** `Overheads.js`, `Dashboard.js`, `Recipes.js`
 
 ### S34 — 2026-06-17 — Menu Engineering Fix + Tooltip System + Reorder Clear All
 
 **Menu Engineering fix**
+
 - Root bug: recipes query selected `total_cost` which is not a DB column → Supabase returned `null` → early return fired → 0 items shown
 - Fixed: removed `total_cost` from SELECT; removed `.eq('is_active', true)` (replaced with `.neq('is_active', false)` to include NULL rows); added `clientId` guard to `loadData` useEffect
 - Ingredient cost calculation already correct after previous session's `qty` → `qty_per_portion` fix
 - **Files:** `MenuEngineering.js`
 
 **Shared Tip tooltip component**
+
 - Created `src/components/Tip.js` — reusable hover tooltip (dark card, dashed underline, `width` prop)
 - Uses `createPortal` to render into `document.body` — escapes all `overflow: hidden/auto` containers (table wrappers, etc.)
 - Positions via `getBoundingClientRect()` + `position: fixed` so it never gets clipped
@@ -5698,11 +6139,13 @@ Audited all 30 source files. Build is now `0 warnings`.
 - **Files:** `src/components/Tip.js` (new), `MenuEngineering.js`, `Dashboard.js`, `MonthlySummary.js`, `Variance.js`, `ReorderReport.js`, `Stock.js`, `FifoReport.js`
 
 **Reorder Report — Clear All Par button**
+
 - Moved "Reset Par Levels" button from page header to filter bar (right-aligned, more visible)
 - Renamed to "✕ Clear All Par" for clarity; prompts before deleting
 - **Files:** `ReorderReport.js`
 
 **ESLint fixes**
+
 - `eslint-disable-line react-hooks/exhaustive-deps` added to `useEffect` in: `MonthlySummary.js`, `Variance.js`, `FifoReport.js`, `ReorderReport.js`, `Stock.js`, `PaymentReport.js`
 - **Pending SQL** (run in Supabase if not already done):
   - `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS vendor_code text;`

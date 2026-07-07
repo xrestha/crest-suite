@@ -34,7 +34,7 @@ No custom linting scripts — ESLint runs via `react-scripts`. Build warnings ar
 `ThemeProvider → AuthProvider → SettingsProvider → BrowserRouter`
 
 | Context | File | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `ThemeContext` | `src/context/ThemeContext.js` | CSS variable theme engine; 9 presets; persisted to `localStorage` (`crest_theme`) |
 | `AuthContext` | `src/context/AuthContext.js` | Session, profile, plan tier, feature flags, module access, admin client-switching |
 | `SettingsContext` | `src/context/SettingsContext.js` | Per-client settings + feature flag helpers |
@@ -42,6 +42,7 @@ No custom linting scripts — ESLint runs via `react-scripts`. Build warnings ar
 ### Access control — two-layer route guard
 
 Every protected route uses both guards stacked:
+
 ```jsx
 <ModuleGate module="ims">
   <PremiumGate featureKey="recipe_costing" minPlan="growth">
@@ -75,6 +76,7 @@ await scopedDelete('vendors').eq('id', vendorId)
 `src/shared/scopedDb.js` fails closed (a sentinel UUID on reads/updates/deletes, an error object on inserts/upserts) when `clientId` is missing, instead of silently running unfiltered or leaking a NULL row — this matters most on **reads**, since an admin's RLS policy (`role='admin' OR client_id=own`) allows every tenant's rows and only the per-query filter narrows an admin "viewing as" session down to one client. Only tables in the `CLIENT_SCOPED_TABLES` allowlist (mirrors the DB's `client_id NOT NULL` constraints) can go through it — `scopedDb` throws for anything else. Tables scoped by `period_id`/parent-id instead of `client_id` (`purchase_entries`, `sales_entries`, `recipe_ingredients`, `opening_stock`, `closing_stock`, `wastages`, `staff_meals`, etc.), tables with a nullable `client_id` (`settings`, `budgets`), and the `clients` table itself stay on raw `supabase.from()`.
 
 `clientId` in `AuthContext` (and thus in `useScopedDb()`) resolves as:
+
 - Admin: `adminViewClientId` (from `localStorage`; set when admin "views as" a client)
 - Client user: `profile.client_id`
 
@@ -87,7 +89,7 @@ As of 2026-07-05, every IMS, HR, and POS page, plus `Dashboard.js`, `Periods.js`
 The app is one React app / one Supabase project with three modules toggled by per-client flags on the `clients` table:
 
 | Flag | Column | Default |
-|---|---|---|
+| --- | --- | --- |
 | Crest IMS | `ims_enabled` | `true` |
 | Crest HR | `hr_enabled` | `false` |
 | Crest POS | `pos_enabled` | `false` (real column, added S193) |
@@ -97,6 +99,7 @@ The app is one React app / one Supabase project with three modules toggled by pe
 ### Splitting a page component once it outgrows one file
 
 As of 2026-07-06, the six pages that had grown past 1,200 lines (`AdminClients.js`, `Roster.jsx`, `Dashboard.js`, `Purchases.js`, `Recipes.js`, `PosOrders.jsx`) were each split, using whichever of these fits what's actually inside — don't force a pattern that doesn't match:
+
 - **Already-self-contained sub-component sitting in the same file** (a modal or panel with its own local state, just not in its own file yet) → move it verbatim into a same-name subfolder (e.g. `src/pages/adminClients/ClientDrawer.js`). Pure relocation, no behavior change — a near-identical production bundle hash is the sanity check.
 - **One file secretly rendering two unrelated views behind a boolean** (e.g. `Dashboard.js`'s admin-overview vs. per-client view, sharing almost no state) → split along that boolean into two components, each with its own `useAuth()`/data loading, and leave the original file as a thin router.
 - **Genuinely tangled state with no existing seam** (e.g. `Purchases.js`'s bill-entry form, `Recipes.js`'s nutrition editor) → extract a new self-contained component that owns its own form state and reports back through a single `onSaved(...)`/`onChanged()` callback, rather than lifting the state up and prop-threading it.
@@ -132,7 +135,7 @@ Constants in `src/modules/hr/payrollConstants.js`: SSF rates (11% employee / 20%
 
 All colors must use CSS variables, not hardcoded hex. The full token set:
 
-```
+```text
 --theme-bg          --theme-card        --theme-border      --theme-border-lt
 --theme-text1       --theme-text2       --theme-text3
 --theme-accent      --theme-green       --theme-red         --theme-amber
@@ -144,7 +147,7 @@ All colors must use CSS variables, not hardcoded hex. The full token set:
 ### Component library (reusable)
 
 | Component | File | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `Tip` | `src/components/Tip.js` | Hover tooltip using `createPortal` — escapes `overflow:hidden` containers. All non-obvious columns and form labels must have one. |
 | `SearchableSelect` | `src/components/SearchableSelect.js` | Drop-in for long `<select>` lists. `position:fixed` dropdown never clips inside modals. Flips above the trigger near the bottom of the viewport. |
 | `Fab` | `src/components/Fab.js` | Fixed bottom-right `+ Add` button |
@@ -156,6 +159,7 @@ All colors must use CSS variables, not hardcoded hex. The full token set:
 ### Class names
 
 Use these global classes from `Layout.css` — don't repeat inline styles:
+
 - `data-table` — styled table
 - `table-wrap` — horizontal scroll wrapper (required on all wide tables)
 - `tab-btn` / `tab-btn--active` / `tab-bar` — pill filter/sort buttons
@@ -168,6 +172,7 @@ Use these global classes from `Layout.css` — don't repeat inline styles:
 ### Purchases: qty/rate storage convention
 
 `purchase_entries.qty` and `rate` are stored in **base units**, not purchase units:
+
 - `stored_qty = entered_qty × conversion_factor`
 - `stored_rate = entered_rate ÷ conversion_factor`
 
@@ -176,6 +181,7 @@ All downstream calculations (Stock, Variance, FIFO, Reorder) read these base-uni
 ### `recipe_ingredients` has no `client_id` column
 
 Always scope ingredient fetches by recipe IDs first:
+
 ```js
 const recipeIds = recipes.map(r => r.id)
 supabase.from('recipe_ingredients').select('*').in('recipe_id', recipeIds)
@@ -184,6 +190,7 @@ supabase.from('recipe_ingredients').select('*').in('recipe_id', recipeIds)
 ### Sub-recipe mirror items
 
 Recipes with `type = 'sub_recipe'` auto-create a mirror row in `items` with `is_sub_recipe = true`. Filter these out of Item Master, Purchases, POs, Requisitions, Reorder Report, and Supplier Price Tracker:
+
 ```js
 .eq('is_sub_recipe', false)
 ```
@@ -204,10 +211,12 @@ Recipes with `type = 'sub_recipe'` auto-create a mirror row in `items` with `is_
 ## Supabase / DB notes
 
 - RLS is enabled on all 18+ tables. The standard policy pattern uses an inline subquery:
+
   ```sql
   (SELECT role FROM profiles WHERE id = auth.uid()) = 'admin'
   OR client_id = (SELECT client_id FROM profiles WHERE id = auth.uid())
   ```
+
 - Admin operations that need the service role key go through the Supabase Edge Function `admin-user-ops` (deployed at `supabase/functions/admin-user-ops/`). Never put `SUPABASE_SERVICE_ROLE_KEY` in the frontend bundle.
 - `profiles` itself is the one table that does **not** follow the standard same-client pattern above — `profiles_select` RLS is self-or-admin only (`id = auth.uid() OR is_admin()`). A raw `supabase.from('profiles').eq('client_id', ...)` query, run by a real (non-admin) client login, silently returns nothing but the caller's own row. To resolve another staff member's name (closed_by/comped_by/sent_by/etc.), call the `get_client_profile_names(p_client_id)` RPC (all profiles for that client) or `get_pos_staff_list(p_client_id)` (PIN-based POS staff only, excludes the Owner — used by Staff Management specifically). Never a raw `profiles` query for anyone but the caller's own row.
 - `per_uom_rate` on `items` is a **generated column** — never include it in INSERT/UPDATE payloads.
@@ -222,6 +231,7 @@ Recipes with `type = 'sub_recipe'` auto-create a mirror row in `items` with `is_
 The Supabase CLI is installed and linked to the live project (`supabase link`, ref in `supabase/.temp/`). `supabase/migrations/` is the source of truth for schema history — a root-level `supabase_schema.sql` snapshot used to serve this purpose and is retired as of the `20260705074838_baseline_schema.sql` migration (a full `pg_dump --schema-only` of the live DB at that point in time).
 
 **Workflow for every schema change:**
+
 1. Create a new file: `supabase/migrations/<YYYYMMDDHHMMSS>_<description>.sql` (or `supabase migration new <description>` to scaffold the filename).
 2. Write the SQL in that file.
 3. Apply it the normal way — paste it into the Supabase Dashboard → SQL Editor and run it.
