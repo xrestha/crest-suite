@@ -25,6 +25,11 @@ export const STATUS_BADGE = { available: 'badge-green', occupied: 'badge-red', r
 export const STATUS_LABEL = { available: 'Available', occupied: 'Occupied', reserved: 'Reserved', inactive: 'Inactive' }
 
 export const PAYMENT_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay']
+// A delivery-aggregator order (Foodmandu/Pathao) is its own top-level payment_method, not a
+// Split-payment leg — the platform handles the whole transaction, so "half Foodmandu half Cash"
+// doesn't correspond to anything real. Kept separate from PAYMENT_METHODS so the split-tender-leg
+// picker (which reuses PAYMENT_METHODS) never offers them; only the main Pay-tab selector does.
+export const DELIVERY_PARTNER_METHODS = ['Foodmandu', 'Pathao']
 export const VOID_REASONS    = ['Wrong table', 'Duplicate order', 'Test order', 'Order entry mistake', 'Other']
 export const COMP_REASONS    = ['Walkout / unpaid', 'Customer goodwill', 'Customer complaint', 'Staff error', 'Owners', 'Company Guest', 'Other']
 export const DEFAULT_DISCOUNT_REASONS = ['Loyalty customer', 'Promo / coupon code', 'Manager goodwill', 'Bulk / corporate order', 'Price match', 'Other']

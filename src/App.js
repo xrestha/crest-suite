@@ -74,6 +74,8 @@ import SalesReport from './modules/pos/reports/SalesReport'
 import KotLog from './modules/pos/reports/KotLog'
 import PurchaseOneLakhAboveReport from './modules/ims/reports/PurchaseOneLakhAboveReport'
 import PosLogin from './modules/pos/login/PosLogin'
+import GuestMenu from './modules/pos/guestmenu/GuestMenu'
+import KitchenDisplay from './modules/pos/kds/KitchenDisplay'
 import './components/Layout.css'
 
 function RootRedirect() {
@@ -91,6 +93,7 @@ export default function App() {
             <Route path="/login"     element={<Login />} />
             <Route path="/pricing"   element={<Pricing />} />
             <Route path="/pos/login" element={<PosLogin />} />
+            <Route path="/pos/menu/:tableId" element={<GuestMenu />} />
             <Route path="/" element={<RootRedirect />} />
             <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
 
@@ -201,6 +204,7 @@ export default function App() {
               <Route path="/pos/credit-notes" element={<ModuleGate module="pos"><CreditNotes /></ModuleGate>} />
               <Route path="/pos/sales-report" element={<ModuleGate module="pos"><SalesReport /></ModuleGate>} />
               <Route path="/pos/kot-log" element={<ModuleGate module="pos"><KotLog /></ModuleGate>} />
+              <Route path="/pos/kds" element={<ModuleGate module="pos"><KitchenDisplay /></ModuleGate>} />
               <Route path="/pos/staff"  element={<ModuleGate module="pos"><PosStaff /></ModuleGate>} />
 
               {/* Admin only */}

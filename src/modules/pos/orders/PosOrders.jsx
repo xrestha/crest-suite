@@ -17,7 +17,7 @@ import {
 import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml } from './posOrderPrintHtml'
 import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL,
-  PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, COPY_LABEL,
+  PAYMENT_METHODS, DELIVERY_PARTNER_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, COPY_LABEL,
   btnSm, billInput,
 } from './posOrdersConstants'
 
@@ -64,6 +64,7 @@ export default function PosOrders() {
   /* ── billing / invoice settings (loaded once per client) ── */
   const [billingSettings, setBillingSettings] = useState({
     is_vat_registered: true, invoice_prefix: '', vat_number: '', property_address: '', property_phone: '', payment_qr_data: '',
+    foodmandu_commission_pct: null, pathao_commission_pct: null,
   })
 
   /* ── Billing modal ── */
@@ -145,13 +146,15 @@ export default function PosOrders() {
           property_address:  data.property_address || '',
           property_phone:    data.property_phone || '',
           payment_qr_data:   data.payment_qr_data || '',
+          foodmandu_commission_pct: data.pos_foodmandu_commission_pct,
+          pathao_commission_pct:    data.pos_pathao_commission_pct,
         })
         setOutletName(data.outlet_name || '')
       })
     } else {
       Promise.all([
         supabase.from('settings')
-          .select('pos_bot_categories, pos_note_presets, pos_discount_reasons, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone, payment_qr_data')
+          .select('pos_bot_categories, pos_note_presets, pos_discount_reasons, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone, payment_qr_data, pos_foodmandu_commission_pct, pos_pathao_commission_pct')
           .eq('client_id', clientId).maybeSingle(),
         supabase.from('clients').select('name').eq('id', clientId).single(),
       ]).then(([{ data }, { data: clientData }]) => {
@@ -166,6 +169,8 @@ export default function PosOrders() {
           property_address:  data?.property_address || '',
           property_phone:    data?.property_phone || '',
           payment_qr_data:   data?.payment_qr_data || '',
+          foodmandu_commission_pct: data?.pos_foodmandu_commission_pct,
+          pathao_commission_pct:    data?.pos_pathao_commission_pct,
         })
         setOutletName(clientData?.name || '')
         cachePosSettings(clientId, { ...data, outlet_name: clientData?.name || '' })
@@ -230,6 +235,22 @@ export default function PosOrders() {
   // Buyer Name + Phone become compulsory (not just optional) whenever a discount is applied, or
   // when the bill is going on Credit — both cases need an identifiable, audited record.
   const requireBuyerId = discountAmt > 0 || payMethod === 'Credit'
+
+  // Foodmandu/Pathao commission — the client's own negotiated rate (Table Management → Delivery
+  // Partners). Confirmed with the client: both platforms compute their cut on the ex-VAT
+  // (taxable) order value, NOT the final VAT-inclusive total — VAT is a pass-through tax the
+  // restaurant owes the government regardless of the platform's fee structure, so the commission
+  // percentage applies to paySubEx minus discount (the same pre-VAT, post-discount base VAT
+  // itself is calculated on), not payTotal. The resulting rupee amount is still deducted from the
+  // full (VAT-inclusive) amount the platform remits — commission and VAT are two independent
+  // deductions/additions off the same underlying ex-VAT value, not stacked on each other. Stored
+  // per-order (not just referenced from settings) since a client's rate can change later and a
+  // past bill should keep reporting what was actually withheld at the time it closed.
+  const isDeliveryPartner = DELIVERY_PARTNER_METHODS.includes(payMethod)
+  const commissionPct = payMethod === 'Foodmandu' ? (parseFloat(billingSettings.foodmandu_commission_pct) || 0)
+    : payMethod === 'Pathao' ? (parseFloat(billingSettings.pathao_commission_pct) || 0) : 0
+  const commissionBase = paySubEx - discountAmt
+  const commissionAmt = isDeliveryPartner ? Math.round(commissionBase * commissionPct / 100) : 0
 
   // Split payment — running total of tenders collected so far against payTotal, and what's left.
   const tendersTotal = tenders.reduce((s, t) => s + t.amount, 0)
@@ -1025,6 +1046,7 @@ export default function PosOrders() {
         payment_method:   closeType === 'paid' ? (isSplit ? 'Split' : payMethod) : null,
         paid_amount:      closeType === 'paid' ? payTotal : (closeType === 'writeoff' ? 0 : null),
         tendered_amount:  closeType === 'paid' && !isSplit && payMethod === 'Cash' ? (parseFloat(tenderedStr) || payTotal) : null,
+        commission_amount: closeType === 'paid' && !isSplit && isDeliveryPartner ? commissionAmt : null,
         close_reason:     closeType === 'paid' ? null : closeReason,
         discount_amount:  closeType === 'paid' ? discountAmt : null,
         discount_reason:  closeType === 'paid' ? (discountReason || null) : null,
@@ -1711,6 +1733,13 @@ export default function PosOrders() {
                     ({fmtNpr(total)} − {fmtNpr(discountAmt)} discount)
                   </span>
                 )}
+                {billingTab === 'pay' && isDeliveryPartner && (
+                  <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>
+                    {commissionPct > 0
+                      ? `(− ${fmtNpr(commissionAmt)} ${payMethod} commission @ ${commissionPct}% of ex-VAT value → net ${fmtNpr(payTotal - commissionAmt)})`
+                      : `(no ${payMethod} commission % configured — see Table Management → Delivery Partners)`}
+                  </span>
+                )}
               </p>
             </div>
 
@@ -1844,7 +1873,7 @@ export default function PosOrders() {
 
                 {!splitMode && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                    {PAYMENT_METHODS.map(m => (
+                    {[...PAYMENT_METHODS, ...DELIVERY_PARTNER_METHODS].map(m => (
                       <button key={m} onClick={() => setPayMethod(m)}
                         className={`pay-method-btn${payMethod === m ? ' pay-method-btn--selected' : ''}`}>
                         {m}

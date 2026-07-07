@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import QRCode from 'qrcode'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
@@ -39,6 +40,10 @@ export default function PosTableManagement() {
   const [saving,  setSaving]  = useState(false)
   const [msg,     setMsg]     = useState('')
 
+  // Guest menu QR (view-only digital menu, src/modules/pos/guestmenu/GuestMenu.jsx)
+  const [qrTable,   setQrTable]   = useState(null) // table row currently shown in the QR modal
+  const [qrDataUrl, setQrDataUrl] = useState('')
+
   // Ticket Routing
   const [categories,      setCategories]      = useState([])
   const [botCats,         setBotCats]         = useState(new Set(['Beverage']))
@@ -68,6 +73,14 @@ export default function PosTableManagement() {
   const [discSaving,    setDiscSaving]    = useState(false)
   const [discMsg,       setDiscMsg]       = useState('')
   const [discLoaded,    setDiscLoaded]    = useState(false)
+
+  // Delivery Partners (Foodmandu/Pathao commission %) — see PosOrders.jsx Charge tab
+  const [foodmanduPct,   setFoodmanduPct]   = useState('')
+  const [pathaoPct,      setPathaoPct]      = useState('')
+  const [deliveryLoading, setDeliveryLoading] = useState(false)
+  const [deliverySaving,  setDeliverySaving]  = useState(false)
+  const [deliveryMsg,     setDeliveryMsg]     = useState('')
+  const [deliveryLoaded,  setDeliveryLoaded]  = useState(false)
 
   useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line
 
@@ -159,6 +172,40 @@ export default function PosTableManagement() {
     if (!target || !window.confirm(`Delete "${target.name}"? This cannot be undone.`)) return
     await scopedDelete('pos_tables').eq('id', target.id)
     await load(); closeModal()
+  }
+
+  // ── Guest Menu QR ────────────────────────────────────────────────────────────
+  // The QR just encodes this table's own guest-menu URL — no new column/token needed, the
+  // table's id is already a UUID and the page itself (GuestMenu.jsx) does its own authorization
+  // via get_guest_menu (checks pos_enabled, only ever returns safe/whitelisted columns).
+
+  function guestMenuUrl(t) {
+    return `${window.location.origin}/pos/menu/${t.id}`
+  }
+
+  async function openQr(t, e) {
+    e?.stopPropagation()
+    setQrTable(t)
+    setQrDataUrl('')
+    const url = await QRCode.toDataURL(guestMenuUrl(t), { margin: 1, width: 240 })
+    setQrDataUrl(url)
+  }
+
+  function printQr() {
+    if (!qrTable || !qrDataUrl) return
+    const w = window.open('', '_blank', 'width=380,height=520,left=200,top=100')
+    if (!w) return
+    w.document.write(`
+      <html><head><title>${qrTable.name} — Menu QR</title></head>
+      <body style="font-family:sans-serif;text-align:center;padding:24px">
+        <h2 style="margin:0 0 4px">${qrTable.name}</h2>
+        <p style="margin:0 0 20px;color:#666;font-size:13px">Scan for our menu</p>
+        <img src="${qrDataUrl}" style="width:240px;height:240px" />
+      </body></html>
+    `)
+    w.document.close()
+    w.focus()
+    setTimeout(() => { w.print(); w.close() }, 300)
   }
 
   async function cycleStatus(t, e) {
@@ -330,6 +377,44 @@ export default function PosTableManagement() {
     setDiscMsg(error ? 'error:' + error.message : 'ok:Discount reasons saved.')
   }
 
+  // ── Delivery Partners ────────────────────────────────────────────────────────
+  // Commission % negotiated with each aggregator — applied automatically to every
+  // Foodmandu/Pathao bill at Charge (see PosOrders.jsx), stored per-order at that rate so a
+  // later rate change doesn't retroactively alter past bills' reporting.
+
+  async function loadDeliverySettings() {
+    setDeliveryLoading(true)
+    const { data } = await supabase.from('settings')
+      .select('pos_foodmandu_commission_pct, pos_pathao_commission_pct').eq('client_id', clientId).maybeSingle()
+    setFoodmanduPct(data?.pos_foodmandu_commission_pct != null ? String(data.pos_foodmandu_commission_pct) : '')
+    setPathaoPct(data?.pos_pathao_commission_pct != null ? String(data.pos_pathao_commission_pct) : '')
+    setDeliveryLoading(false)
+    setDeliveryLoaded(true)
+  }
+
+  function openDeliveryTab() {
+    setMainTab('delivery')
+    if (!deliveryLoaded) loadDeliverySettings()
+  }
+
+  async function saveDeliverySettings() {
+    setDeliverySaving(true); setDeliveryMsg('')
+    const payload = {
+      pos_foodmandu_commission_pct: foodmanduPct.trim() === '' ? null : parseFloat(foodmanduPct),
+      pos_pathao_commission_pct:    pathaoPct.trim() === ''    ? null : parseFloat(pathaoPct),
+    }
+    const { data: existing } = await supabase
+      .from('settings').select('id').eq('client_id', clientId).maybeSingle()
+    let error
+    if (existing?.id) {
+      ;({ error } = await supabase.from('settings').update(payload).eq('id', existing.id))
+    } else {
+      ;({ error } = await supabase.from('settings').insert({ client_id: clientId, ...payload }))
+    }
+    setDeliverySaving(false)
+    setDeliveryMsg(error ? 'error:' + error.message : 'ok:Delivery partner commission rates saved.')
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   return (
@@ -372,6 +457,12 @@ export default function PosTableManagement() {
             className={`tab-btn${mainTab === 'discounts' ? ' tab-btn--active' : ''}`}
             onClick={openDiscountsTab}
           >Discounts</button>
+        </Tip>
+        <Tip text="Foodmandu/Pathao commission % — applied automatically whenever staff selects one of them as the payment method at Charge, so Sales Report can show what the platform withholds vs. what you actually receive">
+          <button
+            className={`tab-btn${mainTab === 'delivery' ? ' tab-btn--active' : ''}`}
+            onClick={openDeliveryTab}
+          >Delivery Partners</button>
         </Tip>
       </div>
 
@@ -630,6 +721,55 @@ export default function PosTableManagement() {
         </div>
       )}
 
+      {/* ══ DELIVERY PARTNERS TAB ══ */}
+      {mainTab === 'delivery' && (
+        <div style={{ maxWidth: 460 }}>
+          <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
+            Foodmandu and Pathao show up as their own payment methods at Charge — no live order sync
+            yet (that needs a real API partnership with either platform), just a way to tag a bill as
+            coming from one of them. Set your negotiated commission rate here and it's applied
+            automatically to every bill closed with that method, so Sales Report → Payment Summary
+            can show what the platform withholds vs. what you actually receive. The % is applied to
+            the bill's ex-VAT (taxable) value, not the final VAT-inclusive total — matching how both
+            platforms actually calculate their cut.
+          </p>
+
+          {deliveryLoading ? (
+            <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>
+                    Foodmandu Commission % <Tip text="Leave blank if you haven't negotiated/confirmed a rate yet — bills will show as 0% commission until set" />
+                  </label>
+                  <input type="number" min="0" max="100" step="0.1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                    value={foodmanduPct} onChange={e => setFoodmanduPct(e.target.value)} placeholder="e.g. 22" />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>
+                    Pathao Commission % <Tip text="Leave blank if you haven't negotiated/confirmed a rate yet — bills will show as 0% commission until set" />
+                  </label>
+                  <input type="number" min="0" max="100" step="0.1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                    value={pathaoPct} onChange={e => setPathaoPct(e.target.value)} placeholder="e.g. 20" />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <button className="btn btn-primary" onClick={saveDeliverySettings} disabled={deliverySaving}>
+                  {deliverySaving ? 'Saving…' : 'Save Commission Rates'}
+                </button>
+                {deliveryMsg && (
+                  <span style={{ fontSize: 12, color: deliveryMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                    {deliveryMsg.replace(/^(error|ok):/, '')}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* ══ TABLES TAB ══ */}
       {mainTab === 'tables' && (
         <>
@@ -762,8 +902,13 @@ export default function PosTableManagement() {
                     </Tip>
                   </div>
                   {t.section && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{t.section}</div>}
-                  <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
-                    <Tip text="Seating capacity — edit the table to change it">👥 {t.capacity} seats</Tip>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                      <Tip text="Seating capacity — edit the table to change it">👥 {t.capacity} seats</Tip>
+                    </div>
+                    <Tip text="View / print this table's guest menu QR code">
+                      <button className="btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={e => openQr(t, e)}>▦ QR</button>
+                    </Tip>
                   </div>
                 </div>
               ))}
@@ -854,6 +999,30 @@ export default function PosTableManagement() {
               <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving…' : target ? 'Save Changes' : 'Add Table'}
               </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Guest Menu QR modal */}
+      {qrTable && (
+        <Modal onClose={() => setQrTable(null)}>
+          <h3 style={{ margin: '0 0 4px', color: 'var(--theme-text1)' }}>{qrTable.name} — Guest Menu QR</h3>
+          <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 18px' }}>
+            Print this and place it on the table — scanning it opens a read-only menu, no app or login needed.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+            {qrDataUrl ? (
+              <img src={qrDataUrl} alt="Guest menu QR" style={{ width: 200, height: 200 }} />
+            ) : (
+              <div style={{ width: 200, height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--theme-text3)', fontSize: 12 }}>Generating…</div>
+            )}
+            <p style={{ fontSize: 11, color: 'var(--theme-text3)', wordBreak: 'break-all', textAlign: 'center', margin: 0 }}>
+              {guestMenuUrl(qrTable)}
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-ghost" onClick={() => setQrTable(null)}>Close</button>
+              <button className="btn btn-primary" onClick={printQr} disabled={!qrDataUrl}>Print</button>
             </div>
           </div>
         </Modal>

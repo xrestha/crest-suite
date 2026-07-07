@@ -12,6 +12,7 @@ import { getBsToday, formatAd, adToBs, BS_MONTHS, getBsFiscalYear } from '../../
 import { computeOrderAmounts, computeCategoryAmounts, computeItemAmounts } from '../../../utils/posBillingMath'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
+import { PAYMENT_METHODS, DELIVERY_PARTNER_METHODS } from '../orders/posOrdersConstants'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const WALKIN_KEY = '__CASH_SALES__'
@@ -32,7 +33,10 @@ const TABS = [
   { key: 'customer', label: 'Customer Wise' },
   { key: 'onelakh',  label: '1L+ Report' },
 ]
-const PAY_METHOD_ORDER = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay', 'Credit']
+// Was its own hardcoded copy of the tender-type list (drifted from posOrdersConstants.js) — a
+// new payment method added there would have silently sorted last here instead of vanishing
+// outright (grouping itself is dynamic), but still worth deriving from the same source of truth.
+const PAY_METHOD_ORDER = [...PAYMENT_METHODS, ...DELIVERY_PARTNER_METHODS, 'Credit']
 
 export default function SalesReport() {
   const { clientId, hasPosAccess } = useAuth()
@@ -71,7 +75,7 @@ export default function SalesReport() {
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
     const [{ data: orderData }, { data: settings }, { data: profs }] = await Promise.all([
-      scopedFrom('pos_orders', 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, closed_at, credit_note_id, payment_method, bill_remarks, closed_by, table_name')
+      scopedFrom('pos_orders', 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, closed_at, credit_note_id, payment_method, commission_amount, bill_remarks, closed_by, table_name')
         .eq('close_type', 'paid')
         .gte('closed_at', fromTs).lte('closed_at', toTs),
       supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
@@ -177,13 +181,19 @@ export default function SalesReport() {
 
   const paymentRows = useMemo(() => {
     const grouped = {}
-    const ensure = m => grouped[m] = grouped[m] || { method: m, bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 }
+    const ensure = m => grouped[m] = grouped[m] || { method: m, bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0, commission: 0 }
     for (const o of orders) {
       if (o.credit_note_id) continue // same exclusion rule as dailyRows — totals must reconcile across tabs
       const amounts = computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg)
       const b = ensure(o.payment_method || 'Cash')
       b.bills += 1; b.gross += amounts.grossAmt; b.discount += amounts.discount
       b.taxable += amounts.taxableBase; b.nonTaxable += amounts.nonTaxableBase; b.vat += amounts.vatAmt; b.net += amounts.net
+      // Commission (Foodmandu/Pathao only, see PosOrders.jsx — computed there on the ex-VAT
+      // value, matching how both platforms actually calculate their cut) is withheld by the
+      // platform, not part of what the restaurant collected — subtracted from `net` a second
+      // time here so this tab's own "amount actually received" figure matches reality, on top of
+      // `net`'s existing discount/VAT accounting.
+      b.commission += parseFloat(o.commission_amount) || 0
     }
     return Object.values(grouped).sort((a, b) => {
       const ia = PAY_METHOD_ORDER.indexOf(a.method), ib = PAY_METHOD_ORDER.indexOf(b.method)
@@ -334,7 +344,7 @@ export default function SalesReport() {
   const dailyTotals = dailyRows.reduce((s, r) => ({ bills: s.bills + r.bills, qty: s.qty + r.qty, gross: s.gross + r.gross, discount: s.discount + r.discount, taxable: s.taxable + r.taxable, nonTaxable: s.nonTaxable + r.nonTaxable, vat: s.vat + r.vat, net: s.net + r.net }), { bills: 0, qty: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
   const hourlyTotals = hourlyRows.reduce((s, h) => ({ bills: s.bills + h.bills, qty: s.qty + h.qty, net: s.net + h.net }), { bills: 0, qty: 0, net: 0 })
   const voucherTotals = voucherRows.reduce((s, v) => ({ gross: s.gross + v.gross, discount: s.discount + v.discount, taxable: s.taxable + v.taxable, nonTaxable: s.nonTaxable + v.nonTaxable, vat: s.vat + v.vat, net: s.net + v.net }), { gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
-  const paymentTotals = paymentRows.reduce((s, p) => ({ bills: s.bills + p.bills, gross: s.gross + p.gross, discount: s.discount + p.discount, taxable: s.taxable + p.taxable, nonTaxable: s.nonTaxable + p.nonTaxable, vat: s.vat + p.vat, net: s.net + p.net }), { bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
+  const paymentTotals = paymentRows.reduce((s, p) => ({ bills: s.bills + p.bills, gross: s.gross + p.gross, discount: s.discount + p.discount, taxable: s.taxable + p.taxable, nonTaxable: s.nonTaxable + p.nonTaxable, vat: s.vat + p.vat, net: s.net + p.net, commission: s.commission + p.commission }), { bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0, commission: 0 })
   const categoryNetOf = c => c.gross - c.discount + c.vat
   const categoryTotals = categoryRows.reduce((s, c) => ({ qtySales: s.qtySales + c.qtySales, qtyReturn: s.qtyReturn + c.qtyReturn, gross: s.gross + c.gross, discount: s.discount + c.discount, taxable: s.taxable + c.taxable, nonTaxable: s.nonTaxable + c.nonTaxable, vat: s.vat + c.vat }), { qtySales: 0, qtyReturn: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0 })
   const itemNetOf = i => i.gross - i.discount + i.vat
@@ -413,6 +423,8 @@ export default function SalesReport() {
         'Gross (NPR)': Math.round(p.gross * 100) / 100, 'Discount (NPR)': Math.round(p.discount * 100) / 100,
         'Non-Taxable (NPR)': Math.round(p.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(p.taxable * 100) / 100,
         'VAT (NPR)': Math.round(p.vat * 100) / 100, 'Net (NPR)': Math.round(p.net * 100) / 100,
+        'Commission (NPR)': p.commission > 0 ? Math.round(p.commission * 100) / 100 : '',
+        'Net Received (NPR)': p.commission > 0 ? Math.round((p.net - p.commission) * 100) / 100 : '',
         '% of Net Total': paymentTotals.net > 0 ? `${((p.net / paymentTotals.net) * 100).toFixed(1)}%` : '0%',
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'Payment Summary')
@@ -717,6 +729,12 @@ export default function SalesReport() {
                 <th style={{ textAlign: 'right' }}>Non-Taxable</th><th style={{ textAlign: 'right' }}>Taxable</th>
                 <th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>Net</th>
                 <th style={{ textAlign: 'right' }}>
+                  <Tip text="Foodmandu/Pathao only — the delivery platform's cut, calculated on the ex-VAT (taxable) value of the bill, withheld before remitting to you" width={260}>Commission</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="Net sales minus commission — what you actually receive from the platform (Foodmandu/Pathao rows only; equals Net for every other payment method)" width={260}>Net Received</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>
                   <Tip text="This method's net sales as a share of total net sales in the range" width={220}>% of Net</Tip>
                 </th>
               </tr>
@@ -732,6 +750,8 @@ export default function SalesReport() {
                   <td style={{ textAlign: 'right' }}>{fmtNpr(p.taxable)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtNpr(p.vat)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(p.net)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{p.commission > 0 ? fmtNpr(p.commission) : '—'}</td>
+                  <td style={{ textAlign: 'right' }}>{p.commission > 0 ? fmtNpr(p.net - p.commission) : '—'}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{paymentTotals.net > 0 ? `${((p.net / paymentTotals.net) * 100).toFixed(1)}%` : '0%'}</td>
                 </tr>
               ))}
@@ -746,6 +766,8 @@ export default function SalesReport() {
                 <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.taxable)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.vat)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.net)}</td>
+                <td style={{ textAlign: 'right' }}>{paymentTotals.commission > 0 ? fmtNpr(paymentTotals.commission) : '—'}</td>
+                <td style={{ textAlign: 'right' }}>{paymentTotals.commission > 0 ? fmtNpr(paymentTotals.net - paymentTotals.commission) : '—'}</td>
                 <td style={{ textAlign: 'right' }}>100%</td>
               </tr>
             </tfoot>

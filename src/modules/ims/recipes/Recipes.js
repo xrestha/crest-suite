@@ -139,7 +139,10 @@ export default function Recipes() {
       vat_rate: (recipe.vat_rate === null || recipe.vat_rate === undefined) ? '0.13' : String(recipe.vat_rate),
       yield_qty: recipe.yield_qty || '1',
       yield_uom: recipe.yield_uom || 'portion',
-      target_fc_pct: fcVal
+      target_fc_pct: fcVal,
+      description: recipe.description || '',
+      image_url: recipe.image_url || '',
+      is_veg: recipe.is_veg === true ? 'veg' : recipe.is_veg === false ? 'non_veg' : ''
     })
     setFcPctSaved(fcVal)
     const ings = (recipe.recipe_ingredients || []).map(ri => ({
@@ -318,7 +321,11 @@ export default function Recipes() {
       yield_qty: parseFloat(recipeForm.yield_qty) || 1,
       yield_uom: recipeForm.yield_uom || 'portion',
       target_fc_pct: parseFloat(recipeForm.target_fc_pct) || 30,
-      is_active: true
+      is_active: true,
+      // Guest-facing QR menu fields — all optional, blank means "not shown" on that page.
+      description: recipeForm.description.trim() || null,
+      image_url: recipeForm.image_url.trim() || null,
+      is_veg: recipeForm.is_veg === 'veg' ? true : recipeForm.is_veg === 'non_veg' ? false : null
     }
 
     let recipeId
@@ -791,6 +798,26 @@ export default function Recipes() {
                 </>
               )}
             </div>
+            {!isSubRecipeForm && (
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 16, marginTop: 16 }}>
+                <div className="form-field">
+                  <label><Tip text="Optional — shown on the guest-facing QR menu (Table Management → Print QR). Leave blank to omit." width={280}>Description (guest menu)</Tip></label>
+                  <input value={recipeForm.description} onChange={e => setRecipeForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Grilled chicken breast, herb butter, seasonal veg" />
+                </div>
+                <div className="form-field">
+                  <label><Tip text="Optional — a public image URL shown on the guest-facing QR menu. Paste a link to an already-hosted photo." width={280}>Photo URL (guest menu)</Tip></label>
+                  <input value={recipeForm.image_url} onChange={e => setRecipeForm(f => ({ ...f, image_url: e.target.value }))} placeholder="https://..." />
+                </div>
+                <div className="form-field">
+                  <label><Tip text="Optional — shows a veg/non-veg badge on the guest-facing QR menu. Leave unset to hide the badge for this item.">Veg / Non-Veg</Tip></label>
+                  <select value={recipeForm.is_veg} onChange={e => setRecipeForm(f => ({ ...f, is_veg: e.target.value }))}>
+                    <option value="">— Not set —</option>
+                    <option value="veg">Veg</option>
+                    <option value="non_veg">Non-Veg</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Live cost panel */}

@@ -73,6 +73,7 @@ const POS_GROUPS = [
   ]},
   { key: 'pos-floor', label: 'Floor', items: [
     { to: '/pos/orders', label: 'Orders', icon: '◉', minPosRole: 'staff' },
+    { to: '/pos/kds', label: 'Kitchen Display', icon: '▥', minPosRole: 'staff' },
     { to: '/pos/tables', label: 'Tables', icon: '⊞', minPosRole: 'supervisor' },
     { to: '/pos/customers', label: 'Customers', icon: '👤', minPosRole: 'supervisor' },
     { to: '/pos/shifts', label: 'Shifts', icon: '⏱', minPosRole: 'supervisor' },
