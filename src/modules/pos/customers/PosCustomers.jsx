@@ -4,8 +4,11 @@ import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import { computeOrderAmounts } from '../../../utils/posBillingMath'
 
-const SETTLE_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay']
+// Cheque + Bank Transfer are settlement-only (how a receivable is remitted) — not counter-payment
+// methods, so they're not in PAYMENT_METHODS. Foodmandu/Pathao typically remit by Bank Transfer.
+const SETTLE_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay', 'Cheque', 'Bank Transfer']
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 
 function invoiceLabel(order, vatReg, prefix) {
@@ -39,18 +42,29 @@ export default function PosCustomers() {
   const [settlingId, setSettlingId] = useState(null)  // order id with the method picker open
   const [settleBusy, setSettleBusy] = useState(false)
   const [settleMsg, setSettleMsg] = useState('')
+  // Foodmandu/Pathao only — the platform's actual remittance statement is what should drive
+  // this number, not the Charge-time guess (deliberately never computed at Charge — see
+  // PosOrders.jsx). settleExVatBase is fetched once per Settle click (this order's ex-VAT,
+  // post-discount value, same basis computeOrderAmounts already uses elsewhere), so the % just
+  // typed can be turned into a live preview amount without a second network round trip per keystroke.
+  const [settleCommissionPct, setSettleCommissionPct] = useState('')
+  const [settleExVatBase, setSettleExVatBase] = useState(null)
+  const [settleExVatLoading, setSettleExVatLoading] = useState(false)
 
-  const [billingSettings, setBillingSettings] = useState({ is_vat_registered: true, invoice_prefix: '' })
+  const [billingSettings, setBillingSettings] = useState({
+    is_vat_registered: true, invoice_prefix: '', delivery_partners: [],
+  })
 
   useEffect(() => {
     if (!clientId) return
     loadCustomers()
     supabase.from('settings')
-      .select('is_vat_registered, invoice_prefix')
+      .select('is_vat_registered, invoice_prefix, pos_delivery_partners')
       .eq('client_id', clientId).maybeSingle()
       .then(({ data }) => setBillingSettings({
         is_vat_registered: data?.is_vat_registered ?? true,
         invoice_prefix: data?.invoice_prefix || '',
+        delivery_partners: data?.pos_delivery_partners || [],
       }))
   }, [clientId]) // eslint-disable-line
 
@@ -65,7 +79,7 @@ export default function PosCustomers() {
 
   async function loadCredit() {
     setCreditLoading(true)
-    const { data } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, buyer_name, buyer_phone, closed_at, credit_settled_at, credit_settled_method')
+    const { data } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_method')
       .eq('payment_method', 'Credit').eq('status', 'billed')
       .order('closed_at', { ascending: false })
     setCreditBills(data || [])
@@ -89,13 +103,39 @@ export default function PosCustomers() {
     setHistoryMap(m => ({ ...m, [cust.id]: data || [] }))
   }
 
+  // Opens the Settle panel — for a Foodmandu/Pathao bill, also fetches this order's own items to
+  // compute its ex-VAT (post-discount) value, the basis both platforms actually calculate
+  // commission on (confirmed with the client — not the final VAT-inclusive total), and pre-fills
+  // the commission % from the client's configured rate so it's a starting point to confirm/adjust
+  // against the platform's real remittance, not a silent default.
+  async function openSettle(order) {
+    setSettlingId(order.id)
+    setSettleMsg('')
+    setSettleCommissionPct('')
+    setSettleExVatBase(null)
+    if (!order.delivery_partner) return
+    const partner = billingSettings.delivery_partners.find(p => p.name === order.delivery_partner)
+    const defaultPct = partner?.commission_pct
+    setSettleCommissionPct(defaultPct != null ? String(defaultPct) : '')
+    setSettleExVatLoading(true)
+    const { data: items } = await scopedFrom('pos_order_items', 'qty, unit_price, vat_rate').eq('order_id', order.id)
+    const amounts = computeOrderAmounts(order, items || [], vatReg)
+    setSettleExVatBase(amounts.taxableBase + amounts.nonTaxableBase)
+    setSettleExVatLoading(false)
+  }
+
   async function settleBill(order, method) {
     setSettleBusy(true); setSettleMsg('')
-    const { error } = await scopedUpdate('pos_orders', {
+    const patch = {
       credit_settled_at:     new Date().toISOString(),
       credit_settled_by:     profile?.id || null,
       credit_settled_method: method,
-    }).eq('id', order.id)
+    }
+    if (order.delivery_partner && settleExVatBase != null) {
+      const pct = parseFloat(settleCommissionPct) || 0
+      patch.commission_amount = Math.round(settleExVatBase * pct / 100)
+    }
+    const { error } = await scopedUpdate('pos_orders', patch).eq('id', order.id)
     setSettleBusy(false)
     if (error) { setSettleMsg('error:' + error.message); return }
     setSettleMsg(`ok:${fmtNpr(order.paid_amount)} collected from ${order.buyer_name || 'customer'} via ${method}.`)
@@ -105,6 +145,7 @@ export default function PosCustomers() {
 
   const vatReg = billingSettings.is_vat_registered
   const prefix = billingSettings.invoice_prefix
+  const settleCommissionAmt = settleExVatBase != null ? Math.round(settleExVatBase * (parseFloat(settleCommissionPct) || 0) / 100) : 0
 
   const q = search.trim().toLowerCase()
   const filteredCustomers = q
@@ -274,10 +315,16 @@ export default function PosCustomers() {
                     </thead>
                     <tbody>
                       {unsettled.map(b => (
-                        <tr key={b.id}>
+                        <Fragment key={b.id}>
+                        <tr>
                           <td>{b.closed_at ? new Date(b.closed_at).toLocaleDateString() : '—'}</td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{invoiceLabel(b, vatReg, prefix)}</td>
-                          <td>{b.buyer_name || '—'}</td>
+                          <td>
+                            {b.buyer_name && b.buyer_name !== b.delivery_partner ? `${b.buyer_name} ` : ''}
+                            {b.delivery_partner
+                              ? <span style={{ color: 'var(--theme-amber)', fontWeight: 600 }}>{b.delivery_partner}</span>
+                              : (b.buyer_name || '—')}
+                          </td>
                           <td>{b.buyer_phone || '—'}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-amber)' }}>{fmtNpr(b.paid_amount || 0)}</td>
                           <td>{b.closed_at ? daysAgo(b.closed_at) : '—'}</td>
@@ -295,12 +342,38 @@ export default function PosCustomers() {
                               </div>
                             ) : (
                               <button className="btn btn-primary" style={{ fontSize: 12, padding: '5px 14px' }}
-                                onClick={() => { setSettlingId(b.id); setSettleMsg('') }}>
+                                onClick={() => openSettle(b)}>
                                 Settle
                               </button>
                             )}
                           </td>
                         </tr>
+                        {settlingId === b.id && b.delivery_partner && (
+                          <tr>
+                            <td colSpan={7} style={{ background: 'var(--theme-bg)', padding: '10px 18px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+                                  <Tip text="Confirm against the platform's actual remittance statement — this is a starting suggestion from Table Management → Delivery Partners, not a locked-in figure" width={280}>
+                                    {b.delivery_partner} commission
+                                  </Tip>
+                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <input type="number" min="0" max="100" step="0.1" className="form-select" style={{ width: 80 }}
+                                    value={settleCommissionPct} onChange={e => setSettleCommissionPct(e.target.value)} placeholder="%" />
+                                  <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>%</span>
+                                </div>
+                                {settleExVatLoading ? (
+                                  <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Calculating…</span>
+                                ) : settleExVatBase != null && (
+                                  <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                                    = {fmtNpr(settleCommissionAmt)} commission → net {fmtNpr((b.paid_amount || 0) - settleCommissionAmt)}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
@@ -320,6 +393,10 @@ export default function PosCustomers() {
                           <th>Bill No</th>
                           <th>Customer</th>
                           <th style={{ textAlign: 'right' }}>Amount</th>
+                          <th style={{ textAlign: 'right' }}>
+                            <Tip text="Foodmandu/Pathao only — confirmed at settlement against their actual remittance" width={240}>Commission</Tip>
+                          </th>
+                          <th style={{ textAlign: 'right' }}>Net Received</th>
                           <th>Collected</th>
                           <th>Via</th>
                         </tr>
@@ -329,8 +406,15 @@ export default function PosCustomers() {
                           <tr key={b.id}>
                             <td>{b.closed_at ? new Date(b.closed_at).toLocaleDateString() : '—'}</td>
                             <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{invoiceLabel(b, vatReg, prefix)}</td>
-                            <td>{b.buyer_name || '—'}</td>
+                            <td>
+                              {b.buyer_name && b.buyer_name !== b.delivery_partner ? `${b.buyer_name} ` : ''}
+                              {b.delivery_partner
+                                ? <span style={{ color: 'var(--theme-amber)', fontWeight: 600 }}>{b.delivery_partner}</span>
+                                : (b.buyer_name || '—')}
+                            </td>
                             <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(b.paid_amount || 0)}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{b.delivery_partner ? fmtNpr(b.commission_amount || 0) : '—'}</td>
+                            <td style={{ textAlign: 'right' }}>{b.delivery_partner ? fmtNpr((b.paid_amount || 0) - (b.commission_amount || 0)) : '—'}</td>
                             <td>{new Date(b.credit_settled_at).toLocaleDateString()}</td>
                             <td><span className="badge-green" style={{ fontSize: 11 }}>{b.credit_settled_method}</span></td>
                           </tr>

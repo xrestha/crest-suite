@@ -7,14 +7,15 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
-import { PAYMENT_METHODS, DELIVERY_PARTNER_METHODS } from '../orders/posOrdersConstants'
+import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 // Was its own hardcoded copy of the tender-type list (drifted from posOrdersConstants.js) — a
 // new payment method added there would have silently vanished from this shift report. Now
 // derived from the same source of truth, plus 'Credit' (a shift-reporting-only bucket, not an
-// actual Charge-tab tender button).
-const PAY_METHODS = [...PAYMENT_METHODS, ...DELIVERY_PARTNER_METHODS, 'Credit']
+// actual Charge-tab tender button). Foodmandu/Pathao are buyers on Credit bills, not their own
+// payment_method (see posOrdersConstants.js) — they're already covered under 'Credit' here.
+const PAY_METHODS = [...PAYMENT_METHODS, 'Credit']
 const DENOMINATIONS = [1000, 500, 100, 50, 20, 10, 5, 2, 1]
 const EMPTY_COUNTS = Object.fromEntries(DENOMINATIONS.map(d => [d, '']))
 

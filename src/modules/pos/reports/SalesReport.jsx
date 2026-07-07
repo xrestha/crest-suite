@@ -12,7 +12,7 @@ import { getBsToday, formatAd, adToBs, BS_MONTHS, getBsFiscalYear } from '../../
 import { computeOrderAmounts, computeCategoryAmounts, computeItemAmounts } from '../../../utils/posBillingMath'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
-import { PAYMENT_METHODS, DELIVERY_PARTNER_METHODS } from '../orders/posOrdersConstants'
+import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const WALKIN_KEY = '__CASH_SALES__'
@@ -28,6 +28,7 @@ const TABS = [
   { key: 'voucher',  label: 'Bill Register' },
   { key: 'compxref', label: 'Comped Bills' },
   { key: 'payment',  label: 'Payment Summary' },
+  { key: 'delivery', label: 'Delivery Partners' },
   { key: 'category', label: 'Category Wise' },
   { key: 'item',     label: 'Item Wise' },
   { key: 'customer', label: 'Customer Wise' },
@@ -36,7 +37,7 @@ const TABS = [
 // Was its own hardcoded copy of the tender-type list (drifted from posOrdersConstants.js) — a
 // new payment method added there would have silently sorted last here instead of vanishing
 // outright (grouping itself is dynamic), but still worth deriving from the same source of truth.
-const PAY_METHOD_ORDER = [...PAYMENT_METHODS, ...DELIVERY_PARTNER_METHODS, 'Credit']
+const PAY_METHOD_ORDER = [...PAYMENT_METHODS, 'Credit']
 
 export default function SalesReport() {
   const { clientId, hasPosAccess } = useAuth()
@@ -45,6 +46,10 @@ export default function SalesReport() {
   const currentFy = getBsFiscalYear(today.year, today.month)
 
   const [tab, setTab] = useState('daily')
+  // Drill-down from Payment Summary → Bill Register: clicking a payment-method row filters the
+  // Bill Register tab down to just that method's bills. Cleared on any direct tab-bar click so a
+  // manual visit to Bill Register always starts unfiltered.
+  const [paymentFilter, setPaymentFilter] = useState(null)
 
   /* ── Letterhead info for Excel exports — fetched once per client, independent of date range ── */
   const [bizInfo, setBizInfo] = useState({ name: '', vat: '', address: '' })
@@ -75,7 +80,7 @@ export default function SalesReport() {
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
     const [{ data: orderData }, { data: settings }, { data: profs }] = await Promise.all([
-      scopedFrom('pos_orders', 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, closed_at, credit_note_id, payment_method, commission_amount, bill_remarks, closed_by, table_name')
+      scopedFrom('pos_orders', 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, closed_at, credit_note_id, payment_method, delivery_partner, commission_amount, credit_settled_at, credit_settled_method, paid_amount, bill_remarks, closed_by, table_name')
         .eq('close_type', 'paid')
         .gte('closed_at', fromTs).lte('closed_at', toTs),
       supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
@@ -179,27 +184,52 @@ export default function SalesReport() {
     }).sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt))
   }, [orders, itemsByOrder, compsByOrder, vatReg, staffNames])
 
+  // Drill-down target for Payment Summary — same rows, narrowed to one payment method.
+  const filteredVoucherRows = useMemo(() => (
+    paymentFilter ? voucherRows.filter(v => v.payMethod === paymentFilter) : voucherRows
+  ), [voucherRows, paymentFilter])
+
   const paymentRows = useMemo(() => {
     const grouped = {}
-    const ensure = m => grouped[m] = grouped[m] || { method: m, bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0, commission: 0 }
+    const ensure = m => grouped[m] = grouped[m] || { method: m, bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 }
     for (const o of orders) {
       if (o.credit_note_id) continue // same exclusion rule as dailyRows — totals must reconcile across tabs
       const amounts = computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg)
       const b = ensure(o.payment_method || 'Cash')
       b.bills += 1; b.gross += amounts.grossAmt; b.discount += amounts.discount
       b.taxable += amounts.taxableBase; b.nonTaxable += amounts.nonTaxableBase; b.vat += amounts.vatAmt; b.net += amounts.net
-      // Commission (Foodmandu/Pathao only, see PosOrders.jsx — computed there on the ex-VAT
-      // value, matching how both platforms actually calculate their cut) is withheld by the
-      // platform, not part of what the restaurant collected — subtracted from `net` a second
-      // time here so this tab's own "amount actually received" figure matches reality, on top of
-      // `net`'s existing discount/VAT accounting.
-      b.commission += parseFloat(o.commission_amount) || 0
     }
     return Object.values(grouped).sort((a, b) => {
       const ia = PAY_METHOD_ORDER.indexOf(a.method), ib = PAY_METHOD_ORDER.indexOf(b.method)
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
     })
   }, [orders, itemsByOrder, vatReg])
+
+  // Foodmandu/Pathao bills — these close as Credit (see PosOrders.jsx: the platform doesn't pay
+  // at the counter, it remits later minus commission, so it's a receivable like any other Credit
+  // customer), tagged via delivery_partner rather than payment_method. Commission/settlement
+  // come from Customers → Outstanding Credit → Settle, not Charge time, so an unsettled row here
+  // has no commission/net-received yet — that's expected, not missing data.
+  const deliveryPartnerRows = useMemo(() => (
+    orders
+      .filter(o => o.delivery_partner)
+      .map(o => ({
+        id: o.id, orderNo: o.order_no, invoiceNo: o.invoice_no, closedAt: o.closed_at,
+        deliveryPartner: o.delivery_partner, tableName: o.table_name,
+        amount: o.paid_amount || 0,
+        settled: !!o.credit_settled_at, settledAt: o.credit_settled_at, settledMethod: o.credit_settled_method,
+        commission: parseFloat(o.commission_amount) || 0,
+      }))
+      .sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt))
+  ), [orders])
+
+  const deliveryPartnerTotals = deliveryPartnerRows.reduce((s, r) => ({
+    bills: s.bills + 1,
+    amount: s.amount + r.amount,
+    outstanding: s.outstanding + (r.settled ? 0 : r.amount),
+    commission: s.commission + (r.settled ? r.commission : 0),
+    netReceived: s.netReceived + (r.settled ? r.amount - r.commission : 0),
+  }), { bills: 0, amount: 0, outstanding: 0, commission: 0, netReceived: 0 })
 
   const categoryRows = useMemo(() => {
     const grouped = {}
@@ -343,8 +373,8 @@ export default function SalesReport() {
 
   const dailyTotals = dailyRows.reduce((s, r) => ({ bills: s.bills + r.bills, qty: s.qty + r.qty, gross: s.gross + r.gross, discount: s.discount + r.discount, taxable: s.taxable + r.taxable, nonTaxable: s.nonTaxable + r.nonTaxable, vat: s.vat + r.vat, net: s.net + r.net }), { bills: 0, qty: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
   const hourlyTotals = hourlyRows.reduce((s, h) => ({ bills: s.bills + h.bills, qty: s.qty + h.qty, net: s.net + h.net }), { bills: 0, qty: 0, net: 0 })
-  const voucherTotals = voucherRows.reduce((s, v) => ({ gross: s.gross + v.gross, discount: s.discount + v.discount, taxable: s.taxable + v.taxable, nonTaxable: s.nonTaxable + v.nonTaxable, vat: s.vat + v.vat, net: s.net + v.net }), { gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
-  const paymentTotals = paymentRows.reduce((s, p) => ({ bills: s.bills + p.bills, gross: s.gross + p.gross, discount: s.discount + p.discount, taxable: s.taxable + p.taxable, nonTaxable: s.nonTaxable + p.nonTaxable, vat: s.vat + p.vat, net: s.net + p.net, commission: s.commission + p.commission }), { bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0, commission: 0 })
+  const voucherTotals = filteredVoucherRows.reduce((s, v) => ({ gross: s.gross + v.gross, discount: s.discount + v.discount, taxable: s.taxable + v.taxable, nonTaxable: s.nonTaxable + v.nonTaxable, vat: s.vat + v.vat, net: s.net + v.net }), { gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
+  const paymentTotals = paymentRows.reduce((s, p) => ({ bills: s.bills + p.bills, gross: s.gross + p.gross, discount: s.discount + p.discount, taxable: s.taxable + p.taxable, nonTaxable: s.nonTaxable + p.nonTaxable, vat: s.vat + p.vat, net: s.net + p.net }), { bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
   const categoryNetOf = c => c.gross - c.discount + c.vat
   const categoryTotals = categoryRows.reduce((s, c) => ({ qtySales: s.qtySales + c.qtySales, qtyReturn: s.qtyReturn + c.qtyReturn, gross: s.gross + c.gross, discount: s.discount + c.discount, taxable: s.taxable + c.taxable, nonTaxable: s.nonTaxable + c.nonTaxable, vat: s.vat + c.vat }), { qtySales: 0, qtyReturn: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0 })
   const itemNetOf = i => i.gross - i.discount + i.vat
@@ -389,7 +419,7 @@ export default function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, 'Hourly Sales')
       XLSX.writeFile(wb, `hourly-sales-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'voucher') {
-      const ws = withLetterhead('Sales Book Report', dateRangeLine, voucherRows.map(v => {
+      const ws = withLetterhead('Sales Book Report', dateRangeLine, filteredVoucherRows.map(v => {
         const bs = adToBs(new Date(v.closedAt))
         return {
           'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`, 'Voucher#': v.orderNo, 'Invoice#': v.invoiceNo || '',
@@ -423,12 +453,26 @@ export default function SalesReport() {
         'Gross (NPR)': Math.round(p.gross * 100) / 100, 'Discount (NPR)': Math.round(p.discount * 100) / 100,
         'Non-Taxable (NPR)': Math.round(p.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(p.taxable * 100) / 100,
         'VAT (NPR)': Math.round(p.vat * 100) / 100, 'Net (NPR)': Math.round(p.net * 100) / 100,
-        'Commission (NPR)': p.commission > 0 ? Math.round(p.commission * 100) / 100 : '',
-        'Net Received (NPR)': p.commission > 0 ? Math.round((p.net - p.commission) * 100) / 100 : '',
         '% of Net Total': paymentTotals.net > 0 ? `${((p.net / paymentTotals.net) * 100).toFixed(1)}%` : '0%',
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'Payment Summary')
       XLSX.writeFile(wb, `payment-summary-${fromIso}-to-${toIso}.xlsx`)
+    } else if (tab === 'delivery') {
+      const ws = withLetterhead('Sales Report - Delivery Partners', dateRangeLine, deliveryPartnerRows.map(r => {
+        const bs = adToBs(new Date(r.closedAt))
+        return {
+          'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
+          'Bill No': r.invoiceNo != null ? `#${r.invoiceNo}` : `Order #${r.orderNo}`,
+          'Partner': r.deliveryPartner, 'Table': r.tableName || 'Takeaway',
+          'Amount (NPR)': Math.round(r.amount * 100) / 100,
+          'Status': r.settled ? 'Settled' : 'Outstanding',
+          'Commission (NPR)': r.settled ? Math.round(r.commission * 100) / 100 : '',
+          'Net Received (NPR)': r.settled ? Math.round((r.amount - r.commission) * 100) / 100 : '',
+          'Settled Via': r.settled ? r.settledMethod : '',
+        }
+      }))
+      XLSX.utils.book_append_sheet(wb, ws, 'Delivery Partners')
+      XLSX.writeFile(wb, `delivery-partners-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'category') {
       const ws = withLetterhead('Sales Report - Category Wise', dateRangeLine, categoryRows.map(c => ({
         'Category': c.name, 'Qty Sales': c.qtySales, 'Qty Return': c.qtyReturn, 'Qty Net': c.qtySales - c.qtyReturn,
@@ -473,9 +517,10 @@ export default function SalesReport() {
   const isEmpty =
     (tab === 'daily' && dailyRows.length === 0) ||
     (tab === 'hourly' && hourlyTotals.bills === 0) ||
-    (tab === 'voucher' && voucherRows.length === 0) ||
+    (tab === 'voucher' && filteredVoucherRows.length === 0) ||
     (tab === 'compxref' && compedBillRows.length === 0) ||
     (tab === 'payment' && paymentRows.length === 0) ||
+    (tab === 'delivery' && deliveryPartnerRows.length === 0) ||
     (tab === 'category' && categoryRows.length === 0) ||
     (tab === 'item' && itemRows.length === 0) ||
     (tab === 'customer' && customerRows.length === 0) ||
@@ -485,16 +530,16 @@ export default function SalesReport() {
     <div style={{ padding: '24px 28px', maxWidth: 1150 }}>
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
-          Sales Report <Tip text="Nine views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
+          Sales Report <Tip text="Ten views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Delivery Partners tracks Foodmandu/Pathao bills from Credit through settlement, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
         </h2>
         <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
-          One report, nine ways to slice it.
+          One report, ten ways to slice it.
         </p>
       </div>
 
       <div className="tab-bar" style={{ marginBottom: 16 }}>
         {TABS.map(t => (
-          <button key={t.key} className={`tab-btn${tab === t.key ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.key)}>{t.label}</button>
+          <button key={t.key} className={`tab-btn${tab === t.key ? ' tab-btn--active' : ''}`} onClick={() => { setTab(t.key); setPaymentFilter(null) }}>{t.label}</button>
         ))}
       </div>
 
@@ -525,7 +570,11 @@ export default function SalesReport() {
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : isEmpty ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-          {tab === 'onelakh' ? `No paid bills in FY ${selectedFy}.` : tab === 'compxref' ? 'No bills had an item comped out of them in this range.' : 'No paid bills in this range.'}
+          {tab === 'onelakh' ? `No paid bills in FY ${selectedFy}.`
+            : tab === 'compxref' ? 'No bills had an item comped out of them in this range.'
+            : tab === 'voucher' && paymentFilter ? `No ${paymentFilter} bills in this range.`
+            : tab === 'delivery' ? 'No Foodmandu/Pathao bills in this range.'
+            : 'No paid bills in this range.'}
         </div>
       ) : tab === 'daily' ? (
         <div className="table-wrap">
@@ -612,7 +661,21 @@ export default function SalesReport() {
         </>
       ) : tab === 'voucher' ? (
         <div>
-        <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--theme-text3)' }}>Click any row to view the actual bill.</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text3)' }}>Click any row to view the actual bill.</p>
+          {paymentFilter && (
+            <span style={{
+              display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600,
+              padding: '3px 6px 3px 10px', borderRadius: 12, background: 'var(--theme-input-bg)',
+              border: '1px solid var(--theme-accent)', color: 'var(--theme-accent)',
+            }}>
+              Filtered: {paymentFilter}
+              <button onClick={() => setPaymentFilter(null)} title="Clear filter" style={{
+                background: 'none', border: 'none', color: 'var(--theme-accent)', cursor: 'pointer', fontSize: 13, padding: 0, lineHeight: 1,
+              }}>×</button>
+            </span>
+          )}
+        </div>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -625,7 +688,7 @@ export default function SalesReport() {
               </tr>
             </thead>
             <tbody>
-              {voucherRows.map(v => {
+              {filteredVoucherRows.map(v => {
                 const bs = adToBs(new Date(v.closedAt))
                 return (
                   <tr key={v.id} onClick={() => viewPosBill(clientId, { id: v.id })} style={{ cursor: 'pointer' }}>
@@ -720,6 +783,8 @@ export default function SalesReport() {
         </div>
         </div>
       ) : tab === 'payment' ? (
+        <div>
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--theme-text3)' }}>Click a row to see its bills in Bill Register.</p>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -729,19 +794,13 @@ export default function SalesReport() {
                 <th style={{ textAlign: 'right' }}>Non-Taxable</th><th style={{ textAlign: 'right' }}>Taxable</th>
                 <th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>Net</th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Foodmandu/Pathao only — the delivery platform's cut, calculated on the ex-VAT (taxable) value of the bill, withheld before remitting to you" width={260}>Commission</Tip>
-                </th>
-                <th style={{ textAlign: 'right' }}>
-                  <Tip text="Net sales minus commission — what you actually receive from the platform (Foodmandu/Pathao rows only; equals Net for every other payment method)" width={260}>Net Received</Tip>
-                </th>
-                <th style={{ textAlign: 'right' }}>
                   <Tip text="This method's net sales as a share of total net sales in the range" width={220}>% of Net</Tip>
                 </th>
               </tr>
             </thead>
             <tbody>
               {paymentRows.map(p => (
-                <tr key={p.method}>
+                <tr key={p.method} onClick={() => { setPaymentFilter(p.method); setTab('voucher') }} style={{ cursor: 'pointer' }}>
                   <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{p.method}</td>
                   <td style={{ textAlign: 'right' }}>{p.bills}</td>
                   <td style={{ textAlign: 'right' }}>{fmtNpr(p.gross)}</td>
@@ -750,8 +809,6 @@ export default function SalesReport() {
                   <td style={{ textAlign: 'right' }}>{fmtNpr(p.taxable)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtNpr(p.vat)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(p.net)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{p.commission > 0 ? fmtNpr(p.commission) : '—'}</td>
-                  <td style={{ textAlign: 'right' }}>{p.commission > 0 ? fmtNpr(p.net - p.commission) : '—'}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{paymentTotals.net > 0 ? `${((p.net / paymentTotals.net) * 100).toFixed(1)}%` : '0%'}</td>
                 </tr>
               ))}
@@ -766,12 +823,77 @@ export default function SalesReport() {
                 <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.taxable)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.vat)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(paymentTotals.net)}</td>
-                <td style={{ textAlign: 'right' }}>{paymentTotals.commission > 0 ? fmtNpr(paymentTotals.commission) : '—'}</td>
-                <td style={{ textAlign: 'right' }}>{paymentTotals.commission > 0 ? fmtNpr(paymentTotals.net - paymentTotals.commission) : '—'}</td>
                 <td style={{ textAlign: 'right' }}>100%</td>
               </tr>
             </tfoot>
           </table>
+        </div>
+        </div>
+      ) : tab === 'delivery' ? (
+        <div>
+        <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
+          Foodmandu/Pathao bills close as Credit (the platform doesn't pay at the counter — it remits later, minus commission), so an outstanding row here has no commission/net yet. Settle it from Customers → Outstanding Credit to record the platform's actual remittance. Click any row to view the bill.
+        </p>
+        <div className="stat-grid" style={{ marginBottom: 16 }}>
+          <div className="card" style={{ padding: '14px 18px' }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Bills</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{deliveryPartnerTotals.bills}</div>
+          </div>
+          <div className="card" style={{ padding: '14px 18px' }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              <Tip text="Bills not yet settled from Customers → Outstanding Credit" width={220}>Outstanding</Tip>
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: deliveryPartnerTotals.outstanding > 0 ? 'var(--theme-amber)' : 'var(--theme-green)' }}>{fmtNpr(deliveryPartnerTotals.outstanding)}</div>
+          </div>
+          <div className="card" style={{ padding: '14px 18px' }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Commission (settled)</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{fmtNpr(deliveryPartnerTotals.commission)}</div>
+          </div>
+          <div className="card" style={{ padding: '14px 18px' }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Net Received (settled)</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-green)' }}>{fmtNpr(deliveryPartnerTotals.netReceived)}</div>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Date (BS)</th><th>Bill No</th><th>Partner</th><th>Table</th>
+                <th style={{ textAlign: 'right' }}>Amount</th><th>Status</th>
+                <th style={{ textAlign: 'right' }}>Commission</th><th style={{ textAlign: 'right' }}>Net Received</th>
+                <th>Settled Via</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deliveryPartnerRows.map(r => {
+                const bs = adToBs(new Date(r.closedAt))
+                return (
+                  <tr key={r.id} onClick={() => viewPosBill(clientId, { id: r.id })} style={{ cursor: 'pointer' }}>
+                    <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.invoiceNo != null ? `#${r.invoiceNo}` : `Order #${r.orderNo}`}</td>
+                    <td><span className="badge-amber" style={{ fontSize: 10 }}>{r.deliveryPartner}</span></td>
+                    <td>{r.tableName || 'Takeaway'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(r.amount)}</td>
+                    <td>{r.settled ? <span className="badge-green" style={{ fontSize: 11 }}>Settled</span> : <span className="badge-amber" style={{ fontSize: 11 }}>Outstanding</span>}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{r.settled ? fmtNpr(r.commission) : '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{r.settled ? fmtNpr(r.amount - r.commission) : '—'}</td>
+                    <td>{r.settled ? r.settledMethod : '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ fontWeight: 700 }}>
+                <td colSpan={4}>TOTAL</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(deliveryPartnerTotals.amount)}</td>
+                <td></td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(deliveryPartnerTotals.commission)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(deliveryPartnerTotals.netReceived)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
         </div>
       ) : tab === 'category' ? (
         <div className="table-wrap">

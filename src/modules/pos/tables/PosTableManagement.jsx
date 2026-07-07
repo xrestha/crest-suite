@@ -74,9 +74,11 @@ export default function PosTableManagement() {
   const [discMsg,       setDiscMsg]       = useState('')
   const [discLoaded,    setDiscLoaded]    = useState(false)
 
-  // Delivery Partners (Foodmandu/Pathao commission %) — see PosOrders.jsx Charge tab
-  const [foodmanduPct,   setFoodmanduPct]   = useState('')
-  const [pathaoPct,      setPathaoPct]      = useState('')
+  // Delivery Partners — a client-editable list (platforms come and go), not a fixed
+  // Foodmandu/Pathao pair. Each entry: { name, commission_pct, phone }. See PosOrders.jsx Credit
+  // quick-select and PosCustomers.jsx settlement flow.
+  const [partners,        setPartners]        = useState([])
+  const [newPartnerName,  setNewPartnerName]   = useState('')
   const [deliveryLoading, setDeliveryLoading] = useState(false)
   const [deliverySaving,  setDeliverySaving]  = useState(false)
   const [deliveryMsg,     setDeliveryMsg]     = useState('')
@@ -378,16 +380,21 @@ export default function PosTableManagement() {
   }
 
   // ── Delivery Partners ────────────────────────────────────────────────────────
-  // Commission % negotiated with each aggregator — applied automatically to every
-  // Foodmandu/Pathao bill at Charge (see PosOrders.jsx), stored per-order at that rate so a
-  // later rate change doesn't retroactively alter past bills' reporting.
+  // A client-editable list, not a fixed Foodmandu/Pathao pair — new aggregators can be added, and
+  // ones a client stops using can be removed, without a code/schema change. Commission % is only a
+  // starting suggestion shown when settling that partner's Credit bill (PosCustomers.jsx) — never
+  // applied automatically at Charge. Phone is the sentinel number the Credit quick-select chip
+  // fills into buyer_phone (PosOrders.jsx), so every order from that platform groups under one
+  // pos_customers row despite there being no real customer phone.
 
   async function loadDeliverySettings() {
     setDeliveryLoading(true)
     const { data } = await supabase.from('settings')
-      .select('pos_foodmandu_commission_pct, pos_pathao_commission_pct').eq('client_id', clientId).maybeSingle()
-    setFoodmanduPct(data?.pos_foodmandu_commission_pct != null ? String(data.pos_foodmandu_commission_pct) : '')
-    setPathaoPct(data?.pos_pathao_commission_pct != null ? String(data.pos_pathao_commission_pct) : '')
+      .select('pos_delivery_partners').eq('client_id', clientId).maybeSingle()
+    setPartners(data?.pos_delivery_partners ?? [
+      { name: 'Foodmandu', commission_pct: '', phone: '9800000001' },
+      { name: 'Pathao',    commission_pct: '', phone: '9800000002' },
+    ])
     setDeliveryLoading(false)
     setDeliveryLoaded(true)
   }
@@ -397,12 +404,34 @@ export default function PosTableManagement() {
     if (!deliveryLoaded) loadDeliverySettings()
   }
 
+  function addPartner() {
+    const v = newPartnerName.trim()
+    if (!v || partners.some(p => p.name.toLowerCase() === v.toLowerCase())) { setNewPartnerName(''); return }
+    setPartners(prev => [...prev, { name: v, commission_pct: '', phone: '' }])
+    setNewPartnerName('')
+    setDeliveryMsg('')
+  }
+
+  function updatePartner(idx, field, value) {
+    setPartners(prev => prev.map((p, i) => i === idx ? { ...p, [field]: value } : p))
+    setDeliveryMsg('')
+  }
+
+  function removePartner(idx) {
+    setPartners(prev => prev.filter((_, i) => i !== idx))
+    setDeliveryMsg('')
+  }
+
   async function saveDeliverySettings() {
     setDeliverySaving(true); setDeliveryMsg('')
-    const payload = {
-      pos_foodmandu_commission_pct: foodmanduPct.trim() === '' ? null : parseFloat(foodmanduPct),
-      pos_pathao_commission_pct:    pathaoPct.trim() === ''    ? null : parseFloat(pathaoPct),
-    }
+    const cleaned = partners
+      .map(p => ({
+        name: (p.name || '').trim(),
+        commission_pct: p.commission_pct === '' || p.commission_pct == null ? null : parseFloat(p.commission_pct),
+        phone: (p.phone || '').trim(),
+      }))
+      .filter(p => p.name)
+    const payload = { pos_delivery_partners: cleaned }
     const { data: existing } = await supabase
       .from('settings').select('id').eq('client_id', clientId).maybeSingle()
     let error
@@ -411,8 +440,9 @@ export default function PosTableManagement() {
     } else {
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, ...payload }))
     }
+    setPartners(cleaned)
     setDeliverySaving(false)
-    setDeliveryMsg(error ? 'error:' + error.message : 'ok:Delivery partner commission rates saved.')
+    setDeliveryMsg(error ? 'error:' + error.message : 'ok:Delivery partner settings saved.')
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -725,39 +755,69 @@ export default function PosTableManagement() {
       {mainTab === 'delivery' && (
         <div style={{ maxWidth: 460 }}>
           <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
-            Foodmandu and Pathao show up as their own payment methods at Charge — no live order sync
-            yet (that needs a real API partnership with either platform), just a way to tag a bill as
-            coming from one of them. Set your negotiated commission rate here and it's applied
-            automatically to every bill closed with that method, so Sales Report → Payment Summary
-            can show what the platform withholds vs. what you actually receive. The % is applied to
-            the bill's ex-VAT (taxable) value, not the final VAT-inclusive total — matching how both
-            platforms actually calculate their cut.
+            Aggregators like Foodmandu and Pathao don't pay at the counter — they collect from the
+            customer and remit to you later, minus commission. So their orders close as a Credit
+            bill (Order Taking → Pay → Credit → tap the platform's chip), not a separate payment
+            method. Commission is never calculated at Charge — it only shows up as an adjustable
+            suggestion when you settle that bill in Customers → Outstanding Credit, computed on the
+            bill's ex-VAT (taxable) value. Add, rename, or remove platforms below as your
+            partnerships change — this list isn't fixed to just these two.
           </p>
 
           {deliveryLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
           ) : (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>
-                    Foodmandu Commission % <Tip text="Leave blank if you haven't negotiated/confirmed a rate yet — bills will show as 0% commission until set" />
-                  </label>
-                  <input type="number" min="0" max="100" step="0.1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
-                    value={foodmanduPct} onChange={e => setFoodmanduPct(e.target.value)} placeholder="e.g. 22" />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>
-                    Pathao Commission % <Tip text="Leave blank if you haven't negotiated/confirmed a rate yet — bills will show as 0% commission until set" />
-                  </label>
-                  <input type="number" min="0" max="100" step="0.1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
-                    value={pathaoPct} onChange={e => setPathaoPct(e.target.value)} placeholder="e.g. 20" />
-                </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                <input
+                  className="form-select" style={{ flex: 1 }}
+                  value={newPartnerName}
+                  onChange={e => setNewPartnerName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addPartner()}
+                  placeholder="e.g. Bhojan Griha"
+                />
+                <button className="btn btn-ghost" onClick={addPartner}>+ Add Platform</button>
               </div>
+
+              {partners.length === 0 ? (
+                <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13, marginBottom: 20 }}>
+                  No delivery partners yet — add one above.
+                </div>
+              ) : (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 26px', gap: 8, marginBottom: 6 }}>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Platform</label>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <Tip text="Only a starting suggestion at settlement time (Customers → Outstanding Credit) — leave blank if you haven't negotiated/confirmed a rate yet">Commission %</Tip>
+                    </label>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <Tip text="Pre-fills Buyer Phone whenever this platform's chip is tapped at Charge, so its orders always group under one customer record">Buyer Phone</Tip>
+                    </label>
+                    <span />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {partners.map((p, idx) => (
+                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 26px', gap: 8, alignItems: 'center' }}>
+                        <input className="form-select" value={p.name}
+                          onChange={e => updatePartner(idx, 'name', e.target.value)} placeholder="Platform name" />
+                        <input type="number" min="0" max="100" step="0.1" className="form-select" value={p.commission_pct ?? ''}
+                          onChange={e => updatePartner(idx, 'commission_pct', e.target.value)} placeholder="e.g. 20" />
+                        <input className="form-select" value={p.phone ?? ''}
+                          onChange={e => updatePartner(idx, 'phone', e.target.value)} placeholder="9800000001" />
+                        <button
+                          onClick={() => removePartner(idx)}
+                          title="Remove"
+                          style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 16, padding: 0, lineHeight: 1 }}
+                        >×</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <button className="btn btn-primary" onClick={saveDeliverySettings} disabled={deliverySaving}>
-                  {deliverySaving ? 'Saving…' : 'Save Commission Rates'}
+                  {deliverySaving ? 'Saving…' : 'Save Delivery Partner Settings'}
                 </button>
                 {deliveryMsg && (
                   <span style={{ fontSize: 12, color: deliveryMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
