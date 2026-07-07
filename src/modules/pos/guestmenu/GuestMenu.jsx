@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { NUTRIENTS } from '../../../utils/nutrition'
@@ -32,6 +32,30 @@ function computeStage(requestStatus, kotStatus) {
   if (kotStatus === 'new') return 'kot_sent'
   if (requestStatus === 'accepted') return 'confirmed'
   return 'placed'
+}
+
+// Short ascending two-tone chime — same Web Audio synthesis approach as the staff-side alert in
+// PosOrders.jsx (no audio asset to ship), just pitched the other way round so it reads as a
+// distinct "your order updated" cue rather than the staff's "new order arrived" one.
+function playStageChangeChime() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return
+    const ctx = new Ctx()
+    const now = ctx.currentTime
+    ;[660, 880].forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      gain.gain.setValueAtTime(0.0001, now + i * 0.15)
+      gain.gain.exponentialRampToValueAtTime(0.25, now + i * 0.15 + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.15 + 0.14)
+      osc.connect(gain); gain.connect(ctx.destination)
+      osc.start(now + i * 0.15)
+      osc.stop(now + i * 0.15 + 0.15)
+    })
+  } catch (_) { /* audio blocked or unsupported — the status card still updates visually */ }
 }
 
 const sessionKey = tableId => `guestOrderReq:${tableId}`
@@ -109,6 +133,19 @@ export default function GuestMenu() {
     const id = setInterval(poll, 5000)
     return () => { cancelled = true; clearInterval(id) }
   }, [requestId])
+
+  // Chime once whenever the guest's own order actually advances a stage (placed → confirmed →
+  // sent to kitchen → preparing → ready, or dismissed) — not on every 5s poll that finds no
+  // change. null on first render (nothing to compare against yet) so mounting never chimes.
+  const prevStageRef = useRef(null)
+  useEffect(() => {
+    if (!requestId) return
+    const stage = requestStatus === 'dismissed' ? 'dismissed' : computeStage(requestStatus, kotStatus)
+    if (prevStageRef.current !== null && prevStageRef.current !== stage) {
+      playStageChangeChime()
+    }
+    prevStageRef.current = stage
+  }, [requestId, requestStatus, kotStatus])
 
   if (rows === null) {
     return <CenteredMessage>Loading menu…</CenteredMessage>

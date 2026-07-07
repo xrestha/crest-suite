@@ -138,6 +138,12 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S297 — 2026-07-07 — Guest ordering: chime on the guest's own phone when order stage changes
+
+Small follow-up to S296's staff-side chime — the guest's own phone now plays a short synthesized chime (same Web Audio approach, pitched ascending instead of descending so it reads as a distinct cue) whenever their order's unified stage actually advances (Placed → Confirmed → Sent to Kitchen → Preparing → Ready, or Dismissed), not on every 5s poll that finds no change. Tracked via a `prevStageRef` in `GuestMenu.jsx`, `null` on first render so mounting the page never chimes — only genuine transitions do.
+
+**Files:** `src/modules/pos/guestmenu/GuestMenu.jsx`, `src/pages/Help.js`
+
 ### S296 — 2026-07-07 — Guest ordering UX polish: covers, unmissable staff alert, order-status card
 
 Live testing of S295's guest self-ordering surfaced three friction points, fixed here. (S295 itself also picked up two correctness fixes same-day, folded into that commit without their own session note: the POS-only Feature Access branch never listed `guest_ordering` at all — a POS-only client had no way to enable it — and the guest RPCs only checked the raw `feature_flags.guest_ordering` boolean, ignoring plan tier, so a genuine Pro-plan client still needed a manual admin toggle. Both fixed: the POS-only modal branch and the full IMS grid now check `client.pos_plan` for this feature, and `submit_guest_order`/`get_guest_menu` auto-unlock when `pos_plan = 'pro'`.)
