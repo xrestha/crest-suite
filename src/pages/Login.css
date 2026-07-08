@@ -37,7 +37,7 @@
   padding: 22px 34px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 /* ── Brand ── */
@@ -242,6 +242,25 @@
   font-size: 14px;
   color: var(--theme-text2);
   margin: 0 0 16px 0;
+}
+
+/* ── Staff (PIN) login shortcut — same size as the Sign in button ── */
+.login-staff-btn {
+  background: #8b5cf6;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 9px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  margin-top: 10px;
+  transition: filter 0.15s;
+}
+
+.login-staff-btn:hover {
+  filter: brightness(1.1);
 }
 
 /* ── Mobile: stack vertically ── */

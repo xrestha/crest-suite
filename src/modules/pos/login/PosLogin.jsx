@@ -26,10 +26,12 @@ export default function PosLogin() {
   const [signingIn, setSigningIn] = useState(false)
 
   useEffect(() => {
-    if (!clientId) { navigate('/login', { replace: true }); return }
+    // No silent bounce — an unactivated device shows its own explanatory screen below
+    // instead of instantly redirecting to /login with no indication of why.
+    if (!clientId) { setLoading(false); return }
     supabase.rpc('get_pos_staff', { p_client_id: clientId })
       .then(({ data }) => { setStaff(data || []); setLoading(false) })
-  }, [clientId, navigate])
+  }, [clientId])
 
   const pressKey = useCallback((k) => {
     if (k === '⌫') { setPin(p => p.slice(0, -1)); setError(''); return }
@@ -94,6 +96,32 @@ export default function PosLogin() {
   function back()        { setSelected(null); setPin(''); setError('') }
 
 const pinDots = Math.max(4, pin.length)
+
+  // Device not yet activated for any client — explain why, instead of silently bouncing
+  // to /login. Activation itself happens from Crest POS (/pos) by an owner/manager.
+  if (!clientId) {
+    return (
+      <div style={{
+        minHeight: '100vh', background: 'var(--theme-bg)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}>
+        <div className="card" style={{ padding: 32, maxWidth: 380, textAlign: 'center' }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>📱</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 8 }}>
+            This device isn't set up yet
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
+            Staff PIN login only works on a device an owner or manager has activated first.
+            Log in with your owner account, open <strong>Crest POS</strong>, and click
+            <strong> Activate</strong> — then this screen will show your staff.
+          </p>
+          <button className="btn btn-primary" onClick={() => navigate('/login')}>
+            Owner Login
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{
@@ -171,9 +199,17 @@ const pinDots = Math.max(4, pin.length)
           )}
 
           <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <a href="/login" style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-              Owner login
-            </a>
+            <button
+              onClick={() => navigate('/login')}
+              style={{
+                padding: '10px 24px', fontSize: 14,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
+                borderRadius: 8, color: 'var(--theme-text2)', cursor: 'pointer',
+              }}
+            >
+              ← Back
+            </button>
           </div>
         </div>
       ) : (

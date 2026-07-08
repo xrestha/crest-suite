@@ -9,7 +9,24 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)))
 }
 
+// iOS Safari never exposes the Push API to a page running as a regular browser tab — only to
+// one that's been "Added to Home Screen" (installed as a standalone PWA). Without this check,
+// every iPhone/iPad user hits the generic "not supported" message with no way forward, even
+// though push genuinely does work on iOS 16.4+ once installed. `navigator.standalone` is the
+// iOS-specific flag for this; `display-mode: standalone` is the cross-platform equivalent.
+function isIosSafari() {
+  return /iPad|iPhone|iPod/.test(window.navigator.userAgent) && !window.MSStream
+}
+function isStandalonePwa() {
+  return window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches
+}
+
 export async function subscribeToPush(profileId, clientId) {
+  if (isIosSafari() && !isStandalonePwa()) {
+    const err = new Error('On iPhone/iPad: tap the Share button, choose "Add to Home Screen", then open Crest from that icon and try again — notifications only work from the installed app, not a regular Safari tab.')
+    err.code = 'ios_add_to_home_screen'
+    throw err
+  }
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     throw new Error('Push notifications are not supported on this device/browser.')
   }

@@ -1,8 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { daysInBsMonth, getBsToday, bsToAd, adToBs, formatAd, BS_MONTHS } from '../utils/bsCalendar'
+import SearchableSelect from './SearchableSelect'
 
 const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+
+// Wide enough for any realistic Date of Birth or business date without the list getting
+// unwieldy — this one component is shared by DOB, join/retirement dates, purchase dates,
+// leave requests, etc., so it can't be tuned per-usage. Note: the precise BS day-count table
+// (bsCalendar.js) only covers 2079–2087; years outside that already fall back to a flat
+// 30-day/month approximation — pre-existing, unrelated to this picker, just reachable faster now.
+const YEAR_RANGE = Array.from({ length: 91 }, (_, i) => 2000 + i) // 2000..2090
+const YEAR_OPTIONS = YEAR_RANGE.map(y => ({ value: String(y), label: String(y) }))
 
 /**
  * Visual BS calendar picker — two modes:
@@ -37,6 +46,7 @@ export default function BsCalendarPicker({
   const [pos,      setPos]      = useState({ top: 0, left: 0, width: 0, above: false })
 
   const triggerRef = useRef(null)
+  const popoverRef = useRef(null)
 
   // Keep nav pinned to the locked period whenever it changes
   useEffect(() => {
@@ -64,10 +74,18 @@ export default function BsCalendarPicker({
     })
   }, [open])
 
-  // Close on outside click
+  // Close on outside click. Checks both the trigger AND the portaled popover (the popover's
+  // DOM node lives under document.body, not under triggerRef, since it's a portal) — this lets
+  // the event keep bubbling to document instead of being swallowed here, which matters because
+  // the nested Year SearchableSelect relies on its own document-level listener to self-close;
+  // swallowing the event earlier left it stuck open when e.g. the Month select was used next.
   useEffect(() => {
     if (!open) return
-    const handler = e => { if (!triggerRef.current?.contains(e.target)) setOpen(false) }
+    const handler = e => {
+      if (triggerRef.current?.contains(e.target)) return
+      if (popoverRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
@@ -126,7 +144,7 @@ export default function BsCalendarPicker({
 
   const popover = open ? createPortal(
     <div
-      onMouseDown={e => e.stopPropagation()}
+      ref={popoverRef}
       style={{
         position:  'fixed',
         top:       pos.above ? undefined : pos.top,
@@ -144,12 +162,34 @@ export default function BsCalendarPicker({
         padding:   '10px 10px 6px',
       }}
     >
-      {/* Month navigation (arrows hidden in locked mode) */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+      {/* Month/year navigation (locked mode keeps the plain label, no controls to jump around) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 6 }}>
         <button style={navBtn(!locked)} onClick={prevMonth} disabled={locked}>‹</button>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>
-          {BS_MONTHS[navMonth - 1]} {navYear}
-        </div>
+        {locked ? (
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>
+            {BS_MONTHS[navMonth - 1]} {navYear}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
+            <select
+              value={navMonth}
+              onChange={e => setNavMonth(parseInt(e.target.value, 10))}
+              style={{
+                flex: 1.3, minWidth: 0, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
+                borderRadius: 5, padding: '4px 4px', fontSize: 11, color: 'var(--theme-text1)',
+                fontFamily: 'inherit', cursor: 'pointer',
+              }}
+            >
+              {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+            <SearchableSelect
+              value={String(navYear)}
+              onChange={v => setNavYear(parseInt(v, 10))}
+              options={YEAR_OPTIONS}
+              style={{ flex: 1 }}
+            />
+          </div>
+        )}
         <button style={navBtn(!locked)} onClick={nextMonth} disabled={locked}>›</button>
       </div>
 

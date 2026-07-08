@@ -204,6 +204,9 @@ export default function Login() {
               {loading ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
+          <button type="button" className="login-staff-btn" onClick={() => navigate('/pos/login')}>
+            Staff Login →
+          </button>
         </div>
 
       </div>

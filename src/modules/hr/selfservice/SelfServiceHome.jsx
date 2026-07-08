@@ -71,7 +71,9 @@ export default function SelfServiceHome() {
       await subscribeToPush(session.user.id, profile.client_id)
       setPushEnabled(true)
     } catch (err) {
-      setPushMsg(err.message || 'Could not enable notifications.')
+      // ios_add_to_home_screen is instructions, not a failure — shown in amber, not red.
+      const prefix = err.code === 'ios_add_to_home_screen' ? 'info' : 'error'
+      setPushMsg(prefix + ':' + (err.message || 'Could not enable notifications.'))
     }
     setPushBusy(false)
   }
@@ -182,7 +184,14 @@ export default function SelfServiceHome() {
             )}
           </div>
         </div>
-        {pushMsg && <p style={{ fontSize: 11, color: 'var(--theme-red)', margin: '-14px 0 14px', textAlign: 'right' }}>{pushMsg}</p>}
+        {pushMsg && (
+          <p style={{
+            fontSize: 11, margin: '-14px 0 14px', textAlign: 'right', lineHeight: 1.5,
+            color: pushMsg.startsWith('info:') ? 'var(--theme-amber)' : 'var(--theme-red)',
+          }}>
+            {pushMsg.replace(/^(info|error):/, '')}
+          </p>
+        )}
 
         <div className="tab-bar" style={{ marginBottom: 20 }}>
           <button className={`tab-btn${tab === 'payslip' ? ' tab-btn--active' : ''}`} onClick={() => setTab('payslip')}>Payslip</button>
