@@ -138,6 +138,28 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S310 — 2026-07-08 — Live-testing fixes: Roster publish per week, swap-picker loading state, self-service OFF-day highlight
+
+Three fixes from live-testing the Roster/Self-Service features on a real phone.
+
+**Roster publish switched from month-grain to day-grain.** Publishing was keyed by whole BS month, so a manager had to finish scheduling the *entire* month before any of it could reach staff. `hr_roster_publish_state` now has a `bs_day` column (unique on `client_id,bs_year,bs_month,bs_day`) — one row per published day, not per published month. `get_my_roster`/`get_coworker_roster` now gate per-day (a self-service employee sees exactly the days published, even mid-month); `get_my_roster_publish_status` keeps its existing meaning ("has anything this month been published," for the "not published yet" message). Roster.jsx's Publish control now appears in **both** Weekly and Monthly view — Weekly publishes just the 7 visible days, Monthly still bulk-publishes the whole visible month in one click (kept as-is, purely additive). The badge shows "◐ x/y Published" for a partial state. The `hr-push` Edge Function's `notify_roster_published` action now takes an explicit `bs_days` array and only notifies employees actually scheduled on those specific days, not the whole month's staff. Existing month-grain publish-state rows (all test data from this week) were cleared as part of the migration.
+
+**Swap-request coworker picker fixed.** Testing on a live phone showed the "Swap with…" dropdown appearing to only show the placeholder — most likely a timing issue where the picker rendered before the `get_coworker_roster` fetch resolved on a slow connection, with no error surfaced if the fetch actually failed. `SelfServiceHome.jsx` now shows an explicit "Loading coworkers…" state while the fetch is in flight, surfaces the RPC error if one occurs (previously silently swallowed), and shows "No coworkers have a published shift this month yet" if the list is genuinely empty.
+
+**Self-service roster: OFF/LEAVE days highlighted.** Days whose shift is a placeholder like "OFF" or "LEAVE" (or has no shift at all) now get a subtle gray tint in the Self-Service Roster tab's day list, so an employee scanning a month of mixed shifts and days off doesn't have to read every row to find their days off.
+
+**Files:** `supabase/migrations/20260707290000_roster_publish_per_day.sql`, `supabase/functions/hr-push/index.ts`, `src/modules/hr/roster/Roster.jsx`, `src/modules/hr/selfservice/SelfServiceHome.jsx`, `src/pages/Help.js`
+
+### S309 — 2026-07-08 — Configurable Weekly Off Day + Half-Day Leave (Full/First/Second Half)
+
+Two HR gaps: the weekly off day was hardcoded to Saturday everywhere (Attendance auto-default, Leave working-day counts, Roster shading), and leave requests were always whole days even though `hr_leave_requests.days` already supported 0.5.
+
+**Weekly Off Day**: new `settings.weekly_off_weekday` (0=Sun..6=Sat, default 6). `workingDaysInRange()` (`leaveConstants.js`) and `isSaturday()`/`buildAttendanceFromRoster()` (`attendanceFromRoster.js`) gained an optional `offWeekday` param, defaulting to the existing constant so nothing breaks if a caller doesn't pass it. `Roster.jsx` (already fetching `settings` for `covers_per_staff_target`), `AttendanceSheet.jsx`, `LeaveManagement.jsx`, and `SelfServiceHome.jsx` all now fetch and thread the client's real value through instead of assuming Saturday. New "Weekly Off Day" selector on Roster → Shift Types (`ShiftSettingsPanel.jsx`), same inline-save pattern as the existing Covers/Staff target.
+
+**Half-Day Leave**: new `hr_leave_requests.day_type` (`full`/`first_half`/`second_half`, only meaningful for a single-day request — enforced in the UI, not the DB). The harder-but-correct design, confirmed with the user: a half-day of a **paid** leave type costs the employee nothing (same as a full day of that type), a half-day of an **unpaid** type deducts 0.5 day's pay — not a blanket "half-day is always unpaid" rule. This needed two new `hr_attendance` statuses, `half_paid_leave`/`half_unpaid_leave`, since the existing generic `half_day` status always deducts 0.5 day regardless of cause. `payrollCompute.js`'s `tallyAttendance`/`computePayslip` updated accordingly (new unit tests confirm a half-paid-leave day costs nothing and a half-unpaid-leave day deducts exactly half a day). Both `LeaveManagement.jsx` (admin) and `SelfServiceHome.jsx` (self-service) get a Day Type selector, shown only for a single-day request and forced back to Full Day otherwise, with identical day-count/status logic on both sides.
+
+**Files:** `supabase/migrations/20260707280000_weekly_off_day_half_leave.sql`, `src/modules/hr/payrollConstants.js`, `src/modules/hr/payroll/payrollCompute.js` (+ test), `src/modules/hr/leave/leaveConstants.js`, `src/modules/hr/leave/LeaveManagement.jsx`, `src/modules/hr/attendance/AttendanceSheet.jsx`, `src/modules/hr/attendance/attendanceFromRoster.js`, `src/modules/hr/roster/Roster.jsx`, `src/modules/hr/roster/ShiftSettingsPanel.jsx`, `src/modules/hr/selfservice/SelfServiceHome.jsx`, `src/pages/Help.js`
+
 ### S308 — 2026-07-08 — SSF bulk-upload "export": researched first, closed the roadmap item without new code
 
 The last open HR roadmap line — "SSF export file matching the actual SSF-portal bulk-upload format" — was researched before writing anything, per the user's explicit request. Pulled the official SOSYS (Nepal Social Security Fund) Employer Portal user manual directly (`sosys.ssf.gov.np/manual/collection_manual.pdf`) rather than trusting third-party blog claims that "a bulk-upload Excel template exists."

@@ -15,6 +15,15 @@ export const DEFAULT_LEAVE_TYPES = [
   { code: 'unpaid',      name: 'Unpaid Leave',         paid: false, annual_quota: 0,  carry_forward: false, color: '#9ca3af', sort_order: 6 },
 ]
 
+// Half-day only applies to a single-day request (start_date === end_date) — enforced in the UI.
+// First vs second half is purely a record-keeping distinction; payroll only cares about full
+// vs half (see hr_attendance's half_paid_leave/half_unpaid_leave statuses).
+export const DAY_TYPES = [
+  { value: 'full',        label: 'Full Day' },
+  { value: 'first_half',  label: 'First Half' },
+  { value: 'second_half', label: 'Second Half' },
+]
+
 export const LEAVE_STATUSES = {
   pending:   { label: 'Pending',   color: '#c9a84c' },
   approved:  { label: 'Approved',  color: '#34d399' },
@@ -22,10 +31,11 @@ export const LEAVE_STATUSES = {
   cancelled: { label: 'Cancelled', color: '#6b7280' },
 }
 
-// Working days in an inclusive AD date range, excluding the weekly off (Saturday).
-// Returns [{ ad: Date, bsYear, bsMonth, bsDay }]. Used both for the day count and
-// for writing/reverting the matching hr_attendance rows.
-export function workingDaysInRange(startIso, endIso) {
+// Working days in an inclusive AD date range, excluding the weekly off day. Returns
+// [{ ad: Date, bsYear, bsMonth, bsDay }]. Used both for the day count and for writing/reverting
+// the matching hr_attendance rows. `offWeekday` (0=Sun..6=Sat) defaults to Saturday when a
+// caller hasn't fetched the client's real settings.weekly_off_weekday yet.
+export function workingDaysInRange(startIso, endIso, offWeekday = WEEKLY_OFF_WEEKDAY) {
   if (!startIso || !endIso) return []
   const start = new Date(startIso)
   const end   = new Date(endIso)
@@ -37,7 +47,7 @@ export function workingDaysInRange(startIso, endIso) {
   let guard = 0
   while (cur <= last && guard < 800) {
     guard += 1
-    if (cur.getDay() !== WEEKLY_OFF_WEEKDAY) {
+    if (cur.getDay() !== offWeekday) {
       const bs = adToBs(new Date(cur))
       out.push({ ad: new Date(cur), bsYear: bs.year, bsMonth: bs.month, bsDay: bs.day })
     }

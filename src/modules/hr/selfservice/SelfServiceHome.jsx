@@ -4,7 +4,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { getBsToday, BS_MONTHS } from '../../../utils/bsCalendar'
-import { workingDaysInRange } from '../leave/leaveConstants'
+import { workingDaysInRange, DAY_TYPES } from '../leave/leaveConstants'
+import { WEEKLY_OFF_WEEKDAY } from '../payrollConstants'
 import { subscribeToPush, isPushSubscribed } from '../../../utils/webPush'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
@@ -14,6 +15,11 @@ const inp = {
 }
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 const STATUS_BADGE = { pending: 'badge-amber', approved: 'badge-green', rejected: 'badge-red', cancelled: 'badge-gray' }
+// Some clients create custom zero-hour shift types purely to mark a day off on the roster board
+// (e.g. "OFF", "LEAVE") — same convention as attendanceFromRoster.js. Highlighted here so an
+// employee scanning their month can spot rest days at a glance instead of reading every row.
+const OFF_SHIFT_NAMES = ['off', 'leave', 'holiday']
+const isOffDay = name => !name || OFF_SHIFT_NAMES.includes(name.trim().toLowerCase())
 const SWAP_STATUS_BADGE = {
   pending_target: 'badge-amber', pending_admin: 'badge-amber', approved: 'badge-green',
   rejected_by_target: 'badge-red', rejected_by_admin: 'badge-red', cancelled: 'badge-gray',
@@ -41,8 +47,10 @@ export default function SelfServiceHome() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [reason, setReason] = useState('')
+  const [dayType, setDayType] = useState('full')
   const [submitting, setSubmitting] = useState(false)
   const [msg, setMsg] = useState('')
+  const [weeklyOffWeekday, setWeeklyOffWeekday] = useState(WEEKLY_OFF_WEEKDAY) // 0=Sun..6=Sat
 
   const [pushEnabled, setPushEnabled] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
@@ -51,6 +59,7 @@ export default function SelfServiceHome() {
   const [swapRequests, setSwapRequests] = useState(null)
   const [swapDay, setSwapDay] = useState(null) // the requester's own day being offered
   const [coworkerRoster, setCoworkerRoster] = useState([])
+  const [coworkerLoading, setCoworkerLoading] = useState(false)
   const [swapTargetEmpId, setSwapTargetEmpId] = useState('')
   const [swapTargetDay, setSwapTargetDay] = useState('')
   const [swapNote, setSwapNote] = useState('')
@@ -64,6 +73,14 @@ export default function SelfServiceHome() {
   }, [authLoading, session, profile, navigate])
 
   useEffect(() => { isPushSubscribed().then(setPushEnabled) }, [])
+
+  // settings isn't excluded from self-service RLS (only HR personal-data tables are), so this
+  // can read it directly rather than needing a dedicated RPC.
+  useEffect(() => {
+    if (!profile?.client_id) return
+    supabase.from('settings').select('weekly_off_weekday').eq('client_id', profile.client_id).maybeSingle()
+      .then(({ data }) => setWeeklyOffWeekday(data?.weekly_off_weekday ?? WEEKLY_OFF_WEEKDAY))
+  }, [profile?.client_id])
 
   async function enableNotifications() {
     setPushBusy(true); setPushMsg('')
@@ -113,8 +130,16 @@ export default function SelfServiceHome() {
 
   function openSwapRequest(bsDay) {
     setSwapDay(bsDay); setSwapTargetEmpId(''); setSwapTargetDay(''); setSwapNote(''); setSwapMsg('')
+    // Clear stale data and show a loading state — otherwise the picker briefly renders with only
+    // the placeholder option while the fetch is in flight, which on a slow connection can look
+    // like coworkers never loaded at all.
+    setCoworkerRoster([]); setCoworkerLoading(true)
     supabase.rpc('get_coworker_roster', { p_bs_year: rosterYear, p_bs_month: rosterMonth })
-      .then(({ data }) => setCoworkerRoster(data || []))
+      .then(({ data, error }) => {
+        setCoworkerLoading(false)
+        if (error) { setSwapMsg(error.message); return }
+        setCoworkerRoster(data || [])
+      })
   }
 
   const coworkerNames = [...new Map(coworkerRoster.map(r => [r.employee_id, r.full_name])).entries()]
@@ -142,19 +167,24 @@ export default function SelfServiceHome() {
     }
   }
 
-  const days = startDate && endDate ? workingDaysInRange(startDate, endDate).length : 0
+  const isSingleDay = startDate && endDate && startDate === endDate
+  const workingDays = startDate && endDate ? workingDaysInRange(startDate, endDate, weeklyOffWeekday) : []
+  const days = isSingleDay && dayType !== 'full' ? 0.5 : workingDays.length
+
+  useEffect(() => { if (!isSingleDay) setDayType('full') }, [isSingleDay])
 
   async function submitLeave() {
     if (!leaveTypeId) { setMsg('error:Select a leave type.'); return }
     if (!startDate || !endDate) { setMsg('error:Select start and end dates.'); return }
-    if (days === 0) { setMsg('error:No working days in that range.'); return }
+    if (workingDays.length === 0) { setMsg('error:No working days in that range.'); return }
     setSubmitting(true); setMsg('')
     const { error } = await supabase.rpc('submit_my_leave_request', {
-      p_leave_type_id: leaveTypeId, p_start_date: startDate, p_end_date: endDate, p_days: days, p_reason: reason,
+      p_leave_type_id: leaveTypeId, p_start_date: startDate, p_end_date: endDate, p_days: days,
+      p_reason: reason, p_day_type: dayType,
     })
     setSubmitting(false)
     if (error) { setMsg('error:' + error.message); return }
-    setStartDate(''); setEndDate(''); setReason(''); setMsg('ok:Leave request submitted.')
+    setStartDate(''); setEndDate(''); setReason(''); setDayType('full'); setMsg('ok:Leave request submitted.')
     loadLeave()
   }
 
@@ -245,7 +275,15 @@ export default function SelfServiceHome() {
                     <BsCalendarPicker value={endDate} onChange={setEndDate} placeholder="Select date" clearable />
                   </div>
                 </div>
-                {days > 0 && <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{days} working day{days !== 1 ? 's' : ''} (Saturdays excluded)</div>}
+                {isSingleDay && (
+                  <div>
+                    <label style={lbl}>Day Type</label>
+                    <select className="form-select" style={{ width: '100%' }} value={dayType} onChange={e => setDayType(e.target.value)}>
+                      {DAY_TYPES.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+                    </select>
+                  </div>
+                )}
+                {days > 0 && <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{days} working day{days !== 1 ? 's' : ''} (weekly off day excluded)</div>}
                 <div>
                   <label style={lbl}>Reason</label>
                   <textarea style={{ ...inp, height: 60, resize: 'vertical' }} value={reason} onChange={e => setReason(e.target.value)} />
@@ -293,12 +331,14 @@ export default function SelfServiceHome() {
               : roster.length === 0 ? <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No shifts scheduled this month.</p>
               : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-                  {roster.map((r, i) => (
-                    <div key={i} className="card" style={{ padding: 12 }}>
+                  {roster.map((r, i) => {
+                    const off = isOffDay(r.shift_type_name)
+                    return (
+                    <div key={i} className="card" style={{ padding: 12, background: off ? 'rgba(107,114,128,0.12)' : undefined, border: off ? '1px solid rgba(107,114,128,0.3)' : undefined }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600 }}>Day {r.bs_day}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
+                          <span style={{ fontSize: 13, color: off ? 'var(--theme-text3)' : 'var(--theme-text2)', fontWeight: off ? 600 : 400 }}>
                             {r.shift_type_name || '—'}{r.shift_start && ` (${r.shift_start}–${r.shift_end})`}
                           </span>
                           <button className="btn btn-ghost" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => openSwapRequest(r.bs_day)}>
@@ -309,11 +349,17 @@ export default function SelfServiceHome() {
 
                       {swapDay === r.bs_day && (
                         <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--theme-border-lt)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          <select className="form-select" style={{ width: '100%' }} value={swapTargetEmpId}
-                            onChange={e => { setSwapTargetEmpId(e.target.value); setSwapTargetDay('') }}>
-                            <option value="">Swap with…</option>
-                            {coworkerNames.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-                          </select>
+                          {coworkerLoading ? (
+                            <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Loading coworkers…</div>
+                          ) : coworkerNames.length === 0 ? (
+                            <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>No coworkers have a published shift this month yet.</div>
+                          ) : (
+                            <select className="form-select" style={{ width: '100%' }} value={swapTargetEmpId}
+                              onChange={e => { setSwapTargetEmpId(e.target.value); setSwapTargetDay('') }}>
+                              <option value="">Swap with…</option>
+                              {coworkerNames.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                            </select>
+                          )}
                           {swapTargetEmpId && (
                             <select className="form-select" style={{ width: '100%' }} value={swapTargetDay} onChange={e => setSwapTargetDay(e.target.value)}>
                               <option value="">Their day…</option>
@@ -331,7 +377,7 @@ export default function SelfServiceHome() {
                         </div>
                       )}
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
 

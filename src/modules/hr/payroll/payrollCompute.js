@@ -17,7 +17,10 @@ export function calcAmount(comp, basic) {
 
 // Tally an employee's attendance rows for the period.
 export function tallyAttendance(attendanceRows) {
-  const t = { present: 0, half_day: 0, absent: 0, paid_leave: 0, unpaid_leave: 0, weekly_off: 0, holiday: 0, sumHours: 0, sumOt: 0 }
+  const t = {
+    present: 0, half_day: 0, absent: 0, paid_leave: 0, unpaid_leave: 0,
+    half_paid_leave: 0, half_unpaid_leave: 0, weekly_off: 0, holiday: 0, sumHours: 0, sumOt: 0,
+  }
   attendanceRows.forEach(a => {
     if (t[a.status] != null) t[a.status] += 1
     t.sumHours += parseFloat(a.hours_worked) || 0
@@ -67,7 +70,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
   const base = {
     pay_basis: basis,
     basic,
-    present_days:      t.present + t.half_day * 0.5,
+    present_days:      t.present + t.half_day * 0.5 + t.half_paid_leave * 0.5,
     absent_days:       t.absent,
     worked_days:       0,
     hours_worked:      t.sumHours,
@@ -80,7 +83,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
 
   if (basis === 'daily') {
     // Paid-leave days are paid for daily-wage staff too — that's what makes the leave "paid".
-    const workedDays = t.present + t.half_day * 0.5 + t.paid_leave
+    const workedDays = t.present + t.half_day * 0.5 + t.paid_leave + t.half_paid_leave * 0.5
     const earned     = r(basic * workedDays)
     const otAmount   = r(t.sumOt * (basic / STANDARD_HOURS_PER_DAY) * OT_MULTIPLIER)
     const ssfEmp     = enrolled ? r(Math.min(earned, SSF_CAP) * SSF_EMPLOYEE_PCT) : 0
@@ -93,7 +96,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     }
   } else if (basis === 'hourly') {
     // Paid-leave days credit a standard working day of hours for hourly staff.
-    const paidHours = t.sumHours + t.paid_leave * STANDARD_HOURS_PER_DAY
+    const paidHours = t.sumHours + t.paid_leave * STANDARD_HOURS_PER_DAY + t.half_paid_leave * STANDARD_HOURS_PER_DAY * 0.5
     const earned   = r(basic * paidHours)
     const otAmount = r(t.sumOt * basic * OT_MULTIPLIER)
     const ssfEmp   = enrolled ? r(Math.min(earned, SSF_CAP) * SSF_EMPLOYEE_PCT) : 0
@@ -111,7 +114,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     const allowances  = earnings.reduce((s, c)   => s + calcAmount(c, basic), 0)
     const otherDed    = deductions.reduce((s, c) => s + calcAmount(c, basic), 0)
     const gross       = basic + allowances
-    const unpaidDays  = t.absent + t.unpaid_leave + t.half_day * 0.5
+    const unpaidDays  = t.absent + t.unpaid_leave + t.half_day * 0.5 + t.half_unpaid_leave * 0.5
     // Unpaid days forfeit the whole day's pay — allowances included, not just the basic
     // portion (otherwise a full-month absence would still pay full allowances).
     const perDay      = monthDays > 0 ? gross / monthDays : 0

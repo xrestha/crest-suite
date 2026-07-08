@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import * as XLSX from 'xlsx'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday } from '../../../utils/bsCalendar'
@@ -14,11 +15,6 @@ const inp = {
   background: '#0f1117', border: '1px solid #2a2f3d', borderRadius: 6,
   padding: '7px 10px', fontSize: 13, color: '#e8e0d0', outline: 'none',
   fontFamily: 'inherit',
-}
-
-function isSaturday(period, day) {
-  if (!period) return false
-  return bsToAd(period.bs_year, period.bs_month, day).getDay() === WEEKLY_OFF_WEEKDAY
 }
 
 function weekdayOf(period, day) {
@@ -39,6 +35,12 @@ export default function AttendanceSheet() {
   const [saving,    setSaving]    = useState(false)
   const [savedMsg,  setSavedMsg]  = useState('')
   const [generating, setGenerating] = useState(false)
+  const [weeklyOffWeekday, setWeeklyOffWeekday] = useState(WEEKLY_OFF_WEEKDAY) // 0=Sun..6=Sat
+
+  function isSaturday(period, day) {
+    if (!period) return false
+    return bsToAd(period.bs_year, period.bs_month, day).getDay() === weeklyOffWeekday
+  }
 
   const loadAttendance = useCallback(async (periodId) => {
     const { data } = await scopedFrom('hr_attendance').eq('period_id', periodId)
@@ -58,14 +60,16 @@ export default function AttendanceSheet() {
     if (!clientId) return
     async function load() {
       setLoading(true)
-      const [{ data: p }, { data: emps }] = await Promise.all([
+      const [{ data: p }, { data: emps }, { data: settings }] = await Promise.all([
         scopedFrom('monthly_periods')
           .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
         scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, status, department')
           .in('status', ['active', 'probation']).order('full_name'),
+        supabase.from('settings').select('weekly_off_weekday').eq('client_id', clientId).maybeSingle(),
       ])
       setPeriods(p || [])
       setEmployees(emps || [])
+      setWeeklyOffWeekday(settings?.weekly_off_weekday ?? WEEKLY_OFF_WEEKDAY)
       const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
       if (open) { applyPeriod(open); await loadAttendance(open.id) }
       setLoading(false)
@@ -151,6 +155,7 @@ export default function AttendanceSheet() {
       bsMonth: period.bs_month,
       days,
       periodId: period.id,
+      offWeekday: weeklyOffWeekday,
     })
     if (rows.length === 0) {
       setSavedMsg('ok:Nothing to generate — every day already has an entry, or no employees are on the roster this month.')

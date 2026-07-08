@@ -71,17 +71,20 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Roster published — notify every self-service employee with a shift that month ─────────
+    // ── Roster published — notify every self-service employee with a shift on one of the days
+    // that were just published (bs_days), not the whole month's staff — publishing now happens
+    // incrementally (e.g. one week at a time), so a month-wide notify would over-notify. ─────────
     if (action === 'notify_roster_published') {
-      const { client_id, bs_year, bs_month } = params
+      const { client_id, bs_year, bs_month, bs_days } = params
       if (!(isCallerAdmin || (isCallerStaffUser && profile?.client_id === client_id))) {
         return json({ error: 'Forbidden' }, 403)
       }
+      if (!Array.isArray(bs_days) || bs_days.length === 0) return json({ error: 'bs_days required' }, 400)
 
       const { data: rows } = await admin
         .from('hr_roster')
         .select('employee_id')
-        .eq('client_id', client_id).eq('bs_year', bs_year).eq('bs_month', bs_month)
+        .eq('client_id', client_id).eq('bs_year', bs_year).eq('bs_month', bs_month).in('bs_day', bs_days)
       const employeeIds = [...new Set((rows || []).map(r => r.employee_id))]
       if (employeeIds.length === 0) return json({ success: true, notified: 0 })
 

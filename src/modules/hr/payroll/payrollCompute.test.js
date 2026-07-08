@@ -29,6 +29,7 @@ describe('tallyAttendance', () => {
     ]
     expect(tallyAttendance(rows)).toEqual({
       present: 3, half_day: 1, absent: 1, paid_leave: 2, unpaid_leave: 1,
+      half_paid_leave: 0, half_unpaid_leave: 0,
       weekly_off: 4, holiday: 1, sumHours: 28, sumOt: 1,
     })
   })
@@ -98,6 +99,21 @@ describe('computePayslip — monthly basis', () => {
     const employee = { pay_basis: 'monthly', basic_salary: 40000, ssf_enrolled: false }
     const slip = computePayslip(employee, [], [], period, 2500, [], 1000)
     expect(slip.net_pay).toBe(36500) // 40000 - 2500 - 1000
+  })
+
+  test('half-day of a PAID leave type costs nothing, unlike the generic half_day status', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false } // 1000/day
+    const slip = computePayslip(employee, [], [{ status: 'half_paid_leave' }], period)
+    expect(slip.present_days).toBe(0.5)
+    expect(slip.absence_deduction).toBe(0)
+    expect(slip.net_pay).toBe(31000)
+  })
+
+  test('half-day of an UNPAID leave type deducts exactly half a day', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false } // 1000/day
+    const slip = computePayslip(employee, [], [{ status: 'half_unpaid_leave' }], period)
+    expect(slip.absence_deduction).toBe(500) // 0.5 day's share of gross
+    expect(slip.net_pay).toBe(30500)
   })
 })
 

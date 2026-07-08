@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import * as XLSX from 'xlsx'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
-import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, workingDaysInRange } from './leaveConstants'
+import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange } from './leaveConstants'
+import { WEEKLY_OFF_WEEKDAY } from '../payrollConstants'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
 const inp = {
@@ -37,11 +39,15 @@ export default function LeaveManagement() {
   const [msg,       setMsg]       = useState('')
 
   // New-request form
-  const [fEmp,    setFEmp]    = useState('')
-  const [fType,   setFType]   = useState('')
-  const [fStart,  setFStart]  = useState('')
-  const [fEnd,    setFEnd]    = useState('')
-  const [fReason, setFReason] = useState('')
+  const [fEmp,     setFEmp]     = useState('')
+  const [fType,    setFType]    = useState('')
+  const [fStart,   setFStart]   = useState('')
+  const [fEnd,     setFEnd]     = useState('')
+  const [fReason,  setFReason]  = useState('')
+  const [fDayType, setFDayType] = useState('full')
+  const isSingleDay = fStart && fEnd && fStart === fEnd
+
+  const [weeklyOffWeekday, setWeeklyOffWeekday] = useState(WEEKLY_OFF_WEEKDAY) // 0=Sun..6=Sat
 
   const empMap  = Object.fromEntries(employees.map(e => [e.id, e]))
   const typeMap = Object.fromEntries(types.map(t => [t.id, t]))
@@ -49,6 +55,9 @@ export default function LeaveManagement() {
   const years = Array.from({ length: 6 }, (_, i) => today.year - 3 + i)
 
   useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Half-day only makes sense for a single-day request — force back to Full Day otherwise.
+  useEffect(() => { if (!isSingleDay) setFDayType('full') }, [isSingleDay])
 
   async function load() {
     setLoading(true); setMsg('')
@@ -59,39 +68,45 @@ export default function LeaveManagement() {
       const r = await scopedFrom('hr_leave_types').order('sort_order')
       lt = r.data || []
     }
-    const [{ data: emps }, { data: pr }, { data: reqs }] = await Promise.all([
+    const [{ data: emps }, { data: pr }, { data: reqs }, { data: settings }] = await Promise.all([
       scopedFrom('hr_employees', 'id, full_name, employee_code, department, status')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('monthly_periods', 'id, bs_year, bs_month, status'),
       scopedFrom('hr_leave_requests').order('start_date', { ascending: false }),
+      supabase.from('settings').select('weekly_off_weekday').eq('client_id', clientId).maybeSingle(),
     ])
     setTypes(lt); setEmployees(emps || []); setPeriods(pr || []); setRequests(reqs || [])
+    setWeeklyOffWeekday(settings?.weekly_off_weekday ?? WEEKLY_OFF_WEEKDAY)
     setLoading(false)
   }
 
   // ── New request ───────────────────────────────────────────────────────────
-  const previewDays = workingDaysInRange(fStart, fEnd)
+  const previewDays = workingDaysInRange(fStart, fEnd, weeklyOffWeekday)
+  // Half-day only applies to a single-day request — 0.5 instead of the whole-day count.
+  const previewDaysCount = isSingleDay && fDayType !== 'full' ? 0.5 : previewDays.length
   async function submitRequest() {
     if (!clientId) { setMsg('error:No client selected'); return }
     if (!fEmp || !fType || !fStart || !fEnd) { setMsg('error:Fill employee, type and dates'); return }
-    if (previewDays.length === 0) { setMsg('error:No working days in that range (end before start, or all Saturdays)'); return }
+    if (previewDays.length === 0) { setMsg('error:No working days in that range (end before start, or all on the weekly off day)'); return }
     setBusy(true); setMsg('')
     const { error } = await scopedInsert('hr_leave_requests', {
       employee_id: fEmp, leave_type_id: fType,
       start_date: fStart.slice(0, 10), end_date: fEnd.slice(0, 10),
-      days: previewDays.length, reason: fReason || null, status: 'pending',
+      days: previewDaysCount, reason: fReason || null, status: 'pending', day_type: fDayType,
     })
     if (error) { setMsg('error:' + error.message); setBusy(false); return }
-    setFEmp(''); setFType(''); setFStart(''); setFEnd(''); setFReason('')
+    setFEmp(''); setFType(''); setFStart(''); setFEnd(''); setFReason(''); setFDayType('full')
     await load(); setMsg('ok:Request submitted'); setBusy(false)
   }
 
   // ── Attendance sync ───────────────────────────────────────────────────────
-  // Write (or revert) the hr_attendance rows for a request's working days.
+  // Write (or revert) the hr_attendance rows for a request's working days. `status` already
+  // reflects half- vs full-day (the caller resolves that) — a half-day request is always a
+  // single day, so this naturally writes just the one row.
   async function syncAttendance(req, status) {
     const periodMap = {}
     periods.forEach(p => { periodMap[`${p.bs_year}:${p.bs_month}`] = p })
-    const days = workingDaysInRange(req.start_date, req.end_date)
+    const days = workingDaysInRange(req.start_date, req.end_date, weeklyOffWeekday)
     const rows = []
     const missing = []
     days.forEach(d => {
@@ -113,7 +128,11 @@ export default function LeaveManagement() {
     const type = typeMap[req.leave_type_id]
     if (!type) { setMsg('error:Leave type missing'); return }
     setBusy(true); setMsg('')
-    const missing = await syncAttendance(req, type.paid ? 'paid_leave' : 'unpaid_leave')
+    const isHalf = req.day_type && req.day_type !== 'full'
+    const status = type.paid
+      ? (isHalf ? 'half_paid_leave' : 'paid_leave')
+      : (isHalf ? 'half_unpaid_leave' : 'unpaid_leave')
+    const missing = await syncAttendance(req, status)
     await scopedUpdate('hr_leave_requests', { status: 'approved', decided_at: new Date().toISOString() }).eq('id', req.id)
     await load()
     setMsg(missing.length
@@ -229,14 +248,22 @@ export default function LeaveManagement() {
                 <BsCalendarPicker value={fEnd} onChange={setFEnd} placeholder="Pick end date" />
               </div>
               <div>
+                <label style={lbl}>
+                  <Tip text="Only applies to a single-day request — pick the same Start and End date." width={240}>Day Type</Tip>
+                </label>
+                <select style={{ ...inp, width: '100%' }} value={fDayType} disabled={!isSingleDay} onChange={e => setFDayType(e.target.value)}>
+                  {DAY_TYPES.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+                </select>
+              </div>
+              <div>
                 <label style={lbl}>Reason</label>
                 <input style={{ ...inp, width: '100%' }} value={fReason} onChange={e => setFReason(e.target.value)} placeholder="Optional" />
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, flexWrap: 'wrap', gap: 8 }}>
               <span style={{ fontSize: 12, color: '#9ca3af' }}>
-                <Tip text="Saturdays (weekly off) are not counted against leave. The balance is reduced by working days only." width={260}>
-                  {fStart && fEnd ? `${previewDays.length} working day${previewDays.length === 1 ? '' : 's'}` : 'Pick a date range'}
+                <Tip text="The weekly off day is not counted against leave. The balance is reduced by working days only." width={260}>
+                  {fStart && fEnd ? `${fmt(previewDaysCount)} working day${previewDaysCount === 1 ? '' : 's'}` : 'Pick a date range'}
                 </Tip>
               </span>
               <button className="btn btn-primary" onClick={submitRequest} disabled={busy} style={{ fontSize: 13 }}>{busy ? 'Saving…' : 'Submit Request'}</button>
@@ -252,7 +279,7 @@ export default function LeaveManagement() {
                     <th>Type</th>
                     <th>Dates (BS)</th>
                     <th style={{ textAlign: 'right' }}>
-                      <Tip text="Working days in the range — Saturdays excluded." width={220}>Days</Tip>
+                      <Tip text="Working days in the range — the weekly off day excluded. Half-day requests show 0.5." width={240}>Days</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Remaining balance for this leave type after approved leave this BS year." width={250}>Balance</Tip>

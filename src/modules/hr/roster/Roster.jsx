@@ -77,14 +77,16 @@ export default function Roster() {
   // Letterhead info for the print header + labor-scheduling target — fetched once per client
   const [bizInfo, setBizInfo] = useState({ name: '', address: '' })
   const [coversPerStaffTarget, setCoversPerStaffTarget] = useState(20)
+  const [weeklyOffWeekday, setWeeklyOffWeekday] = useState(6) // 0=Sun..6=Sat, default Saturday
   useEffect(() => {
     if (!clientId) return
     Promise.all([
       supabase.from('clients').select('name').eq('id', clientId).single(),
-      supabase.from('settings').select('property_address, covers_per_staff_target').eq('client_id', clientId).maybeSingle(),
+      supabase.from('settings').select('property_address, covers_per_staff_target, weekly_off_weekday').eq('client_id', clientId).maybeSingle(),
     ]).then(([{ data: client }, { data: settings }]) => {
       setBizInfo({ name: client?.name || '', address: settings?.property_address || '' })
       setCoversPerStaffTarget(settings?.covers_per_staff_target ?? 20)
+      setWeeklyOffWeekday(settings?.weekly_off_weekday ?? 6)
     })
   }, [clientId])
 
@@ -93,6 +95,12 @@ export default function Roster() {
     setCoversPerStaffTarget(n)
     if (!clientId) return
     await supabase.from('settings').update({ covers_per_staff_target: n }).eq('client_id', clientId)
+  }
+
+  async function saveWeeklyOffWeekday(day) {
+    setWeeklyOffWeekday(day)
+    if (!clientId) return
+    await supabase.from('settings').update({ weekly_off_weekday: day }).eq('client_id', clientId)
   }
 
   // Demand-forecast overlay: day-level covers/revenue forecast (recipe_id IS NULL rows in
@@ -240,33 +248,80 @@ export default function Roster() {
 
   useEffect(() => { loadRoster() }, [loadRoster])
 
-  // ── Publish state (Monthly view only — publish is keyed by BS month) ───────────────────────
-  // Self-service employees never see a draft roster; get_my_roster only returns rows for a
-  // month once a hr_roster_publish_state row exists for it (see the migration).
-  const [publishState, setPublishState] = useState(null) // { published_at, published_by } | null
-  const [publishing,   setPublishing]   = useState(false)
-  const loadPublishState = useCallback(async () => {
-    if (!clientId) return
-    const { data } = await scopedFrom('hr_roster_publish_state')
-      .eq('bs_year', bsYear).eq('bs_month', bsMonth).maybeSingle()
-    setPublishState(data || null)
-  }, [clientId, bsYear, bsMonth, scopedFrom])
-  useEffect(() => { loadPublishState() }, [loadPublishState])
+  // ── Publish state — day-grain (one row per published day, not per published month) ─────────
+  // Self-service employees never see a draft roster; get_my_roster only returns rows for days
+  // that have a matching hr_roster_publish_state row (see the migration). Loaded for the
+  // currently-visible range using the same "group visible days by unique year:month" pattern as
+  // loadForecast, since a week can span two BS months.
+  const [publishedDays, setPublishedDays] = useState(new Set()) // Set of `${year}:${month}:${day}`
+  const [publishing,    setPublishing]    = useState(false)
 
-  async function publishRoster() {
+  const loadPublishedDays = useCallback(async () => {
+    if (!clientId) return
+    let all = []
+    if (viewMode === 'weekly') {
+      const months = new Map()
+      weekDays(weekStart).forEach(d => {
+        const bs = adToBs(d)
+        const k = `${bs.year}:${bs.month}`
+        if (!months.has(k)) months.set(k, bs)
+      })
+      for (const bs of months.values()) {
+        const { data } = await scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
+          .eq('bs_year', bs.year).eq('bs_month', bs.month)
+        all.push(...(data || []))
+      }
+    } else {
+      const { data } = await scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
+        .eq('bs_year', bsYear).eq('bs_month', bsMonth)
+      all = data || []
+    }
+    setPublishedDays(new Set(all.map(r => `${r.bs_year}:${r.bs_month}:${r.bs_day}`)))
+  }, [clientId, viewMode, weekStart, bsYear, bsMonth, scopedFrom])
+  useEffect(() => { loadPublishedDays() }, [loadPublishedDays])
+
+  // Publishes every day in `dayGroups` (usually one group, two if a visible week straddles a BS
+  // month boundary) and notifies affected staff once per group — only employees scheduled on
+  // those specific days, not the whole month's.
+  async function publishDays(dayGroups) {
     if (!clientId || publishing) return
     setPublishing(true)
-    const { data, error } = await scopedUpsert('hr_roster_publish_state', {
-      bs_year: bsYear, bs_month: bsMonth, published_at: new Date().toISOString(), published_by: profile?.id,
-    }, { onConflict: 'client_id,bs_year,bs_month' })
-    if (!error) {
-      setPublishState(data?.[0] || null)
-      supabase.functions.invoke('hr-push', {
-        body: { action: 'notify_roster_published', client_id: clientId, bs_year: bsYear, bs_month: bsMonth },
-      })
+    for (const g of dayGroups) {
+      const rows = g.bsDays.map(d => ({
+        bs_year: g.bsYear, bs_month: g.bsMonth, bs_day: d,
+        published_at: new Date().toISOString(), published_by: profile?.id,
+      }))
+      const { error } = await scopedUpsert('hr_roster_publish_state', rows, { onConflict: 'client_id,bs_year,bs_month,bs_day' })
+      if (!error) {
+        supabase.functions.invoke('hr-push', {
+          body: { action: 'notify_roster_published', client_id: clientId, bs_year: g.bsYear, bs_month: g.bsMonth, bs_days: g.bsDays },
+        })
+      }
     }
+    await loadPublishedDays()
     setPublishing(false)
   }
+
+  function publishMonth() {
+    publishDays([{ bsYear, bsMonth, bsDays: Array.from({ length: daysInBsMonth(bsYear, bsMonth) }, (_, i) => i + 1) }])
+  }
+
+  function publishWeek() {
+    const groups = new Map() // `${year}:${month}` -> { bsYear, bsMonth, bsDays: [] }
+    weekDays(weekStart).forEach(d => {
+      const bs = adToBs(d)
+      const k = `${bs.year}:${bs.month}`
+      if (!groups.has(k)) groups.set(k, { bsYear: bs.year, bsMonth: bs.month, bsDays: [] })
+      groups.get(k).bsDays.push(bs.day)
+    })
+    publishDays(Array.from(groups.values()))
+  }
+
+  const monthTotalDays = daysInBsMonth(bsYear, bsMonth)
+  const monthPublishedCount = Array.from({ length: monthTotalDays }, (_, i) => i + 1)
+    .filter(d => publishedDays.has(`${bsYear}:${bsMonth}:${d}`)).length
+  const weekPublishedCount = weekDays(weekStart)
+    .filter(d => { const bs = adToBs(d); return publishedDays.has(`${bs.year}:${bs.month}:${bs.day}`) }).length
 
   // ── Leave-conflict detection ────────────────────────────────────────────────────────────────
   // Approved leave requests for the client, fetched once (small table) — same "fetch all, filter
@@ -361,7 +416,7 @@ export default function Roster() {
         bsYear: bs.year, bsMonth: bs.month, bsDay: bs.day,
         label:    WEEKDAYS[d.getDay()],
         sublabel: `${bs.day} ${BS_MONTHS[bs.month - 1].slice(0, 3)}`,
-        isSat:    d.getDay() === 6,
+        isSat:    d.getDay() === weeklyOffWeekday,
       }
     })
   } else {
@@ -372,7 +427,7 @@ export default function Roster() {
         bsYear, bsMonth, bsDay: d,
         label:    d,
         sublabel: WEEKDAYS[adDate.getDay()].slice(0, 2),
-        isSat:    adDate.getDay() === 6,
+        isSat:    adDate.getDay() === weeklyOffWeekday,
       })
     }
   }
@@ -478,7 +533,10 @@ export default function Roster() {
 
       {/* ── Shift Settings tab ── */}
       {tab === 'shifts' && (
-        <ShiftSettingsPanel clientId={clientId} shiftTypes={shiftTypes} setShiftTypes={setShiftTypes} />
+        <ShiftSettingsPanel
+          clientId={clientId} shiftTypes={shiftTypes} setShiftTypes={setShiftTypes}
+          weeklyOffWeekday={weeklyOffWeekday} saveWeeklyOffWeekday={saveWeeklyOffWeekday}
+        />
       )}
 
       {/* ── Roster Board tab ── */}
@@ -545,22 +603,34 @@ export default function Roster() {
               </select>
             )}
 
-            {/* Publish — keyed by BS month, so only shown in Monthly view. Self-service
-                employees never see a draft roster until this has been clicked. */}
-            {viewMode === 'monthly' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {publishState ? (
-                  <Tip text={`Published ${new Date(publishState.published_at).toLocaleString('en-NP', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}. Further edits this month are not auto-republished.`}>
-                    <span className="badge-green" style={{ fontSize: 10 }}>✓ Published</span>
-                  </Tip>
-                ) : (
-                  <span className="badge-gray" style={{ fontSize: 10 }}>Draft</span>
-                )}
-                <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={publishing} onClick={publishRoster}>
-                  {publishing ? 'Publishing…' : publishState ? 'Re-Publish + Notify' : 'Publish + Notify Staff'}
-                </button>
-              </div>
-            )}
+            {/* Publish — day-grain, so a manager can publish a week at a time instead of having
+                to finish the whole month first. Self-service employees never see a draft day
+                until it's been published. */}
+            {(() => {
+              const publishedCount = viewMode === 'weekly' ? weekPublishedCount : monthPublishedCount
+              const totalCount     = viewMode === 'weekly' ? 7 : monthTotalDays
+              const allPublished   = publishedCount === totalCount
+              const nonePublished  = publishedCount === 0
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {nonePublished ? (
+                    <span className="badge-gray" style={{ fontSize: 10 }}>Draft</span>
+                  ) : allPublished ? (
+                    <Tip text="Every visible day has been published. Further edits aren't auto-notified — use Re-Publish to push an update.">
+                      <span className="badge-green" style={{ fontSize: 10 }}>✓ Published</span>
+                    </Tip>
+                  ) : (
+                    <Tip text={`${publishedCount} of ${totalCount} visible days have been published so far.`}>
+                      <span className="badge-amber" style={{ fontSize: 10 }}>◐ {publishedCount}/{totalCount} Published</span>
+                    </Tip>
+                  )}
+                  <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={publishing}
+                    onClick={viewMode === 'weekly' ? publishWeek : publishMonth}>
+                    {publishing ? 'Publishing…' : nonePublished ? `Publish ${viewMode === 'weekly' ? 'Week' : 'Month'} + Notify` : 'Re-Publish + Notify'}
+                  </button>
+                </div>
+              )
+            })()}
 
             {/* Legend + Print */}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginLeft: 'auto', alignItems: 'center' }}>

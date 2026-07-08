@@ -36,15 +36,22 @@ export function minRateFor(payBasis, employmentType) {
 export const STANDARD_HOURS_PER_DAY = 8     // Nepal Labour Act standard working day
 export const OT_MULTIPLIER          = 1.5   // overtime paid at 1.5× normal hourly rate (weekday)
 export const OT_HOLIDAY_MULTIPLIER  = 2.0   // overtime on a gazetted public holiday (Nepal Labour Act)
-export const WEEKLY_OFF_WEEKDAY     = 6     // Saturday (JS Date.getDay(): 0=Sun … 6=Sat)
+// Fallback default only — the real per-client value lives in settings.weekly_off_weekday
+// (editable from Roster → Shift Types). Used when that setting hasn't loaded yet, or by pure
+// functions whose caller didn't pass an override. (JS Date.getDay(): 0=Sun … 6=Sat)
+export const WEEKLY_OFF_WEEKDAY     = 6
 
 export const ATTENDANCE_STATUSES = [
-  { key: 'present',      label: 'Present',      short: 'P',  color: '#34d399' },
-  { key: 'half_day',     label: 'Half-day',     short: '½',  color: '#c9a84c' },
-  { key: 'absent',       label: 'Absent',       short: 'A',  color: '#f87171' },
-  { key: 'paid_leave',   label: 'Paid Leave',   short: 'PL', color: '#60a5fa' },
-  { key: 'unpaid_leave', label: 'Unpaid Leave', short: 'UL', color: '#9ca3af' },
-  { key: 'weekly_off',   label: 'Weekly Off',   short: 'W',  color: '#4b5563' },
-  { key: 'holiday',      label: 'Holiday',      short: 'H',  color: '#818cf8' },
+  { key: 'present',           label: 'Present',             short: 'P',   color: '#34d399' },
+  { key: 'half_day',          label: 'Half-day',            short: '½',   color: '#c9a84c' },
+  { key: 'absent',            label: 'Absent',               short: 'A',   color: '#f87171' },
+  { key: 'paid_leave',        label: 'Paid Leave',          short: 'PL',  color: '#60a5fa' },
+  { key: 'unpaid_leave',      label: 'Unpaid Leave',        short: 'UL',  color: '#9ca3af' },
+  // Half-day leave — distinct from the generic 'half_day' status above so payroll can respect
+  // the underlying leave type's paid/unpaid flag instead of always deducting 0.5 day's pay.
+  { key: 'half_paid_leave',   label: 'Half-day Paid Leave',   short: '½PL', color: '#60a5fa' },
+  { key: 'half_unpaid_leave', label: 'Half-day Unpaid Leave', short: '½UL', color: '#9ca3af' },
+  { key: 'weekly_off',        label: 'Weekly Off',          short: 'W',   color: '#4b5563' },
+  { key: 'holiday',           label: 'Holiday',             short: 'H',   color: '#818cf8' },
 ]
 

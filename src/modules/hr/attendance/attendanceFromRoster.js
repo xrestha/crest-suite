@@ -5,8 +5,8 @@ import { bsToAd } from '../../../utils/bsCalendar'
 import { WEEKLY_OFF_WEEKDAY } from '../payrollConstants'
 import { shiftHours } from '../roster/laborForecast'
 
-export function isSaturday(bsYear, bsMonth, bsDay) {
-  return bsToAd(bsYear, bsMonth, bsDay).getDay() === WEEKLY_OFF_WEEKDAY
+export function isSaturday(bsYear, bsMonth, bsDay, offWeekday = WEEKLY_OFF_WEEKDAY) {
+  return bsToAd(bsYear, bsMonth, bsDay).getDay() === offWeekday
 }
 
 // rosterRows: hr_roster rows for the BS month (employee_id, shift_type_id, bs_day)
@@ -14,8 +14,9 @@ export function isSaturday(bsYear, bsMonth, bsDay) {
 // employeeIds: ids of active employees to consider
 // existingDayKeys: Set of `${employee_id}:${bs_day}` already present in hr_attendance for this period
 // days: array of bs_day numbers in the period (1..daysInBsMonth)
+// offWeekday: 0=Sun..6=Sat, the client's configured weekly off day (defaults to Saturday)
 // Returns hr_attendance row objects ready for scopedUpsert — never overlaps existingDayKeys.
-export function buildAttendanceFromRoster({ rosterRows, shiftTypesById, employeeIds, existingDayKeys, bsYear, bsMonth, days, periodId }) {
+export function buildAttendanceFromRoster({ rosterRows, shiftTypesById, employeeIds, existingDayKeys, bsYear, bsMonth, days, periodId, offWeekday = WEEKLY_OFF_WEEKDAY }) {
   const rosterByKey = {}
   rosterRows.forEach(r => { rosterByKey[`${r.employee_id}:${r.bs_day}`] = r })
 
@@ -42,7 +43,7 @@ export function buildAttendanceFromRoster({ rosterRows, shiftTypesById, employee
           ot_hours:     0,
           note:         null,
         })
-      } else if (isSaturday(bsYear, bsMonth, day)) {
+      } else if (isSaturday(bsYear, bsMonth, day, offWeekday)) {
         rows.push({
           employee_id:  empId,
           period_id:    periodId,
