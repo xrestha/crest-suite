@@ -19,6 +19,9 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
   if (!session) return <Navigate to="/login" replace />
   if (adminOnly && profile?.role !== 'admin') return <Navigate to="/dashboard" replace />
   if (!profile) return <Navigate to="/login" replace />
+  // An HR self-service account's whole app is /hr/self-service (outside this Layout) — it has
+  // no business on any Layout route, and RLS blocks its data there anyway.
+  if (profile.hr_self_service) return <Navigate to="/hr/self-service" replace />
 
   return children
 }

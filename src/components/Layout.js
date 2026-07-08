@@ -248,8 +248,11 @@ export default function Layout() {
   // Which module panels exist for this user, and which one is showing.
   // activePanel (route-synced) is resolved against visibility — if it points at a module this
   // user can't see (or nothing is selected yet), fall back to the first available panel.
-  const imsVisible = clientModules.ims && (!isAdmin || adminViewClientId)
-  const hrVisible  = clientModules.hr  && (!isAdmin || adminViewClientId)
+  // IMS and HR are owner/admin-only panels — a POS PIN staff login (posRole set, not owner)
+  // works the floor, and RLS blocks it from the IMS/HR tables anyway; don't show nav to pages
+  // that would render empty.
+  const imsVisible = clientModules.ims && (!isAdmin || adminViewClientId) && (isAdmin || isOwner)
+  const hrVisible  = clientModules.hr  && (!isAdmin || adminViewClientId) && (isAdmin || isOwner)
   const posVisible = clientModules.pos && (!isAdmin || adminViewClientId) && (isAdmin || posRole || isOwner)
   const panelOrder = [
     isAdmin && 'admin',

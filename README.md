@@ -141,6 +141,20 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S316 — 2026-07-08 — IMS debug pass: staff PIN accounts had owner-level DB access to the whole business
+
+The "debug the module" sweep, IMS edition — and it found the module-level twin of S314's gap, bigger on both axes. All three login types (`admin-user-ops`) share the same profile shape — `role='client'` + the tenant's `client_id` — and every standard RLS policy is "admin OR same client", so the DB couldn't tell an owner from a waiter:
+
+- **An HR self-service account** (password = a 4–6 digit PIN) passed same-client RLS on **every IMS and POS table**: full item master with costs, all purchases and rates, supplier list, recipes with costings, all sales — readable and writable over the REST API. S306/S314 had fenced these accounts off the HR tables only.
+- **A POS PIN staff account** passed RLS on **everything, including all 20 `hr_` tables** — a waiter's PIN login could read the whole staff's payslips, salaries, and advances. No exclusion had ever applied to these accounts at all.
+- **Bonus UI hole:** `isOwner` in AuthContext was `role==='client' && !pos_role` — an HR self-service account has no `pos_role`, so it *counted as Owner* and inherited POS **manager** access (voids, discounts, staff management UI).
+
+Fix in `20260708130000_staff_account_business_table_isolation.sql` (**run in SQL Editor**): a new `is_pos_pin_staff()` helper (`pos_email IS NOT NULL` — set in exactly one place, `create_pos_staff`), then **RESTRICTIVE** policies (they AND with existing permissive ones — no risky 70-table policy rewrite): self-service accounts blocked from all 35 IMS+POS tables plus settings *writes* (keeping the read `SelfServiceHome` needs); POS PIN staff blocked from all 20 HR tables + the 19 pure-IMS tables with no POS code path. Deliberately left open for POS staff: `recipes`/`recipe_ingredients`/`recipe_suggestions` (Menu Pricing is POS-manager nav), `sales_entries`/`monthly_periods`/`stock_movements` (billing posts sales, deducts stock), `settings` writes (PosTableManagement's manager tabs — the S290 fix), and all `pos_*`. SECURITY DEFINER RPCs bypass RLS, so every staff flow keeps working.
+
+Frontend: `isOwner` now excludes `hr_self_service`; ProtectedRoute redirects self-service accounts to `/hr/self-service` (their whole app); Layout hides the IMS/HR nav panels from PIN staff (their pages would render empty under the new RLS anyway).
+
+**Files:** `supabase/migrations/20260708130000_staff_account_business_table_isolation.sql`, `src/context/AuthContext.js`, `src/components/ProtectedRoute.js`, `src/components/Layout.js`
+
 ### S315 — 2026-07-08 — POS debug pass: co-occurrence suggestions were unreachable on exactly the tiers S304 built them for
 
 Same "debug the module" sweep as S314, over the post-audit POS commits (S303, S304, S310's device screen). One real defect found, in S304's suggestion-chip tiering: `computeSuggestions()` bailed out (`if (initial.length === 0) return`) when the *local* ranking came up empty — but on a Growth+IMS client with no manual pairing on the tapped item, or a Pro+IMS client who's never run Menu Engineering, every local score ties at zero, so the early return fired **before** the `get_cooccurrence` RPC was ever called. The co-occurrence layer — the very thing S304's tier table promises Growth+IMS — was dead code unless a manual pairing happened to exist for that same item. Fixed: set the (possibly empty) local ranking, then always proceed to the co-occurrence fetch when the tier allows it; the panel stays hidden on empty and fills when the RPC responds, which is the documented "re-ranks on arrival" behavior anyway.

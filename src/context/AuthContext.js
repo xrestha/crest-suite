@@ -134,8 +134,10 @@ export function AuthProvider({ children }) {
 
   const posEnabled = isAdmin || (profile?.clients?.pos_enabled ?? false)
   // Admin gets 'manager'; owner (client with no pos_role) gets 'manager' when POS enabled;
-  // PIN-based staff use their explicit pos_role
-  const isOwner = !isAdmin && profile?.role === 'client' && !profile?.pos_role
+  // PIN-based staff use their explicit pos_role. An HR self-service account also has role
+  // 'client' with no pos_role — without the explicit exclusion it would count as Owner and
+  // inherit POS manager access.
+  const isOwner = !isAdmin && profile?.role === 'client' && !profile?.pos_role && !profile?.hr_self_service
   const posRole = isAdmin || isOwner ? 'manager' : (profile?.pos_role || null)
 
   const POS_RANK = { staff: 1, supervisor: 2, manager: 3 }
