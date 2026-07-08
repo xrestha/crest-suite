@@ -45,7 +45,7 @@ describe('buildAttendanceFromRoster', () => {
     expect(rows[0].hours_worked).toBe(4)
   })
 
-  test('a roster row pointing to a zero-hour placeholder shift (e.g. custom "LEAVE"/"OFF") is not marked present', () => {
+  test('a roster row pointing to a zero-hour placeholder shift (e.g. custom "LEAVE"/"Day Off") is marked holiday, not present', () => {
     const rows = buildAttendanceFromRoster({
       rosterRows: [{ employee_id: 'e1', shift_type_id: 'leave', bs_day: 5 }],
       shiftTypesById,
@@ -54,7 +54,9 @@ describe('buildAttendanceFromRoster', () => {
       bsYear: 2082, bsMonth: 4, days: [5],
       periodId: 'p1',
     })
-    expect(rows).toEqual([])
+    expect(rows).toEqual([
+      { employee_id: 'e1', period_id: 'p1', bs_day: 5, status: 'holiday', hours_worked: 0, ot_hours: 0, note: null },
+    ])
   })
 
   test('a zero-hour placeholder shift on a Saturday still gets the weekly_off default', () => {

@@ -27,11 +27,11 @@ export function buildAttendanceFromRoster({ rosterRows, shiftTypesById, employee
       if (existingDayKeys.has(key)) return
 
       const rosterRow = rosterByKey[key]
-      // Some clients create custom zero-hour shift types (e.g. "LEAVE", "OFF") purely to mark
+      // Some clients create custom zero-hour shift types (e.g. "LEAVE", "Day Off") purely to mark
       // exceptions on the roster board visually — those aren't real work, so a roster row only
-      // counts as "present" when it resolves to actual hours. Anything else (no roster row, or
-      // an unresolvable/zero-hour placeholder) falls through to the same handling as an
-      // unrostered day, rather than risk marking a leave day as paid presence.
+      // counts as "present" when it resolves to actual hours. A zero-hour roster row still marks
+      // the day (as 'holiday' — payroll-neutral, same as Weekly Off, just not tied to the
+      // recurring weekday policy) rather than leaving a gap with no attendance row at all.
       const hours = rosterRow ? shiftHours(shiftTypesById[rosterRow.shift_type_id]) : 0
       if (rosterRow && hours > 0) {
         rows.push({
@@ -49,6 +49,16 @@ export function buildAttendanceFromRoster({ rosterRows, shiftTypesById, employee
           period_id:    periodId,
           bs_day:       day,
           status:       'weekly_off',
+          hours_worked: 0,
+          ot_hours:     0,
+          note:         null,
+        })
+      } else if (rosterRow) {
+        rows.push({
+          employee_id:  empId,
+          period_id:    periodId,
+          bs_day:       day,
+          status:       'holiday',
           hours_worked: 0,
           ot_hours:     0,
           note:         null,

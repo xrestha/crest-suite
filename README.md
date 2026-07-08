@@ -18,8 +18,11 @@ npm run build    # Production build
 ```text
 REACT_APP_SUPABASE_URL
 REACT_APP_SUPABASE_ANON_KEY
-REACT_APP_SUPABASE_SERVICE_ROLE_KEY
+REACT_APP_USDA_API_KEY
+REACT_APP_VAPID_PUBLIC_KEY
 ```
+
+`REACT_APP_SUPABASE_SERVICE_ROLE_KEY` must never be set here or in Vercel — admin operations go through the `admin-user-ops` Supabase Edge Function instead (see S311).
 
 ---
 
@@ -137,6 +140,28 @@ Architecture: single React app, single Supabase project, feature flags per clien
 ---
 
 ## Session Log
+
+### S313 — 2026-07-08 — Attendance: roster's zero-hour placeholder shifts now marked Holiday instead of a silent gap
+
+Live use surfaced a second gap right after S310/S312: the Monthly Summary grid in Attendance showed blank cells scattered through an otherwise-fully-rostered week. Root cause was in `buildAttendanceFromRoster` (`attendanceFromRoster.js`) — a roster row pointing at a zero-hour custom shift type (e.g. the built-in "Day Off" from S311, or a client's own "LEAVE"/"OFF") resolved to 0 hours and was silently skipped, leaving no `hr_attendance` row at all instead of the "shows up correctly... in Attendance's Generate from Roster" behavior the S311 fix's own code comment had promised but never actually implemented. Now `⚡ Generate from Roster` marks these days `holiday` — payroll-neutral, same treatment as Weekly Off, just not tied to the recurring weekday policy — closing the visual gap and giving the "Day Off"/"LEAVE" shift types a real counterpart in the Attendance legend (previously they matched nothing in it). Saturday still takes priority over a zero-hour roster placeholder (a "LEAVE" shift rostered onto a Saturday still shows Weekly Off, not Holiday). Updated the stale tooltip/Help text that said these were "skipped," and the unit tests in `attendanceFromRoster.test.js`.
+
+**Files:** `src/modules/hr/attendance/attendanceFromRoster.js`, `src/modules/hr/attendance/attendanceFromRoster.test.js`, `src/modules/hr/attendance/AttendanceSheet.jsx`, `src/pages/Help.js`
+
+### S312 — 2026-07-08 — Leave: client owners can approve/reject requests and manage Leave Types; self-service off-day match broadened; service-role key fully removed
+
+A screenshot of a real pending leave request showed only a "Cancel" action, no Approve/Reject. Root cause: `LeaveManagement.jsx` gated both Approve/Reject and the entire "Leave Types" tab behind `isAdmin`, which is Crest's own platform-support flag (`profile.role === 'admin'`) — never true for a real client login, since the tenant's own login (the actual restaurant owner/manager) always has `role === 'client'`. Every real client saw only Cancel. Removed the gate on both, matching how Roster's publish/swap-approval already work (no admin gate — any logged-in client user can act, since that login *is* the owner/manager).
+
+Also broadened the S310 self-service off-day highlight: `isOffDay` matched shift names by exact string ("off", "leave", "holiday"), so a shift literally named "Off Day" (two words) fell through unhighlighted. Changed to a substring match.
+
+Separately, completed the `REACT_APP_SUPABASE_SERVICE_ROLE_KEY` cleanup flagged in memory during the earlier "update all .md" pass: removed the unused entry from `.env.local` (confirmed via repo-wide grep that no code ever referenced it — dead config, not an active leak) and from the Vercel dashboard (Production + Preview) directly by the user. Quick Start's env var list in this README was still listing it as required — corrected.
+
+**Files:** `src/modules/hr/leave/LeaveManagement.jsx`, `src/modules/hr/selfservice/SelfServiceHome.jsx`, `.env.local` (gitignored, no diff), `README.md`
+
+### S311 — 2026-07-08 — Roster shift-picker: "Clear (Unassign)" vs a real "Day Off" shift type
+
+A phone screenshot showed an employee's roster day going blank both on the admin board and in their own Self-Service view after using the shift picker's "Clear (Day Off)" option. Traced to `ShiftPicker.jsx`: that option actually deleted the `hr_roster` row entirely rather than marking the day off, so the cell went blank and the day disappeared from Self-Service (no row = nothing for `get_my_roster`'s join to return). Renamed to "Clear (Unassign)" to describe what it actually does, and added a built-in zero-hour "Day Off" shift type to `DEFAULT_SHIFTS` so a client has a real, non-destructive way to mark someone off that shows up everywhere — the board, Self-Service, and (as of S313) Attendance's Generate from Roster.
+
+**Files:** `src/modules/hr/roster/Roster.jsx`, `src/modules/hr/roster/ShiftPicker.jsx`, `src/pages/Help.js`
 
 ### S310 — 2026-07-08 — Live-testing fixes: Roster publish per week, swap-picker loading state, self-service OFF-day highlight
 

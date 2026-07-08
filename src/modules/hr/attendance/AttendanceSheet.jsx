@@ -291,7 +291,7 @@ export default function AttendanceSheet() {
           )}
 
           <div style={{ marginBottom: 14, fontSize: 11, color: '#6b7280', lineHeight: 1.6 }}>
-            <Tip text="Fills blank days across the whole month from Staff Roster shift assignments — marked Present, with hours from the shift — and defaults unrostered Saturdays to Weekly Off. A roster shift with no hours (e.g. a custom 'LEAVE' or 'OFF' entry) is skipped rather than marked Present. Never overwrites a day that already has an entry, so leave, extra offs, and OT still need manual entry afterward." width={320}>
+            <Tip text="Fills blank days across the whole month from Staff Roster shift assignments — marked Present, with hours from the shift — and defaults unrostered Saturdays to Weekly Off. A roster shift with no hours (e.g. a custom 'LEAVE' or 'Day Off' entry) is marked Holiday rather than Present. Never overwrites a day that already has an entry, so a formal approved Leave Request or manual correction still takes precedence if entered afterward." width={320}>
               ⚡ Generate from Roster
             </Tip>{' '}pre-fills this month from Staff Roster shift assignments; it never overwrites a day you've already marked.
           </div>
