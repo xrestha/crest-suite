@@ -138,6 +138,16 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S308 — 2026-07-08 — SSF bulk-upload "export": researched first, closed the roadmap item without new code
+
+The last open HR roadmap line — "SSF export file matching the actual SSF-portal bulk-upload format" — was researched before writing anything, per the user's explicit request. Pulled the official SOSYS (Nepal Social Security Fund) Employer Portal user manual directly (`sosys.ssf.gov.np/manual/collection_manual.pdf`) rather than trusting third-party blog claims that "a bulk-upload Excel template exists."
+
+The manual shows the real "Collection" screen has **no bulk-upload feature at all** — the employer manually types each employee's SSF No + Basic Salary into a web grid, one row at a time, and SOSYS calculates the 31% (11% employee + 20% employer) deposit itself. An independent source corroborated this, describing the same manual entry as "hours or days" of work for employers with many staff. The blog claims of a downloadable bulk-upload template gave zero verifiable specifics (no column names, no location) and appear to simply be wrong.
+
+Since there's no real upload format to match, the roadmap item's original framing was based on a false premise. Rather than build toward a target that doesn't exist, added a clarifying note to the existing SSF Challan tab (already exports SSF No / Basic / 11% / 20% / 31% per employee) explaining this and positioning it as the manual-entry reference sheet — type SSF No + SSF Basic into SOSYS; the Total 31% column should match what SOSYS calculates.
+
+**Files:** `src/modules/hr/reports/HrReports.jsx`, `src/pages/Help.js`
+
 ### S307 — 2026-07-07 — Roster: Publish + Web Push, Mutual Shift Swap, Leave-Conflict Auto-Block
 
 Three Roster gaps confirmed missing from the roadmap. All three build on the S306 Self-Service PWA.
