@@ -25,7 +25,7 @@ function bsLabel(iso) {
 }
 
 export default function LeaveManagement() {
-  const { clientId, isAdmin } = useAuth()
+  const { clientId } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate } = useScopedDb()
   const today = adToBs(new Date())
   const [bsYear,    setBsYear]    = useState(today.year)
@@ -210,7 +210,7 @@ export default function LeaveManagement() {
       </div>
 
       <div className="tab-bar" style={{ marginBottom: 18 }}>
-        {[{ id: 'requests', label: 'Requests' }, { id: 'balances', label: 'Balances' }, ...(isAdmin ? [{ id: 'types', label: 'Leave Types' }] : [])].map(t => (
+        {[{ id: 'requests', label: 'Requests' }, { id: 'balances', label: 'Balances' }, { id: 'types', label: 'Leave Types' }].map(t => (
           <button key={t.id} className={`tab-btn${tab === t.id ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </div>
@@ -317,7 +317,7 @@ export default function LeaveManagement() {
                         </td>
                         <td><span style={{ fontSize: 11, fontWeight: 700, color: sc.color }}>{sc.label}</span></td>
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          {isAdmin && req.status === 'pending' && (
+                          {req.status === 'pending' && (
                             <>
                               <button className="btn btn-ghost" style={{ fontSize: 11, color: '#34d399' }} onClick={() => approveRequest(req)} disabled={busy}>Approve</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, color: '#f87171' }} onClick={() => decideRequest(req, 'rejected')} disabled={busy}>Reject</button>

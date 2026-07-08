@@ -16,10 +16,12 @@ const inp = {
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 const STATUS_BADGE = { pending: 'badge-amber', approved: 'badge-green', rejected: 'badge-red', cancelled: 'badge-gray' }
 // Some clients create custom zero-hour shift types purely to mark a day off on the roster board
-// (e.g. "OFF", "LEAVE") — same convention as attendanceFromRoster.js. Highlighted here so an
-// employee scanning their month can spot rest days at a glance instead of reading every row.
-const OFF_SHIFT_NAMES = ['off', 'leave', 'holiday']
-const isOffDay = name => !name || OFF_SHIFT_NAMES.includes(name.trim().toLowerCase())
+// (e.g. "OFF", "Day Off", "Off Day", "LEAVE", "Public Holiday") — same convention as
+// attendanceFromRoster.js. Matched as a substring, not an exact name, since clients phrase these
+// differently. Highlighted here so an employee scanning their month can spot rest days at a
+// glance instead of reading every row.
+const OFF_SHIFT_KEYWORDS = ['off', 'leave', 'holiday']
+const isOffDay = name => !name || OFF_SHIFT_KEYWORDS.some(k => name.trim().toLowerCase().includes(k))
 const SWAP_STATUS_BADGE = {
   pending_target: 'badge-amber', pending_admin: 'badge-amber', approved: 'badge-green',
   rejected_by_target: 'badge-red', rejected_by_admin: 'badge-red', cancelled: 'badge-gray',
