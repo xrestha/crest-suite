@@ -3,7 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import * as XLSX from 'xlsx'
-import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 import { computePayslip } from './payrollCompute'
 import { computeMonthlyTds, fiscalYearOf } from './tds'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -108,6 +108,25 @@ export default function PayrollRun() {
     return map
   }
 
+  // Approved TADA claims (from the TADA Claims ledger) whose trip dates fall inside this BS
+  // period, per employee. Feeds the TADA column's auto-fill — Finalize marks these claims Paid
+  // so the same trip is never reimbursed both through TADA Claims and through payroll.
+  async function fetchApprovedTadaMap() {
+    const periodStart = formatAd(bsToAd(period.bs_year, period.bs_month, 1))
+    const periodEnd   = formatAd(bsToAd(period.bs_year, period.bs_month, daysInBsMonth(period.bs_year, period.bs_month)))
+    const { data } = await scopedFrom('hr_tada_claims', 'id, employee_id, total_amount, start_date, end_date')
+      .eq('status', 'approved')
+    const map = {}
+    ;(data || []).forEach(c => {
+      if (c.start_date > periodEnd || c.end_date < periodStart) return
+      const e = map[c.employee_id] || { total: 0, ids: [] }
+      e.total += parseFloat(c.total_amount) || 0
+      e.ids.push(c.id)
+      map[c.employee_id] = e
+    })
+    return map
+  }
+
   // Per-employee scheduled advance deduction for this period.
   // For each active advance: deduct min(installment, outstanding).
   // If no installment set, deduct full outstanding (treated as one-time advance).
@@ -128,7 +147,7 @@ export default function PayrollRun() {
     return advMap
   }
 
-  function buildRows(runId, ytdMap) {
+  function buildRows(runId, ytdMap, tadaMap) {
     const advMap = buildAdvanceMap()
     return employees.map(emp => {
       const comps        = components.filter(c => c.employee_id === emp.id)
@@ -151,8 +170,10 @@ export default function PayrollRun() {
         annualLifeInsurance:   parseFloat(emp.life_insurance_premium) || 0,
         annualHealthInsurance: parseFloat(emp.health_insurance_premium) || 0,
       })
-      const net = slip.net_pay - tds
-      return { run_id: runId, employee_id: emp.id, ...slip, tds, tada_amount: 0, net_pay: net }
+      const tada = tadaMap[emp.id] || { total: 0, ids: [] }
+      const tadaAmount = Math.round(tada.total)
+      const net = slip.net_pay - tds + tadaAmount
+      return { run_id: runId, employee_id: emp.id, ...slip, tds, tada_amount: tadaAmount, tada_claim_ids: tada.ids, net_pay: net }
     })
   }
 
@@ -160,9 +181,10 @@ export default function PayrollRun() {
     if (!period || employees.length === 0) return
     setBusy(true); setMsg('')
     const ytdMap = await fetchYtdMap()
+    const tadaMap = await fetchApprovedTadaMap()
     const { data: runRow, error: rErr } = await scopedInsert('hr_payroll_runs', { period_id: period.id, status: 'draft' }, { single: true })
     if (rErr) { setMsg('error:' + rErr.message); setBusy(false); return }
-    const { error: pErr } = await scopedInsert('hr_payslips', buildRows(runRow.id, ytdMap))
+    const { error: pErr } = await scopedInsert('hr_payslips', buildRows(runRow.id, ytdMap, tadaMap))
     if (pErr) { setMsg('error:' + pErr.message); setBusy(false); return }
     await loadAll(period.id, period.bs_year, period.bs_month)
     setMsg('ok:Payroll generated'); setBusy(false)
@@ -170,11 +192,12 @@ export default function PayrollRun() {
 
   async function regenerate() {
     if (!run || run.status === 'finalized') return
-    if (!window.confirm('Recompute all payslips from current salary, attendance & tax? Manual TDS and TADA overrides will be reset.')) return
+    if (!window.confirm('Recompute all payslips from current salary, attendance & tax? Manual TDS and TADA overrides will be reset (TADA re-fills from currently Approved claims for this period).')) return
     setBusy(true); setMsg('')
     const ytdMap = await fetchYtdMap()
+    const tadaMap = await fetchApprovedTadaMap()
     await scopedDelete('hr_payslips').eq('run_id', run.id)
-    const { error } = await scopedInsert('hr_payslips', buildRows(run.id, ytdMap))
+    const { error } = await scopedInsert('hr_payslips', buildRows(run.id, ytdMap, tadaMap))
     if (error) { setMsg('error:' + error.message); setBusy(false); return }
     await loadAll(period.id, period.bs_year, period.bs_month)
     setMsg('ok:Recomputed'); setBusy(false)
@@ -241,6 +264,14 @@ export default function PayrollRun() {
       }
     }
 
+    // TADA claims auto-filled into a payslip get marked Paid so the same trip is never
+    // reimbursed both through TADA Claims and through this payroll run. Skipped for any
+    // payslip where the clerk zeroed TADA back out — those claims stay Approved, unpaid.
+    const tadaClaimIds = []
+    payslips.forEach(s => {
+      if ((s.tada_amount || 0) > 0 && Array.isArray(s.tada_claim_ids)) tadaClaimIds.push(...s.tada_claim_ids)
+    })
+
     await scopedUpdate('hr_payroll_runs', { status: 'finalized', finalized_at: new Date().toISOString() }).eq('id', run.id)
     // Idempotent: delete prior auto-repayments for this run, then re-insert
     await scopedDelete('hr_advance_repayments').eq('payroll_run_id', run.id)
@@ -249,6 +280,10 @@ export default function PayrollRun() {
     }
     if (settleIds.length > 0) {
       await scopedUpdate('hr_advances', { status: 'settled' }).in('id', settleIds)
+    }
+    if (tadaClaimIds.length > 0) {
+      await scopedUpdate('hr_tada_claims', { status: 'paid', paid_at: new Date().toISOString(), paid_method: 'Payroll' })
+        .in('id', tadaClaimIds).eq('status', 'approved')
     }
 
     await loadAll(period.id, period.bs_year, period.bs_month)
@@ -259,7 +294,7 @@ export default function PayrollRun() {
 
   async function reopen() {
     if (!run) return
-    if (!window.confirm('Reopen this payroll for editing? It will return to draft and advance repayments auto-recorded by this run will be reversed.')) return
+    if (!window.confirm('Reopen this payroll for editing? It will return to draft, advance repayments auto-recorded by this run will be reversed, and TADA claims auto-marked Paid by this run will revert to Approved.')) return
     setBusy(true)
 
     // Reverse auto-repayments created by this run
@@ -277,6 +312,17 @@ export default function PayrollRun() {
       .map(a => a.id)
     if (reactivateIds.length > 0) {
       await scopedUpdate('hr_advances', { status: 'active' }).in('id', reactivateIds)
+    }
+
+    // Revert TADA claims this run auto-marked Paid — but only ones marked paid BY payroll,
+    // never a claim a manager separately paid by hand via TADA Claims.
+    const tadaClaimIds = []
+    payslips.forEach(s => {
+      if (Array.isArray(s.tada_claim_ids) && s.tada_claim_ids.length > 0) tadaClaimIds.push(...s.tada_claim_ids)
+    })
+    if (tadaClaimIds.length > 0) {
+      await scopedUpdate('hr_tada_claims', { status: 'approved', paid_at: null, paid_method: null })
+        .in('id', tadaClaimIds).eq('paid_method', 'Payroll')
     }
 
     await scopedUpdate('hr_payroll_runs', { status: 'draft', finalized_at: null }).eq('id', run.id)
@@ -431,9 +477,18 @@ export default function PayrollRun() {
                               : <input type="number" min="0" defaultValue={s.tds || ''} onBlur={e => updateTds(s, e.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
                           </td>
                           <td style={{ textAlign: 'right' }}>
-                            {finalized
-                              ? <span style={{ color: (s.tada_amount || 0) > 0 ? '#34d399' : '#4b5563' }}>{(s.tada_amount || 0) > 0 ? `+${fmt(s.tada_amount)}` : '—'}</span>
-                              : <input type="number" min="0" defaultValue={s.tada_amount || ''} onBlur={e => updateTada(s, e.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
+                            <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
+                              {(s.tada_claim_ids || []).length > 0 && (
+                                <Tip text={finalized
+                                  ? `Auto-paid from ${s.tada_claim_ids.length} approved TADA claim(s) for this period — marked Paid in TADA Claims when this run was finalized.`
+                                  : `Auto-filled from ${s.tada_claim_ids.length} approved TADA claim(s) for this period. Finalizing will mark them Paid — clear this to 0 to skip paying them via payroll.`} width={280}>
+                                  <span style={{ fontSize: 10, cursor: 'help' }}>🔗</span>
+                                </Tip>
+                              )}
+                              {finalized
+                                ? <span style={{ color: (s.tada_amount || 0) > 0 ? '#34d399' : '#4b5563' }}>{(s.tada_amount || 0) > 0 ? `+${fmt(s.tada_amount)}` : '—'}</span>
+                                : <input type="number" min="0" defaultValue={s.tada_amount || ''} onBlur={e => updateTada(s, e.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
+                            </div>
                           </td>
                           <td style={{ textAlign: 'right', color: '#c9a84c', fontWeight: 700, fontSize: 14 }}>{fmt(s.net_pay)}</td>
                           <td style={{ textAlign: 'right' }}>
@@ -459,7 +514,7 @@ export default function PayrollRun() {
               </div>
             </div>
             <div style={{ marginTop: 12, fontSize: 11, color: '#4b5563', lineHeight: 1.6 }}>
-              {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can override any TDS value inline.'} SSF is applied only to employees with an SSF number. TDS is computed automatically from the fiscal-year tax slabs using year-to-date projection; finalize earlier months first so each month\'s tax builds on the last. TADA (travel/daily allowance) can be entered per employee — it's added after TDS as a non-taxable reimbursement, not part of taxable gross. Active advance installments are auto-deducted; repayment rows are written to Advances & Loans on Finalize.
+              {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can override any TDS value inline.'} SSF is applied only to employees with an SSF number. TDS is computed automatically from the fiscal-year tax slabs using year-to-date projection; finalize earlier months first so each month\'s tax builds on the last. TADA (travel/daily allowance) auto-fills from that employee's Approved TADA Claims for this period (🔗 marks a claim-linked amount) and is added after TDS as a non-taxable reimbursement, not part of taxable gross — you can still hand-edit or clear it. Finalize marks linked claims Paid in TADA Claims; Reopen reverts them to Approved. Active advance installments are auto-deducted; repayment rows are written to Advances & Loans on Finalize.
             </div>
           </>
         )}
