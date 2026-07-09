@@ -49,6 +49,39 @@
   --theme-green:        #34d399;
   --theme-red:          #f87171;
   --theme-amber:        #fbbf24;
+
+  /* Sidebar type scale — formalized from sizes already in use across Layout.css/Layout.js,
+     nothing new invented. Lets every sidebar element share one source of truth instead of
+     scattered inline pixel values. */
+  --font-size-rail-icon:    17px;
+  --font-size-brand:        16px;
+  --font-size-nav-icon:     14px;
+  --font-size-nav-item:     13px;
+  --font-size-group-label:  11px;
+  --font-size-micro:        10px;
+  --font-size-chevron:      9px;
+
+  /* Motion tokens — same easing/duration for every sidebar hover/active transition so it reads
+     as one deliberate system rather than several different per-rule timings. */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-fast:   160ms;
+}
+
+@keyframes rail-tip-in {
+  from { opacity: 0; transform: translateY(-50%) translateX(-4px); }
+  to   { opacity: 1; transform: translateY(-50%); }
+}
+.rail-tip {
+  animation: rail-tip-in var(--motion-fast) var(--ease-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-btn, .sidebar-link, .sidebar-toggle {
+    transition-duration: 0ms !important;
+  }
+  .rail-tip {
+    animation-duration: 0ms !important;
+  }
 }
 
 .layout-root {
@@ -100,10 +133,12 @@
   border: none;
   cursor: pointer;
   color: var(--theme-text3);
-  font-size: 17px;
+  font-size: var(--font-size-rail-icon);
   text-decoration: none;
   flex-shrink: 0;
-  transition: color 0.12s, background 0.12s;
+  transition: color var(--motion-fast) var(--ease-standard),
+              background var(--motion-fast) var(--ease-standard),
+              box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .rail-btn:hover {
@@ -114,6 +149,7 @@
 .rail-btn--active {
   color: var(--theme-accent);
   background: var(--theme-focus-ring);
+  box-shadow: 0 0 0 3px var(--theme-focus-ring);
 }
 
 .rail-btn--signout:hover {
@@ -168,7 +204,7 @@
 }
 
 .sidebar-brand-name {
-  font-size: 16px;
+  font-size: var(--font-size-brand);
   font-weight: 700;
   color: var(--theme-text1);
   letter-spacing: 0.04em;
@@ -290,15 +326,38 @@
   overflow-y: auto;
 }
 
+/* Pin-to-favorites star — hidden until the row is hovered, except when already pinned (an
+   unpinned star hanging around on every one of 65 rows would be visual noise; a pinned star
+   stays visible so the user can find it to unpin). */
+.sidebar-pin {
+  opacity: 0;
+  font-size: var(--font-size-nav-icon);
+  color: var(--theme-text3);
+  flex-shrink: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.sidebar-link:hover .sidebar-pin {
+  opacity: 1;
+}
+.sidebar-pin:hover {
+  color: var(--theme-accent);
+}
+.sidebar-pin--active {
+  opacity: 1;
+  color: var(--theme-accent);
+}
+
 .sidebar-link {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 9px 20px;
-  font-size: 13px;
+  font-size: var(--font-size-nav-item);
   color: var(--theme-text2);
   text-decoration: none;
-  transition: color 0.12s, background 0.12s;
+  transition: color var(--motion-fast) var(--ease-standard),
+              background var(--motion-fast) var(--ease-standard),
+              border-color var(--motion-fast) var(--ease-standard);
   border-left: 2px solid transparent;
   white-space: nowrap;
 }
@@ -312,12 +371,13 @@
   color: var(--theme-text1);
   background: var(--theme-focus-ring);
   border-left-color: var(--theme-accent);
+  box-shadow: inset 0 0 0 1px var(--theme-focus-ring);
 }
 
 .sidebar-icon {
   width: 16px;
   text-align: center;
-  font-size: 14px;
+  font-size: var(--font-size-nav-icon);
   flex-shrink: 0;
 }
 

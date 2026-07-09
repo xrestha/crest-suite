@@ -1,9 +1,12 @@
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { supabase } from '../supabaseClient'
 import { getSubStatus } from '../utils/subscription'
+import RailTip from './RailTip'
+import CommandPalette from './CommandPalette'
+import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import './Layout.css'
 
 // minPlan: 'growth' | 'pro' — used for lock icon and tier badge
@@ -140,6 +143,13 @@ export default function Layout() {
   const [openGroups, setOpenGroups] = useState(() => {
     try { return JSON.parse(localStorage.getItem('crest_nav_groups')) || {} } catch { return {} }
   })
+
+  // Pinned favorites — an array of `to` paths, same read/try-catch localStorage pattern as
+  // openGroups above. Capped at MAX_PINS so the "Pinned" section can't itself grow into the kind
+  // of long list it exists to shortcut.
+  const [pins, setPins] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('crest_nav_pins')) || [] } catch { return [] }
+  })
   function groupOpen(key, state = openGroups) {
     if (state[key] !== undefined) return state[key]
     return !key.startsWith('reports') // report groups start collapsed
@@ -199,17 +209,48 @@ export default function Layout() {
     navigate(isPosDevice && posRole ? '/pos/login' : '/login')
   }
 
-  function unlockedItems(items) {
-    return items.filter(item => !item.featureKey || hasFeature(item.featureKey))
+  // Single source of truth for "can this user see this destination" — used by the rendered nav,
+  // the command palette's search index, and pinned favorites, so gating can never drift between
+  // them as new items get added later.
+  function isItemVisible(item) {
+    if (item.featureKey && !hasFeature(item.featureKey)) return false
+    if (item.minPosRole && !hasPosAccess(item.minPosRole)) return false
+    return true
   }
 
-  function renderNavItem(item) {
+  function unlockedItems(items) {
+    return items.filter(isItemVisible)
+  }
+
+  const MAX_PINS = 8
+  function togglePin(e, to) {
+    e.preventDefault()
+    e.stopPropagation()
+    setPins(prev => {
+      const isPinned = prev.includes(to)
+      const next = isPinned ? prev.filter(p => p !== to) : (prev.length >= MAX_PINS ? prev : [...prev, to])
+      localStorage.setItem('crest_nav_pins', JSON.stringify(next))
+      return next
+    })
+  }
+
+  function renderNavItem(item, { pinnable = true } = {}) {
+    const isPinned = pins.includes(item.to)
     return (
       <NavLink key={item.to} to={item.to}
         className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
         onClick={() => setMobileSidebarOpen(false)}>
         <span className="sidebar-icon">{item.icon}</span>
-        {item.label}
+        <span style={{ flex: 1 }}>{item.label}</span>
+        {pinnable && (
+          <span
+            className={`sidebar-pin${isPinned ? ' sidebar-pin--active' : ''}`}
+            onClick={e => togglePin(e, item.to)}
+            title={isPinned ? 'Unpin' : 'Pin to top'}
+          >
+            {isPinned ? '★' : '☆'}
+          </span>
+        )}
       </NavLink>
     )
   }
@@ -230,14 +271,14 @@ export default function Layout() {
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
             background: 'none', border: 'none', cursor: 'pointer', padding: '9px 14px 5px',
-            color: 'var(--theme-text3)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+            color: 'var(--theme-text3)', fontSize: 'var(--font-size-group-label)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
             fontFamily: 'inherit',
           }}
         >
           <span>{group.label}</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ fontSize: 10, color: 'var(--theme-text3)', fontWeight: 600 }}>{items.length}</span>
-            <span style={{ fontSize: 9, color: 'var(--theme-text3)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+            <span style={{ fontSize: 'var(--font-size-micro)', color: 'var(--theme-text3)', fontWeight: 600 }}>{items.length}</span>
+            <span style={{ fontSize: 'var(--font-size-chevron)', color: 'var(--theme-text3)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform var(--motion-fast) var(--ease-standard)' }}>▶</span>
           </span>
         </button>
         {open && items.map(renderNavItem)}
@@ -262,6 +303,82 @@ export default function Layout() {
   ].filter(Boolean)
   const panel = panelOrder.includes(activePanel) ? activePanel : panelOrder[0]
   const PANEL_TITLES = { admin: 'Admin', ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS' }
+  const { hrPending, posPending } = useNavBadgeCounts(hrVisible, posVisible)
+
+  // Top "Dashboard" nav label — mirrors ClientDashboard.jsx's own dashTitle exactly (admin always
+  // sees "Admin Dashboard"; a real client with 2-3 modules sees generic "Dashboard"; a client with
+  // exactly one module sees that module's own title) so the sidebar link never promises a
+  // different page than the one it actually opens.
+  const dashModuleCount = [clientModules.ims, clientModules.hr, clientModules.pos].filter(Boolean).length
+  const dashLabel = isAdmin ? 'Admin Dashboard'
+    : dashModuleCount > 1 ? 'Dashboard'
+    : clientModules.ims ? 'Inventory Dashboard'
+    : clientModules.hr  ? 'HR Overview'
+    : clientModules.pos ? 'POS Dashboard'
+    : 'Dashboard'
+  const dashNavItem = { ...NAV[0], label: dashLabel }
+
+  // ── Command palette — flat search across every destination, gated by the exact same
+  // isItemVisible() predicate the rendered nav uses (defined below; hoisted, safe to reference
+  // here). Rebuilds only when what this user can see changes, not on every render/keystroke —
+  // the palette component itself does the query filtering. Panel-switching after navigating is
+  // already handled by the existing location.pathname effect above, so items don't need a
+  // 'panel' tag.
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const paletteItems = useMemo(() => {
+    const all = [
+      dashNavItem,
+      { to: '/owner-dashboard', label: 'Owner Dashboard', icon: '◆' },
+      ...NAV.slice(1),
+      ...REPORTS,
+      ...(hrVisible ? [HR_DASHBOARD, ...HR_GROUPS.flatMap(g => g.items)] : []),
+      ...(posVisible ? POS_GROUPS.flatMap(g => g.items) : []),
+      ...(isAdmin ? [
+        { to: '/admin/clients', label: 'Clients', icon: '⊛' },
+        { to: '/admin/audit', label: 'Audit Log', icon: '◈' },
+      ] : []),
+      { to: '/settings', label: 'Settings', icon: '⚙' },
+    ]
+    const seen = new Set()
+    return all.filter(item => isItemVisible(item) && !seen.has(item.to) && seen.add(item.to))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hrVisible, posVisible, isAdmin, plan, dashLabel])
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen(o => !o)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  function handlePaletteSelect(item) {
+    setPaletteOpen(false)
+    setMobileSidebarOpen(false)
+    navigate(item.to)
+  }
+
+  // Pinned items resolved against paletteItems (already isItemVisible-filtered) rather than
+  // rendered fresh from `pins` alone — so a pin whose underlying page has since been locked by a
+  // plan downgrade silently drops out instead of rendering a dead link.
+  const pinnedItems = pins.map(to => paletteItems.find(i => i.to === to)).filter(Boolean)
+  function renderPinnedGroup() {
+    if (pinnedItems.length === 0) return null
+    return (
+      <div>
+        <div style={{
+          padding: '9px 14px 5px', color: 'var(--theme-text3)', fontSize: 'var(--font-size-group-label)',
+          fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+        }}>
+          Pinned
+        </div>
+        {pinnedItems.map(item => renderNavItem(item))}
+      </div>
+    )
+  }
 
   function openPanel(key) {
     setActivePanel(key)
@@ -317,42 +434,78 @@ export default function Layout() {
           </div>
 
           {isAdmin && (
-            <button className={`rail-btn${panel === 'admin' && !collapsed ? ' rail-btn--active' : ''}`}
-              title="Admin" onClick={() => openPanel('admin')}>
-              <span style={{ position: 'relative' }}>
-                ⊛
-                {(pendingTrialCount > 0 || newTrialCount > 0) && (
-                  <span style={{
-                    position: 'absolute', top: -3, right: -7, width: 9, height: 9, borderRadius: '50%',
-                    background: pendingTrialCount > 0 ? '#f87171' : '#f59e0b',
-                    boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
-                  }} />
-                )}
-              </span>
-            </button>
+            <RailTip label="Admin">
+              <button className={`rail-btn${panel === 'admin' && !collapsed ? ' rail-btn--active' : ''}`}
+                title="Admin" onClick={() => openPanel('admin')}>
+                <span style={{ position: 'relative' }}>
+                  ⊛
+                  {(pendingTrialCount > 0 || newTrialCount > 0) && (
+                    <span style={{
+                      position: 'absolute', top: -3, right: -7, width: 9, height: 9, borderRadius: '50%',
+                      background: pendingTrialCount > 0 ? '#f87171' : '#f59e0b',
+                      boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
+                    }} />
+                  )}
+                </span>
+              </button>
+            </RailTip>
           )}
           {imsVisible && (
-            <button className={`rail-btn${panel === 'ims' && !collapsed ? ' rail-btn--active' : ''}`}
-              title="Crest IMS" onClick={() => openPanel('ims')}>▤</button>
+            <RailTip label="Crest IMS">
+              <button className={`rail-btn${panel === 'ims' && !collapsed ? ' rail-btn--active' : ''}`}
+                title="Crest IMS" onClick={() => openPanel('ims')}>▤</button>
+            </RailTip>
           )}
           {hrVisible && (
-            <button className={`rail-btn${panel === 'hr' && !collapsed ? ' rail-btn--active' : ''}`}
-              title="Crest HR" onClick={() => openPanel('hr')}>👥</button>
+            <RailTip label={hrPending > 0 ? `Crest HR — ${hrPending} pending` : 'Crest HR'}>
+              <button className={`rail-btn${panel === 'hr' && !collapsed ? ' rail-btn--active' : ''}`}
+                title="Crest HR" onClick={() => openPanel('hr')}>
+                <span style={{ position: 'relative' }}>
+                  👥
+                  {hrPending > 0 && (
+                    <span style={{
+                      position: 'absolute', top: -3, right: -7, width: 9, height: 9, borderRadius: '50%',
+                      background: 'var(--theme-amber)',
+                      boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
+                    }} />
+                  )}
+                </span>
+              </button>
+            </RailTip>
           )}
           {posVisible && (
-            <button className={`rail-btn${panel === 'pos' && !collapsed ? ' rail-btn--active' : ''}`}
-              title="Crest POS" onClick={() => openPanel('pos')}>◉</button>
+            <RailTip label={posPending > 0 ? `Crest POS — ${posPending} pending` : 'Crest POS'}>
+              <button className={`rail-btn${panel === 'pos' && !collapsed ? ' rail-btn--active' : ''}`}
+                title="Crest POS" onClick={() => openPanel('pos')}>
+                <span style={{ position: 'relative' }}>
+                  ◉
+                  {posPending > 0 && (
+                    <span style={{
+                      position: 'absolute', top: -3, right: -7, width: 9, height: 9, borderRadius: '50%',
+                      background: 'var(--theme-amber)',
+                      boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
+                    }} />
+                  )}
+                </span>
+              </button>
+            </RailTip>
           )}
 
           <div style={{ flex: 1 }} />
 
-          <NavLink to="/help" title="Help"
-            className={({ isActive }) => `rail-btn${isActive ? ' rail-btn--active' : ''}`}
-            onClick={() => setMobileSidebarOpen(false)}>?</NavLink>
-          <button className="rail-btn" title={collapsed ? 'Show menu' : 'Hide menu'}
-            onClick={() => setCollapsed(c => !c)}>{collapsed ? '›' : '‹'}</button>
-          <button className="rail-btn rail-btn--signout" title={posRole ? 'Lock POS' : 'Sign out'}
-            onClick={handleSignOut}>⎋</button>
+          <RailTip label="Help">
+            <NavLink to="/help" title="Help"
+              className={({ isActive }) => `rail-btn${isActive ? ' rail-btn--active' : ''}`}
+              onClick={() => setMobileSidebarOpen(false)}>?</NavLink>
+          </RailTip>
+          <RailTip label={collapsed ? 'Show menu' : 'Hide menu'}>
+            <button className="rail-btn" title={collapsed ? 'Show menu' : 'Hide menu'}
+              onClick={() => setCollapsed(c => !c)}>{collapsed ? '›' : '‹'}</button>
+          </RailTip>
+          <RailTip label={posRole ? 'Lock POS' : 'Sign out'}>
+            <button className="rail-btn rail-btn--signout" title={posRole ? 'Lock POS' : 'Sign out'}
+              onClick={handleSignOut}>⎋</button>
+          </RailTip>
         </div>
 
         {/* Flyout panel — only the selected module's links */}
@@ -365,6 +518,21 @@ export default function Layout() {
             <div className="sidebar-brand-name">{PANEL_TITLES[panel] || settings?.app_name || 'Crest'}</div>
             <div className="sidebar-brand-sub">{settings?.app_name || 'Crest Inventory'}</div>
           </div>
+          <button
+            onClick={() => setPaletteOpen(true)}
+            title="Search pages (Ctrl+K)"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, background: 'var(--theme-bg)',
+              border: '1px solid var(--theme-border)', borderRadius: 6, cursor: 'pointer',
+              padding: '5px 8px', color: 'var(--theme-text3)', flexShrink: 0,
+              transition: 'color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard)',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--theme-text1)'; e.currentTarget.style.borderColor = 'var(--theme-accent)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--theme-text3)'; e.currentTarget.style.borderColor = 'var(--theme-border)' }}
+          >
+            <span style={{ fontSize: 13 }}>⌕</span>
+            <span style={{ fontSize: 'var(--font-size-micro)' }}>Ctrl K</span>
+          </button>
         </div>
 
         {/* Role / client badge */}
@@ -467,7 +635,8 @@ export default function Layout() {
 
           {panel === 'admin' && isAdmin && (
             <>
-              {renderNavItem(NAV[0])}
+              {renderNavItem(dashNavItem)}
+              {renderPinnedGroup()}
               <NavLink to="/admin/clients"
                 className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
                 style={newTrialCount > 0 && pendingTrialCount === 0 ? {
@@ -501,7 +670,8 @@ export default function Layout() {
 
           {panel === 'ims' && imsVisible && (
             <>
-              {renderNavItem(NAV[0])}
+              {renderNavItem(dashNavItem)}
+              {renderPinnedGroup()}
               {IMS_GROUPS.map(renderGroup)}
 
               {renderUpgradeTeaser()}
@@ -517,6 +687,8 @@ export default function Layout() {
 
           {panel === 'hr' && hrVisible && (
             <>
+              {renderNavItem(dashNavItem)}
+              {renderPinnedGroup()}
               {renderNavItem(HR_DASHBOARD)}
               {HR_GROUPS.map(renderGroup)}
             </>
@@ -524,10 +696,9 @@ export default function Layout() {
 
           {panel === 'pos' && posVisible && (
             <>
-              {POS_GROUPS.map(group => renderGroup({
-                ...group,
-                items: group.items.filter(item => !item.minPosRole || hasPosAccess(item.minPosRole)),
-              }))}
+              {renderNavItem(dashNavItem)}
+              {renderPinnedGroup()}
+              {POS_GROUPS.map(group => renderGroup({ ...group, items: group.items.filter(isItemVisible) }))}
             </>
           )}
         </nav>
@@ -633,6 +804,13 @@ export default function Layout() {
 
         <Outlet />
       </main>
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        items={paletteItems}
+        onSelect={handlePaletteSelect}
+      />
     </div>
   )
 }
