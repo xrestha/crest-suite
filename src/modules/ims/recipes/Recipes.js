@@ -42,6 +42,11 @@ export default function Recipes() {
   // ── Inline per-ingredient nutrition editor (saves to items.nutrition) ──
   const [nutriItemId, setNutriItemId] = useState(null)
   const [autoFillBusy, setAutoFillBusy] = useState(false)
+  // Ingredients with no match in the regional library after the last Auto-fill run — USDA
+  // FoodData Central is a live, US-sourced API and deliberately NOT queried automatically;
+  // it's offered as a separate, explicit action once the user sees exactly which items missed.
+  const [usdaCandidates, setUsdaCandidates] = useState([])
+  const [usdaFillBusy, setUsdaFillBusy] = useState(false)
 
   const init = useCallback(async () => {
     if (!clientId) return
@@ -125,6 +130,7 @@ export default function Recipes() {
     setRecipeForm(EMPTY_RECIPE)
     setIngredients([{ _key: Date.now(), item_id: '', sub_recipe_id: '', qty_per_portion: '', type: 'item' }])
     setFcPctSaved(null)
+    setUsdaCandidates([])
     setError('')
     setView('edit')
   }
@@ -153,6 +159,7 @@ export default function Recipes() {
       type: ri.sub_recipe_id ? 'sub_recipe' : 'item'
     }))
     setIngredients(ings.length > 0 ? ings : [{ _key: Date.now(), item_id: '', sub_recipe_id: '', qty_per_portion: '', type: 'item' }])
+    setUsdaCandidates([])
     setError('')
     setView('edit')
   }
@@ -219,6 +226,28 @@ export default function Recipes() {
     return out
   }
 
+  // Applies a set of { it, payload } targets to items.nutrition and reflects the change
+  // into local items/recipes state so the live label + coverage recompute immediately.
+  async function saveNutritionTargets(targets) {
+    const results = await Promise.all(
+      targets.map(t => supabase.from('items').update({ nutrition: t.payload }).eq('id', t.it.id).then(r => ({ id: t.it.id, payload: t.payload, error: r.error })))
+    )
+    const okMap = {}
+    let failed = 0
+    results.forEach(r => { if (r.error) failed++; else okMap[r.id] = r.payload })
+
+    setItems(prev => prev.map(i => okMap[i.id] ? { ...i, nutrition: okMap[i.id] } : i))
+    setRecipes(prev => prev.map(r => ({
+      ...r,
+      recipe_ingredients: (r.recipe_ingredients || []).map(ri =>
+        ri.item_id && okMap[ri.item_id] && ri.items ? { ...ri, items: { ...ri.items, nutrition: okMap[ri.item_id] } } : ri)
+    })))
+    return { filled: Object.keys(okMap).length, failed }
+  }
+
+  // Regional library only (DFTQC Nepal / IFCT 2017 / USDA rows already in NUTRITION_SEED).
+  // Deliberately does NOT reach for the live USDA FoodData Central API on a miss — that's a
+  // separate, explicit action (fillFromUsda) once the user sees exactly which items missed.
   async function autoFillNutrition() {
     setAutoFillBusy(true)
 
@@ -235,58 +264,62 @@ export default function Recipes() {
       else unmatchedItems.push(it)
     })
 
-    // Live USDA FoodData Central fallback for seed misses
-    const usdaTargets = []
-    const stillUnmatched = []
-    if (unmatchedItems.length > 0) {
-      const usdaResults = await Promise.all(
-        unmatchedItems.map(async it => ({ it, payload: await fetchUsdaNutrition(it.name) }))
-      )
-      usdaResults.forEach(({ it, payload }) => {
-        if (payload) usdaTargets.push({ it, payload })
-        else stillUnmatched.push(it.name)
-      })
-    }
-
-    const targets = [...seedTargets, ...usdaTargets]
     setAutoFillBusy(false)
+    setUsdaCandidates(unmatchedItems)
 
-    if (targets.length === 0) {
-      window.alert(stillUnmatched.length
-        ? `No matches found in library or USDA. Add these manually: ${stillUnmatched.join(', ')}`
+    if (seedTargets.length === 0) {
+      window.alert(unmatchedItems.length
+        ? `No regional library match for ${unmatchedItems.length} ingredient(s): ${unmatchedItems.map(i => i.name).join(', ')}.\n\nUse "🔍 Try USDA FoodData Central" below if you want a live US-sourced estimate, or add nutrition manually.`
         : 'All ingredients already have nutrition data.')
       return
     }
 
-    const parts = []
-    if (seedTargets.length) parts.push(`${seedTargets.length} from regional library`)
-    if (usdaTargets.length) parts.push(`${usdaTargets.length} from USDA FoodData Central`)
-    const msg = `Auto-fill nutrition for ${targets.length} ingredient(s)?\n${parts.join(' · ')}`
-      + (stillUnmatched.length ? `\n\n${stillUnmatched.length} have no match and will be skipped: ${stillUnmatched.join(', ')}` : '')
+    const msg = `Auto-fill nutrition for ${seedTargets.length} ingredient(s) from the regional library (DFTQC Nepal / IFCT 2017 / USDA)?`
+      + (unmatchedItems.length ? `\n\n${unmatchedItems.length} have no local match: ${unmatchedItems.map(i => i.name).join(', ')}. Left for manual entry or a separate USDA lookup.` : '')
       + `\n\nValues are reference estimates — you can edit any afterward.`
     if (!window.confirm(msg)) return
 
     setAutoFillBusy(true)
-    const results = await Promise.all(
-      targets.map(t => supabase.from('items').update({ nutrition: t.payload }).eq('id', t.it.id).then(r => ({ id: t.it.id, payload: t.payload, error: r.error })))
-    )
-    const okMap = {}
-    let failed = 0
-    results.forEach(r => { if (r.error) failed++; else okMap[r.id] = r.payload })
-
-    // Reflect immediately so label + coverage recompute.
-    setItems(prev => prev.map(i => okMap[i.id] ? { ...i, nutrition: okMap[i.id] } : i))
-    setRecipes(prev => prev.map(r => ({
-      ...r,
-      recipe_ingredients: (r.recipe_ingredients || []).map(ri =>
-        ri.item_id && okMap[ri.item_id] && ri.items ? { ...ri, items: { ...ri.items, nutrition: okMap[ri.item_id] } } : ri)
-    })))
+    const { filled, failed } = await saveNutritionTargets(seedTargets)
     setAutoFillBusy(false)
 
-    window.alert(`Filled ${Object.keys(okMap).length} ingredient(s).`
+    window.alert(`Filled ${filled} ingredient(s) from the regional library.`
       + (failed ? ` ${failed} failed to save.` : '')
-      + (stillUnmatched.length ? `\n\nStill need manual entry (no USDA match): ${stillUnmatched.join(', ')}` : ''))
+      + (unmatchedItems.length ? `\n\n${unmatchedItems.length} still need nutrition data (no local match): ${unmatchedItems.map(i => i.name).join(', ')}.` : ''))
   }
+
+  // Explicit, separate step — a live call to USDA FoodData Central, only for ingredients the
+  // regional library missed, and only when the user asks for it (never automatic).
+  async function fillFromUsda() {
+    if (usdaCandidates.length === 0) return
+    setUsdaFillBusy(true)
+    const results = await Promise.all(
+      usdaCandidates.map(async it => ({ it, payload: await fetchUsdaNutrition(it.name) }))
+    )
+    const usdaTargets = results.filter(r => r.payload)
+    const stillUnmatched = results.filter(r => !r.payload).map(r => r.it.name)
+    setUsdaFillBusy(false)
+
+    if (usdaTargets.length === 0) {
+      window.alert(`No USDA FoodData Central match found for: ${stillUnmatched.join(', ')}. Add these manually.`)
+      setUsdaCandidates([])
+      return
+    }
+
+    const msg = `Fetch nutrition from USDA FoodData Central for ${usdaTargets.length} ingredient(s)?\n${usdaTargets.map(t => t.it.name).join(', ')}`
+      + (stillUnmatched.length ? `\n\nNo USDA match for: ${stillUnmatched.join(', ')} — add these manually.` : '')
+      + `\n\nUSDA values are US-sourced estimates — verify against a regional source for local dishes if possible.`
+    if (!window.confirm(msg)) return
+
+    setUsdaFillBusy(true)
+    const { filled, failed } = await saveNutritionTargets(usdaTargets)
+    setUsdaFillBusy(false)
+    setUsdaCandidates([])
+
+    window.alert(`Filled ${filled} ingredient(s) from USDA FoodData Central.` + (failed ? ` ${failed} failed to save.` : ''))
+  }
+
+  function dismissUsdaCandidates() { setUsdaCandidates([]) }
 
   function getNextSubRecipeCode() {
     const SRC_PREFIX = (settings?.sub_recipe_code_prefix || 'SRC').toUpperCase()
@@ -893,7 +926,7 @@ export default function Recipes() {
               <div style={{ display: 'flex', gap: 8 }}>
                 {showNutrition && (
                   <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px', color: '#818cf8', borderColor: 'rgba(99,102,241,0.3)' }} onClick={autoFillNutrition} disabled={autoFillBusy}>
-                    <Tip width={280} text="Fills every ingredient that's missing nutrition with its best match from the library (USDA / IFCT / Nepal), in one step. Branded items (Open Food Facts) and unmatched items are left for you to add manually. You can edit any afterward.">
+                    <Tip width={290} text="Fills every ingredient that's missing nutrition with its best match from the regional library (DFTQC Nepal / IFCT 2017 / USDA), in one step. Doesn't reach for the live USDA FoodData Central API on a miss — that's offered separately below so USDA is never a silent default. Branded items (Open Food Facts) and unmatched items are left for you to add manually.">
                       {autoFillBusy ? 'Filling…' : '⚡ Auto-fill nutrition'}
                     </Tip>
                   </button>
@@ -901,6 +934,22 @@ export default function Recipes() {
                 <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }} onClick={addRow}>+ Add Row</button>
               </div>
             </div>
+
+            {showNutrition && usdaCandidates.length > 0 && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12,
+                background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.25)',
+                borderRadius: 8, padding: '8px 12px', marginBottom: 18,
+              }}>
+                <span style={{ color: 'var(--theme-text2)' }}>
+                  {usdaCandidates.length} ingredient{usdaCandidates.length > 1 ? 's' : ''} not in the regional library: {usdaCandidates.map(i => i.name).join(', ')}
+                </span>
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: '#60a5fa', borderColor: 'rgba(96,165,250,0.3)' }} onClick={fillFromUsda} disabled={usdaFillBusy}>
+                  {usdaFillBusy ? 'Fetching…' : '🔍 Try USDA FoodData Central'}
+                </button>
+                <button style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 0 }} onClick={dismissUsdaCandidates} title="Dismiss">✕</button>
+              </div>
+            )}
 
             <div className="table-wrap">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
