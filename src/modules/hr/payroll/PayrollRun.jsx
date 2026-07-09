@@ -602,9 +602,11 @@ function PayslipBody({ slip, emp, periodLabel, forPrint }) {
       <div style={{ marginTop: 12, paddingTop: 12, borderTop: `2px solid ${forPrint ? '#000' : '#2a2f3d'}` }}>
         <Row label="Net Pay" value={slip.net_pay} strong />
       </div>
-      <div style={{ marginTop: 8, fontSize: 11, color: c1 }}>
-        Employer SSF (20%, paid by company): {fmtn(slip.ssf_employer)}
-      </div>
+      {slip.ssf_employer > 0 && (
+        <div style={{ marginTop: 8, fontSize: 11, color: c1 }}>
+          Employer SSF (20%, paid by company): {fmtn(slip.ssf_employer)}
+        </div>
+      )}
     </div>
   )
 }
