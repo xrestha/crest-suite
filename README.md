@@ -141,6 +141,14 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S322 — 2026-07-08 — Calculate Transport Fare: dropped the sub-modal for inline Vehicle + Distance
+
+S321 shipped a separate "Calculate Transport Fare" modal (opened via a button on the Transport line). Live feedback in this same session went through two iterations before landing here: first the modal's plain-text Start/Stop/End labels were made to actually do something (a live Google Maps route preview, using the free-and-unlimited Maps Embed API — a genuinely different, uncosted SKU from the paid Distance Matrix/Routes APIs the original research correctly stayed away from) and the Rate/KM field inside it was locked to `isAdmin || isOwner` so a lower-authority submitter couldn't silently override the configured rate. Then: simpler is better — the whole sub-modal was dropped in favor of putting a Vehicle picker (2-Wheeler/4-Wheeler/EV) and a Distance (km) field directly inline on the Transport expense line itself, with Amount auto-computing live as Distance × that vehicle's configured Rate/KM (whenever both are known — a manually-typed Amount is never overwritten just because a rate isn't configured for that vehicle yet). Amount stays hand-editable afterward (e.g. to add a toll). `CalculateFareModal.js` and the Maps Embed integration were deleted entirely — confirmed zero remaining references before removal.
+
+The **Rate/KM lock survives the simplification**: the per-vehicle rate is read from Settings and was never re-exposed as an inline editable field, so the same `isAdmin || isOwner` boundary from the modal version holds without any extra code — a non-owner submitter can adjust Vehicle/Distance but has no way to change the rate itself, only the resulting Amount if they choose to hand-edit it.
+
+**Files:** `src/modules/hr/tada/TadaClaims.jsx`, `src/pages/Help.js` (removed: `src/modules/hr/tada/CalculateFareModal.js`)
+
 ### S321 — 2026-07-08 — TADA Claims: Calculate Transport Fare (distance × rate/km)
 
 Researched before building, per the pattern this project follows for anything touching an external rate or a third-party API. TADA Claims is deliberately actual-expense reimbursement, not a per-diem formula (kept out of Payroll Run since prompt reimbursement isn't taxable income) — so the calculator pre-fills the Amount field rather than replacing manual entry; the employee/manager can still see and adjust it before submitting.

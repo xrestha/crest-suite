@@ -5,7 +5,6 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import CalculateFareModal from './CalculateFareModal'
 import TadaSettingsModal from './TadaSettingsModal'
 import { adToBs, formatAd } from '../../../utils/bsCalendar'
 
@@ -23,8 +22,15 @@ const inp = {
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 
 const CATEGORIES = ['Transport', 'Lodging', 'Daily Allowance', 'Other']
+const VEHICLE_TYPES = [
+  { key: '2w', label: '2-Wheeler' },
+  { key: '4w', label: '4-Wheeler' },
+  { key: 'ev', label: 'EV' },
+]
 const STATUS_BADGE = { pending: 'badge-amber', approved: 'badge-yellow', rejected: 'badge-red', paid: 'badge-green' }
-const EMPTY_ITEM = () => ({ category: 'Transport', description: '', amount: '' })
+// vehicle/distanceKm are UI-only — they drive the auto-computed Amount but are never sent to
+// hr_tada_claim_items (which only has category/description/amount; see handleAdd's insert).
+const EMPTY_ITEM = () => ({ category: 'Transport', description: '', amount: '', vehicle: '2w', distanceKm: '' })
 const DEFAULT_PURPOSE_OPTIONS = ['Vendor site visit', 'Purchase', 'Bank errand', 'Client meeting', 'Delivery', 'Site inspection', 'Training / Conference']
 const OTHER_PURPOSE = '__other__'
 function emptyAddForm() {
@@ -63,7 +69,6 @@ export default function TadaClaims() {
   const [vehicleRates,   setVehicleRates]   = useState({ '2w': null, '4w': null, ev: null })
   const [purposeOptions, setPurposeOptions] = useState(DEFAULT_PURPOSE_OPTIONS)
   const [showSettings,   setShowSettings]   = useState(false)
-  const [calcModalFor,   setCalcModalFor]   = useState(null) // index into addForm.items, or null
 
   const load = useCallback(async () => {
     if (!clientId) return
@@ -99,15 +104,25 @@ export default function TadaClaims() {
     setShowSettings(false)
   }
 
-  function openCalcModal(idx) { setCalcModalFor(idx) }
-  function handleCalcConfirm(amount, description) {
+  // Live-recompute Amount whenever Distance or Vehicle changes on a Transport line — only
+  // overwrites Amount when both a distance and a configured rate exist, so it never clobbers a
+  // manually-typed Amount just because the rate isn't set up yet for that vehicle.
+  function recomputeAmount(it, distanceKm, vehicle) {
+    const dist = parseFloat(distanceKm) || 0
+    const rate = vehicleRates[vehicle]
+    return (dist > 0 && rate != null) ? String(Math.round(dist * rate)) : it.amount
+  }
+  function setItemDistance(idx, v) {
     setAddForm(p => ({
       ...p,
-      items: p.items.map((it, i) => i === calcModalFor
-        ? { ...it, amount: String(amount), description: it.description || description }
-        : it),
+      items: p.items.map((it, i) => i === idx ? { ...it, distanceKm: v, amount: recomputeAmount(it, v, it.vehicle) } : it),
     }))
-    setCalcModalFor(null)
+  }
+  function setItemVehicle(idx, v) {
+    setAddForm(p => ({
+      ...p,
+      items: p.items.map((it, i) => i === idx ? { ...it, vehicle: v, amount: recomputeAmount(it, it.distanceKm, v) } : it),
+    }))
   }
 
   const empMap = Object.fromEntries(employees.map(e => [e.id, e]))
@@ -397,23 +412,36 @@ export default function TadaClaims() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {addForm.items.map((it, idx) => (
-                  <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <select className="form-select" style={{ width: 140, flexShrink: 0 }} value={it.category} onChange={e => setItem(idx, 'category', e.target.value)}>
-                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <input style={inp} placeholder="Description (optional)" value={it.description} onChange={e => setItem(idx, 'description', e.target.value)} />
-                    <input style={{ ...inp, width: 110, flexShrink: 0 }} type="number" min="0" placeholder="Amount" value={it.amount} onChange={e => setItem(idx, 'amount', e.target.value)} />
+                  <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <select className="form-select" style={{ width: 140, flexShrink: 0 }} value={it.category} onChange={e => setItem(idx, 'category', e.target.value)}>
+                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <input style={inp} placeholder="Description (optional)" value={it.description} onChange={e => setItem(idx, 'description', e.target.value)} />
+                      <input style={{ ...inp, width: 110, flexShrink: 0 }} type="number" min="0" placeholder="Amount" value={it.amount} onChange={e => setItem(idx, 'amount', e.target.value)} />
+                      {addForm.items.length > 1 && (
+                        <button style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 16, flexShrink: 0 }} onClick={() => removeItemRow(idx)}>✕</button>
+                      )}
+                    </div>
                     {it.category === 'Transport' && (
-                      <button
-                        style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 5, color: 'var(--theme-accent)', cursor: 'pointer', fontSize: 11, padding: '4px 8px', flexShrink: 0, whiteSpace: 'nowrap' }}
-                        onClick={() => openCalcModal(idx)}
-                        title="Calculate from distance × rate/km"
-                      >
-                        ⤷ Calculate
-                      </button>
-                    )}
-                    {addForm.items.length > 1 && (
-                      <button style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 16, flexShrink: 0 }} onClick={() => removeItemRow(idx)}>✕</button>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingLeft: 2 }}>
+                        <span style={{ fontSize: 12, flexShrink: 0 }}>🧮</span>
+                        <select
+                          className="form-select" style={{ width: 110, flexShrink: 0, fontSize: 12 }}
+                          value={it.vehicle} onChange={e => setItemVehicle(idx, e.target.value)}
+                        >
+                          {VEHICLE_TYPES.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
+                        </select>
+                        <input
+                          style={{ ...inp, width: 100, flexShrink: 0 }} type="number" min="0" step="0.1"
+                          placeholder="Distance (km)" value={it.distanceKm} onChange={e => setItemDistance(idx, e.target.value)}
+                        />
+                        {vehicleRates[it.vehicle] == null ? (
+                          <span style={{ fontSize: 11, color: 'var(--theme-amber)' }}>No rate set — ask an owner/admin, or enter Amount manually</span>
+                        ) : (
+                          <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>× NPR {vehicleRates[it.vehicle]}/km → Amount</span>
+                        )}
+                      </div>
                     )}
                   </div>
                 ))}
@@ -473,14 +501,6 @@ export default function TadaClaims() {
             </div>
           </div>
         </div>
-      )}
-
-      {calcModalFor !== null && (
-        <CalculateFareModal
-          vehicleRates={vehicleRates}
-          onConfirm={handleCalcConfirm}
-          onClose={() => setCalcModalFor(null)}
-        />
       )}
 
       {showSettings && canManageSettings && (
