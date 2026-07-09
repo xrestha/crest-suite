@@ -141,6 +141,18 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S335 — 2026-07-09 — feat(ims): Purchases Daily Register — sticky Total column + collapsible categories
+
+S334's new Total column needed a full horizontal scroll to see, and with the whole table's horizontal scrollbar sitting at the very bottom of a long (172-item) list, seeing it meant scrolling all the way down first. Made the Total column `position: sticky; right: 0` (and the header row `position: sticky; top: 0`) so it's always visible without any scrolling at all, regardless of vertical or horizontal scroll position. Also made each category header in the grid clickable to collapse/expand its items (▾/▸, with an item count), so a long item list can be narrowed down to just the categories currently relevant instead of scrolling past all of them. The sticky Total cell composites its subtle alternating-row tint over an explicitly opaque `var(--theme-card)` base (via a layered `linear-gradient`) rather than reusing the row's translucent stripe background directly, so horizontally-scrolled-away cells don't show through underneath it.
+
+**Files:** `src/modules/ims/purchases/Purchases.js`, `src/pages/Help.js`
+
+### S334 — 2026-07-09 — feat(ims): Purchases Daily Register — monthly Total column per item
+
+Added a Total column at the end of the Daily Register tab's day-by-day grid, summing each item's purchase qty across every day in the selected period — both in the on-screen table and the Export Excel output, so the figure travels with the sheet.
+
+**Files:** `src/modules/ims/purchases/Purchases.js`, `src/pages/Help.js`
+
 ### S333 — 2026-07-09 — fix(ims): Sales Import Excel header detection too strict for real files
 
 After S332's crash fix, the very same real report instead failed with "Could not find a Product Name / Product Code header row" — the header-row scan required an exact `startsWith('product name')`/`startsWith('product code')` match, which breaks the moment a real export wraps header text with a line break inside the cell (e.g. "Product\nName", common Alt+Enter wrapping in narrow columns) or uses a non-breaking space, and unnecessarily also required a "Product Code" column that isn't even read anywhere downstream. Relaxed detection to `cell.includes('product') && cell.includes('name')` (substring-based, so any whitespace variant between the two words still matches) and dropped the Product Code requirement entirely — the header row is now recognized by a Product Name-like cell plus at least one Sale/Return/Net quantity column in the same row, which is what the feature actually needs. Verified against three reconstructed cases: a line-wrapped header cell, a header with no Product Code column at all, and the original well-formed test file — all parse correctly.

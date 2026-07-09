@@ -36,6 +36,9 @@ export default function Purchases() {
   // Returns tab
   const [returns, setReturns]               = useState([])
 
+  // Daily Register tab
+  const [collapsedRegisterCats, setCollapsedRegisterCats] = useState(new Set())
+
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
@@ -575,10 +578,13 @@ export default function Purchases() {
                 'Item Name': item.name,
                 'UOM': item.uom,
               }
+              let total = 0
               days.forEach(d => {
                 const qty = dayMatrix[item.id]?.[d]
+                if (qty) total += qty
                 row[String(d)] = qty ? parseFloat(qty.toFixed(3)) : ''
               })
+              row['Total'] = parseFloat(total.toFixed(3))
               rows.push(row)
             })
           })
@@ -587,8 +593,16 @@ export default function Purchases() {
           XLSX.writeFile(wb, `Purchase-Register-${BS_MONTHS[selectedPeriod.bs_month - 1]}-${selectedPeriod.bs_year}.xlsx`)
         }
 
-        const thStyle = { fontSize: 11, color: 'var(--theme-text2)', padding: '6px 8px', textTransform: 'uppercase', letterSpacing: '0.05em', background: 'var(--theme-bg)00', borderBottom: '2px solid var(--theme-border)', whiteSpace: 'nowrap', textAlign: 'right' }
+        const thStyle = { fontSize: 11, color: 'var(--theme-text2)', padding: '6px 8px', textTransform: 'uppercase', letterSpacing: '0.05em', background: 'var(--theme-card)', borderBottom: '2px solid var(--theme-border)', whiteSpace: 'nowrap', textAlign: 'right', position: 'sticky', top: 0, zIndex: 2 }
         const tdStyle = { padding: '5px 8px', fontSize: 12, borderBottom: '1px solid var(--theme-card)', textAlign: 'right', whiteSpace: 'nowrap' }
+
+        function toggleRegisterCat(cat) {
+          setCollapsedRegisterCats(prev => {
+            const next = new Set(prev)
+            if (next.has(cat)) next.delete(cat); else next.add(cat)
+            return next
+          })
+        }
 
         return (
           <div className="card" style={{ padding: 0 }}>
@@ -617,18 +631,28 @@ export default function Purchases() {
                       {days.map(d => (
                         <th key={d} style={{ ...thStyle, width: 52, color: d % 2 === 0 ? 'var(--theme-text2)' : 'var(--theme-text3)' }}>{d}</th>
                       ))}
+                      <th style={{ ...thStyle, width: 68, color: 'var(--theme-accent)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 3 }}>Total</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedCats.map(cat => (
+                    {sortedCats.map(cat => {
+                      const collapsed = collapsedRegisterCats.has(cat)
+                      return (
                       <>
-                        {/* Category header */}
-                        <tr key={`cat-${cat}`} style={{ background: 'rgba(201,168,76,0.06)' }}>
-                          <td colSpan={3 + numDays} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 11, color: 'var(--theme-accent)', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid var(--theme-border)' }}>
-                            {cat}
+                        {/* Category header — click to collapse/expand, so a long item list can be
+                            narrowed down without scrolling past categories you don't need right now */}
+                        <tr key={`cat-${cat}`} style={{ background: 'rgba(201,168,76,0.06)', cursor: 'pointer' }} onClick={() => toggleRegisterCat(cat)}>
+                          <td colSpan={3 + numDays + 1} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 11, color: 'var(--theme-accent)', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid var(--theme-border)' }}>
+                            <span style={{ display: 'inline-block', width: 14 }}>{collapsed ? '▸' : '▾'}</span>{cat}
+                            <span style={{ fontWeight: 400, color: 'var(--theme-text3)', textTransform: 'none', letterSpacing: 0, marginLeft: 8 }}>({byCategory[cat].length})</span>
                           </td>
                         </tr>
-                        {byCategory[cat].map((item, idx) => {
+                        {!collapsed && byCategory[cat].map((item, idx) => {
+                          const total = Object.values(dayMatrix[item.id] || {}).reduce((s, q) => s + q, 0)
+                          // The sticky Total cell needs a fully opaque background (unlike the row's own
+                          // translucent stripe tint) so horizontally-scrolled-away cells don't show through
+                          // underneath it — layering the tint over the opaque card color bakes them into one paint.
+                          const rowBg = idx % 2 === 0 ? 'var(--theme-card)' : 'linear-gradient(rgba(255,255,255,0.03), rgba(255,255,255,0.03)), var(--theme-card)'
                           return (
                             <tr key={item.id} style={{ background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)' }}>
                               <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--theme-text3)' }}>{idx + 1}</td>
@@ -642,11 +666,14 @@ export default function Purchases() {
                                   </td>
                                 )
                               })}
+                              <td style={{ ...tdStyle, color: 'var(--theme-accent)', fontWeight: 700, borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, background: rowBg }}>
+                                {total.toLocaleString('en-NP', { maximumFractionDigits: 2 })}
+                              </td>
                             </tr>
                           )
                         })}
                       </>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>
