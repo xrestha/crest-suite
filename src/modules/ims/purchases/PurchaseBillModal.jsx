@@ -251,11 +251,11 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
                       />
                     </td>
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
-                      <input type="number" min="0" step="any" value={line.qty} placeholder="0"
+                      <input type="number" min="0" step="any" value={line.qty} placeholder={inputUnit || '0'}
                         onChange={e => updateBillLine(line._key, 'qty', e.target.value)}
                         style={cellInput} />
-                      {inputUnit && <div style={{ fontSize: 10, color: 'var(--theme-text2)', textAlign: 'right', marginTop: 2 }}>{inputUnit}</div>}
-                      {cf > 1 && line.qty && <div style={{ fontSize: 10, color: 'var(--theme-text3)', textAlign: 'right' }}>= {(parseFloat(line.qty) * cf).toLocaleString()} {selItem?.uom}</div>}
+                      {/* Unit shown via the placeholder above, not a separate line — avoids duplicating it. */}
+                      {cf > 1 && line.qty && <div style={{ fontSize: 10, color: 'var(--theme-text3)', textAlign: 'right', marginTop: 2 }}>= {(parseFloat(line.qty) * cf).toLocaleString()} {selItem?.uom}</div>}
                     </td>
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
                       <input type="number" min="0" step="any" value={line.rate} placeholder="0"
