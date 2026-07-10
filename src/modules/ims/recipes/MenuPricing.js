@@ -262,7 +262,7 @@ export default function MenuPricing() {
               <tr>
                 <th style={{ width: 36 }}>#</th>
                 <th style={{ width: 72, textAlign: 'center' }}>
-                  <Tip text="Toggle to include or exclude this item from the POS order screen." width={220}>On POS</Tip>
+                  <Tip text="Toggle to include or exclude this item from the POS order screen — also how you 86 an item when you run out (remember to turn it back on once restocked)." width={260}>On POS</Tip>
                 </th>
                 <th><Tip text="Item name, category, and VAT status." width={200}>Item</Tip></th>
                 <th style={{ textAlign: 'right', width: 110 }}>
@@ -519,7 +519,7 @@ export default function MenuPricing() {
             <thead>
               <tr>
                 {th('left',  null, '#', 36)}
-                {th('center', 'Toggle to include or exclude this item from the POS order screen. Turn off for seasonal or discontinued items without deleting the recipe.', 'On POS', 72)}
+                {th('center', 'Toggle to include or exclude this item from the POS order screen. Turn off for seasonal or discontinued items, or to 86 it for the day when you run out — just remember to turn it back on once restocked.', 'On POS', 72)}
                 {th('left',  'Recipe name, category, and VAT status. VAT 13% items: selling price includes 13% VAT. No VAT items are sold at the price as entered.', 'Item')}
                 {th('right', 'Total ingredient cost per portion at current item rates from the Item Master.', 'Food Cost', 100)}
                 {th('right', 'Current VAT-inclusive menu price saved in Recipe Costing. Calculated as selling price × (1 + VAT rate).', 'Current Price', 120)}

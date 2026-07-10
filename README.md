@@ -141,6 +141,12 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S343 — 2026-07-10 — docs(ims): "On POS" tooltip now mentions it doubles as the 86 toggle
+
+Explored building a separate "86 list" feature (mark a menu item unavailable when out of stock, blocking it on the POS order screen and Guest QR menu) — research confirmed the existing "On POS" toggle (`recipes.pos_enabled`, `MenuPricing.js`) already produces the exact same outcome, since both `PosOrders.jsx`'s menu query and the `get_guest_menu`/`submit_guest_order` guest-ordering RPCs already filter on `pos_enabled`. Rather than build a parallel `is_86` flag/column/UI duplicating a mechanism that already works, updated both of `MenuPricing.js`'s existing "On POS" column tooltips (the file has two view branches) to mention it doubles as the 86 mechanism — uncheck when you run out, recheck once restocked. No schema/logic change.
+
+**Files:** `src/modules/ims/recipes/MenuPricing.js`
+
 ### S342 — 2026-07-10 — feat: Dashboard KPI cards shrunk to reduce page length
 
 `ClientDashboard.jsx` (the same file backs both "Admin Dashboard" and the real-client dashboard — there's no separate admin-only file) stacks up to 4 KPI-card grid sections (IMS Row 1: 5 cards, IMS Row 2: 6 cards, HR: 3, POS: 4) plus 4 chart/table blocks, making the page long enough to require scrolling. After discussing three options (shrink cards / convert secondary cards to a slim chip strip / make sections collapsible), the user chose to shrink the cards only.
