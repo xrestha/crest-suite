@@ -204,3 +204,21 @@ export function suggestSeeds(itemName, limit = 6) {
 export function suggestSeed(itemName) {
   return suggestSeeds(itemName, 1)[0] || null
 }
+
+// Matches restricted to one specific source, best keyword match first — unlike suggestSeeds
+// (which only returns ties at the single best score across ALL sources, so a source with a
+// merely-good match gets silently dropped if another source has a longer one), this always
+// searches the chosen source on its own so a user who explicitly picks e.g. "DFTQC Nepal" sees
+// everything that source has, not just whichever source happened to win the cross-source tie.
+export function suggestSeedsForSource(itemName, source, limit = 6) {
+  const norm = normalize(itemName)
+  if (!norm) return []
+  const scored = []
+  NUTRITION_SEED.forEach(row => {
+    if (row.source !== source) return
+    let best = 0
+    row.match.forEach(kw => { if (norm.includes(kw) && kw.length > best) best = kw.length })
+    if (best > 0) scored.push({ row, score: best })
+  })
+  return scored.sort((a, b) => b.score - a.score).slice(0, limit).map(s => s.row)
+}

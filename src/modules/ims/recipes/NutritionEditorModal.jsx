@@ -3,8 +3,10 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import { NUTRIENTS, EMPTY_NUTRITION, buildNutritionPayload, defaultBasisUnit } from '../../../utils/nutrition'
-import { suggestSeeds } from '../../../data/nutritionSeed'
+import { suggestSeedsForSource } from '../../../data/nutritionSeed'
 import { UNITS } from './recipeCostCalc'
+
+const LIBRARIES = ['DFTQC Nepal', 'IFCT 2017', 'USDA']
 
 // Builds the initial form from an item's saved nutrition (or sensible defaults).
 function initFormFromItem(item) {
@@ -27,6 +29,7 @@ function initFormFromItem(item) {
 export default function NutritionEditorModal({ item, onClose, onSaved }) {
   const [nutriForm, setNutriForm] = useState(() => item ? initFormFromItem(item) : { ...EMPTY_NUTRITION })
   const [nutriMatches, setNutriMatches] = useState([])
+  const [nutriMatchSource, setNutriMatchSource] = useState('')
   const [nutriSaving, setNutriSaving] = useState(false)
   const [nutriError, setNutriError] = useState('')
   // Open Food Facts lookup (branded/packaged products)
@@ -37,15 +40,17 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
 
   function setNF(val) { setNutriForm(prev => ({ ...prev, ...val })) }
 
-  function findNutriSeeds() {
-    const matches = suggestSeeds(item?.name || '')
+  function findNutriSeedsFor(source) {
+    const matches = suggestSeedsForSource(item?.name || '', source)
     setNutriMatches(matches)
-    setNutriError(matches.length === 0 ? `No library match for "${item?.name}". Enter values manually.` : '')
+    setNutriMatchSource(source)
+    setNutriError(matches.length === 0 ? `No ${source} entry for "${item?.name}". Try another library or enter manually.` : '')
   }
 
   function applyNutriSeed(seed) {
     setNutriError('')
     setNutriMatches([])
+    setNutriMatchSource('')
     setNutriForm(prev => ({
       ...prev,
       basis_qty: 100,
@@ -157,9 +162,22 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
             {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
-        <button className="btn btn-ghost" style={{ fontSize: 12, marginBottom: 4 }} onClick={findNutriSeeds}>
-          ⚡ Suggest from library
-        </button>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+          {LIBRARIES.map(lib => (
+            <button
+              key={lib}
+              className="btn btn-ghost"
+              style={{
+                fontSize: 12,
+                color: nutriMatchSource === lib ? (lib === 'DFTQC Nepal' ? 'var(--theme-green)' : lib === 'IFCT 2017' ? 'var(--theme-accent)' : 'var(--theme-text1)') : undefined,
+                borderColor: nutriMatchSource === lib ? 'currentColor' : undefined,
+              }}
+              onClick={() => findNutriSeedsFor(lib)}
+            >
+              {lib}
+            </button>
+          ))}
+        </div>
         {nutriForm.source && (
           <span style={{ fontSize: 11, color: 'var(--theme-green)', marginBottom: 8 }}>Source: {nutriForm.source}</span>
         )}
@@ -168,15 +186,14 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
       {nutriMatches.length > 0 && (
         <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8 }}>
           <div style={{ fontSize: 11, color: '#818cf8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-            {nutriMatches.length} match{nutriMatches.length > 1 ? 'es' : ''} — choose a source to fill
+            {nutriMatches.length} match{nutriMatches.length > 1 ? 'es' : ''} from {nutriMatchSource}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {nutriMatches.map((s, i) => (
               <button key={i} className="btn btn-ghost" style={{ fontSize: 12, textAlign: 'left', padding: '7px 11px', lineHeight: 1.35 }} onClick={() => applyNutriSeed(s)}>
                 <span style={{ display: 'block', color: 'var(--theme-text1)', fontWeight: 600 }}>{s.name}</span>
                 <span style={{ display: 'block', color: 'var(--theme-text2)', fontSize: 11 }}>
-                  <span style={{ color: s.source === 'DFTQC Nepal' ? 'var(--theme-green)' : s.source === 'IFCT 2017' ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>{s.source}</span>
-                  {' · '}{s.energy_kcal} kcal · P{s.protein_g} C{s.carbs_g} F{s.fat_g} /100{s.unit}
+                  {s.energy_kcal} kcal · P{s.protein_g} C{s.carbs_g} F{s.fat_g} /100{s.unit}
                 </span>
               </button>
             ))}

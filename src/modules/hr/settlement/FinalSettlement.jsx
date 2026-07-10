@@ -280,9 +280,11 @@ export default function FinalSettlement() {
             <div><span style={{ color: '#6b7280' }}>Basic: </span><strong>NPR {fmt(result.basic)}</strong></div>
             <div><span style={{ color: '#6b7280' }}>Service: </span><strong>{fmtService(result.serviceMonths)}</strong></div>
             <div><span style={{ color: '#6b7280' }}>Gratuity: </span>
-              {result.vested
-                ? <span className="badge-green">Vested</span>
-                : <span className="badge-amber">Not vested ({result.serviceMonths} / 12 mo)</span>}
+              <Tip text="The 12-month vesting cliff used here is a commonly applied assumption, not something confirmed in the current Labour Act 2074 text — Sections 52/53 read as accruing monthly from day 1 with no explicit tenure threshold found. Other sources still cite 1-year or 5-year thresholds. Verify with an accountant before finalizing a settlement for anyone close to the 1-year mark." width={340}>
+                {result.vested
+                  ? <span className="badge-green">Vested</span>
+                  : <span className="badge-amber">Not vested ({result.serviceMonths} / 12 mo)</span>}
+              </Tip>
             </div>
           </div>
 
@@ -440,7 +442,7 @@ export default function FinalSettlement() {
             {' '}Partial salary uses BS month day count ({result.totalDaysInLastMonth} days for {BS_MONTH_NAMES[lastDate.month-1]} {lastDate.year}).
             {' '}Leave encashment at basic ÷ 26 per day (Nepal Labour Act).
             {' '}TDS on lump sum is estimated at the marginal rate — final tax liability depends on total annual income for the year.
-            {!result.vested && ' Gratuity is not included as service is under 1 year.'}
+            {!result.vested && ' Gratuity is not included as service is under 1 year (this 1-year threshold is a common assumption, not confirmed in the current Labour Act text — verify with an accountant if this employee is close to the boundary).'}
             {result.gratuitySsfCovered > 0 && ' Gratuity is shown net of the portion already funded through employer SSF contributions.'}
             {' '}Consult your CA before disbursing.
           </div>

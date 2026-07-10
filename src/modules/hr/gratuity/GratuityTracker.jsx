@@ -121,7 +121,10 @@ export default function GratuityTracker() {
         <div>
           <h1 className="page-title">Gratuity Accrual</h1>
           <p className="page-subtitle">
-            Labour Act: 1 month basic per year of service · Vests after 1 year
+            Labour Act: 1 month basic per year of service ·{' '}
+            <Tip text="The 12-month vesting cliff shown here is a commonly applied assumption, not something this app has confirmed in the current 2074 Act's own text — Sections 52/53 read as a defined-contribution scheme (a portable SSF balance) accruing monthly from day 1, with no explicit tenure threshold found. Other sources still cite 1-year or 5-year thresholds. Confirm with an accountant before relying on this for an actual payout, especially for anyone close to the 1-year mark." width={340}>
+              Vests after 1 year (unconfirmed — verify with an accountant)
+            </Tip>
           </p>
         </div>
         <div className="no-print">
@@ -153,7 +156,7 @@ export default function GratuityTracker() {
             </div>
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                <Tip text="Employees who have completed ≥ 1 year of service and are eligible for gratuity payment on departure." width={260}>Vested Employees</Tip>
+                <Tip text="Employees who have completed ≥ 1 year of service, commonly treated as eligible for gratuity payment on departure. This 1-year threshold is not confirmed in the current Labour Act 2074 text (which reads as day-1 accrual with no explicit vesting gate) — verify with an accountant before relying on it for an actual payout." width={320}>Vested Employees</Tip>
               </div>
               <div style={{ fontSize: 20, fontWeight: 700, color: '#34d399' }}>{vestedCount}</div>
               <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{rows.length - vestedCount} still vesting</div>
@@ -204,7 +207,7 @@ export default function GratuityTracker() {
                       <Tip text="Total months of continuous service from join date to today." width={220}>Service</Tip>
                     </th>
                     <th style={{ textAlign: 'center' }}>
-                      <Tip text="Vested = ≥ 12 months of service. Employee is eligible for full gratuity payment on departure." width={260}>Vested</Tip>
+                      <Tip text="Vested = ≥ 12 months of service, commonly treated as eligible for full gratuity payment on departure — this threshold is not confirmed in the current Labour Act 2074 text. Verify with an accountant." width={300}>Vested</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Basic salary ÷ 12 = amount added to the gratuity pool each month." width={240}>Monthly Accrual</Tip>

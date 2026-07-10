@@ -141,6 +141,28 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S338 — 2026-07-10 — feat(ims): Recipe Costing — explicit DFTQC/IFCT/USDA source picker per ingredient
+
+`NutritionEditorModal.jsx`'s single "⚡ Suggest from library" button only ever showed source options that happened to have a matching row for that specific ingredient — for "Strawberry" (USDA-only in the seed data; DFTQC/IFCT are Nepal/India government food tables that don't cover imported fruit), that meant only one option ever appeared, reading as "no choice" even though the mechanism for choosing a source already existed for multi-source ingredients like Rice/Milk/Chicken. Replaced it with three always-visible buttons (DFTQC Nepal / IFCT 2017 / USDA) so the choice is explicit and predictable regardless of an ingredient's actual data coverage — clicking a source with no entry for that ingredient now says so directly ("No {source} entry for X — try another library or enter manually") instead of silently not being an option. New `suggestSeedsForSource()` in `nutritionSeed.js` searches one source at a time (unlike `suggestSeeds()`, which only surfaces ties at the single best cross-source keyword match, silently dropping a source with a merely-good match if another source has a longer one) — the original `suggestSeeds()`/`suggestSeed()` are unchanged and still back the separate bulk "⚡ Auto-fill nutrition" button on the Ingredients header (S325).
+
+**Files:** `src/data/nutritionSeed.js`, `src/modules/ims/recipes/NutritionEditorModal.jsx`, `src/pages/Help.js`
+
+### S337 — 2026-07-10 — fix(hr): Gratuity Tracker & Final Settlement flag unconfirmed 12-month vesting cliff
+
+Researched Nepal's Labour Act 2074 employment categories (Permanent/Probation/Contract/Part-time) in depth, which surfaced a separate, higher-stakes finding: `GratuityTracker.jsx` and `FinalSettlement.jsx` both hardcode a 12-month vesting cliff (zero gratuity for an employee leaving before 1 year), but reading Sections 52/53 of the Act directly shows gratuity structured as a defined-contribution scheme (a portable SSF balance) accruing monthly from day 1, with no explicit vesting threshold found in the current Act's text — the 1yr/3yr/5yr figures floating around secondary sources look like holdovers from the old 2048 Act's tenure-gated defined-benefit formula. Genuinely unresolved without an accountant's confirmation, and it involves real payout amounts on real employee exits.
+
+User's decision: keep the 12-month cliff in the actual calculation (too risky to change blind) but make the uncertainty visible everywhere it currently presents as settled fact — added `Tip` caveats to the page subtitle, the "Vested Employees" stat card, and the "Vested" column header in `GratuityTracker.jsx`, and to the vested/not-vested badge and the inline settlement note in `FinalSettlement.jsx`, all noting the threshold is a common assumption rather than a confirmed legal requirement and recommending accountant verification for anyone near the boundary. No calculation changed — `vested = months >= 12` stays exactly as before in both files.
+
+Also: confirmed `FestivalAllowance.jsx` already correctly prorates by months worked with no 1-year gate (matches Section 37), and that `MIN_HOURLY_PARTTIME` (107) being higher than `MIN_HOURLY` (101) in `payrollConstants.js` is consistent with the Act's part-time pro-rata wage-floor rule (Section 19) — no changes needed to either.
+
+**Files:** `src/modules/hr/gratuity/GratuityTracker.jsx`, `src/modules/hr/settlement/FinalSettlement.jsx`
+
+### S336 — 2026-07-10 — fix(hr): Employee Status = Probation always violated a check constraint
+
+`EmployeeForm.jsx`'s Status dropdown has offered "Probation" as an option for a while (also used in `EmployeeList.jsx`'s filters/counts, HR Dashboard, etc.), but `hr_employees_status_check` (from the baseline schema snapshot) only ever allowed `active`/`inactive`/`resigned`/`terminated` — `probation` was never added to it, so saving Status = Probation always failed with a check-constraint violation. (Not to be confused with the separate `employment_type` column, whose own check constraint already correctly allows `probation` — that field was unaffected.) Migration `20260710090000_hr_employees_status_add_probation.sql` drops and recreates the constraint to include `probation`. Applied and confirmed by the user.
+
+**Files:** `supabase/migrations/20260710090000_hr_employees_status_add_probation.sql`
+
 ### S335 — 2026-07-09 — feat(ims): Purchases Daily Register — sticky Total column + collapsible categories
 
 S334's new Total column needed a full horizontal scroll to see, and with the whole table's horizontal scrollbar sitting at the very bottom of a long (172-item) list, seeing it meant scrolling all the way down first. Made the Total column `position: sticky; right: 0` (and the header row `position: sticky; top: 0`) so it's always visible without any scrolling at all, regardless of vertical or horizontal scroll position. Also made each category header in the grid clickable to collapse/expand its items (▾/▸, with an item count), so a long item list can be narrowed down to just the categories currently relevant instead of scrolling past all of them. The sticky Total cell composites its subtle alternating-row tint over an explicitly opaque `var(--theme-card)` base (via a layered `linear-gradient`) rather than reusing the row's translucent stripe background directly, so horizontally-scrolled-away cells don't show through underneath it.
