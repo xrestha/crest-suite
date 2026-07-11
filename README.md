@@ -141,6 +141,14 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S359 — 2026-07-11 — fix: Payroll Run's Total row leaked TDS into the Advance/deductions cell
+
+User spotted "−920" sitting under the ADVANCE column in the Total row when every employee's individual Advance cell showed "—". Root cause in `PayrollRun.jsx`'s `totals` reducer: `a.ded += s.absence_deduction + s.other_deductions + s.tds` folded each payslip's TDS into the same running total as Absence/Other Deductions — which then renders in one `colSpan={4}` cell spanning Absence/SSF/Other Ded/Advance. With all four of those genuinely zero for this payroll, the only thing left in that merged cell was the TDS sum (250+200+270+200=920), right-aligned so it visually sat under "Advance". The TDS column itself was left blank in the Total row despite having its own per-employee inputs directly above it.
+
+Fixed by giving TDS its own `totals.tds` accumulator and rendering it in the TDS column (previously an empty `<td>`), and made both the merged deduction cell and the new TDS cell show "—" instead of "−0" when the total is genuinely zero, matching the per-row convention. Full HR suite (37 tests) passes; build compiles clean.
+
+**Files:** `src/modules/hr/payroll/PayrollRun.jsx`
+
 ### S358 — 2026-07-11 — feat(hr): By Employee tab gets a Total OT Hours footer row
 
 Small addition to the By Employee tab's day-by-day table: a footer row under the last day of the month summing that employee's OT Hours across every day, so the monthly OT total is visible without switching to the Month Summary tab. Also fixed a stale `colSpan={8}` on the "Pick an employee above" placeholder row — the Break column added in S355 made the table 9 columns wide, not 8. Full HR suite (37 tests) passes; build compiles clean.

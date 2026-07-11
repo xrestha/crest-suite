@@ -361,11 +361,12 @@ export default function PayrollRun() {
   const totals = payslips.reduce((a, s) => {
     a.gross  += s.gross; a.ot += s.ot_amount; a.ssfEmp += s.ssf_employee; a.ssfEmpr += s.ssf_employer
     a.advDed += s.advance_deduction || 0
-    a.ded    += s.absence_deduction + s.other_deductions + s.tds
+    a.ded    += s.absence_deduction + s.other_deductions
+    a.tds    += s.tds || 0
     a.tada   += s.tada_amount || 0
     a.net    += s.net_pay
     return a
-  }, { gross: 0, ot: 0, ssfEmp: 0, ssfEmpr: 0, ded: 0, advDed: 0, tada: 0, net: 0 })
+  }, { gross: 0, ot: 0, ssfEmp: 0, ssfEmpr: 0, ded: 0, advDed: 0, tds: 0, tada: 0, net: 0 })
 
   return (
     <div>
@@ -503,8 +504,10 @@ export default function PayrollRun() {
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>Total — {payslips.length}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totals.gross)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-green)' }}>{totals.ot > 0 ? `+${fmt(totals.ot)}` : '—'}</td>
-                      <td colSpan={4} style={{ textAlign: 'right', color: 'var(--theme-red)' }}>−{fmt(totals.ded + totals.ssfEmp + totals.advDed)}</td>
-                      <td></td>
+                      <td colSpan={4} style={{ textAlign: 'right', color: 'var(--theme-red)' }}>
+                        {(totals.ded + totals.ssfEmp + totals.advDed) > 0 ? `−${fmt(totals.ded + totals.ssfEmp + totals.advDed)}` : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{totals.tds > 0 ? `−${fmt(totals.tds)}` : '—'}</td>
                       <td style={{ textAlign: 'right', color: totals.tada > 0 ? 'var(--theme-green)' : 'var(--theme-text2)' }}>{totals.tada > 0 ? `+${fmt(totals.tada)}` : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontSize: 15 }}>{fmt(totals.net)}</td>
                       <td></td>
