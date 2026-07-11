@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import * as XLSX from 'xlsx'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday } from '../../../utils/bsCalendar'
-import { ATTENDANCE_STATUSES, WEEKLY_OFF_WEEKDAY } from '../payrollConstants'
+import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 import { buildAttendanceFromRoster } from './attendanceFromRoster'
+import { calcHours, shiftHours } from '../roster/laborForecast'
 
 const STATUS_MAP = Object.fromEntries(ATTENDANCE_STATUSES.map(s => [s.key, s]))
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -22,6 +22,12 @@ function weekdayOf(period, day) {
   return WEEKDAYS[bsToAd(period.bs_year, period.bs_month, day).getDay()]
 }
 
+// Start/End are punched in as plain text (24-hour HH:MM), not a native time-picker widget —
+// empty is fine (still typing / not entered), anything else must match the pattern exactly.
+function isValidTimeStr(s) {
+  return !s || /^([01]?\d|2[0-3]):[0-5]\d$/.test(s.trim())
+}
+
 export default function AttendanceSheet() {
   const { clientId } = useAuth()
   const { scopedFrom, scopedUpsert } = useScopedDb()
@@ -32,14 +38,34 @@ export default function AttendanceSheet() {
   const [loading,   setLoading]   = useState(true)
   const [tab,       setTab]       = useState('mark')
   const [selectedDay, setSelectedDay] = useState(getBsToday().day)
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('') // By Employee tab
   const [saving,    setSaving]    = useState(false)
   const [savedMsg,  setSavedMsg]  = useState('')
   const [generating, setGenerating] = useState(false)
-  const [weeklyOffWeekday, setWeeklyOffWeekday] = useState(WEEKLY_OFF_WEEKDAY) // 0=Sun..6=Sat
+  // Shift types (client-wide) + this period's roster assignments — used to auto-calc OT when an
+  // admin enters a Start/End time: worked hours beyond the employee's roster-assigned shift for
+  // that day (or STANDARD_HOURS_PER_DAY if they're not on the roster that day) become OT.
+  const [shiftTypesById, setShiftTypesById] = useState({})
+  const [rosterRows,     setRosterRows]     = useState([])
 
-  function isSaturday(period, day) {
-    if (!period) return false
-    return bsToAd(period.bs_year, period.bs_month, day).getDay() === weeklyOffWeekday
+  useEffect(() => {
+    if (!clientId) return
+    scopedFrom('hr_shift_types', 'id, name, hours, start_time, end_time').then(({ data }) => {
+      setShiftTypesById(Object.fromEntries((data || []).map(s => [s.id, s])))
+    })
+  }, [clientId, scopedFrom])
+
+  useEffect(() => {
+    if (!period) { setRosterRows([]); return }
+    scopedFrom('hr_roster', 'employee_id, shift_type_id, bs_day')
+      .eq('bs_year', period.bs_year).eq('bs_month', period.bs_month)
+      .then(({ data }) => setRosterRows(data || []))
+  }, [period?.bs_year, period?.bs_month, scopedFrom]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rosterByKey = Object.fromEntries(rosterRows.map(r => [`${r.employee_id}:${r.bs_day}`, r.shift_type_id]))
+  function assignedHoursFor(empId, day) {
+    const shiftTypeId = rosterByKey[`${empId}:${day}`]
+    return shiftTypeId ? shiftHours(shiftTypesById[shiftTypeId]) : STANDARD_HOURS_PER_DAY
   }
 
   const loadAttendance = useCallback(async (periodId) => {
@@ -60,16 +86,15 @@ export default function AttendanceSheet() {
     if (!clientId) return
     async function load() {
       setLoading(true)
-      const [{ data: p }, { data: emps }, { data: settings }] = await Promise.all([
+      const [{ data: p }, { data: emps }] = await Promise.all([
         scopedFrom('monthly_periods')
           .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
         scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, status, department')
           .in('status', ['active', 'probation']).order('full_name'),
-        supabase.from('settings').select('weekly_off_weekday').eq('client_id', clientId).maybeSingle(),
       ])
       setPeriods(p || [])
       setEmployees(emps || [])
-      setWeeklyOffWeekday(settings?.weekly_off_weekday ?? WEEKLY_OFF_WEEKDAY)
+      setSelectedEmployeeId(prev => prev || (emps || [])[0]?.id || '')
       const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
       if (open) { applyPeriod(open); await loadAttendance(open.id) }
       setLoading(false)
@@ -90,19 +115,61 @@ export default function AttendanceSheet() {
   function cellFor(empId, day) {
     return records[`${empId}:${day}`]
   }
-  function defaultStatus(day) {
-    return isSaturday(period, day) ? 'weekly_off' : 'present'
+  // No more auto-computed off day — a cell only gets a status once it's actually touched (Off
+  // included), same as marking Absent or Leave. 'present' is only the fallback for a record
+  // that's ALREADY been created via some other field (note/hours/time) but never got an
+  // explicit status pick — genuinely untouched cells stay null (see statusFor).
+  function defaultStatus() {
+    return 'present'
   }
+  // null (not 'present') for a cell nobody has touched — the dropdown shows a neutral "not
+  // marked" placeholder instead of a misleading green Present, so what's on screen matches what
+  // Save will actually persist (an untouched cell is skipped, not saved as Present).
   function statusFor(empId, day) {
-    return cellFor(empId, day)?.status ?? defaultStatus(day)
+    return cellFor(empId, day)?.status ?? null
   }
-  function setCell(empId, field, value) {
-    const key = `${empId}:${selectedDay}`
+  function setCell(empId, day, field, value) {
+    const key = `${empId}:${day}`
     setRecords(m => {
-      const prev = m[key] || { employee_id: empId, bs_day: selectedDay, status: defaultStatus(selectedDay) }
+      const prev = m[key] || { employee_id: empId, bs_day: day, status: defaultStatus() }
       return { ...m, [key]: { ...prev, [field]: value } }
     })
   }
+  // Reverts a cell to genuinely untouched — used when the Status dropdown is set back to the
+  // "— Not marked —" placeholder, since writing status: '' would violate the DB's status
+  // CHECK constraint and isn't what "not marked" means anyway.
+  function clearCell(empId, day) {
+    const key = `${empId}:${day}`
+    setRecords(m => {
+      if (!(key in m)) return m
+      const next = { ...m }
+      delete next[key]
+      return next
+    })
+  }
+  // Start/End are punched in as plain text (24-hour HH:MM) — auto-computes Hours + OT (worked
+  // hours beyond that day's roster-assigned shift) the moment both are valid times. Still just
+  // seeds the Hours/OT Hours fields, which stay directly editable afterward if the auto-calc
+  // needs a manual tweak. An invalid/partial time is kept as typed (so the admin can keep
+  // fixing it) but never touches Hours/OT — the input border + a small "invalid" hint flag it.
+  function setTimeCell(empId, day, field, value) {
+    const key = `${empId}:${day}`
+    setRecords(m => {
+      const prev = m[key] || { employee_id: empId, bs_day: day, status: defaultStatus() }
+      const next = { ...prev, [field]: value }
+      const start = field === 'start_time' ? value : prev.start_time
+      const end   = field === 'end_time'   ? value : prev.end_time
+      if (isValidTimeStr(start) && isValidTimeStr(end)) {
+        const worked = calcHours(start, end)
+        if (worked != null) {
+          next.hours_worked = worked
+          next.ot_hours = Math.max(0, parseFloat((worked - assignedHoursFor(empId, day)).toFixed(1)))
+        }
+      }
+      return { ...m, [key]: next }
+    })
+  }
+  // All employees, one day (Mark Attendance tab's bulk buttons).
   function markAll(status) {
     setRecords(m => {
       const next = { ...m }
@@ -113,49 +180,69 @@ export default function AttendanceSheet() {
       return next
     })
   }
+  // One employee, every day of the month (By Employee tab's bulk buttons).
+  function markAllDaysForEmployee(empId, status) {
+    setRecords(m => {
+      const next = { ...m }
+      days.forEach(d => {
+        const key = `${empId}:${d}`
+        next[key] = { ...(next[key] || { employee_id: empId, bs_day: d }), status }
+      })
+      return next
+    })
+  }
 
   async function saveDay() {
     if (!period) return
     setSaving(true); setSavedMsg('')
-    const rows = employees.map(emp => {
-      const rec = cellFor(emp.id, selectedDay)
-      return {
-        employee_id:  emp.id,
-        period_id:    period.id,
-        bs_day:       selectedDay,
-        status:       rec?.status ?? defaultStatus(selectedDay),
-        hours_worked: parseFloat(rec?.hours_worked) || 0,
-        ot_hours:     parseFloat(rec?.ot_hours) || 0,
-        note:         rec?.note || null,
-      }
-    })
+    // Only staff whose cell was actually touched (status changed, a time/hours/OT/note typed)
+    // get written — an employee nobody clicked on for this day is skipped entirely rather than
+    // silently persisted as Present. cellFor() returns undefined until setCell/setTimeCell has
+    // run at least once for that key.
+    const rows = employees
+      .map(emp => {
+        const rec = cellFor(emp.id, selectedDay)
+        if (!rec) return null
+        return {
+          employee_id:  emp.id,
+          period_id:    period.id,
+          bs_day:       selectedDay,
+          status:       rec.status ?? defaultStatus(),
+          hours_worked: parseFloat(rec.hours_worked) || 0,
+          ot_hours:     parseFloat(rec.ot_hours) || 0,
+          note:         rec.note || null,
+          // An invalid/partial typed time never reaches the DB's `time` column — it just isn't
+          // saved (the admin still sees what they typed on screen until they fix or clear it).
+          start_time:   isValidTimeStr(rec.start_time) ? (rec.start_time || null) : null,
+          end_time:     isValidTimeStr(rec.end_time)   ? (rec.end_time   || null) : null,
+        }
+      })
+      .filter(Boolean)
+    if (rows.length === 0) {
+      setSavedMsg('ok:Nothing to save — no changes were made for Day ' + selectedDay)
+      setSaving(false)
+      return
+    }
     const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
     if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
     await loadAttendance(period.id)
-    setSavedMsg('ok:Saved Day ' + selectedDay)
+    setSavedMsg(`ok:Saved Day ${selectedDay} (${rows.length} of ${employees.length} staff)`)
     setSaving(false)
   }
 
   async function generateFromRoster() {
     if (!period) return
     setGenerating(true); setSavedMsg('')
-    const [{ data: rosterRows }, { data: shiftTypes }] = await Promise.all([
-      scopedFrom('hr_roster', 'employee_id, shift_type_id, bs_day')
-        .eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
-      scopedFrom('hr_shift_types', 'id, hours, start_time, end_time'),
-    ])
-    const shiftTypesById = Object.fromEntries((shiftTypes || []).map(s => [s.id, s]))
+    // Reuses the shiftTypesById/rosterRows state already loaded for the Start/End OT auto-calc
+    // above — same period, same shift types, no need to re-fetch.
     const alreadySet = Object.keys(records).length
     const rows = buildAttendanceFromRoster({
-      rosterRows: rosterRows || [],
+      rosterRows,
       shiftTypesById,
       employeeIds: employees.map(e => e.id),
       existingDayKeys: new Set(Object.keys(records)),
-      bsYear: period.bs_year,
-      bsMonth: period.bs_month,
       days,
       periodId: period.id,
-      offWeekday: weeklyOffWeekday,
     })
     if (rows.length === 0) {
       setSavedMsg('ok:Nothing to generate — every day already has an entry, or no employees are on the roster this month.')
@@ -171,6 +258,68 @@ export default function AttendanceSheet() {
     if (error) { setSavedMsg('error:' + error.message); setGenerating(false); return }
     await loadAttendance(period.id)
     setSavedMsg(`ok:Generated ${rows.length} entr${rows.length === 1 ? 'y' : 'ies'} from roster`)
+    setGenerating(false)
+  }
+
+  // ── By Employee tab: same idea as saveDay/generateFromRoster, but one employee × every day
+  // of the month instead of every employee × one day. ─────────────────────────────────────────
+  async function saveEmployeeMonth(empId) {
+    if (!period || !empId) return
+    setSaving(true); setSavedMsg('')
+    // Only days actually touched for this employee get written — an untouched day is skipped
+    // entirely rather than silently persisted as Present (same rule as saveDay()).
+    const rows = days
+      .map(d => {
+        const rec = cellFor(empId, d)
+        if (!rec) return null
+        return {
+          employee_id:  empId,
+          period_id:    period.id,
+          bs_day:       d,
+          status:       rec.status ?? defaultStatus(),
+          hours_worked: parseFloat(rec.hours_worked) || 0,
+          ot_hours:     parseFloat(rec.ot_hours) || 0,
+          note:         rec.note || null,
+          start_time:   isValidTimeStr(rec.start_time) ? (rec.start_time || null) : null,
+          end_time:     isValidTimeStr(rec.end_time)   ? (rec.end_time   || null) : null,
+        }
+      })
+      .filter(Boolean)
+    const name = employees.find(e => e.id === empId)?.full_name || 'employee'
+    if (rows.length === 0) {
+      setSavedMsg(`ok:Nothing to save — no changes were made for ${name}`)
+      setSaving(false)
+      return
+    }
+    const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
+    if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
+    await loadAttendance(period.id)
+    setSavedMsg(`ok:Saved ${rows.length} day${rows.length === 1 ? '' : 's'} for ${name}`)
+    setSaving(false)
+  }
+
+  async function generateFromRosterForEmployee(empId) {
+    if (!period || !empId) return
+    setGenerating(true); setSavedMsg('')
+    const rows = buildAttendanceFromRoster({
+      rosterRows,
+      shiftTypesById,
+      employeeIds: [empId],
+      existingDayKeys: new Set(Object.keys(records).filter(k => k.startsWith(`${empId}:`))),
+      days,
+      periodId: period.id,
+    })
+    if (rows.length === 0) {
+      setSavedMsg('ok:Nothing to generate — every day already has an entry, or this employee isn\'t on the roster this month.')
+      setGenerating(false)
+      return
+    }
+    const ok = window.confirm(`Generate attendance for ${rows.length} day(s) from the roster for this employee?`)
+    if (!ok) { setGenerating(false); return }
+    const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
+    if (error) { setSavedMsg('error:' + error.message); setGenerating(false); return }
+    await loadAttendance(period.id)
+    setSavedMsg(`ok:Generated ${rows.length} day${rows.length === 1 ? '' : 's'} from roster`)
     setGenerating(false)
   }
 
@@ -205,6 +354,7 @@ export default function AttendanceSheet() {
       row['Present'] = s.counts.present
       row['Half'] = s.counts.half_day
       row['Absent'] = s.counts.absent
+      row['Off'] = s.counts.weekly_off
       row['Paid Leave'] = s.counts.paid_leave + s.counts.half_paid_leave * 0.5
       row['Unpaid Leave'] = s.counts.unpaid_leave + s.counts.half_unpaid_leave * 0.5
       row['OT Hours'] = s.otHours
@@ -219,7 +369,6 @@ export default function AttendanceSheet() {
   }
 
   const periodLabel = period ? `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : '—'
-  const dayIsSaturday = isSaturday(period, selectedDay)
 
   return (
     <div>
@@ -242,7 +391,7 @@ export default function AttendanceSheet() {
 
       {/* Tabs */}
       <div className="tab-bar" style={{ marginBottom: 18 }}>
-        {[{ id: 'mark', label: 'Mark Attendance' }, { id: 'summary', label: 'Month Summary' }].map(t => (
+        {[{ id: 'mark', label: 'Mark Attendance' }, { id: 'employee', label: 'By Employee' }, { id: 'summary', label: 'Month Summary' }].map(t => (
           <button key={t.id} className={`tab-btn${tab === t.id ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </div>
@@ -265,12 +414,12 @@ export default function AttendanceSheet() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Day</span>
               <select style={inp} value={selectedDay} onChange={e => setSelectedDay(parseInt(e.target.value, 10))}>
-                {days.map(d => <option key={d} value={d}>{d} · {weekdayOf(period, d)}{isSaturday(period, d) ? ' (off)' : ''}</option>)}
+                {days.map(d => <option key={d} value={d}>{d} · {weekdayOf(period, d)}</option>)}
               </select>
             </div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('present')}>All Present</button>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('weekly_off')}>All Weekly Off</button>
+              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('weekly_off')}>All Off</button>
               <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('holiday')}>All Holiday</button>
             </div>
             <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={generateFromRoster} disabled={generating}>
@@ -287,14 +436,9 @@ export default function AttendanceSheet() {
             </button>
           </div>
 
-          {dayIsSaturday && (
-            <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 8, fontSize: 12, color: 'var(--theme-accent)' }}>
-              ⚠ Day {selectedDay} is a Saturday — defaulted to Weekly Off. Adjust any staff who worked.
-            </div>
-          )}
-
           <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            <Tip text="Fills blank days across the whole month from Staff Roster shift assignments — marked Present, with hours from the shift — and defaults unrostered Saturdays to Weekly Off. A roster shift with no hours (e.g. a custom 'LEAVE' or 'Day Off' entry) is marked Holiday rather than Present. Never overwrites a day that already has an entry, so a formal approved Leave Request or manual correction still takes precedence if entered afterward." width={320}>
+            Every day defaults to Present until you mark it otherwise — nothing is assumed off automatically; use Off/Holiday/Leave per staff member as needed.{' '}
+            <Tip text="Fills blank days across the whole month from Staff Roster shift assignments — marked Present, with hours from the shift. A zero-hour roster entry named like an off day (e.g. 'OFF DAY', 'LEAVE') is marked Off; any other zero-hour entry is marked Holiday. Days with no roster entry at all are left blank for manual entry. Never overwrites a day that already has an entry, so a formal approved Leave Request or manual correction still takes precedence if entered afterward." width={320}>
               ⚡ Generate from Roster
             </Tip>{' '}pre-fills this month from Staff Roster shift assignments; it never overwrites a day you've already marked.
           </div>
@@ -306,11 +450,17 @@ export default function AttendanceSheet() {
                   <tr>
                     <th>Employee</th>
                     <th style={{ width: 150 }}>Status</th>
-                    <th style={{ width: 110, textAlign: 'right' }}>
-                      <Tip text="Hours worked that day. Only used for hourly-paid staff." width={220}>Hours</Tip>
+                    <th style={{ width: 100 }}>
+                      <Tip text="Clock-in time — type 24-hour HH:MM (e.g. 09:00). Once both Start and End are valid, Hours and OT Hours are calculated automatically — worked hours beyond that day's roster-assigned shift (or 8h if not on the roster that day) become OT." width={300}>Start</Tip>
                     </th>
-                    <th style={{ width: 110, textAlign: 'right' }}>
-                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll. Don't also log the same hours in the Overtime module — both sources are paid, so duplicates pay twice (payroll flags this with an ⚠ OT ×2? badge)." width={270}>OT Hours</Tip>
+                    <th style={{ width: 100 }}>
+                      <Tip text="Clock-out time — type 24-hour HH:MM (e.g. 18:30). Overnight shifts (end time earlier than start time) are handled automatically." width={260}>End</Tip>
+                    </th>
+                    <th style={{ width: 90, textAlign: 'right' }}>
+                      <Tip text="Hours worked that day — auto-filled from Start/End, or enter directly. Only used for hourly-paid staff." width={240}>Hours</Tip>
+                    </th>
+                    <th style={{ width: 90, textAlign: 'right' }}>
+                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster-assigned shift, or enter directly. Don't also log the same hours in the Overtime module — both sources are paid, so duplicates pay twice (payroll flags this with an ⚠ OT ×2? badge)." width={280}>OT Hours</Tip>
                     </th>
                     <th>Note</th>
                   </tr>
@@ -330,29 +480,150 @@ export default function AttendanceSheet() {
                         </td>
                         <td>
                           <select
-                            style={{ ...inp, color: sc?.color || 'var(--theme-text1)', fontWeight: 600, width: '100%' }}
-                            value={status}
-                            onChange={e => setCell(emp.id, 'status', e.target.value)}
+                            style={{ ...inp, color: sc?.color || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
+                            value={status || ''}
+                            onChange={e => e.target.value ? setCell(emp.id, selectedDay, 'status', e.target.value) : clearCell(emp.id, selectedDay)}
                           >
+                            <option value="" style={{ color: 'var(--theme-text3)' }}>— Not marked —</option>
                             {ATTENDANCE_STATUSES.map(s => <option key={s.key} value={s.key} style={{ color: 'var(--theme-text1)' }}>{s.label}</option>)}
                           </select>
                         </td>
+                        <td>
+                          <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time) ? 'var(--theme-red)' : undefined }}
+                            value={rec?.start_time || ''} onChange={e => setTimeCell(emp.id, selectedDay, 'start_time', e.target.value)} />
+                          {!isValidTimeStr(rec?.start_time) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM</div>}
+                        </td>
+                        <td>
+                          <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time) ? 'var(--theme-red)' : undefined }}
+                            value={rec?.end_time || ''} onChange={e => setTimeCell(emp.id, selectedDay, 'end_time', e.target.value)} />
+                          {!isValidTimeStr(rec?.end_time) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM</div>}
+                        </td>
                         <td style={{ textAlign: 'right' }}>
                           {emp.pay_basis === 'hourly' ? (
-                            <input type="number" min="0" step="0.5" style={{ ...inp, width: 90, textAlign: 'right' }}
-                              value={rec?.hours_worked ?? ''} onChange={e => setCell(emp.id, 'hours_worked', e.target.value)} placeholder="0" />
+                            <input type="number" min="0" step="0.5" style={{ ...inp, width: 80, textAlign: 'right' }}
+                              value={rec?.hours_worked ?? ''} onChange={e => setCell(emp.id, selectedDay, 'hours_worked', e.target.value)} placeholder="0" />
                           ) : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          <input type="number" min="0" step="0.5" style={{ ...inp, width: 90, textAlign: 'right' }}
-                            value={rec?.ot_hours ?? ''} onChange={e => setCell(emp.id, 'ot_hours', e.target.value)} placeholder="0" />
+                          <input type="number" min="0" step="0.5" style={{ ...inp, width: 80, textAlign: 'right' }}
+                            value={rec?.ot_hours ?? ''} onChange={e => setCell(emp.id, selectedDay, 'ot_hours', e.target.value)} placeholder="0" />
                         </td>
                         <td>
-                          <input style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(emp.id, 'note', e.target.value)} placeholder="—" />
+                          <input style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(emp.id, selectedDay, 'note', e.target.value)} placeholder="—" />
                         </td>
                       </tr>
                     )
                   })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : tab === 'employee' ? (
+        /* ── BY EMPLOYEE ── */
+        <div>
+          {/* Employee selector + bulk actions */}
+          <div className="card" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Employee</span>
+              <select style={inp} value={selectedEmployeeId} onChange={e => setSelectedEmployeeId(e.target.value)}>
+                {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.full_name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'present')}>All Present</button>
+              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'weekly_off')}>All Off</button>
+              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'holiday')}>All Holiday</button>
+            </div>
+            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => generateFromRosterForEmployee(selectedEmployeeId)} disabled={generating}>
+              {generating ? 'Generating…' : '⚡ Generate from Roster'}
+            </button>
+            <div style={{ flex: 1 }} />
+            {savedMsg && (
+              <span style={{ fontSize: 12, color: savedMsg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                {savedMsg.split(':').slice(1).join(':')}
+              </span>
+            )}
+            <button className="btn btn-primary" onClick={() => saveEmployeeMonth(selectedEmployeeId)} disabled={saving} style={{ fontSize: 13 }}>
+              {saving ? 'Saving…' : 'Save Month'}
+            </button>
+          </div>
+
+          <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+            Fill in this one employee's whole month here, day by day, instead of switching days on the Mark Attendance tab. Same data either way — both tabs read and write the same records.
+          </div>
+
+          <div className="card" style={{ padding: 0 }}>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 110 }}>Date</th>
+                    <th style={{ width: 150 }}>Status</th>
+                    <th style={{ width: 100 }}>
+                      <Tip text="Clock-in time — type 24-hour HH:MM (e.g. 09:00). Once both Start and End are valid, Hours and OT Hours are calculated automatically — worked hours beyond that day's roster-assigned shift (or 8h if not on the roster that day) become OT." width={300}>Start</Tip>
+                    </th>
+                    <th style={{ width: 100 }}>
+                      <Tip text="Clock-out time — type 24-hour HH:MM (e.g. 18:30). Overnight shifts (end time earlier than start time) are handled automatically." width={260}>End</Tip>
+                    </th>
+                    <th style={{ width: 90, textAlign: 'right' }}>
+                      <Tip text="Hours worked that day — auto-filled from Start/End, or enter directly. Only used for hourly-paid staff." width={240}>Hours</Tip>
+                    </th>
+                    <th style={{ width: 90, textAlign: 'right' }}>
+                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster-assigned shift, or enter directly." width={280}>OT Hours</Tip>
+                    </th>
+                    <th>Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!selectedEmployeeId ? (
+                    <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>Pick an employee above</td></tr>
+                  ) : (() => {
+                    const emp = employees.find(e => e.id === selectedEmployeeId)
+                    return days.map(d => {
+                      const status = statusFor(selectedEmployeeId, d)
+                      const rec = cellFor(selectedEmployeeId, d)
+                      const sc = STATUS_MAP[status]
+                      return (
+                        <tr key={d}>
+                          <td style={{ color: 'var(--theme-text1)', fontWeight: 600, fontSize: 13 }}>{d} · {weekdayOf(period, d)}</td>
+                          <td>
+                            <select
+                              style={{ ...inp, color: sc?.color || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
+                              value={status || ''}
+                              onChange={e => e.target.value ? setCell(selectedEmployeeId, d, 'status', e.target.value) : clearCell(selectedEmployeeId, d)}
+                            >
+                              <option value="" style={{ color: 'var(--theme-text3)' }}>— Not marked —</option>
+                              {ATTENDANCE_STATUSES.map(s => <option key={s.key} value={s.key} style={{ color: 'var(--theme-text1)' }}>{s.label}</option>)}
+                            </select>
+                          </td>
+                          <td>
+                            <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time) ? 'var(--theme-red)' : undefined }}
+                              value={rec?.start_time || ''} onChange={e => setTimeCell(selectedEmployeeId, d, 'start_time', e.target.value)} />
+                            {!isValidTimeStr(rec?.start_time) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM</div>}
+                          </td>
+                          <td>
+                            <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time) ? 'var(--theme-red)' : undefined }}
+                              value={rec?.end_time || ''} onChange={e => setTimeCell(selectedEmployeeId, d, 'end_time', e.target.value)} />
+                            {!isValidTimeStr(rec?.end_time) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM</div>}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {emp?.pay_basis === 'hourly' ? (
+                              <input type="number" min="0" step="0.5" style={{ ...inp, width: 80, textAlign: 'right' }}
+                                value={rec?.hours_worked ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'hours_worked', e.target.value)} placeholder="0" />
+                            ) : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <input type="number" min="0" step="0.5" style={{ ...inp, width: 80, textAlign: 'right' }}
+                              value={rec?.ot_hours ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'ot_hours', e.target.value)} placeholder="0" />
+                          </td>
+                          <td>
+                            <input style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'note', e.target.value)} placeholder="—" />
+                          </td>
+                        </tr>
+                      )
+                    })
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -379,7 +650,7 @@ export default function AttendanceSheet() {
                   <tr>
                     <th style={{ position: 'sticky', left: 0, background: 'var(--theme-card)', zIndex: 1 }}>Employee</th>
                     {days.map(d => (
-                      <th key={d} style={{ textAlign: 'center', padding: '8px 4px', background: isSaturday(period, d) ? 'rgba(75,85,99,0.18)' : undefined, color: isSaturday(period, d) ? 'var(--theme-text3)' : undefined }}>
+                      <th key={d} style={{ textAlign: 'center', padding: '8px 4px' }}>
                         {d}
                       </th>
                     ))}
@@ -388,6 +659,9 @@ export default function AttendanceSheet() {
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Absent days for the month." width={180}>A</Tip>
+                    </th>
+                    <th style={{ textAlign: 'right' }}>
+                      <Tip text="Off days for the month — marked explicitly per employee, either directly or via Generate from Roster." width={220}>O</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Total overtime hours for the month." width={200}>OT</Tip>
@@ -405,15 +679,15 @@ export default function AttendanceSheet() {
                         {days.map(d => {
                           const rec = cellFor(emp.id, d)
                           const sc = rec ? STATUS_MAP[rec.status] : null
-                          const sat = isSaturday(period, d)
                           return (
-                            <td key={d} style={{ textAlign: 'center', padding: '6px 4px', background: sat ? 'rgba(75,85,99,0.12)' : undefined }}>
+                            <td key={d} style={{ textAlign: 'center', padding: '6px 4px' }}>
                               {sc ? <span style={{ color: sc.color, fontWeight: 700 }}>{sc.short}</span> : <span style={{ color: 'var(--theme-border)' }}>·</span>}
                             </td>
                           )
                         })}
                         <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-green)', fontWeight: 600 }}>{s.counts.present + s.counts.half_day * 0.5 + s.counts.half_paid_leave * 0.5 || 0}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{s.counts.absent || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{s.counts.weekly_off || 0}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{s.otHours || 0}</td>
                       </tr>
                     )
@@ -423,7 +697,7 @@ export default function AttendanceSheet() {
             </div>
           </div>
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            P column counts present days (half-days as 0.5). Saturdays are shaded and default to Weekly Off. Hours and overtime feed the future Payroll module, which computes actual pay for daily/hourly staff.
+            P column counts present days (half-days as 0.5). O counts explicit Off days. Nothing is marked off automatically — mark each staff member's off days directly, or via Generate from Roster. Hours and overtime feed the future Payroll module, which computes actual pay for daily/hourly staff.
           </div>
         </div>
       )}

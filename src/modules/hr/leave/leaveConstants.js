@@ -1,7 +1,6 @@
 // Leave Management constants & helpers — Crest HR (S116).
 // See memory: nepal-payroll-law (Labour Act 2074 leave entitlements).
 import { adToBs } from '../../../utils/bsCalendar'
-import { WEEKLY_OFF_WEEKDAY } from '../payrollConstants'
 
 // Nepal Labour Act 2074 default leave types. Seeded once per client (when they
 // have none). annual_quota 0 = uncapped (e.g. unpaid). Maternity/paternity are
@@ -31,11 +30,11 @@ export const LEAVE_STATUSES = {
   cancelled: { label: 'Cancelled', color: 'var(--theme-text2)' },
 }
 
-// Working days in an inclusive AD date range, excluding the weekly off day. Returns
-// [{ ad: Date, bsYear, bsMonth, bsDay }]. Used both for the day count and for writing/reverting
-// the matching hr_attendance rows. `offWeekday` (0=Sun..6=Sat) defaults to Saturday when a
-// caller hasn't fetched the client's real settings.weekly_off_weekday yet.
-export function workingDaysInRange(startIso, endIso, offWeekday = WEEKLY_OFF_WEEKDAY) {
+// Every day in an inclusive AD date range — no day is assumed off automatically (there's no
+// single company-wide off weekday; off days are marked explicitly per employee in Attendance).
+// Returns [{ ad: Date, bsYear, bsMonth, bsDay }]. Used both for the day count and for
+// writing/reverting the matching hr_attendance rows.
+export function workingDaysInRange(startIso, endIso) {
   if (!startIso || !endIso) return []
   const start = new Date(startIso)
   const end   = new Date(endIso)
@@ -47,10 +46,8 @@ export function workingDaysInRange(startIso, endIso, offWeekday = WEEKLY_OFF_WEE
   let guard = 0
   while (cur <= last && guard < 800) {
     guard += 1
-    if (cur.getDay() !== offWeekday) {
-      const bs = adToBs(new Date(cur))
-      out.push({ ad: new Date(cur), bsYear: bs.year, bsMonth: bs.month, bsDay: bs.day })
-    }
+    const bs = adToBs(new Date(cur))
+    out.push({ ad: new Date(cur), bsYear: bs.year, bsMonth: bs.month, bsDay: bs.day })
     cur.setDate(cur.getDate() + 1)
   }
   return out

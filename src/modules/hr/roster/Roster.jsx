@@ -82,16 +82,14 @@ export default function Roster() {
   // Letterhead info for the print header + labor-scheduling target — fetched once per client
   const [bizInfo, setBizInfo] = useState({ name: '', address: '' })
   const [coversPerStaffTarget, setCoversPerStaffTarget] = useState(20)
-  const [weeklyOffWeekday, setWeeklyOffWeekday] = useState(6) // 0=Sun..6=Sat, default Saturday
   useEffect(() => {
     if (!clientId) return
     Promise.all([
       supabase.from('clients').select('name').eq('id', clientId).single(),
-      supabase.from('settings').select('property_address, covers_per_staff_target, weekly_off_weekday').eq('client_id', clientId).maybeSingle(),
+      supabase.from('settings').select('property_address, covers_per_staff_target').eq('client_id', clientId).maybeSingle(),
     ]).then(([{ data: client }, { data: settings }]) => {
       setBizInfo({ name: client?.name || '', address: settings?.property_address || '' })
       setCoversPerStaffTarget(settings?.covers_per_staff_target ?? 20)
-      setWeeklyOffWeekday(settings?.weekly_off_weekday ?? 6)
     })
   }, [clientId])
 
@@ -100,12 +98,6 @@ export default function Roster() {
     setCoversPerStaffTarget(n)
     if (!clientId) return
     await supabase.from('settings').update({ covers_per_staff_target: n }).eq('client_id', clientId)
-  }
-
-  async function saveWeeklyOffWeekday(day) {
-    setWeeklyOffWeekday(day)
-    if (!clientId) return
-    await supabase.from('settings').update({ weekly_off_weekday: day }).eq('client_id', clientId)
   }
 
   // Demand-forecast overlay: day-level covers/revenue forecast (recipe_id IS NULL rows in
@@ -421,7 +413,6 @@ export default function Roster() {
         bsYear: bs.year, bsMonth: bs.month, bsDay: bs.day,
         label:    WEEKDAYS[d.getDay()],
         sublabel: `${bs.day} ${BS_MONTHS[bs.month - 1].slice(0, 3)}`,
-        isSat:    d.getDay() === weeklyOffWeekday,
       }
     })
   } else {
@@ -432,7 +423,6 @@ export default function Roster() {
         bsYear, bsMonth, bsDay: d,
         label:    d,
         sublabel: WEEKDAYS[adDate.getDay()].slice(0, 2),
-        isSat:    adDate.getDay() === weeklyOffWeekday,
       })
     }
   }
@@ -540,7 +530,6 @@ export default function Roster() {
       {tab === 'shifts' && (
         <ShiftSettingsPanel
           clientId={clientId} shiftTypes={shiftTypes} setShiftTypes={setShiftTypes}
-          weeklyOffWeekday={weeklyOffWeekday} saveWeeklyOffWeekday={saveWeeklyOffWeekday}
         />
       )}
 
@@ -703,13 +692,12 @@ export default function Roster() {
                               <th key={i} style={{
                                 padding: viewMode === 'weekly' ? '8px 4px' : '6px 2px',
                                 textAlign: 'center',
-                                color:      col.isSat ? 'var(--theme-amber)' : 'var(--theme-text3)',
-                                background: col.isSat ? 'rgba(245,158,11,0.06)' : 'inherit',
+                                color:      'var(--theme-text3)',
                                 borderRight: '1px solid var(--theme-border-lt)',
                                 fontWeight: 500,
                               }}>
                                 <div style={{ fontSize: viewMode === 'weekly' ? 12 : 11, color: 'var(--theme-text2)' }}>{col.label}</div>
-                                <div style={{ fontSize: 10, color: col.isSat ? 'var(--theme-amber)' : 'var(--theme-text3)' }}>{col.sublabel}</div>
+                                <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{col.sublabel}</div>
                                 {fr?.recommended != null && (
                                   <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2 }}>
                                     <Tip text={`Recommended ${fr.recommended} staff (~${Math.round(fr.forecastCovers)} forecasted covers ÷ ${coversPerStaffTarget}/staff). Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`} width={240}>
@@ -761,7 +749,6 @@ export default function Roster() {
                                 return (
                                   <td key={ci} style={{
                                     padding: 3,
-                                    background: col.isSat ? 'rgba(245,158,11,0.04)' : 'inherit',
                                     borderRight: '1px solid var(--theme-border-lt)',
                                   }}>
                                     <button

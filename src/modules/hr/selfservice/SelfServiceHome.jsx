@@ -5,7 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { getBsToday, BS_MONTHS, adToBs, formatAd } from '../../../utils/bsCalendar'
 import { workingDaysInRange, DAY_TYPES } from '../leave/leaveConstants'
-import { WEEKLY_OFF_WEEKDAY } from '../payrollConstants'
+import { isOffDay } from '../payrollConstants'
 import { subscribeToPush, isPushSubscribed } from '../../../utils/webPush'
 import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount } from '../tada/tadaShared'
 import SearchableSelect from '../../../components/SearchableSelect'
@@ -27,13 +27,9 @@ function emptyTadaForm() {
   const today = formatAd(new Date())
   return { trip_purpose: '', destination: '', start_point: '', start_date: today, end_date: today, notes: '', items: [EMPTY_TADA_ITEM()] }
 }
-// Some clients create custom zero-hour shift types purely to mark a day off on the roster board
-// (e.g. "OFF", "Day Off", "Off Day", "LEAVE", "Public Holiday") — same convention as
-// attendanceFromRoster.js. Matched as a substring, not an exact name, since clients phrase these
-// differently. Highlighted here so an employee scanning their month can spot rest days at a
-// glance instead of reading every row.
-const OFF_SHIFT_KEYWORDS = ['off', 'leave', 'holiday']
-const isOffDay = name => !name || OFF_SHIFT_KEYWORDS.some(k => name.trim().toLowerCase().includes(k))
+// isOffDay (imported from payrollConstants.js) highlights an employee's own off days on their
+// roster view — same convention attendanceFromRoster.js uses to decide whether a zero-hour
+// roster row generates an Off vs Holiday attendance row.
 const SWAP_STATUS_BADGE = {
   pending_target: 'badge-amber', pending_admin: 'badge-amber', approved: 'badge-green',
   rejected_by_target: 'badge-red', rejected_by_admin: 'badge-red', cancelled: 'badge-gray',
@@ -64,7 +60,6 @@ export default function SelfServiceHome() {
   const [dayType, setDayType] = useState('full')
   const [submitting, setSubmitting] = useState(false)
   const [msg, setMsg] = useState('')
-  const [weeklyOffWeekday, setWeeklyOffWeekday] = useState(WEEKLY_OFF_WEEKDAY) // 0=Sun..6=Sat
 
   const [tadaClaims,    setTadaClaims]    = useState(null)
   const [tadaVendors,   setTadaVendors]   = useState([])
@@ -103,9 +98,8 @@ export default function SelfServiceHome() {
   // can read it directly rather than needing a dedicated RPC.
   useEffect(() => {
     if (!profile?.client_id) return
-    supabase.from('settings').select('weekly_off_weekday, tada_vehicle_rates, tada_purpose_options, tada_start_points').eq('client_id', profile.client_id).maybeSingle()
+    supabase.from('settings').select('tada_vehicle_rates, tada_purpose_options, tada_start_points').eq('client_id', profile.client_id).maybeSingle()
       .then(({ data }) => {
-        setWeeklyOffWeekday(data?.weekly_off_weekday ?? WEEKLY_OFF_WEEKDAY)
         setTadaVehicleRates({ '2w': null, '4w': null, ev: null, ...(data?.tada_vehicle_rates || {}) })
         setTadaPurposeOptions(data?.tada_purpose_options?.length ? data.tada_purpose_options : DEFAULT_PURPOSE_OPTIONS)
         setTadaStartPoints(data?.tada_start_points?.length ? data.tada_start_points : DEFAULT_START_POINTS)
@@ -208,7 +202,7 @@ export default function SelfServiceHome() {
   }
 
   const isSingleDay = startDate && endDate && startDate === endDate
-  const workingDays = startDate && endDate ? workingDaysInRange(startDate, endDate, weeklyOffWeekday) : []
+  const workingDays = startDate && endDate ? workingDaysInRange(startDate, endDate) : []
   const days = isSingleDay && dayType !== 'full' ? 0.5 : workingDays.length
 
   useEffect(() => { if (!isSingleDay) setDayType('full') }, [isSingleDay])
@@ -216,7 +210,7 @@ export default function SelfServiceHome() {
   async function submitLeave() {
     if (!leaveTypeId) { setMsg('error:Select a leave type.'); return }
     if (!startDate || !endDate) { setMsg('error:Select start and end dates.'); return }
-    if (workingDays.length === 0) { setMsg('error:No working days in that range.'); return }
+    if (workingDays.length === 0) { setMsg('error:No days in that range.'); return }
     setSubmitting(true); setMsg('')
     const { error } = await supabase.rpc('submit_my_leave_request', {
       p_leave_type_id: leaveTypeId, p_start_date: startDate, p_end_date: endDate, p_days: days,
@@ -369,7 +363,7 @@ export default function SelfServiceHome() {
                     </select>
                   </div>
                 )}
-                {days > 0 && <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{days} working day{days !== 1 ? 's' : ''} (weekly off day excluded)</div>}
+                {days > 0 && <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{days} day{days !== 1 ? 's' : ''}</div>}
                 <div>
                   <label style={lbl}>Reason</label>
                   <textarea style={{ ...inp, height: 60, resize: 'vertical' }} value={reason} onChange={e => setReason(e.target.value)} />

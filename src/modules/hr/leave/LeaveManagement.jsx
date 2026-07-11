@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import * as XLSX from 'xlsx'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange } from './leaveConstants'
-import { WEEKLY_OFF_WEEKDAY } from '../payrollConstants'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
 const inp = {
@@ -47,8 +45,6 @@ export default function LeaveManagement() {
   const [fDayType, setFDayType] = useState('full')
   const isSingleDay = fStart && fEnd && fStart === fEnd
 
-  const [weeklyOffWeekday, setWeeklyOffWeekday] = useState(WEEKLY_OFF_WEEKDAY) // 0=Sun..6=Sat
-
   const empMap  = Object.fromEntries(employees.map(e => [e.id, e]))
   const typeMap = Object.fromEntries(types.map(t => [t.id, t]))
   const activeTypes = types.filter(t => t.active)
@@ -68,26 +64,24 @@ export default function LeaveManagement() {
       const r = await scopedFrom('hr_leave_types').order('sort_order')
       lt = r.data || []
     }
-    const [{ data: emps }, { data: pr }, { data: reqs }, { data: settings }] = await Promise.all([
+    const [{ data: emps }, { data: pr }, { data: reqs }] = await Promise.all([
       scopedFrom('hr_employees', 'id, full_name, employee_code, department, status')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('monthly_periods', 'id, bs_year, bs_month, status'),
       scopedFrom('hr_leave_requests').order('start_date', { ascending: false }),
-      supabase.from('settings').select('weekly_off_weekday').eq('client_id', clientId).maybeSingle(),
     ])
     setTypes(lt); setEmployees(emps || []); setPeriods(pr || []); setRequests(reqs || [])
-    setWeeklyOffWeekday(settings?.weekly_off_weekday ?? WEEKLY_OFF_WEEKDAY)
     setLoading(false)
   }
 
   // ── New request ───────────────────────────────────────────────────────────
-  const previewDays = workingDaysInRange(fStart, fEnd, weeklyOffWeekday)
+  const previewDays = workingDaysInRange(fStart, fEnd)
   // Half-day only applies to a single-day request — 0.5 instead of the whole-day count.
   const previewDaysCount = isSingleDay && fDayType !== 'full' ? 0.5 : previewDays.length
   async function submitRequest() {
     if (!clientId) { setMsg('error:No client selected'); return }
     if (!fEmp || !fType || !fStart || !fEnd) { setMsg('error:Fill employee, type and dates'); return }
-    if (previewDays.length === 0) { setMsg('error:No working days in that range (end before start, or all on the weekly off day)'); return }
+    if (previewDays.length === 0) { setMsg('error:No days in that range (end date is before start date)'); return }
     setBusy(true); setMsg('')
     const { error } = await scopedInsert('hr_leave_requests', {
       employee_id: fEmp, leave_type_id: fType,
@@ -106,7 +100,7 @@ export default function LeaveManagement() {
   async function syncAttendance(req, status) {
     const periodMap = {}
     periods.forEach(p => { periodMap[`${p.bs_year}:${p.bs_month}`] = p })
-    const days = workingDaysInRange(req.start_date, req.end_date, weeklyOffWeekday)
+    const days = workingDaysInRange(req.start_date, req.end_date)
     const rows = []
     const missing = []
     days.forEach(d => {
@@ -262,8 +256,8 @@ export default function LeaveManagement() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, flexWrap: 'wrap', gap: 8 }}>
               <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-                <Tip text="The weekly off day is not counted against leave. The balance is reduced by working days only." width={260}>
-                  {fStart && fEnd ? `${fmt(previewDaysCount)} working day${previewDaysCount === 1 ? '' : 's'}` : 'Pick a date range'}
+                <Tip text="Every day in the picked range counts against the balance — there's no automatic day-off exclusion. Adjust the dates if the employee has a day off within this range." width={260}>
+                  {fStart && fEnd ? `${fmt(previewDaysCount)} day${previewDaysCount === 1 ? '' : 's'}` : 'Pick a date range'}
                 </Tip>
               </span>
               <button className="btn btn-primary" onClick={submitRequest} disabled={busy} style={{ fontSize: 13 }}>{busy ? 'Saving…' : 'Submit Request'}</button>
@@ -279,7 +273,7 @@ export default function LeaveManagement() {
                     <th>Type</th>
                     <th>Dates (BS)</th>
                     <th style={{ textAlign: 'right' }}>
-                      <Tip text="Working days in the range — the weekly off day excluded. Half-day requests show 0.5." width={240}>Days</Tip>
+                      <Tip text="Days in the range — every calendar day counts, half-day requests show 0.5." width={240}>Days</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Remaining balance for this leave type after approved leave this BS year." width={250}>Balance</Tip>
@@ -336,7 +330,7 @@ export default function LeaveManagement() {
             </div>
           </div>
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request reverts those attendance days to Present. Saturdays are never counted.
+            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request reverts those attendance days to Present. Every day in the range is included — mark the employee's own off days separately in Attendance if the range spans one.
           </div>
         </div>
       ) : tab === 'balances' ? (

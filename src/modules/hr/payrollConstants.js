@@ -36,10 +36,6 @@ export function minRateFor(payBasis, employmentType) {
 export const STANDARD_HOURS_PER_DAY = 8     // Nepal Labour Act standard working day
 export const OT_MULTIPLIER          = 1.5   // overtime paid at 1.5× normal hourly rate (weekday)
 export const OT_HOLIDAY_MULTIPLIER  = 2.0   // overtime on a gazetted public holiday (Nepal Labour Act)
-// Fallback default only — the real per-client value lives in settings.weekly_off_weekday
-// (editable from Roster → Shift Types). Used when that setting hasn't loaded yet, or by pure
-// functions whose caller didn't pass an override. (JS Date.getDay(): 0=Sun … 6=Sat)
-export const WEEKLY_OFF_WEEKDAY     = 6
 
 export const ATTENDANCE_STATUSES = [
   { key: 'present',           label: 'Present',             short: 'P',   color: 'var(--theme-green)' },
@@ -51,7 +47,19 @@ export const ATTENDANCE_STATUSES = [
   // the underlying leave type's paid/unpaid flag instead of always deducting 0.5 day's pay.
   { key: 'half_paid_leave',   label: 'Half-day Paid Leave',   short: '½PL', color: '#60a5fa' },
   { key: 'half_unpaid_leave', label: 'Half-day Unpaid Leave', short: '½UL', color: 'var(--theme-text3)' },
-  { key: 'weekly_off',        label: 'Weekly Off',          short: 'W',   color: 'var(--theme-text2)' },
+  // Key stays 'weekly_off' (no DB migration needed — hr_attendance_status_check already allows
+  // it) even though there's no more auto-computed "weekly" pattern; it's now just an explicit
+  // per-employee, per-day Off marking. Label/short changed from "Weekly Off"/"W" to "Off"/"O"
+  // to match — see attendanceFromRoster.js and AttendanceSheet.jsx.
+  { key: 'weekly_off',        label: 'Off',                 short: 'O',   color: 'var(--theme-text2)' },
   { key: 'holiday',           label: 'Holiday',             short: 'H',   color: '#818cf8' },
 ]
+
+// A roster shift type whose name suggests it marks a non-working day (e.g. "OFF DAY", "Day Off",
+// "LEAVE", "Public Holiday") rather than an actual shift — matched as a substring, not an exact
+// name, since clients phrase these differently. Shared by attendanceFromRoster.js (deciding
+// whether a zero-hour roster row should generate a 'weekly_off' vs 'holiday' attendance row) and
+// SelfServiceHome.jsx (highlighting an employee's own off days on their roster view).
+export const OFF_SHIFT_KEYWORDS = ['off', 'leave', 'holiday']
+export const isOffDay = name => !name || OFF_SHIFT_KEYWORDS.some(k => name.trim().toLowerCase().includes(k))
 

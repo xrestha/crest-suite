@@ -4,8 +4,6 @@ import Tip from '../../../components/Tip'
 import { calcHours } from './laborForecast'
 import { fmtTime } from './rosterHelpers'
 
-const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-
 const INP = {
   background: 'var(--theme-input-bg)',
   border: '1px solid var(--theme-border)',
@@ -17,7 +15,7 @@ const INP = {
   fontFamily: 'inherit',
 }
 
-export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes, weeklyOffWeekday, saveWeeklyOffWeekday }) {
+export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes }) {
   const { scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const [editing, setEditing] = useState(null)
   const [adding,  setAdding]  = useState(false)
@@ -96,19 +94,6 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
             + Add Shift
           </button>
         )}
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--theme-border-lt)' }}>
-        <Tip text="The day auto-defaulted to Weekly Off in Attendance, excluded from Leave working-day counts, and shaded on the Roster Board. Applies across the whole HR module for this client." width={280}>
-          <span style={{ fontSize: 12, color: 'var(--theme-text2)', fontWeight: 600 }}>Weekly Off Day</span>
-        </Tip>
-        <select
-          className="form-select"
-          value={weeklyOffWeekday}
-          onChange={e => saveWeeklyOffWeekday(parseInt(e.target.value, 10))}
-        >
-          {WEEKDAY_NAMES.map((name, i) => <option key={i} value={i}>{name}</option>)}
-        </select>
       </div>
 
       <div className="table-wrap">
@@ -245,6 +230,7 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
 
       <p style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 10, marginBottom: 0 }}>
         Leave Hours blank to auto-calculate from start/end times. Overnight shifts (e.g. Night 21:00–07:00) wrap past midnight automatically.
+        A zero-hour shift type named like "Off"/"Leave"/"Holiday" (e.g. "OFF DAY") is what Attendance → Generate from Roster recognizes as a day off for whichever staff it's assigned to.
       </p>
     </div>
   )
