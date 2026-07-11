@@ -141,6 +141,16 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S353 — 2026-07-11 — feat(hr): Attendance Start/End time — accept plain-digit shorthand ("0800"), no colon required
+
+User compared the Start/End time cells to a time-card calculator tool's input style and asked whether typing could skip the colon. Rather than a live-masked input (colon auto-inserted as you type) or a purely cosmetic restyle, went with the option the user picked: accept bare digits — `0800`, `800`, or just `8` — parsed the same way a time-clock calculator reads them (1-2 digits = hour only, 3 digits = H:MM, 4 digits = HH:MM), normalized to canonical `H:MM` the moment the field loses focus. Typing `08:00` still works exactly as before.
+
+New `parseTimeInput()` in `AttendanceSheet.jsx` is the single parser behind both the live validity check and the blur-time normalization. To avoid the input flashing red mid-keystroke (e.g. typing toward `0800`, the intermediate `080` numerically reads as an invalid `0:80`), `isValidTimeStr()` takes a `lenient` flag that's only true while that exact cell is focused — 1-3 bare digits are treated as "still typing" and never flagged red while focused, but get properly validated the instant the field blurs (via a new `activeTimeKey` state tracking which cell has focus). This also closes a correctness gap in the naive lenient-everywhere version: without focus-tracking, a genuinely broken leftover value (like an abandoned 3-digit `080`) would have silently passed validation forever and risked being sent to the DB's `time` column unparsed.
+
+`setTimeCell`'s Hours/OT auto-calc now runs off the parsed/normalized values rather than the raw typed string, so it can fire correctly mid-typing too (e.g. `800` alone already parses to a valid `8:00` and triggers the calc, without waiting for a 4th digit). Added a matching Help tip. Full HR suite (37 tests) passes; build compiles clean.
+
+**Files:** `src/modules/hr/attendance/AttendanceSheet.jsx`, `src/pages/Help.js`
+
 ### S352 — 2026-07-11 — fix: full BS calendar re-derivation — EPOCH_AD + BS_CALENDAR 2079-2087, all cross-verified against independent sources
 
 User asked to cross-check the Roster board's dates (Ashadh 22-28, 2083 shown as Sun-Sat) — this reproduced the EPOCH_AD bug found (but deliberately not fixed) in S347, so the user asked for the full fix: correct EPOCH_AD, and re-derive/verify the other 8 years of BS_CALENDAR (2083 was already hand-fixed in S349/350) with the same rigor.

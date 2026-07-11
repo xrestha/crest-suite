@@ -22,10 +22,32 @@ function weekdayOf(period, day) {
   return WEEKDAYS[bsToAd(period.bs_year, period.bs_month, day).getDay()]
 }
 
-// Start/End are punched in as plain text (24-hour HH:MM), not a native time-picker widget —
-// empty is fine (still typing / not entered), anything else must match the pattern exactly.
-function isValidTimeStr(s) {
-  return !s || /^([01]?\d|2[0-3]):[0-5]\d$/.test(s.trim())
+// Start/End are punched in as plain text (24-hour HH:MM), not a native time-picker widget. Also
+// accepts colon-free digits — "0800"/"800"/"08" — same shorthand a time-clock calculator takes,
+// so the admin doesn't have to type the colon by hand; normalized to canonical "H:MM" on blur.
+// Returns the canonical string, '' for blank, or null if genuinely unparseable.
+function parseTimeInput(raw) {
+  const s = (raw || '').trim()
+  if (!s) return ''
+  const colon = s.match(/^([01]?\d|2[0-3]):([0-5]\d)$/)
+  if (colon) return `${parseInt(colon[1], 10)}:${colon[2]}`
+  if (/^\d{1,4}$/.test(s)) {
+    let hour, minute
+    if (s.length <= 2) { hour = parseInt(s, 10); minute = 0 }
+    else if (s.length === 3) { hour = parseInt(s.slice(0, 1), 10); minute = parseInt(s.slice(1), 10) }
+    else { hour = parseInt(s.slice(0, 2), 10); minute = parseInt(s.slice(2), 10) }
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) return `${hour}:${String(minute).padStart(2, '0')}`
+  }
+  return null
+}
+
+// `lenient` (the field is currently focused / mid-typing) treats 1-3 bare digits as still-in-
+// progress rather than flashing red before the admin has finished typing a 4-digit HHMM entry.
+function isValidTimeStr(s, lenient) {
+  const v = (s || '').trim()
+  if (!v) return true
+  if (lenient && /^\d{1,3}$/.test(v)) return true
+  return parseTimeInput(v) !== null
 }
 
 export default function AttendanceSheet() {
@@ -39,6 +61,7 @@ export default function AttendanceSheet() {
   const [tab,       setTab]       = useState('mark')
   const [selectedDay, setSelectedDay] = useState(getBsToday().day)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('') // By Employee tab
+  const [activeTimeKey, setActiveTimeKey] = useState('') // `${empId}:${day}:${field}` currently focused — suppresses the invalid-red flash while mid-typing a digit shorthand
   const [saving,    setSaving]    = useState(false)
   const [savedMsg,  setSavedMsg]  = useState('')
   const [generating, setGenerating] = useState(false)
@@ -164,8 +187,10 @@ export default function AttendanceSheet() {
       const next = { ...prev, [field]: value }
       const start = field === 'start_time' ? value : prev.start_time
       const end   = field === 'end_time'   ? value : prev.end_time
-      if (isValidTimeStr(start) && isValidTimeStr(end)) {
-        const worked = calcHours(start, end)
+      const startNorm = parseTimeInput(start)
+      const endNorm   = parseTimeInput(end)
+      if (startNorm && endNorm) {
+        const worked = calcHours(startNorm, endNorm)
         if (worked != null) {
           next.hours_worked = worked
           next.ot_hours = Math.max(0, parseFloat((worked - assignedHoursFor(empId, day)).toFixed(1)))
@@ -173,6 +198,16 @@ export default function AttendanceSheet() {
       }
       return { ...m, [key]: next }
     })
+  }
+  // Leaving a Start/End field commits whatever shorthand was typed ("0800"/"800"/"08") into the
+  // canonical "H:MM" it'll be saved and displayed as (and re-runs the Hours/OT auto-calc against
+  // that normalized value). A leftover genuinely-invalid value (e.g. a 3-digit "080" left mid-
+  // entry) is kept as typed so the red "invalid" hint can flag it.
+  function normalizeTimeCell(empId, day, field) {
+    const rec = records[`${empId}:${day}`]
+    if (!rec) return
+    const normalized = parseTimeInput(rec[field])
+    if (normalized !== null && normalized !== (rec[field] || '')) setTimeCell(empId, day, field, normalized)
   }
   // All employees, one day (Mark Attendance tab's bulk buttons).
   function markAll(status) {
@@ -540,14 +575,18 @@ export default function AttendanceSheet() {
                           </select>
                         </td>
                         <td>
-                          <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time) ? 'var(--theme-red)' : undefined }}
-                            value={rec?.start_time || ''} onChange={e => setTimeCell(emp.id, selectedDay, 'start_time', e.target.value)} />
-                          {!isValidTimeStr(rec?.start_time) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM</div>}
+                          <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time, activeTimeKey === `${emp.id}:${selectedDay}:start_time`) ? 'var(--theme-red)' : undefined }}
+                            value={rec?.start_time || ''} onChange={e => setTimeCell(emp.id, selectedDay, 'start_time', e.target.value)}
+                            onFocus={() => setActiveTimeKey(`${emp.id}:${selectedDay}:start_time`)}
+                            onBlur={() => { normalizeTimeCell(emp.id, selectedDay, 'start_time'); setActiveTimeKey('') }} />
+                          {!isValidTimeStr(rec?.start_time, activeTimeKey === `${emp.id}:${selectedDay}:start_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
                         </td>
                         <td>
-                          <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time) ? 'var(--theme-red)' : undefined }}
-                            value={rec?.end_time || ''} onChange={e => setTimeCell(emp.id, selectedDay, 'end_time', e.target.value)} />
-                          {!isValidTimeStr(rec?.end_time) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM</div>}
+                          <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time, activeTimeKey === `${emp.id}:${selectedDay}:end_time`) ? 'var(--theme-red)' : undefined }}
+                            value={rec?.end_time || ''} onChange={e => setTimeCell(emp.id, selectedDay, 'end_time', e.target.value)}
+                            onFocus={() => setActiveTimeKey(`${emp.id}:${selectedDay}:end_time`)}
+                            onBlur={() => { normalizeTimeCell(emp.id, selectedDay, 'end_time'); setActiveTimeKey('') }} />
+                          {!isValidTimeStr(rec?.end_time, activeTimeKey === `${emp.id}:${selectedDay}:end_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {emp.pay_basis === 'hourly' ? (
@@ -666,14 +705,18 @@ export default function AttendanceSheet() {
                             </select>
                           </td>
                           <td>
-                            <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time) ? 'var(--theme-red)' : undefined }}
-                              value={rec?.start_time || ''} onChange={e => setTimeCell(selectedEmployeeId, d, 'start_time', e.target.value)} />
-                            {!isValidTimeStr(rec?.start_time) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM</div>}
+                            <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time, activeTimeKey === `${selectedEmployeeId}:${d}:start_time`) ? 'var(--theme-red)' : undefined }}
+                              value={rec?.start_time || ''} onChange={e => setTimeCell(selectedEmployeeId, d, 'start_time', e.target.value)}
+                              onFocus={() => setActiveTimeKey(`${selectedEmployeeId}:${d}:start_time`)}
+                              onBlur={() => { normalizeTimeCell(selectedEmployeeId, d, 'start_time'); setActiveTimeKey('') }} />
+                            {!isValidTimeStr(rec?.start_time, activeTimeKey === `${selectedEmployeeId}:${d}:start_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
                           </td>
                           <td>
-                            <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time) ? 'var(--theme-red)' : undefined }}
-                              value={rec?.end_time || ''} onChange={e => setTimeCell(selectedEmployeeId, d, 'end_time', e.target.value)} />
-                            {!isValidTimeStr(rec?.end_time) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM</div>}
+                            <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time, activeTimeKey === `${selectedEmployeeId}:${d}:end_time`) ? 'var(--theme-red)' : undefined }}
+                              value={rec?.end_time || ''} onChange={e => setTimeCell(selectedEmployeeId, d, 'end_time', e.target.value)}
+                              onFocus={() => setActiveTimeKey(`${selectedEmployeeId}:${d}:end_time`)}
+                              onBlur={() => { normalizeTimeCell(selectedEmployeeId, d, 'end_time'); setActiveTimeKey('') }} />
+                            {!isValidTimeStr(rec?.end_time, activeTimeKey === `${selectedEmployeeId}:${d}:end_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {emp?.pay_basis === 'hourly' ? (
