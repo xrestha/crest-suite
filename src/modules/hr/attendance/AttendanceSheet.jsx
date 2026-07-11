@@ -745,11 +745,18 @@ export default function AttendanceSheet() {
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Total overtime hours for the month." width={200}>OT</Tip>
                     </th>
+                    <th style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)' }}>
+                      <Tip text="P + A + O + OT added together for this employee." width={200}>Total</Tip>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {employees.map(emp => {
                     const s = summaryFor(emp)
+                    const pVal  = s.counts.present + s.counts.half_day * 0.5 + s.counts.half_paid_leave * 0.5
+                    const aVal  = s.counts.absent
+                    const oVal  = s.counts.weekly_off
+                    const otVal = s.otHours
                     return (
                       <tr key={emp.id}>
                         <td style={{ position: 'sticky', left: 0, background: 'var(--theme-card)', zIndex: 1, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
@@ -764,10 +771,11 @@ export default function AttendanceSheet() {
                             </td>
                           )
                         })}
-                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-green)', fontWeight: 600 }}>{s.counts.present + s.counts.half_day * 0.5 + s.counts.half_paid_leave * 0.5 || 0}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{s.counts.absent || 0}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{s.counts.weekly_off || 0}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{s.otHours || 0}</td>
+                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-green)', fontWeight: 600 }}>{pVal || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{aVal || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{oVal || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{otVal || 0}</td>
+                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-text1)', fontWeight: 700 }}>{pVal + aVal + oVal + otVal || 0}</td>
                       </tr>
                     )
                   })}

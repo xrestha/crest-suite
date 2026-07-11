@@ -141,6 +141,12 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S351 — 2026-07-11 — feat(hr): Attendance Month Summary — per-employee Total column (P+A+O+OT)
+
+Small follow-up to S349. First attempt added a horizontal Total *row* summing each column down the bottom of the table — wrong axis; the actual ask was a vertical Total *column* after OT, giving each employee's own P+A+O+OT sum on their row. Replaced the row with the column (e.g. 15 P + 13 A + 3 O + 0 OT = 31 for that employee), reusing the exact same per-column formulas each row already computed rather than introducing a second calculation path.
+
+**Files:** `src/modules/hr/attendance/AttendanceSheet.jsx`
+
 ### S350 — 2026-07-11 — fix: BS_CALENDAR 2083 month-length table had 4 wrong months (Jestha/Ashadh/Shrawan transposed, Ashwin short a day)
 
 User flagged Ashadh 2083 showing 31 days on the Attendance page when it should be 32. Verified against Hamro Patro (fetched all 12 months of BS 2083 individually, cross-checked each month's day-1 AD date against the next month's day-1 AD date to derive real month lengths independent of any single page's self-reported count) rather than patching just the one reported month, since a single wrong entry raised the question of whether the whole row was suspect.
