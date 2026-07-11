@@ -30,7 +30,7 @@ function isValidTimeStr(s) {
 
 export default function AttendanceSheet() {
   const { clientId } = useAuth()
-  const { scopedFrom, scopedUpsert } = useScopedDb()
+  const { scopedFrom, scopedUpsert, scopedDelete } = useScopedDb()
   const [periods,   setPeriods]   = useState([])
   const [period,    setPeriod]    = useState(null)
   const [employees, setEmployees] = useState([])
@@ -135,10 +135,12 @@ export default function AttendanceSheet() {
       return { ...m, [key]: { ...prev, [field]: value } }
     })
   }
-  // Reverts a cell to genuinely untouched — used when the Status dropdown is set back to the
-  // "— Not marked —" placeholder, since writing status: '' would violate the DB's status
-  // CHECK constraint and isn't what "not marked" means anyway.
-  function clearCell(empId, day) {
+  // Reverts a cell to genuinely untouched — used both by the Status dropdown's "— Not marked —"
+  // placeholder and the per-row delete button. Removes it from local state immediately for a
+  // snappy UI, and if it was ever actually saved, deletes the row in the DB too — Save Day's
+  // upsert only ever inserts/updates, never deletes, so without this a previously-saved value
+  // would just silently reappear on the next reload.
+  async function clearCell(empId, day) {
     const key = `${empId}:${day}`
     setRecords(m => {
       if (!(key in m)) return m
@@ -146,6 +148,9 @@ export default function AttendanceSheet() {
       delete next[key]
       return next
     })
+    if (!period) return
+    const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id).eq('bs_day', day)
+    if (error) setSavedMsg('error:' + error.message)
   }
   // Start/End are punched in as plain text (24-hour HH:MM) — auto-computes Hours + OT (worked
   // hours beyond that day's roster-assigned shift) the moment both are valid times. Still just
@@ -230,6 +235,26 @@ export default function AttendanceSheet() {
     setSaving(false)
   }
 
+  // Deletes every employee's record for the selected day — reverts the whole day back to
+  // genuinely blank, e.g. to clean up a day that was wrongly bulk-marked before the save-behavior
+  // fix. Destructive, so it asks first.
+  async function clearDay() {
+    if (!period) return
+    const touched = employees.filter(emp => cellFor(emp.id, selectedDay))
+    if (touched.length === 0) {
+      setSavedMsg('ok:Nothing to clear — Day ' + selectedDay + ' has no records.')
+      return
+    }
+    const ok = window.confirm(`Delete all ${touched.length} record(s) for Day ${selectedDay}? This can't be undone.`)
+    if (!ok) return
+    setSaving(true); setSavedMsg('')
+    const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).eq('bs_day', selectedDay)
+    if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
+    await loadAttendance(period.id)
+    setSavedMsg(`ok:Cleared Day ${selectedDay}`)
+    setSaving(false)
+  }
+
   async function generateFromRoster() {
     if (!period) return
     setGenerating(true); setSavedMsg('')
@@ -295,6 +320,26 @@ export default function AttendanceSheet() {
     if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
     await loadAttendance(period.id)
     setSavedMsg(`ok:Saved ${rows.length} day${rows.length === 1 ? '' : 's'} for ${name}`)
+    setSaving(false)
+  }
+
+  // Deletes every record for this employee, this whole period — e.g. to wipe a month that was
+  // wrongly bulk-marked before the save-behavior fix and re-enter it clean. Destructive, asks first.
+  async function clearEmployeeMonth(empId) {
+    if (!period || !empId) return
+    const name = employees.find(e => e.id === empId)?.full_name || 'employee'
+    const touchedCount = days.filter(d => cellFor(empId, d)).length
+    if (touchedCount === 0) {
+      setSavedMsg(`ok:Nothing to clear — no records for ${name}.`)
+      return
+    }
+    const ok = window.confirm(`Delete all ${touchedCount} record(s) for ${name} this month? This can't be undone.`)
+    if (!ok) return
+    setSaving(true); setSavedMsg('')
+    const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id)
+    if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
+    await loadAttendance(period.id)
+    setSavedMsg(`ok:Cleared ${name}'s records for ${periodLabel}`)
     setSaving(false)
   }
 
@@ -425,6 +470,11 @@ export default function AttendanceSheet() {
             <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={generateFromRoster} disabled={generating}>
               {generating ? 'Generating…' : '⚡ Generate from Roster'}
             </button>
+            <Tip text="Deletes every employee's saved record for this day — reverts the whole day back to genuinely blank. Can't be undone.">
+              <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }} onClick={clearDay} disabled={saving}>
+                🗑 Clear Day
+              </button>
+            </Tip>
             <div style={{ flex: 1 }} />
             {savedMsg && (
               <span style={{ fontSize: 12, color: savedMsg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
@@ -463,6 +513,7 @@ export default function AttendanceSheet() {
                       <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster-assigned shift, or enter directly. Don't also log the same hours in the Overtime module — both sources are paid, so duplicates pay twice (payroll flags this with an ⚠ OT ×2? badge)." width={280}>OT Hours</Tip>
                     </th>
                     <th>Note</th>
+                    <th style={{ width: 32 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -511,6 +562,17 @@ export default function AttendanceSheet() {
                         <td>
                           <input style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(emp.id, selectedDay, 'note', e.target.value)} placeholder="—" />
                         </td>
+                        <td>
+                          {rec && (
+                            <Tip text="Delete this record — reverts to Not Marked">
+                              <button onClick={() => clearCell(emp.id, selectedDay)}
+                                style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 15, padding: 4, lineHeight: 1 }}
+                                onMouseEnter={e => { e.currentTarget.style.color = 'var(--theme-red)' }}
+                                onMouseLeave={e => { e.currentTarget.style.color = 'var(--theme-text3)' }}
+                              >🗑</button>
+                            </Tip>
+                          )}
+                        </td>
                       </tr>
                     )
                   })}
@@ -538,6 +600,11 @@ export default function AttendanceSheet() {
             <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => generateFromRosterForEmployee(selectedEmployeeId)} disabled={generating}>
               {generating ? 'Generating…' : '⚡ Generate from Roster'}
             </button>
+            <Tip text="Deletes every saved record for this employee, this whole month — reverts it back to genuinely blank. Can't be undone.">
+              <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }} onClick={() => clearEmployeeMonth(selectedEmployeeId)} disabled={saving}>
+                🗑 Clear Month
+              </button>
+            </Tip>
             <div style={{ flex: 1 }} />
             {savedMsg && (
               <span style={{ fontSize: 12, color: savedMsg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
@@ -573,11 +640,12 @@ export default function AttendanceSheet() {
                       <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster-assigned shift, or enter directly." width={280}>OT Hours</Tip>
                     </th>
                     <th>Note</th>
+                    <th style={{ width: 32 }} />
                   </tr>
                 </thead>
                 <tbody>
                   {!selectedEmployeeId ? (
-                    <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>Pick an employee above</td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>Pick an employee above</td></tr>
                   ) : (() => {
                     const emp = employees.find(e => e.id === selectedEmployeeId)
                     return days.map(d => {
@@ -619,6 +687,17 @@ export default function AttendanceSheet() {
                           </td>
                           <td>
                             <input style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'note', e.target.value)} placeholder="—" />
+                          </td>
+                          <td>
+                            {rec && (
+                              <Tip text="Delete this record — reverts to Not Marked">
+                                <button onClick={() => clearCell(selectedEmployeeId, d)}
+                                  style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 15, padding: 4, lineHeight: 1 }}
+                                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--theme-red)' }}
+                                  onMouseLeave={e => { e.currentTarget.style.color = 'var(--theme-text3)' }}
+                                >🗑</button>
+                              </Tip>
+                            )}
                           </td>
                         </tr>
                       )

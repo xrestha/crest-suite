@@ -26,7 +26,12 @@ const BS_CALENDAR = {
   2080: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
   2081: [31, 32, 31, 32, 31, 30, 30, 29, 30, 29, 30, 30],
   2082: [31, 31, 32, 32, 31, 30, 30, 30, 29, 30, 29, 31],
-  2083: [31, 32, 31, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  // Corrected S349 (2026-07-11) — verified month-by-month against Hamro Patro (every month's day-1
+  // AD date cross-checked against the next month's day-1 AD date). Was [31,32,31,32,31,30,...]:
+  // Jestha/Ashadh/Shrawan were transposed (32/31/32 instead of the real 31/32/31) and Ashwin was
+  // short by a day (30 instead of 31) — the year's total (365) matched either way, which is
+  // presumably why it went unnoticed. Months 7-12 were already correct.
+  2083: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
   2084: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 30],
   2085: [31, 32, 31, 31, 32, 30, 30, 30, 29, 30, 30, 30],
   2086: [31, 32, 31, 32, 31, 31, 30, 30, 29, 30, 29, 31],

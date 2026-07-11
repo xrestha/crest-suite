@@ -9,6 +9,24 @@ describe('daysInBsMonth', () => {
     expect(daysInBsMonth(2082, 9)).toBe(29)
   })
 
+  // Corrected S349 (2026-07-11) — verified month-by-month against Hamro Patro. Jestha/Ashadh/
+  // Shrawan were transposed and Ashwin was short by a day; locking in the corrected values so a
+  // future edit can't silently re-introduce the same transposition.
+  test('BS 2083 matches the corrected month-length table (S349)', () => {
+    expect(daysInBsMonth(2083, 1)).toBe(31)  // Baisakh
+    expect(daysInBsMonth(2083, 2)).toBe(31)  // Jestha
+    expect(daysInBsMonth(2083, 3)).toBe(32)  // Ashadh
+    expect(daysInBsMonth(2083, 4)).toBe(31)  // Shrawan
+    expect(daysInBsMonth(2083, 5)).toBe(31)  // Bhadra
+    expect(daysInBsMonth(2083, 6)).toBe(31)  // Ashwin
+    expect(daysInBsMonth(2083, 7)).toBe(30)  // Kartik
+    expect(daysInBsMonth(2083, 8)).toBe(29)  // Mangsir
+    expect(daysInBsMonth(2083, 9)).toBe(30)  // Poush
+    expect(daysInBsMonth(2083, 10)).toBe(29) // Magh
+    expect(daysInBsMonth(2083, 11)).toBe(30) // Falgun
+    expect(daysInBsMonth(2083, 12)).toBe(30) // Chaitra
+  })
+
   test('falls back to a 30-day approximation outside the covered range', () => {
     expect(daysInBsMonth(2099, 5)).toBe(30)
   })

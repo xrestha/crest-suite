@@ -141,6 +141,26 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S350 — 2026-07-11 — fix: BS_CALENDAR 2083 month-length table had 4 wrong months (Jestha/Ashadh/Shrawan transposed, Ashwin short a day)
+
+User flagged Ashadh 2083 showing 31 days on the Attendance page when it should be 32. Verified against Hamro Patro (fetched all 12 months of BS 2083 individually, cross-checked each month's day-1 AD date against the next month's day-1 AD date to derive real month lengths independent of any single page's self-reported count) rather than patching just the one reported month, since a single wrong entry raised the question of whether the whole row was suspect.
+
+Confirmed 4 of `src/utils/bsCalendar.js`'s `BS_CALENDAR[2083]` 12 entries were wrong: Jestha/Ashadh/Shrawan were `[32,31,32]` instead of the real `[31,32,31]` (a transposition), and Ashwin was `30` instead of `31`. Months 1, 5, 7–12 were already correct. The year's total (365 days) happened to match either way, which is presumably why this went unnoticed — nothing downstream cross-checks a year's total against anything external. Fixed the row to `[31,31,32,31,31,31,30,29,30,29,30,30]`; added a dedicated test in `bsCalendar.test.js` covering all 12 corrected months so a future edit can't silently re-transpose them. All 53 tests (bsCalendar + HR suite) pass; build compiles clean.
+
+**Separate, still open:** this is unrelated to — and doesn't fix — the `EPOCH_AD` 2-day offset bug found earlier this session (see [[bug_bs_calendar_epoch_offset]] memory / S347's writeup). That's a constant applied uniformly to every BS year; this was wrong values *within* one specific year's table row. Both need to be correct for `bsCalendar.js` to be fully trustworthy — the epoch fix is still pending explicit go-ahead given its live-production blast radius. Worth a future spot-check of the other 8 years (2079–2087) in `BS_CALENDAR` given this table already had one confirmed transcription error — not done here, out of scope for what was asked.
+
+**Files:** `src/utils/bsCalendar.js`, `src/utils/bsCalendar.test.js`
+
+### S349 — 2026-07-11 — feat(hr): Attendance — "not marked" display fix, then real delete/clear buttons once its gap surfaced
+
+Follow-up design re-check after S348's save-behavior fix (only touched cells get written) found the Status dropdown still *displayed* "Present" for an untouched cell — same green/bold look as a genuinely-confirmed one, so there was no visual way to tell before saving which rows would actually persist. Fixed by having `statusFor()` return `null` for a cell with no record, rendered as a neutral "— Not marked —" placeholder (grey, unbolded) instead. Also bumped the Start/End "invalid — use HH:MM" warning from 9px (smaller than anything else on the page) to 11px, caught in the same pass.
+
+That placeholder then turned out to have a real gap of its own: selecting it only cleared *local* React state, never actually deleting the row from `hr_attendance` if one already existed — so reverting a previously-saved cell back to "not marked" and clicking Save left the stale DB row untouched (Save only ever upserts, never deletes) and it silently reappeared on the next reload. Fixed `clearCell()` to also issue a real `scopedDelete()` against the DB when the cell was previously saved.
+
+User then asked for an actual way to bulk-clean bad historical data (the false Present-on-save rows from before S348's fix) rather than editing cell-by-cell — having declined an automated cleanup of already-written rows earlier in the session in favor of reviewing manually. Added that manual tooling: a small 🗑 delete button on every row in both Mark Attendance and By Employee (only shown when that cell has a record), plus two bulk actions — "Clear Day" (deletes every employee's record for the selected day, Mark Attendance) and "Clear Month" (deletes every record for the selected employee this period, By Employee) — both behind a `window.confirm` given they're destructive and irreversible.
+
+**Files:** `src/modules/hr/attendance/AttendanceSheet.jsx`
+
 ### S348 — 2026-07-11 — fix(hr): Attendance no longer silently saves untouched days as Present
 
 Follow-up to S346/S347's "nothing assumed off automatically" work — found the same problem in reverse. `saveDay()` and `saveEmployeeMonth()` still wrote `status: rec?.status ?? defaultStatus()` for every employee/day in scope, so any cell nobody had touched got persisted as Present the moment Save was clicked. Concretely: opening By Employee, correcting a handful of days (Off on Saturdays, Holiday on a gazetted day), and clicking Save Month wrote **every other day of the month as Present too**, even though nothing was actually confirmed — reproduced live against a real client's Ashadh 2083 data (Ananda Bhusal showed 26 days Present against a completely empty Roster for the first 19 days of the month; traced and confirmed the mechanism, user declined an automated cleanup of the already-written rows and is correcting that data by hand).
