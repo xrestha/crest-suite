@@ -188,6 +188,14 @@ export default function AttendanceSheet() {
     const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id).eq('bs_day', day)
     if (error) setSavedMsg('error:' + error.message)
   }
+  // Unpaid break/lunch minutes, subtracted from the raw Start-to-End span before it becomes Hours
+  // Worked — otherwise a clocked-out lunch break would inflate both Hours and OT. Clamped at 0 so
+  // a break longer than the raw span can't produce a negative.
+  function computeWorked(startNorm, endNorm, breakMinutes) {
+    const raw = calcHours(startNorm, endNorm)
+    if (raw == null) return null
+    return Math.max(0, parseFloat((raw - (parseFloat(breakMinutes) || 0) / 60).toFixed(2)))
+  }
   // Start/End are punched in as plain text (24-hour HH:MM) — auto-computes Hours + OT (worked
   // hours beyond that day's roster-assigned shift) the moment both are valid times. Still just
   // seeds the Hours/OT Hours fields, which stay directly editable afterward if the auto-calc
@@ -203,7 +211,26 @@ export default function AttendanceSheet() {
       const startNorm = parseTimeInput(start)
       const endNorm   = parseTimeInput(end)
       if (startNorm && endNorm) {
-        const worked = calcHours(startNorm, endNorm)
+        const worked = computeWorked(startNorm, endNorm, prev.break_minutes)
+        if (worked != null) {
+          next.hours_worked = worked
+          next.ot_hours = Math.max(0, parseFloat((worked - assignedHoursFor(empId, day)).toFixed(1)))
+        }
+      }
+      return { ...m, [key]: next }
+    })
+  }
+  // Editing the break-minutes field re-runs the same Hours/OT auto-calc against the already-
+  // stored Start/End (mirrors setTimeCell's recompute, just triggered from the other input).
+  function setBreakCell(empId, day, value) {
+    const key = `${empId}:${day}`
+    setRecords(m => {
+      const prev = m[key] || { employee_id: empId, bs_day: day, status: defaultStatus() }
+      const next = { ...prev, break_minutes: value }
+      const startNorm = parseTimeInput(prev.start_time)
+      const endNorm   = parseTimeInput(prev.end_time)
+      if (startNorm && endNorm) {
+        const worked = computeWorked(startNorm, endNorm, value)
         if (worked != null) {
           next.hours_worked = worked
           next.ot_hours = Math.max(0, parseFloat((worked - assignedHoursFor(empId, day)).toFixed(1)))
@@ -263,6 +290,7 @@ export default function AttendanceSheet() {
           status:       rec.status ?? defaultStatus(),
           hours_worked: parseFloat(rec.hours_worked) || 0,
           ot_hours:     parseFloat(rec.ot_hours) || 0,
+          break_minutes: parseFloat(rec.break_minutes) || null,
           note:         rec.note || null,
           // An invalid/partial typed time never reaches the DB's `time` column — it just isn't
           // saved (the admin still sees what they typed on screen until they fix or clear it).
@@ -352,6 +380,7 @@ export default function AttendanceSheet() {
           status:       rec.status ?? defaultStatus(),
           hours_worked: parseFloat(rec.hours_worked) || 0,
           ot_hours:     parseFloat(rec.ot_hours) || 0,
+          break_minutes: parseFloat(rec.break_minutes) || null,
           note:         rec.note || null,
           start_time:   isValidTimeStr(rec.start_time) ? (rec.start_time || null) : null,
           end_time:     isValidTimeStr(rec.end_time)   ? (rec.end_time   || null) : null,
@@ -554,8 +583,11 @@ export default function AttendanceSheet() {
                     <th style={{ width: 100 }}>
                       <Tip text="Clock-out time — type 24-hour HH:MM (e.g. 18:30). Overnight shifts (end time earlier than start time) are handled automatically." width={260}>End</Tip>
                     </th>
+                    <th style={{ width: 70, textAlign: 'right' }}>
+                      <Tip text="Unpaid lunch/break minutes to subtract from the raw Start-to-End span before it becomes Hours Worked — otherwise a clocked-out break would inflate Hours and OT. Leave blank if the shift has no unpaid break." width={260}>Break</Tip>
+                    </th>
                     <th style={{ width: 90, textAlign: 'right' }}>
-                      <Tip text="Hours worked that day — auto-filled from Start/End, or enter directly. Only used for hourly-paid staff." width={240}>Hours</Tip>
+                      <Tip text="Hours worked that day — auto-filled from Start/End minus Break, or enter directly. Only used for hourly-paid staff." width={250}>Hours</Tip>
                     </th>
                     <th style={{ width: 90, textAlign: 'right' }}>
                       <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster-assigned shift, or enter directly. Don't also log the same hours in the Overtime module — both sources are paid, so duplicates pay twice (payroll flags this with an ⚠ OT ×2? badge)." width={280}>OT Hours</Tip>
@@ -600,6 +632,10 @@ export default function AttendanceSheet() {
                             onFocus={() => setActiveTimeKey(`${emp.id}:${selectedDay}:end_time`)}
                             onBlur={() => { normalizeTimeCell(emp.id, selectedDay, 'end_time'); setActiveTimeKey('') }} />
                           {!isValidTimeStr(rec?.end_time, activeTimeKey === `${emp.id}:${selectedDay}:end_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <input type="number" min="0" step="5" style={{ ...inp, width: 60, textAlign: 'right' }}
+                            value={rec?.break_minutes ?? ''} onChange={e => setBreakCell(emp.id, selectedDay, e.target.value)} placeholder="0" />
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {emp.pay_basis === 'hourly' ? (
@@ -690,8 +726,11 @@ export default function AttendanceSheet() {
                     <th style={{ width: 100 }}>
                       <Tip text="Clock-out time — type 24-hour HH:MM (e.g. 18:30). Overnight shifts (end time earlier than start time) are handled automatically." width={260}>End</Tip>
                     </th>
+                    <th style={{ width: 70, textAlign: 'right' }}>
+                      <Tip text="Unpaid lunch/break minutes to subtract from the raw Start-to-End span before it becomes Hours Worked — otherwise a clocked-out break would inflate Hours and OT. Leave blank if the shift has no unpaid break." width={260}>Break</Tip>
+                    </th>
                     <th style={{ width: 90, textAlign: 'right' }}>
-                      <Tip text="Hours worked that day — auto-filled from Start/End, or enter directly. Only used for hourly-paid staff." width={240}>Hours</Tip>
+                      <Tip text="Hours worked that day — auto-filled from Start/End minus Break, or enter directly. Only used for hourly-paid staff." width={250}>Hours</Tip>
                     </th>
                     <th style={{ width: 90, textAlign: 'right' }}>
                       <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster-assigned shift, or enter directly." width={280}>OT Hours</Tip>
@@ -735,6 +774,10 @@ export default function AttendanceSheet() {
                               onFocus={() => setActiveTimeKey(`${selectedEmployeeId}:${d}:end_time`)}
                               onBlur={() => { normalizeTimeCell(selectedEmployeeId, d, 'end_time'); setActiveTimeKey('') }} />
                             {!isValidTimeStr(rec?.end_time, activeTimeKey === `${selectedEmployeeId}:${d}:end_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <input type="number" min="0" step="5" style={{ ...inp, width: 60, textAlign: 'right' }}
+                              value={rec?.break_minutes ?? ''} onChange={e => setBreakCell(selectedEmployeeId, d, e.target.value)} placeholder="0" />
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {emp?.pay_basis === 'hourly' ? (

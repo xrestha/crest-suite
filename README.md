@@ -141,6 +141,14 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S355 — 2026-07-11 — feat(hr): Attendance gets an unpaid Break (minutes) field
+
+User pointed at calculatorsoup.com's Hours Calculator and asked what was worth adopting. Its core feature not already covered by Crest: subtracting an unpaid lunch/break deduction from the raw Start-to-End span before it becomes a paid hours total (its rounding-to-nearest-5/15/6-minutes and multi-break options were judged not worth the added complexity — Hours/OT are already directly editable if a precise adjustment is needed, and the app's Month Summary already covers the "weekly hours calculator" use case at BS-month grain). Without it, a clocked-out lunch break was inflating both Hours Worked and OT Hours for anyone whose Start/End span included one.
+
+Added a "Break" column (minutes) next to End on both the Mark Attendance and By Employee tabs. New `computeWorked()` in `AttendanceSheet.jsx` subtracts break minutes from the raw Start-to-End span (clamped at 0) before it becomes Hours Worked / feeds the OT calc; a new `setBreakCell()` mirrors `setTimeCell()`'s auto-recalc so editing Break alone (after Start/End are already filled) updates Hours/OT immediately, in either entry order. New `hr_attendance.break_minutes` column (migration `20260711163011_hr_attendance_break_minutes.sql`, integer, nullable — apply via Supabase SQL Editor). Full HR suite (37 tests) passes; build compiles clean.
+
+**Files:** `src/modules/hr/attendance/AttendanceSheet.jsx`, `src/pages/Help.js`, `supabase/migrations/20260711163011_hr_attendance_break_minutes.sql`
+
 ### S354 — 2026-07-11 — feat(hr): Attendance flags shortfall hours against the roster (no auto-deduction)
 
 User asked what should happen when an employee's clocked hours fall short of their Roster-assigned shift. Researched Nepal's Labour Act 2074 / Rules 2075: Section 47 restricts salary deductions to a fixed list of grounds, and the "absence" deduction it does define is a full-day daily-rate deduction — nothing in the Act prescribes a per-hour/partial-day formula, and deducting outside the Act's grounds risks the labour office ordering double repayment. Checked `payrollCompute.js` too: for `monthly`/`daily` pay-basis employees, a day marked Present already pays a full day regardless of actual `hours_worked` — a shortfall currently pays out silently, unflagged. (`hourly`-basis staff are unaffected — their pay is computed directly from hours worked.)
