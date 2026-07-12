@@ -101,10 +101,10 @@ export default function AdminDashboardOverview() {
 
   const statCard = (borderColor) => ({
     background: 'var(--theme-card)', border: `1px solid ${borderColor || 'var(--theme-border)'}`,
-    borderRadius: 10, padding: '16px 18px'
+    borderRadius: 'var(--radius-lg)', boxShadow: 'var(--theme-card-shadow)', padding: '16px 18px'
   })
   const planBadge = (plan) => ({
-    fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+    fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)',
     color:       plan === 'pro' ? 'var(--theme-accent)'  : plan === 'growth' ? 'var(--theme-green)'               : 'var(--theme-text2)',
     background:  plan === 'pro' ? 'rgba(201,168,76,0.12)': plan === 'growth' ? 'rgba(52,211,153,0.10)'            : 'rgba(120,113,108,0.10)',
     border: `1px solid ${plan === 'pro' ? 'rgba(201,168,76,0.25)' : plan === 'growth' ? 'rgba(52,211,153,0.20)' : 'rgba(120,113,108,0.20)'}`,

@@ -7,9 +7,9 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
   if (!ready) {
     return (
       <div style={{
-        minHeight: '100vh', background: '#0f1117',
+        minHeight: '100vh', background: 'var(--theme-bg, #0f1117)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: '#c9a84c', fontSize: 14, letterSpacing: '0.08em'
+        color: 'var(--theme-accent, #c9a84c)', fontSize: 14, letterSpacing: '0.08em'
       }}>
         Loading…
       </div>

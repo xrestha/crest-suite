@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
+import { useTheme } from '../../context/ThemeContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -16,6 +17,7 @@ const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#f
 
 export default function ClientDashboard() {
   const { profile, clientId, isAdmin, clientModules, hasFeature, loading: authLoading, adminViewClientName } = useAuth()
+  const { colors, themeKey } = useTheme()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
@@ -425,7 +427,8 @@ export default function ClientDashboard() {
 
   // Shared mini card style
   const kpiCard = (onClick) => ({
-    background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 10,
+    background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)',
+    boxShadow: 'var(--theme-card-shadow)',
     padding: '10px 14px', cursor: onClick ? 'pointer' : 'default',
     transition: 'border-color 0.15s'
   })
@@ -435,6 +438,27 @@ export default function ClientDashboard() {
   // hierarchy explicit via its params, rather than one flattened size for every card.
   const kpiLabelStyle = { fontSize: 10, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }
   const kpiSubtextStyle = { fontSize: 10, color: 'var(--theme-text3)', marginTop: 4 }
+
+  // Colorful per-category icon badge on a headline KPI card — a deliberate exception to the One
+  // Accent Rule, scoped to the Bright preset only (see DESIGN.md's exception note). Every other
+  // preset keeps plain text-only stat cards, same as today. Not applied to every stat card on
+  // every page — just this dashboard's primary IMS row, matching what was actually mocked up.
+  function kpiIcon(glyph, hue) {
+    if (themeKey !== 'bright') return null
+    const hues = {
+      blue:  { bg: 'rgba(58,109,240,0.12)', fg: colors.accent },
+      green: { bg: 'rgba(22,163,74,0.12)',  fg: colors.green },
+      amber: { bg: 'rgba(217,119,6,0.12)',  fg: colors.amber },
+    }
+    const h = hues[hue] || hues.blue
+    return (
+      <div style={{
+        width: 30, height: 30, borderRadius: 'var(--radius-md)', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', fontSize: 14, marginBottom: 10,
+        background: h.bg, color: h.fg,
+      }}>{glyph}</div>
+    )
+  }
   const kpiValueStyle = (size, weight = 700) => ({ fontSize: size, fontWeight: weight, lineHeight: 1.1 })
 
   // Compact upsell card for a locked feature → links to /pricing. Only render when the
@@ -444,7 +468,7 @@ export default function ClientDashboard() {
       onClick={() => navigate('/pricing')}
       style={{
         background: 'rgba(129,140,248,0.05)', border: '1px dashed rgba(129,140,248,0.4)',
-        borderRadius: 10, padding: '10px 14px', cursor: 'pointer', transition: 'border-color 0.15s'
+        borderRadius: 'var(--radius-lg)', padding: '10px 14px', cursor: 'pointer', transition: 'border-color 0.15s'
       }}
     >
       <div style={{ ...kpiLabelStyle, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
@@ -567,6 +591,7 @@ export default function ClientDashboard() {
 
         {/* Net Purchases */}
         <div style={kpiCard(() => navigate('/purchases'))} onClick={() => navigate('/purchases')}>
+          {kpiIcon('↓', 'blue')}
           <div style={kpiLabelStyle}>Net Purchases</div>
           <div style={{ ...kpiValueStyle(18), color: 'var(--theme-accent)' }}>
             {loading ? '—' : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
@@ -577,6 +602,7 @@ export default function ClientDashboard() {
         {/* Revenue */}
         {canSales ? (
           <div style={kpiCard(() => navigate('/sales'))} onClick={() => navigate('/sales')}>
+            {kpiIcon('↑', 'green')}
             <div style={kpiLabelStyle}>Revenue</div>
             <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green)' }}>
               {loading ? '—' : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
@@ -588,6 +614,7 @@ export default function ClientDashboard() {
         {/* Food Cost % — computable from purchases ÷ revenue, so any sales client sees it */}
         {canSales ? (
           <div style={kpiCard(() => navigate(canVariance ? '/variance' : '/summary'))} onClick={() => navigate(canVariance ? '/variance' : '/summary')}>
+            {kpiIcon('◈', 'amber')}
             <div style={kpiLabelStyle}>
               <Tip text="Net purchases ÷ revenue × 100. Shows what portion of sales goes to ingredient cost. Healthy range: 28–35% for Nepal F&B." width={240}>Food Cost %</Tip>
             </div>
@@ -606,6 +633,7 @@ export default function ClientDashboard() {
         {/* Fixed Costs % (Pro — needs overhead data) */}
         {canOverheads ? (
           <div style={kpiCard(() => navigate('/overheads'))} onClick={() => navigate('/overheads')}>
+            {kpiIcon('₿', 'blue')}
             <div style={kpiLabelStyle}>
               <Tip text="All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Target: under 60% combined. See Overheads page for the full breakdown." width={250}>Fixed Costs % of Revenue</Tip>
             </div>
@@ -626,6 +654,7 @@ export default function ClientDashboard() {
         {/* Est. Net Margin % (Pro — only meaningful with overhead data) */}
         {canOverheads && (
           <div style={kpiCard(null)}>
+            {kpiIcon('◎', 'green')}
             <div style={kpiLabelStyle}>
               <Tip text="Revenue minus food cost and overheads, as a % of revenue. This is what the business keeps after ingredient and fixed costs. Healthy Nepal F&B target: ≥20%." width={260}>Est. Net Margin %</Tip>
             </div>
@@ -760,9 +789,9 @@ export default function ClientDashboard() {
               title="Daily Purchases vs Sales"
               cardStyle={{ minWidth: 0 }}
               legend={<>
-                <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: '#c9a84c' }}>●</span> Purchases</span>
-                {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: '#34d399' }}>●</span> Sales</span>}
-                {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: '#34d399', letterSpacing: '-2px' }}>┄</span> Projection</span>}
+                <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-accent)' }}>●</span> Purchases</span>
+                {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green)' }}>●</span> Sales</span>}
+                {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green)', letterSpacing: '-2px' }}>┄</span> Projection</span>}
                 {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
               </>}
               footer={salesProjection && (
@@ -781,18 +810,18 @@ export default function ClientDashboard() {
                 const chart = (
                   <ResponsiveContainer width="100%" height={h}>
                     <LineChart data={dailyTrend} margin={{ top: big ? 8 : 4, right: big ? 16 : 8, bottom: big ? 4 : 0, left: big ? 8 : 0 }}>
-                      <CartesianGrid stroke="#2a2f3d" strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="day" tick={{ fill: '#9ca3af', fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} interval={0} tickFormatter={v => v.replace('Day ', '')} />
-                      <YAxis tick={{ fill: '#9ca3af', fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
+                      <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="day" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} interval={0} tickFormatter={v => v.replace('Day ', '')} />
+                      <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
                       <Tooltip
                         contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: big ? 12 : 11 }}
-                        labelStyle={{ color: '#fff' }}
+                        labelStyle={{ color: colors.text1 }}
                         formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
                         labelFormatter={l => l}
                       />
-                      <Line type="monotone" dataKey="purchases" name="Purchases" stroke="#c9a84c" strokeWidth={big ? 2.5 : 2} connectNulls dot={{ r: big ? 3 : 2, fill: '#c9a84c', strokeWidth: 0 }} activeDot={{ r: big ? 5 : 4, fill: '#c9a84c' }} />
-                      {hasDailySales && <Line type="monotone" dataKey="sales" name="Sales" stroke="#34d399" strokeWidth={big ? 2.5 : 2} connectNulls dot={{ r: big ? 3 : 2, fill: '#34d399', strokeWidth: 0 }} activeDot={{ r: big ? 5 : 4, fill: '#34d399' }} />}
-                      {salesProjection && <Line type="monotone" dataKey="salesProj" name="Projection" stroke="#34d399" strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.65} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: '#34d399' }} />}
+                      <Line type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={big ? 2.5 : 2} connectNulls dot={{ r: big ? 3 : 2, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: big ? 5 : 4, fill: colors.accent }} />
+                      {hasDailySales && <Line type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={big ? 2.5 : 2} connectNulls dot={{ r: big ? 3 : 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: big ? 5 : 4, fill: colors.green }} />}
+                      {salesProjection && <Line type="monotone" dataKey="salesProj" name="Projection" stroke={colors.green} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.65} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.green }} />}
                     </LineChart>
                   </ResponsiveContainer>
                 )
@@ -818,13 +847,13 @@ export default function ClientDashboard() {
                   <ResponsiveContainer width="100%" height={h}>
                     <BarChart data={topItemSpend.slice(0, count)} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
                       <XAxis type="number" hide />
-                      <YAxis type="category" dataKey="name" tick={{ fill: '#9ca3af', fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
+                      <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
                       <Tooltip
                         contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
                         formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}`, p.payload.fullName || n]}
                         labelFormatter={() => ''}
                       />
-                      <Bar dataKey="value" fill="#c9a84c" radius={[0, 3, 3, 0]} barSize={big ? 18 : 10}>
+                      <Bar dataKey="value" fill={colors.accent} radius={[0, 3, 3, 0]} barSize={big ? 18 : 10}>
                         {topItemSpend.slice(0, count).map((entry, i) => (
                           <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
@@ -854,11 +883,11 @@ export default function ClientDashboard() {
                   <div style={{ minWidth: Math.max(0, fcTrend.length * 64), height: h }}>
                     <ResponsiveContainer width="100%" height={h}>
                       <LineChart data={fcTrend} margin={{ top: 8, right: 48, bottom: 0, left: 0 }}>
-                        <CartesianGrid stroke="#2a2f3d" strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fill: '#9ca3af', fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
-                        <YAxis tick={{ fill: '#9ca3af', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
-                        <ReferenceLine y={35} stroke="#34d399" strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '35%', fill: '#34d399', fontSize: 9, position: 'right' }} />
-                        <ReferenceLine y={45} stroke="#f87171" strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '45%', fill: '#f87171', fontSize: 9, position: 'right' }} />
+                        <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
+                        <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
+                        <ReferenceLine y={35} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '35%', fill: colors.green, fontSize: 9, position: 'right' }} />
+                        <ReferenceLine y={45} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '45%', fill: colors.red, fontSize: 9, position: 'right' }} />
                         <Tooltip
                           contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
                           labelStyle={{ color: 'var(--theme-text1)' }}
@@ -871,13 +900,13 @@ export default function ClientDashboard() {
                             return [lines.join(' · '), 'Food Cost %']
                           }}
                         />
-                        <Line type="monotone" dataKey="fc" strokeWidth={2} stroke="#c9a84c" connectNulls={false}
+                        <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false}
                           dot={(props) => {
                             const { cx, cy, payload } = props
-                            const col = payload.fc <= 35 ? '#34d399' : payload.fc <= 45 ? '#c9a84c' : '#f87171'
-                            return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? '#e8e0d0' : 'none'} strokeWidth={1.5} />
+                            const col = payload.fc <= 35 ? colors.green : payload.fc <= 45 ? colors.accent : colors.red
+                            return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
                           }}
-                          activeDot={{ r: 5, fill: '#c9a84c' }}
+                          activeDot={{ r: 5, fill: colors.accent }}
                         />
                       </LineChart>
                     </ResponsiveContainer>

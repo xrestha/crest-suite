@@ -239,7 +239,8 @@ export default function OwnerDashboard() {
   // Shared mini card style — matches ClientDashboard.jsx's kpiCard() convention exactly (this
   // page does not use stat-grid/badge-* despite those classes existing, same as ClientDashboard).
   const kpiCard = (onClick) => ({
-    background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 10,
+    background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)',
+    boxShadow: 'var(--theme-card-shadow)',
     padding: '14px 16px', cursor: onClick ? 'pointer' : 'default', transition: 'border-color 0.15s',
   })
 

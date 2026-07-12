@@ -399,7 +399,7 @@ export default function Layout() {
     const more  = locked.length - shown.length
 
     return (
-      <div style={{ margin: '4px 8px 2px', border: `1px solid ${tierColor}25`, borderRadius: 7, padding: '10px 12px', background: `${tierColor}07` }}>
+      <div style={{ margin: '4px 8px 2px', border: `1px solid ${tierColor}25`, borderRadius: 'var(--radius-lg)', padding: '10px 12px', background: `${tierColor}07` }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
           <span style={{ fontSize: 9, fontWeight: 800, color: tierColor, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{tierLabel} Plan</span>
           <span style={{ fontSize: 9, color: '#4b5563' }}>{locked.length} features</span>
@@ -421,120 +421,78 @@ export default function Layout() {
     )
   }
 
+  // Module switcher tabs — one entry per module this user can see. Rendered as a horizontal pill
+  // row when expanded, an icon column when collapsed (CSS flex-direction flip, same buttons).
+  const moduleTabs = [
+    isAdmin && {
+      key: 'admin', label: 'Admin', icon: '⊛', tip: 'Admin',
+      dot: pendingTrialCount > 0 ? '#f87171' : newTrialCount > 0 ? '#f59e0b' : null,
+    },
+    imsVisible && { key: 'ims', label: 'IMS', icon: '▤', tip: 'Crest IMS', dot: null },
+    hrVisible && {
+      key: 'hr', label: 'HR', icon: '👥', dot: hrPending > 0 ? 'var(--theme-amber)' : null,
+      tip: hrPending > 0 ? `Crest HR — ${hrPending} pending` : 'Crest HR',
+    },
+    posVisible && {
+      key: 'pos', label: 'POS', icon: '◉', dot: posPending > 0 ? 'var(--theme-amber)' : null,
+      tip: posPending > 0 ? `Crest POS — ${posPending} pending` : 'Crest POS',
+    },
+  ].filter(Boolean)
+
   return (
     <div className="layout-root">
       {mobileSidebarOpen && <div className="sidebar-overlay" onClick={() => setMobileSidebarOpen(false)} />}
-      <div className={`sidebar-wrap${mobileSidebarOpen ? ' mobile-open' : ''}`}>
+      <div className={`sidebar-wrap${mobileSidebarOpen ? ' mobile-open' : ''}${collapsed ? ' sidebar-wrap--collapsed' : ''}`}>
+        <div className="sidebar-shell">
 
-        {/* Icon rail — one button per module; the panel beside it shows that module's links */}
-        <div className="sidebar-rail">
-          <div className="rail-brand" title={settings?.app_name || 'Crest'}>
-            {settings?.logo_url
-              ? <img src={settings.logo_url} alt="logo" style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 4 }} />
-              : <span aria-label="Crest" style={{ fontSize: 22, lineHeight: 1, color: 'var(--theme-accent)' }}>⬢</span>}
+          {/* Brand — logo + wordmark + search trigger. Always visible; text hides when collapsed
+              (CSS), same effect as today's rail-only collapsed state without unmounting anything. */}
+          <div className="sidebar-brand">
+            <div className="sidebar-brand-icon" title={settings?.app_name || 'Crest'}>
+              {settings?.logo_url
+                ? <img src={settings.logo_url} alt="logo" style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 4 }} />
+                : <span aria-label="Crest" style={{ fontSize: 22, lineHeight: 1, color: 'var(--theme-accent)' }}>⬢</span>}
+            </div>
+            <div className="sidebar-brand-text">
+              <div className="sidebar-brand-name">{settings?.app_name || 'Crest'}</div>
+              <div className="sidebar-brand-sub">{PANEL_TITLES[panel] || 'Crest Inventory'}</div>
+            </div>
+            <button className="sidebar-search-btn" onClick={() => setPaletteOpen(true)} title="Search pages (Ctrl+K)">
+              <span style={{ fontSize: 13 }}>⌕</span>
+              <span className="sidebar-search-label">Ctrl K</span>
+            </button>
           </div>
 
-          {isAdmin && (
-            <RailTip label="Admin">
-              <button className={`rail-btn${panel === 'admin' && !collapsed ? ' rail-btn--active' : ''}`}
-                title="Admin" onClick={() => openPanel('admin')}>
-                <span style={{ position: 'relative' }}>
-                  ⊛
-                  {(pendingTrialCount > 0 || newTrialCount > 0) && (
-                    <span style={{
-                      position: 'absolute', top: -3, right: -7, width: 9, height: 9, borderRadius: '50%',
-                      background: pendingTrialCount > 0 ? '#f87171' : '#f59e0b',
-                      boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
-                    }} />
-                  )}
-                </span>
-              </button>
-            </RailTip>
-          )}
-          {imsVisible && (
-            <RailTip label="Crest IMS">
-              <button className={`rail-btn${panel === 'ims' && !collapsed ? ' rail-btn--active' : ''}`}
-                title="Crest IMS" onClick={() => openPanel('ims')}>▤</button>
-            </RailTip>
-          )}
-          {hrVisible && (
-            <RailTip label={hrPending > 0 ? `Crest HR — ${hrPending} pending` : 'Crest HR'}>
-              <button className={`rail-btn${panel === 'hr' && !collapsed ? ' rail-btn--active' : ''}`}
-                title="Crest HR" onClick={() => openPanel('hr')}>
-                <span style={{ position: 'relative' }}>
-                  👥
-                  {hrPending > 0 && (
-                    <span style={{
-                      position: 'absolute', top: -3, right: -7, width: 9, height: 9, borderRadius: '50%',
-                      background: 'var(--theme-amber)',
-                      boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
-                    }} />
-                  )}
-                </span>
-              </button>
-            </RailTip>
-          )}
-          {posVisible && (
-            <RailTip label={posPending > 0 ? `Crest POS — ${posPending} pending` : 'Crest POS'}>
-              <button className={`rail-btn${panel === 'pos' && !collapsed ? ' rail-btn--active' : ''}`}
-                title="Crest POS" onClick={() => openPanel('pos')}>
-                <span style={{ position: 'relative' }}>
-                  ◉
-                  {posPending > 0 && (
-                    <span style={{
-                      position: 'absolute', top: -3, right: -7, width: 9, height: 9, borderRadius: '50%',
-                      background: 'var(--theme-amber)',
-                      boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
-                    }} />
-                  )}
-                </span>
-              </button>
-            </RailTip>
+          {/* Module switcher — hidden entirely for a single-module user (one pill reads as broken
+              UI, same case where today's rail just shows that one module's icon alone). */}
+          {moduleTabs.length > 1 && (
+            <div className="module-switcher">
+              {moduleTabs.map(t => (
+                <RailTip key={t.key} label={t.tip}>
+                  <button
+                    className={`module-tab${panel === t.key && !collapsed ? ' module-tab--active' : ''}`}
+                    onClick={() => openPanel(t.key)}
+                  >
+                    <span className="module-tab-icon" style={{ position: 'relative' }}>
+                      {t.icon}
+                      {t.dot && (
+                        <span style={{
+                          position: 'absolute', top: -3, right: -5, width: 9, height: 9, borderRadius: '50%',
+                          background: t.dot, boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
+                        }} />
+                      )}
+                    </span>
+                    <span className="module-tab-label">{t.label}</span>
+                  </button>
+                </RailTip>
+              ))}
+            </div>
           )}
 
-          <div style={{ flex: 1 }} />
-
-          <RailTip label="Help">
-            <NavLink to="/help" title="Help"
-              className={({ isActive }) => `rail-btn${isActive ? ' rail-btn--active' : ''}`}
-              onClick={() => setMobileSidebarOpen(false)}>?</NavLink>
-          </RailTip>
-          <RailTip label={collapsed ? 'Show menu' : 'Hide menu'}>
-            <button className="rail-btn" title={collapsed ? 'Show menu' : 'Hide menu'}
-              onClick={() => setCollapsed(c => !c)}>{collapsed ? '›' : '‹'}</button>
-          </RailTip>
-          <RailTip label={posRole ? 'Lock POS' : 'Sign out'}>
-            <button className="rail-btn rail-btn--signout" title={posRole ? 'Lock POS' : 'Sign out'}
-              onClick={handleSignOut}>⎋</button>
-          </RailTip>
-        </div>
-
-        {/* Flyout panel — only the selected module's links */}
-        {!collapsed && (
-        <aside className="sidebar">
-
-        {/* Panel title */}
-        <div className="sidebar-brand">
-          <div style={{ flex: 1 }}>
-            <div className="sidebar-brand-name">{PANEL_TITLES[panel] || settings?.app_name || 'Crest'}</div>
-            <div className="sidebar-brand-sub">{settings?.app_name || 'Crest Inventory'}</div>
-          </div>
-          <button
-            onClick={() => setPaletteOpen(true)}
-            title="Search pages (Ctrl+K)"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 5, background: 'var(--theme-bg)',
-              border: '1px solid var(--theme-border)', borderRadius: 6, cursor: 'pointer',
-              padding: '5px 8px', color: 'var(--theme-text3)', flexShrink: 0,
-              transition: 'color var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard)',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--theme-text1)'; e.currentTarget.style.borderColor = 'var(--theme-accent)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--theme-text3)'; e.currentTarget.style.borderColor = 'var(--theme-border)' }}
-          >
-            <span style={{ fontSize: 13 }}>⌕</span>
-            <span style={{ fontSize: 'var(--font-size-micro)' }}>Ctrl K</span>
-          </button>
-        </div>
+        {/* Everything below hides when collapsed (CSS) — client badge, nav, footer. Kept mounted
+            rather than conditionally rendered so scroll position / dropdown state survive a
+            collapse/expand toggle instead of resetting. */}
+        <div className="sidebar-content">
 
         {/* Role / client badge */}
         {(() => (
@@ -727,8 +685,26 @@ export default function Layout() {
             </div>
           </div>
         </div>
-        </aside>
-        )}
+        </div>{/* /sidebar-content */}
+
+        {/* Bottom-anchored, icon-only, always visible regardless of collapsed state — same three
+            actions today's rail always kept visible at its bottom. */}
+        <div className="sidebar-bottom">
+          <RailTip label="Help">
+            <NavLink to="/help" title="Help"
+              className={({ isActive }) => `rail-btn${isActive ? ' rail-btn--active' : ''}`}
+              onClick={() => setMobileSidebarOpen(false)}>?</NavLink>
+          </RailTip>
+          <RailTip label={collapsed ? 'Show menu' : 'Hide menu'}>
+            <button className="rail-btn" title={collapsed ? 'Show menu' : 'Hide menu'}
+              onClick={() => setCollapsed(c => !c)}>{collapsed ? '›' : '‹'}</button>
+          </RailTip>
+          <RailTip label={posRole ? 'Lock POS' : 'Sign out'}>
+            <button className="rail-btn rail-btn--signout" title={posRole ? 'Lock POS' : 'Sign out'}
+              onClick={handleSignOut}>⎋</button>
+          </RailTip>
+        </div>
+        </div>{/* /sidebar-shell */}
       </div>
 
       <main className={`main-content${collapsed ? ' main-content--collapsed' : ''}`}>

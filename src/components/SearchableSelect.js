@@ -80,14 +80,14 @@ export default function SearchableSelect({ value, onChange, options, placeholder
         onClick={() => (open ? close() : openIt())}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          background: '#0f1117', border: '1px solid #2a2f3d', borderRadius: 5, padding: '7px 10px',
-          fontSize: 13, color: '#e8e0d0', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+          background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', padding: '7px 10px',
+          fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
         }}
       >
-        <span style={{ color: selected ? '#e8e0d0' : '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ color: selected ? 'var(--theme-text1)' : 'var(--theme-text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {selected ? selected.label : placeholder}
         </span>
-        <span style={{ color: '#6b7280', flexShrink: 0 }}>▾</span>
+        <span style={{ color: 'var(--theme-text2)', flexShrink: 0 }}>▾</span>
       </button>
 
       {open && coords && (
@@ -95,8 +95,8 @@ export default function SearchableSelect({ value, onChange, options, placeholder
           position: 'fixed',
           ...(coords.up ? { bottom: coords.bottom } : { top: coords.top }),
           left: coords.left, width: coords.width, zIndex: 1000,
-          background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 6,
-          boxShadow: '0 10px 30px rgba(0,0,0,0.5)', overflow: 'hidden',
+          background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)',
+          boxShadow: 'var(--theme-card-shadow)', overflow: 'hidden',
         }}>
           <input
             ref={inputRef}
@@ -106,14 +106,14 @@ export default function SearchableSelect({ value, onChange, options, placeholder
             placeholder="Type to search…"
             autoComplete="off"
             style={{
-              width: '100%', boxSizing: 'border-box', background: '#0f1117', border: 'none',
-              borderBottom: '1px solid #2a2f3d', padding: '9px 11px', fontSize: 13, color: '#e8e0d0',
+              width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: 'none',
+              borderBottom: '1px solid var(--theme-border)', padding: '9px 11px', fontSize: 13, color: 'var(--theme-text1)',
               outline: 'none', fontFamily: 'inherit',
             }}
           />
           <div ref={listRef} style={{ maxHeight: coords.listMax, overflowY: 'auto' }}>
             {filtered.length === 0 ? (
-              <div style={{ padding: '12px', fontSize: 12, color: '#6b7280' }}>No matches</div>
+              <div style={{ padding: '12px', fontSize: 12, color: 'var(--theme-text2)' }}>No matches</div>
             ) : filtered.map((opt, i) => (
               <div
                 key={opt.value}
@@ -123,8 +123,8 @@ export default function SearchableSelect({ value, onChange, options, placeholder
                 style={{
                   padding: '8px 11px', fontSize: 13, cursor: 'pointer',
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  background: i === highlight ? '#2a2f3d' : 'transparent',
-                  color: opt.value === value ? '#c9a84c' : '#e8e0d0',
+                  background: i === highlight ? 'var(--theme-table-hover)' : 'transparent',
+                  color: opt.value === value ? 'var(--theme-accent)' : 'var(--theme-text1)',
                 }}
               >
                 {opt.label}

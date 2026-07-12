@@ -14,7 +14,7 @@
   max-width: 1020px;
   background: var(--theme-card, #181c27);
   border: 1px solid var(--theme-border, #2a2f3d);
-  border-radius: 14px;
+  border-radius: var(--radius-xl, 24px);
   box-shadow: 0 4px 40px rgba(0,0,0,0.35);
   overflow: hidden;
 }

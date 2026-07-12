@@ -222,10 +222,10 @@ export default function BsCalendarPicker({
                 background: isSel
                   ? 'var(--theme-accent)'
                   : isToday
-                    ? 'rgba(201,168,76,0.12)'
+                    ? 'var(--theme-focus-ring)'
                     : 'transparent',
                 color: isSel
-                  ? '#0f1117'
+                  ? 'var(--theme-accent-text)'
                   : isToday
                     ? 'var(--theme-accent)'
                     : 'var(--theme-text1)',

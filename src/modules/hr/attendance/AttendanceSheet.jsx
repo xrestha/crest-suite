@@ -522,6 +522,10 @@ export default function AttendanceSheet() {
       otHours     += parseFloat(rec.ot_hours) || 0
       hoursWorked += parseFloat(rec.hours_worked) || 0
     })
+    // Round off the binary float drift from summing decimal hours across ~30 days (e.g. repeated
+    // 0.1-type fractions summing to 9.600000000000001) rather than displaying/exporting it raw.
+    otHours     = Math.round(otHours * 100) / 100
+    hoursWorked = Math.round(hoursWorked * 100) / 100
     return { counts, otHours, hoursWorked }
   }
 
