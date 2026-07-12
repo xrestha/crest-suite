@@ -303,6 +303,17 @@ export default function PosShifts() {
       .then(({ data }) => setOutletName(data?.name || ''))
     supabase.from('settings').select('property_address').eq('client_id', clientId).maybeSingle()
       .then(({ data }) => setPropertyAddress(data?.property_address || ''))
+
+    // Shift History wasn't reset here — an admin switching "view as" client while sitting on the
+    // History tab kept showing the PREVIOUS client's shifts (and would print the previous
+    // client's Z-Report figures under the freshly-loaded outlet name/address above). History is
+    // reloaded lazily (openHistoryTab), not eagerly, to avoid an extra query on every client
+    // switch for the common case where nobody's looking at History.
+    setHistory([])
+    setReportsMap({})
+    setExpandedId(null)
+    setHistoryLoaded(false)
+    if (mainTab === 'history') loadHistory()
   }, [clientId]) // eslint-disable-line
 
   // Same pattern as PosOrders.jsx's printHtml — a popup window that auto-prints and closes.
@@ -392,6 +403,18 @@ export default function PosShifts() {
   async function submitClose() {
     if (!openShift || !currentReport) return
     setSaving(true); setMsg('')
+
+    // A table still open past shift-end never shows up in loadShiftReport (it only aggregates
+    // paid/void/writeoff orders) — closing anyway lets that order get paid later under an
+    // already-closed, already-signed-off shift, so its cash silently never reconciles.
+    const { count: openOrderCount } = await scopedFrom('pos_orders', 'id', { count: 'exact', head: true })
+      .eq('shift_id', openShift.id).eq('status', 'open')
+    if (openOrderCount > 0) {
+      setSaving(false)
+      setMsg(`error:${openOrderCount} order${openOrderCount !== 1 ? 's are' : ' is'} still open on this shift — settle or void ${openOrderCount !== 1 ? 'them' : 'it'} before closing.`)
+      return
+    }
+
     const closing_cash = sumDenoms(denomCounts)
     const closedAt = new Date()
     // .eq('status', 'open') + .select() together detect a double-close: the DB's only relevant

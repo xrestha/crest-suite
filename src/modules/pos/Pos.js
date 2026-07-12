@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { supabase } from '../../supabaseClient'
 
 export default function Pos() {
   const { clientId, profile, isAdmin, adminViewClientName, hasPosAccess } = useAuth()
@@ -11,21 +12,31 @@ export default function Pos() {
     : (profile?.clients?.name || 'this restaurant')
 
   const [activated, setActivated] = useState(!!localStorage.getItem('pos_device_client_id'))
+  const [activating, setActivating] = useState(false)
 
   const storedClientId   = localStorage.getItem('pos_device_client_id')
   const storedClientName = localStorage.getItem('pos_device_client_name')
   const boundToOther     = activated && storedClientId !== clientId
 
-  function activate() {
-    if (!clientId) return
+  // The device secret (not the raw client_id) is what get_pos_staff actually checks — fetched
+  // here from an authenticated session so an unauthenticated PosLogin visit can never obtain it
+  // for a client it isn't already bound to.
+  async function activate() {
+    if (!clientId || activating) return
+    setActivating(true)
+    const { data, error } = await supabase.from('clients').select('pos_device_secret').eq('id', clientId).single()
+    setActivating(false)
+    if (error || !data?.pos_device_secret) return
     localStorage.setItem('pos_device_client_id', clientId)
     localStorage.setItem('pos_device_client_name', clientName)
+    localStorage.setItem('pos_device_secret', data.pos_device_secret)
     setActivated(true)
   }
 
   function deactivate() {
     localStorage.removeItem('pos_device_client_id')
     localStorage.removeItem('pos_device_client_name')
+    localStorage.removeItem('pos_device_secret')
     setActivated(false)
   }
 
@@ -77,8 +88,8 @@ export default function Pos() {
               Once activated, staff can log in on this device with their name and PIN —
               no email or password needed.
             </p>
-            <button className="btn btn-primary" onClick={activate} disabled={!clientId}>
-              Activate for {clientName}
+            <button className="btn btn-primary" onClick={activate} disabled={!clientId || activating}>
+              {activating ? 'Activating…' : `Activate for ${clientName}`}
             </button>
           </div>
         )

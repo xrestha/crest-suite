@@ -164,6 +164,11 @@ export default function PosOrders() {
   // state) because the poll's setInterval closure needs the CURRENT value synchronously, not
   // whatever `closing` was when the interval callback was created.
   const closingRef = useRef(false)
+  // Re-entry guard for performSave — saveOrder/sendTicket are only gated by the `saving` state,
+  // which doesn't update synchronously, so a double-tap on Send Order before the re-render commits
+  // can enter performSave twice with orderId still null and insert two pos_orders rows. A ref for
+  // the same reason as closingRef above: it needs to be readable/settable synchronously mid-call.
+  const savingRef = useRef(false)
 
   useEffect(() => {
     if (!clientId) return
@@ -561,10 +566,15 @@ export default function PosOrders() {
       try {
         const oid = q.order_id
         if (q.created_offline) {
-          const { error } = await scopedInsert('pos_orders', {
+          // Upsert, not insert: if a previous flush attempt got this far but died before
+          // dequeuePosOrder ran (e.g. connectivity dropped mid-sync), created_offline is still
+          // true and this same row id gets retried. A plain insert would hit the PK and fail
+          // forever, stranding the order. onConflict: 'id' makes the retry a no-op on the order
+          // row itself instead of a permanent dead end.
+          const { error } = await scopedUpsert('pos_orders', {
             id: oid, table_id: q.table_id, table_name: q.table_name,
             status: 'open', covers: q.covers, opened_by: q.opened_by,
-          })
+          }, { onConflict: 'id' })
           if (error) throw error
           if (q.table_id) await scopedUpdate('pos_tables', { status: 'occupied' }).eq('id', q.table_id)
         } else {
@@ -976,11 +986,13 @@ export default function PosOrders() {
   async function saveOrder() {
     if (!clientId) return
     if (orderItems.length === 0) { setMsg('error:Add at least one item.'); return }
+    if (savingRef.current) return
+    savingRef.current = true
     setSaving(true); setMsg('')
 
     const wasNew = !orderId
     const saved = await performSave()
-    if (!saved) { setSaving(false); setMsg('error:Save failed.'); return }
+    if (!saved) { savingRef.current = false; setSaving(false); setMsg('error:Save failed.'); return }
     const { oid, oNo } = saved
 
     if (wasNew) {
@@ -1003,6 +1015,7 @@ export default function PosOrders() {
       setMsg('ok:Saved.')
     }
 
+    savingRef.current = false
     setSaving(false)
   }
 
@@ -1023,9 +1036,11 @@ export default function PosOrders() {
       return
     }
 
+    if (savingRef.current) return
+    savingRef.current = true
     setSaving(true); setMsg('')
     const saved = await performSave()
-    if (!saved) { setSaving(false); setMsg('error:Save failed.'); return }
+    if (!saved) { savingRef.current = false; setSaving(false); setMsg('error:Save failed.'); return }
     const { oid, oNo } = saved
 
     // Mark sent by recipe_id (unique per order)
@@ -1047,6 +1062,7 @@ export default function PosOrders() {
 
     setOrderItems(updatedItems)
 
+    savingRef.current = false
     setSaving(false)
     setMsg(`ok:${station} sent!`)
     printTicket(station, unsentItems, oNo)

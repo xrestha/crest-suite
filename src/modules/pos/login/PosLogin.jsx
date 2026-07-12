@@ -15,8 +15,9 @@ export default function PosLogin() {
   const navigate = useNavigate()
   const { colors } = useTheme()
   const isDark = relativeLuminance(colors.bg) < 0.5
-  const clientId   = localStorage.getItem('pos_device_client_id')
-  const clientName = localStorage.getItem('pos_device_client_name') || 'Crest POS'
+  const clientId     = localStorage.getItem('pos_device_client_id')
+  const clientName   = localStorage.getItem('pos_device_client_name') || 'Crest POS'
+  const deviceSecret = localStorage.getItem('pos_device_secret')
 
   const [staff,     setStaff]     = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -28,10 +29,10 @@ export default function PosLogin() {
   useEffect(() => {
     // No silent bounce — an unactivated device shows its own explanatory screen below
     // instead of instantly redirecting to /login with no indication of why.
-    if (!clientId) { setLoading(false); return }
-    supabase.rpc('get_pos_staff', { p_client_id: clientId })
+    if (!clientId || !deviceSecret) { setLoading(false); return }
+    supabase.rpc('get_pos_staff', { p_client_id: clientId, p_device_secret: deviceSecret })
       .then(({ data }) => { setStaff(data || []); setLoading(false) })
-  }, [clientId])
+  }, [clientId, deviceSecret])
 
   const pressKey = useCallback((k) => {
     if (k === '⌫') { setPin(p => p.slice(0, -1)); setError(''); return }
@@ -101,7 +102,10 @@ const pinDots = Math.max(4, pin.length)
 
   // Device not yet activated for any client — explain why, instead of silently bouncing
   // to /login. Activation itself happens from Crest POS (/pos) by an owner/manager.
-  if (!clientId) {
+  // Also catches a device activated before device-secret verification was introduced — its
+  // stored client_id is still present but there's no secret to authorize get_pos_staff with,
+  // so it needs a one-time re-activation rather than silently showing "no staff found".
+  if (!clientId || !deviceSecret) {
     return (
       <div style={{
         minHeight: '100vh', background: 'var(--theme-bg)',
