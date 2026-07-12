@@ -20,8 +20,8 @@ const KOT_STATUS_LABEL = { new: 'Order sent to kitchen', in_progress: 'Being pre
 // same precedence the small pre-redesign badge used.
 const STAGES = ['placed', 'confirmed', 'kot_sent', 'preparing', 'ready']
 const STAGE_LABEL = {
-  placed: 'Order placed — waiting for staff to confirm…',
-  confirmed: 'Confirmed by staff — heading to the kitchen',
+  placed: 'Order placed. Waiting for staff to confirm…',
+  confirmed: 'Confirmed by staff, heading to the kitchen',
   kot_sent: 'Sent to kitchen',
   preparing: 'Being prepared',
   ready: 'Ready to serve',
@@ -68,6 +68,19 @@ function loadStoredRequest(tableId) {
   }
 }
 
+// A cart in progress (not yet submitted) is just as vulnerable to a phone lock, incoming call,
+// or accidental tab switch as a submitted request already was — this survives that the same way
+// loadStoredRequest/sessionKey above do for a submitted one.
+const cartSessionKey = tableId => `guestCart:${tableId}`
+function loadStoredCart(tableId) {
+  try {
+    const raw = sessionStorage.getItem(cartSessionKey(tableId))
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
 // Fully public, unauthenticated page — reached by a guest scanning a table's QR code (see
 // PosTableManagement.jsx's "Print QR" action). Shows the live POS menu for that table's client;
 // if the client has guest_ordering enabled (Pro-tier feature flag, see migration
@@ -82,10 +95,10 @@ export default function GuestMenu() {
   const [error, setError] = useState(false)
   const [kotStatus, setKotStatus] = useState(null) // null = no open order / nothing sent yet
 
-  const [cart, setCart] = useState({}) // recipe_id -> qty
-  const [covers, setCovers] = useState(2)
+  const [cart, setCart] = useState(() => loadStoredCart(tableId)?.cart || {}) // recipe_id -> qty
+  const [covers, setCovers] = useState(() => loadStoredCart(tableId)?.covers ?? 2)
   const [reviewOpen, setReviewOpen] = useState(false)
-  const [guestNote, setGuestNote] = useState('')
+  const [guestNote, setGuestNote] = useState(() => loadStoredCart(tableId)?.guestNote || '')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [requestId, setRequestId] = useState(() => loadStoredRequest(tableId)?.requestId || null)
@@ -97,6 +110,16 @@ export default function GuestMenu() {
   })
   const [requestStatus, setRequestStatus] = useState(null)
   const prevStageRef = useRef(null)
+  // True for a few seconds right after this guest's own placeOrder() call succeeds — separate
+  // from the stage-change chime below, which deliberately stays silent on mount/reload so a
+  // returning guest isn't chimed at for an order they placed minutes ago. This one always fires,
+  // including the very first order, because it's tied to an explicit action just taken, not to
+  // detecting a change since last render.
+  const [justPlaced, setJustPlaced] = useState(false)
+  const statusCardRef = useRef(null)
+
+  const [activeCategory, setActiveCategory] = useState(null)
+  const categoryRefs = useRef({}) // category name -> section DOM node, populated during render
 
   // requestId/requestSnapshot above are only seeded once, via a lazy useState initializer that
   // runs on mount — if tableId changes without a full remount (client-side back/forward between
@@ -110,12 +133,28 @@ export default function GuestMenu() {
     setRequestSnapshot(stored ? { items: stored.items || [], covers: stored.covers || 1 } : null)
     setRequestStatus(null)
     prevStageRef.current = null
-    setCart({})
-    setCovers(2)
-    setGuestNote('')
+    const storedCart = loadStoredCart(tableId)
+    setCart(storedCart?.cart || {})
+    setCovers(storedCart?.covers ?? 2)
+    setGuestNote(storedCart?.guestNote || '')
     setSubmitError('')
     setReviewOpen(false)
   }, [tableId])
+
+  // Persist the in-progress cart on every change so a phone lock, incoming call, or accidental
+  // tab switch doesn't silently wipe it — the same protection the submitted-request snapshot
+  // above already had via sessionStorage, just extended to the pre-submission cart.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(cartSessionKey(tableId), JSON.stringify({ cart, covers, guestNote }))
+    } catch { /* private-browsing / quota — cart still works for this session, just won't survive a reload */ }
+  }, [tableId, cart, covers, guestNote])
+
+  // retryToken bumps on a manual Retry click, forcing the effect below to re-run against the
+  // same tableId — same effect this ran on mount, just re-triggerable from a button instead of
+  // only from a tableId change.
+  const [retryToken, setRetryToken] = useState(0)
+  const retryLoadMenu = () => { setRows(null); setError(false); setRetryToken(t => t + 1) }
 
   useEffect(() => {
     let cancelled = false
@@ -125,7 +164,7 @@ export default function GuestMenu() {
       setRows(data || [])
     })
     return () => { cancelled = true }
-  }, [tableId])
+  }, [tableId, retryToken])
 
   // 5s poll while the guest has the menu open — same cadence as the staff floor-view badge.
   useEffect(() => {
@@ -166,12 +205,80 @@ export default function GuestMenu() {
     prevStageRef.current = stage
   }, [requestId, requestStatus, kotStatus])
 
+  // Scroll the confirmation card into view and chime the instant an order is placed — the
+  // review modal has just closed, so without this the guest lands back on a menu list with no
+  // visible sign anything happened. Runs once per justPlaced=true, then clears itself; the pulse
+  // classes (guest-order-glow/guest-order-banner) fade back to a normal card after ~2.8s (two
+  // animation cycles) rather than looping forever on a page the guest may sit on.
+  useEffect(() => {
+    if (!justPlaced) return
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    statusCardRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+    playStageChangeChime()
+    const id = setTimeout(() => setJustPlaced(false), 2800)
+    return () => clearTimeout(id)
+  }, [justPlaced])
+
+  // Computed unconditionally (safe on the loading/error/empty renders too, via the `rows || []`
+  // fallback) so the category-nav effect right below — a hook, which can't follow a conditional
+  // early return — has something stable to key off of.
+  const byRecipe = Object.fromEntries((rows || []).map(r => [r.recipe_id, r]))
+  const categories = []
+  const byCategory = {}
+  for (const r of (rows || [])) {
+    const cat = r.category || 'Other'
+    if (!byCategory[cat]) { byCategory[cat] = []; categories.push(cat) }
+    byCategory[cat].push(r)
+  }
+
+  // Default the highlighted chip to the first category before the guest has scrolled at all —
+  // otherwise the bar renders with no active chip until the observer's first callback fires.
+  useEffect(() => {
+    if (categories.length > 0 && activeCategory === null) setActiveCategory(categories[0])
+  }, [categories.join('|'), activeCategory]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Track which category section is currently in view so the sticky chip bar can highlight it —
+  // only meaningful (and only wired up) once there's more than one category to navigate between.
+  useEffect(() => {
+    if (categories.length < 2) return
+    const targets = categories.map(cat => categoryRefs.current[cat]).filter(Boolean)
+    if (targets.length === 0) return
+    const observer = new IntersectionObserver(
+      entries => {
+        const visible = entries.filter(e => e.isIntersecting)
+        if (visible.length === 0) return
+        // Topmost visible section wins — matches "which category am I looking at" better than
+        // largest-intersection-ratio when a short category is fully visible alongside a long one.
+        const top = visible.reduce((a, b) => (a.boundingClientRect.top < b.boundingClientRect.top ? a : b))
+        const cat = categories.find(c => categoryRefs.current[c] === top.target)
+        if (cat) setActiveCategory(cat)
+      },
+      { rootMargin: '-60px 0px -70% 0px', threshold: 0 } // -60px ~= sticky nav bar height (52px) + a small buffer
+    )
+    targets.forEach(el => observer.observe(el))
+    return () => observer.disconnect()
+  }, [categories.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function scrollToCategory(cat) {
+    setActiveCategory(cat)
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    categoryRefs.current[cat]?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+  }
+
   if (rows === null) {
     return <CenteredMessage>Loading menu…</CenteredMessage>
   }
-  if (error || rows.length === 0) {
+  if (error) {
+    return (
+      <CenteredMessage>
+        <p style={{ margin: '0 0 14px' }}>We couldn't reach the menu. Check your connection and try again.</p>
+        <button type="button" className="btn btn-primary" onClick={retryLoadMenu}>Try again</button>
+      </CenteredMessage>
+    )
+  }
+  if (rows.length === 0) {
     return <CenteredMessage>
-      Menu not available. Please ask staff for assistance.
+      This menu isn't available right now. Please ask staff for assistance.
     </CenteredMessage>
   }
 
@@ -179,15 +286,6 @@ export default function GuestMenu() {
   const tableName = rows[0].table_name
   const nutritionEnabled = rows[0].nutrition_enabled
   const orderingEnabled = rows[0].guest_ordering_enabled
-
-  const byRecipe = Object.fromEntries(rows.map(r => [r.recipe_id, r]))
-  const categories = []
-  const byCategory = {}
-  for (const r of rows) {
-    const cat = r.category || 'Other'
-    if (!byCategory[cat]) { byCategory[cat] = []; categories.push(cat) }
-    byCategory[cat].push(r)
-  }
 
   const cartLines = Object.entries(cart)
     .filter(([, qty]) => qty > 0)
@@ -203,6 +301,10 @@ export default function GuestMenu() {
   async function placeOrder() {
     setSubmitting(true)
     setSubmitError('')
+    // Force a false->true transition even if a previous order's pulse hasn't finished yet
+    // (e.g. a guest immediately places a second order) — React bails out of the justPlaced
+    // effect on a same-value update, which would otherwise silently skip the scroll/chime.
+    setJustPlaced(false)
     const payload = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty }))
     const itemsSnapshot = cartLines.map(l => ({ name: l.item.name, qty: l.qty }))
     const { data, error: err } = await supabase.rpc('submit_guest_order', {
@@ -210,7 +312,7 @@ export default function GuestMenu() {
     })
     setSubmitting(false)
     if (err) {
-      setSubmitError(err.message || 'Could not place order — please ask staff for assistance.')
+      setSubmitError(err.message || 'Could not place order. Please ask staff for assistance.')
       return
     }
     sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: data, items: itemsSnapshot, covers }))
@@ -221,6 +323,7 @@ export default function GuestMenu() {
     setGuestNote('')
     setCovers(2)
     setReviewOpen(false)
+    setJustPlaced(true)
   }
 
   function orderAgain() {
@@ -236,28 +339,58 @@ export default function GuestMenu() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--theme-bg)', color: 'var(--theme-text1)' }}>
-      <div style={{ maxWidth: 640, margin: '0 auto', padding: '28px 20px 100px' }}>
+      <div style={{ maxWidth: 640, margin: '0 auto', padding: '28px 20px 100px', '--guest-menu-nav-h': '52px' }}>
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <h1 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 700 }}>{outletName}</h1>
           <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>{tableName}</p>
         </div>
 
+        {categories.length > 1 && (
+          <div
+            className="tab-bar tab-bar--scroll"
+            style={{
+              position: 'sticky', top: 0, zIndex: 40, marginBottom: 20,
+              padding: '10px 0', background: 'var(--theme-bg)', borderBottom: '1px solid var(--theme-border)',
+            }}
+          >
+            {categories.map(cat => (
+              <button
+                key={cat} type="button"
+                className={`tab-btn${activeCategory === cat ? ' tab-btn--active' : ''}`}
+                aria-current={activeCategory === cat ? 'true' : undefined}
+                onClick={() => scrollToCategory(cat)}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
+
         {requestSnapshot ? (
-          <OrderStatusCard
-            requestStatus={requestStatus} kotStatus={kotStatus}
-            items={requestSnapshot.items} covers={requestSnapshot.covers}
-            onOrderAgain={orderAgain}
-          />
+          <div
+            ref={statusCardRef} className={justPlaced ? 'guest-order-glow' : undefined}
+            style={{ borderRadius: 10, scrollMarginTop: categories.length > 1 ? 'var(--guest-menu-nav-h)' : 0 }}
+            aria-live="polite"
+          >
+            <OrderStatusCard
+              requestStatus={requestStatus} kotStatus={kotStatus}
+              items={requestSnapshot.items} covers={requestSnapshot.covers}
+              onOrderAgain={orderAgain}
+            />
+          </div>
         ) : kotStatus && (
           <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <span className={KOT_STATUS_BADGE[kotStatus]} style={{ display: 'inline-block', fontSize: 11 }}>
+            <span className={`badge ${KOT_STATUS_BADGE[kotStatus]}`} style={{ display: 'inline-block', fontSize: 11 }}>
               {KOT_STATUS_LABEL[kotStatus]}
             </span>
           </div>
         )}
 
         {categories.map(cat => (
-          <div key={cat} style={{ marginBottom: 28 }}>
+          <div
+            key={cat} ref={el => { categoryRefs.current[cat] = el }}
+            style={{ marginBottom: 28, scrollMarginTop: 'var(--guest-menu-nav-h)' }}
+          >
             <h2 style={{
               fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
               color: 'var(--theme-accent)', margin: '0 0 12px', paddingBottom: 6,
@@ -284,7 +417,7 @@ export default function GuestMenu() {
             position: 'fixed', left: 16, right: 16, bottom: 16, zIndex: 50,
             maxWidth: 608, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '14px 18px', borderRadius: 10, border: 'none', cursor: 'pointer',
-            background: 'var(--theme-accent)', color: '#fff', fontSize: 14, fontWeight: 700,
+            background: 'var(--theme-accent)', color: 'var(--theme-accent-text)', fontSize: 14, fontWeight: 700,
             boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
           }}
         >

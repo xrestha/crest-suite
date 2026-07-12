@@ -141,6 +141,10 @@ Constants in `src/modules/hr/payrollConstants.js`: SSF rates (11% employee / 20%
 
 ## Design conventions
 
+### Design context (PRODUCT.md / DESIGN.md)
+
+`PRODUCT.md` (strategic: users, positioning, brand personality, anti-references) and `DESIGN.md` (visual: colors, typography, components, extracted from the actual `Layout.css`/`ThemeContext.js` tokens) exist at the project root, written by the `impeccable` skill's `init`/`document` commands. Read them before any design-focused work — `DESIGN.md` in particular documents named rules (the accent-text pairing rule, the one-accent rule, flat-by-default elevation) that are already enforced in code but weren't written down anywhere before this. `.impeccable/design.json` is the machine-readable sidecar; don't hand-edit it, regenerate via `/impeccable document`.
+
 ### CSS variable theme system
 
 All colors must use CSS variables, not hardcoded hex. The full token set:

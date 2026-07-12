@@ -273,8 +273,8 @@ export default function SelfServiceHome() {
       <div style={{ maxWidth: 640, margin: '0 auto', padding: '28px 20px 60px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
-            <h1 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)' }}>{profile.full_name}</h1>
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text3)' }}>Employee Self-Service</p>
+            <h1 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--theme-text1)' }}>{profile.full_name}</h1>
+            <p style={{ margin: 0, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-text3)' }}>Employee Self-Service</p>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={signOut}>Sign Out</button>
@@ -337,7 +337,7 @@ export default function SelfServiceHome() {
         {tab === 'leave' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="card" style={{ padding: 16 }}>
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--theme-text1)' }}>Submit Leave Request</h3>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Submit Leave Request</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div>
                   <label style={lbl}>Leave Type</label>
@@ -376,7 +376,7 @@ export default function SelfServiceHome() {
             </div>
 
             <div>
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--theme-text1)' }}>My Requests</h3>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>My Requests</h3>
               {leaveRequests === null ? <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
                 : leaveRequests.length === 0 ? <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No requests yet.</p>
                 : (
@@ -399,7 +399,7 @@ export default function SelfServiceHome() {
         {tab === 'tada' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="card" style={{ padding: 16 }}>
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--theme-text1)' }}>Submit TADA Claim</h3>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Submit TADA Claim</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <div style={{ flex: 1 }}>
@@ -489,7 +489,7 @@ export default function SelfServiceHome() {
                             </select>
                             <input style={{ ...inp, width: 90, flexShrink: 0 }} type="number" min="0" step="0.1" placeholder="Distance (km)" value={it.distanceKm} onChange={e => setTadaItemDistance(idx, e.target.value)} />
                             {tadaVehicleRates[it.vehicle] == null ? (
-                              <span style={{ fontSize: 11, color: 'var(--theme-amber)' }}>No rate set — enter Amount manually</span>
+                              <span style={{ fontSize: 11, color: 'var(--theme-amber)' }}>No rate set. Enter amount manually</span>
                             ) : (
                               <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>× NPR {tadaVehicleRates[it.vehicle]}/km</span>
                             )}
@@ -516,7 +516,7 @@ export default function SelfServiceHome() {
             </div>
 
             <div>
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--theme-text1)' }}>My Claims</h3>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>My Claims</h3>
               {tadaClaims === null ? <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
                 : tadaClaims.length === 0 ? <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No claims yet.</p>
                 : (
@@ -524,7 +524,7 @@ export default function SelfServiceHome() {
                     {tadaClaims.map(c => (
                       <div key={c.id} className="card" style={{ padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                          <div style={{ fontSize: 13, color: 'var(--theme-text1)' }}>{fmtD(c.start_date)} → {fmtD(c.end_date)} — NPR {fmt(c.total_amount)}</div>
+                          <div style={{ fontSize: 13, color: 'var(--theme-text1)' }}>{fmtD(c.start_date)} → {fmtD(c.end_date)} · NPR {fmt(c.total_amount)}</div>
                           <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
                             {[c.start_point && c.destination ? `${c.start_point} → ${c.destination}` : c.destination, c.trip_purpose].filter(Boolean).join(' · ') || '—'}
                             {c.status === 'paid' && ` · Paid via ${c.paid_method}`}
@@ -604,7 +604,7 @@ export default function SelfServiceHome() {
                 </div>
               )}
 
-            <h3 style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--theme-text1)' }}>Swap Requests</h3>
+            <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Swap Requests</h3>
             {swapRequests === null ? <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
               : swapRequests.length === 0 ? <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No swap requests yet.</p>
               : (

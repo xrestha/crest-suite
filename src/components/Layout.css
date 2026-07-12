@@ -82,6 +82,9 @@
   .rail-tip {
     animation-duration: 0ms !important;
   }
+  .guest-order-banner, .guest-order-glow {
+    animation: none !important;
+  }
 }
 
 .layout-root {
@@ -765,6 +768,22 @@ input[type="number"] {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* Single-row horizontal-scroll variant of .tab-bar — for a category chip nav or similar strip
+   where wrapping to a second row would defeat the point (GuestMenu.jsx). Chips themselves stay
+   .tab-btn/.tab-btn--active unchanged. */
+.tab-bar--scroll {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.tab-bar--scroll::-webkit-scrollbar {
+  display: none;
+}
+.tab-bar--scroll .tab-btn {
+  flex-shrink: 0;
 }
 
 .pay-method-btn {
