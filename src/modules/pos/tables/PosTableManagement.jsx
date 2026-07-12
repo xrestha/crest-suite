@@ -31,6 +31,9 @@ export default function PosTableManagement() {
   const [tables,    setTables]    = useState([])
   const [loading,   setLoading]   = useState(true)
   const [secFilter, setSecFilter] = useState('All')
+  // Transient banner above the floor grid for cycleStatus errors — that action happens directly
+  // on a floor tile, outside the Add/Edit modal, so the modal's own `msg` banner isn't visible.
+  const [floorMsg, setFloorMsg] = useState('')
 
   // Quick Setup
   const [qsOpen,   setQsOpen]   = useState(false)
@@ -196,7 +199,8 @@ export default function PosTableManagement() {
 
   async function handleDelete() {
     if (!target || !window.confirm(`Delete "${target.name}"? This cannot be undone.`)) return
-    await scopedDelete('pos_tables').eq('id', target.id)
+    const { error } = await scopedDelete('pos_tables').eq('id', target.id)
+    if (error) { setMsg('error:' + error.message); return }
     await load(); closeModal()
   }
 
@@ -240,13 +244,16 @@ export default function PosTableManagement() {
 
   async function cycleStatus(t, e) {
     e.stopPropagation()
+    setFloorMsg('')
     const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(t.status) + 1) % STATUS_CYCLE.length]
-    await scopedUpdate('pos_tables', { status: next }).eq('id', t.id)
+    const { error } = await scopedUpdate('pos_tables', { status: next }).eq('id', t.id)
+    if (error) { setFloorMsg('error:Could not update ' + t.name + ' — ' + error.message); return }
     setTables(prev => prev.map(r => r.id === t.id ? { ...r, status: next } : r))
   }
 
   async function handleStatusChange(val) {
-    await scopedUpdate('pos_tables', { status: val }).eq('id', target.id)
+    const { error } = await scopedUpdate('pos_tables', { status: val }).eq('id', target.id)
+    if (error) { setMsg('error:' + error.message); return }
     setTables(prev => prev.map(r => r.id === target.id ? { ...r, status: val } : r))
     setTarget(t => ({ ...t, status: val }))
   }
@@ -958,6 +965,18 @@ export default function PosTableManagement() {
               {sections.map(s => (
                 <button key={s} className={`tab-btn${secFilter === s ? ' tab-btn--active' : ''}`} onClick={() => setSecFilter(s)}>{s}</button>
               ))}
+            </div>
+          )}
+
+          {floorMsg && (
+            <div style={{
+              background: floorMsg.startsWith('error:') ? 'rgba(248,113,113,0.08)' : 'rgba(52,211,153,0.08)',
+              border: `1px solid ${floorMsg.startsWith('error:') ? 'rgba(248,113,113,0.25)' : 'rgba(52,211,153,0.25)'}`,
+              borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
+              color: floorMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)',
+              cursor: 'pointer',
+            }} onClick={() => setFloorMsg('')}>
+              {floorMsg.replace(/^(error|ok):/, '')} <span style={{ opacity: 0.7 }}>(tap to dismiss)</span>
             </div>
           )}
 

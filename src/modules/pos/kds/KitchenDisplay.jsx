@@ -42,6 +42,11 @@ export default function KitchenDisplay() {
   // touchscreens could otherwise fire two overlapping updates whose responses arrive out of
   // order, leaving the row reverted to an earlier stage than what was actually tapped.
   const [advancing, setAdvancing] = useState(() => new Set())
+  // advance() previously never checked the write's result, so a failed update (RLS denial,
+  // network blip) left the optimistic status showing on screen for up to POLL_MS with no
+  // indication the DB write never landed — a busy kitchen could believe a ticket was done when
+  // it wasn't. Now reverted immediately below on error, with a dismissible reason shown here.
+  const [kdsError, setKdsError] = useState('')
 
   const load = useCallback(async () => {
     const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0)
@@ -69,18 +74,25 @@ export default function KitchenDisplay() {
 
   function selectStation(s) {
     setStation(s)
+    setKdsError('')
     localStorage.setItem('pos_kds_station', s)
   }
 
   async function advance(ticket, nextStatus) {
     if (advancing.has(ticket.id)) return
     setAdvancing(prev => new Set(prev).add(ticket.id))
-    // Optimistic — the next poll (≤4s) reconciles with the server either way.
+    const prevStatus = ticket.status
+    // Optimistic — reverted below if the write actually fails; otherwise the next poll (≤4s)
+    // reconciles with the server as before.
     setTickets(prev => prev.map(t => t.id === ticket.id ? { ...t, status: nextStatus } : t))
     const patch = { status: nextStatus, status_updated_by: profile?.id || null }
     if (nextStatus === 'in_progress') patch.started_at = new Date().toISOString()
     if (nextStatus === 'ready') patch.ready_at = new Date().toISOString()
-    await scopedUpdate('pos_kot_log', patch).eq('id', ticket.id)
+    const { error } = await scopedUpdate('pos_kot_log', patch).eq('id', ticket.id)
+    if (error) {
+      setTickets(prev => prev.map(t => t.id === ticket.id ? { ...t, status: prevStatus } : t))
+      setKdsError(`Could not update ${ticket.table_name || 'this ticket'} — ${error.message}`)
+    }
     setAdvancing(prev => { const next = new Set(prev); next.delete(ticket.id); return next })
   }
 
@@ -109,6 +121,16 @@ export default function KitchenDisplay() {
           ))}
         </div>
       </div>
+
+      {kdsError && (
+        <div style={{
+          background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)',
+          borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
+          color: 'var(--theme-red)', cursor: 'pointer',
+        }} onClick={() => setKdsError('')}>
+          {kdsError} <span style={{ opacity: 0.7 }}>(tap to dismiss)</span>
+        </div>
+      )}
 
       {loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>

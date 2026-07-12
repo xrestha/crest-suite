@@ -104,6 +104,14 @@ export default function PosOrders() {
   const [billingTab,  setBillingTab]  = useState('pay') // 'pay' | 'void' | 'writeoff'
   const [payMethod,   setPayMethod]   = useState('Cash')
   const [tenderedStr, setTenderedStr] = useState('')
+  // tenderedStr === '' means "not entered yet" (assume exact cash, i.e. fall back to the total).
+  // `parseFloat(tenderedStr) || fallback` treated an explicit "0" the same as empty, since 0 is
+  // falsy in JS — silently recording an exact-cash payment even when the cashier typed 0. This
+  // only falls back when the parse genuinely fails (empty or non-numeric), never for a real 0.
+  function resolveTendered(fallback) {
+    const v = parseFloat(tenderedStr)
+    return Number.isNaN(v) ? fallback : v
+  }
   const [closeReason, setCloseReason] = useState('')
   const [buyerName,    setBuyerName]    = useState('')
   const [buyerAddress, setBuyerAddress] = useState('')
@@ -315,6 +323,20 @@ export default function PosOrders() {
     return () => { cancelled = true }
   }, [billingOpen, splitMode, payMethod, tenderMethod, tenderAmtStr, remaining, payTotal, orderNo, billingSettings.payment_qr_data]) // eslint-disable-line
 
+  // Always the freshest closeOrder — a new function every render, closing over that render's
+  // discountAmt/discountReason/buyerName/payableOrderItems/etc (closeOrder's 'paid' guards read
+  // these directly, not via arguments). The poll effect below reads this ref instead of listing
+  // all of those as its own dependencies, so a keystroke in an unrelated field (which changes
+  // payableOrderItems's array identity on every render) no longer tears down and restarts the
+  // setInterval before it ever fires — previously the poll effectively never survived a full 4s
+  // tick while the modal was open and the cashier was still typing (discount, tender, etc).
+  const closeOrderRef = useRef(null)
+  closeOrderRef.current = closeOrder
+  // payTotal changes on every discount/item edit too — same staleness risk as closeOrder above,
+  // needed for the poll's amount-match check without also being a restart trigger.
+  const payTotalRef = useRef(payTotal)
+  payTotalRef.current = payTotal
+
   // Poll for an auto-confirmed QR payment while the Charge modal is showing one. The webhook
   // scaffold (supabase/functions/pos-payment-webhook) only ever produces a row once a
   // per-client pos_webhook_secret is set and a real provider is wired up to call it — until
@@ -329,27 +351,21 @@ export default function PosOrders() {
         .order('received_at', { ascending: false }).limit(1)
       const hit = data?.[0]
       if (!hit || cancelled) return
-      if (hit.provider !== payMethod || Math.abs(hit.amount - payTotal) > 1) return
+      if (hit.provider !== payMethod || Math.abs(hit.amount - payTotalRef.current) > 1) return
       // Consume the confirmation only once closeOrder actually finishes billing — not before.
       // Marking it consumed first (as this used to) would burn it on a close that aborts (e.g.
       // the comp-reason guard, or closingRef rejecting a concurrent manual tap), leaving no
       // unconsumed confirmation left for the next poll tick to retry against.
-      const ok = await closeOrder('paid')
+      const ok = await closeOrderRef.current('paid')
       if (ok && !cancelled) {
         await scopedUpdate('pos_payment_confirmations', { consumed_at: new Date().toISOString() }).eq('id', hit.id)
       }
     }, 4000)
     return () => { cancelled = true; clearInterval(poll) }
-    // closeOrder('paid') (called inside poll) also validates discountReason/buyer-id/itemCompReason
-    // /payableOrderItems — these weren't in the dependency list, so a field filled in AFTER this
-    // effect last ran (e.g. a discount reason typed in after the discount amount itself, which
-    // WAS in the list) left the poll's closure holding the pre-fill value, spuriously rejecting a
-    // payment that looks complete on screen. All fields closeOrder's 'paid' guards actually read
-    // are listed here so the closure never goes stale.
-  }, [ // eslint-disable-line
-    billingOpen, splitMode, orderId, payMethod, billQrUrl, payTotal,
-    discountAmt, discountReason, requireBuyerId, buyerName, buyerPhone, hasItemComp, itemCompReason, payableOrderItems,
-  ])
+    // Only what should actually restart the polling loop — !!billQrUrl (not the QR string
+    // itself, which regenerates on every discount/amount keystroke) so re-rendering the same QR
+    // for the same order doesn't reset the interval either.
+  }, [billingOpen, splitMode, orderId, payMethod, !!billQrUrl]) // eslint-disable-line
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
 
@@ -1318,7 +1334,7 @@ export default function PosOrders() {
         close_type:       closeType,
         payment_method:   closeType === 'paid' ? (isSplit ? 'Split' : payMethod) : null,
         paid_amount:      closeType === 'paid' ? payTotal : (closeType === 'writeoff' ? 0 : null),
-        tendered_amount:  closeType === 'paid' && !isSplit && payMethod === 'Cash' ? (parseFloat(tenderedStr) || payTotal) : null,
+        tendered_amount:  closeType === 'paid' && !isSplit && payMethod === 'Cash' ? resolveTendered(payTotal) : null,
         // Commission is deliberately NOT computed here — Foodmandu/Pathao don't pay at the
         // counter (they remit later, minus commission), so this is a receivable, not an instant
         // payment. commission_amount gets set at settlement time instead (Customers →
@@ -1545,7 +1561,7 @@ export default function PosOrders() {
   const previewDraftOrder = {
     invoice_no: null, invoice_fy: null,
     payment_method: splitMode && tenders.length > 0 ? 'Split' : payMethod,
-    tendered_amount: !splitMode && payMethod === 'Cash' ? (parseFloat(tenderedStr) || payTotal) : null,
+    tendered_amount: !splitMode && payMethod === 'Cash' ? resolveTendered(payTotal) : null,
     buyer_name: buyerName, buyer_address: buyerAddress, buyer_pan: buyerPan, buyer_phone: buyerPhone,
     bill_remarks: billRemarks, close_reason: closeReason,
     discount_amount: discountAmt,
@@ -2269,7 +2285,7 @@ export default function PosOrders() {
                         <div style={{ flex: 1 }}>
                           <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Change</label>
                           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>
-                            {fmtNpr(Math.max(0, (parseFloat(tenderedStr) || payTotal) - payTotal))}
+                            {fmtNpr(Math.max(0, resolveTendered(payTotal) - payTotal))}
                           </div>
                         </div>
                       </div>
