@@ -8,7 +8,7 @@ const KEYS = [
   ['1', '2', '3'],
   ['4', '5', '6'],
   ['7', '8', '9'],
-  ['',  '0', '⌫'],
+  ['C', '0', '⌫'],
 ]
 
 export default function PosLogin() {
@@ -35,6 +35,7 @@ export default function PosLogin() {
 
   const pressKey = useCallback((k) => {
     if (k === '⌫') { setPin(p => p.slice(0, -1)); setError(''); return }
+    if (k === 'C') { setPin(''); setError(''); return }
     if (!k) return
     setPin(p => p.length < 6 ? p + k : p)
     setError('')
@@ -46,6 +47,7 @@ export default function PosLogin() {
     function onKey(e) {
       if (e.key >= '0' && e.key <= '9') pressKey(e.key)
       else if (e.key === 'Backspace')    pressKey('⌫')
+      else if (e.key === 'Escape')       pressKey('C')
       else if (e.key === 'Enter')        handleSignIn()
     }
     window.addEventListener('keydown', onKey)
@@ -133,13 +135,19 @@ const pinDots = Math.max(4, pin.length)
       justifyContent: 'center',
       padding: 24,
     }}>
+    <div className="card" style={{
+      padding: '40px 36px', borderRadius: 10,
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      width: '100%', maxWidth: 540,
+    }}>
 
-      {/* Header */}
+      {/* Header — Georgia serif is reserved for exactly two places in this product: the
+          sidebar wordmark and this login screen (DESIGN.md §3, The One Serif Rule). */}
       <div style={{ marginBottom: 36, textAlign: 'center' }}>
-        <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--theme-text1)', letterSpacing: 0.5 }}>
+        <div style={{ fontSize: 26, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.02em', color: 'var(--theme-text1)', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
           {clientName}
         </div>
-        <div style={{ fontSize: selected ? 18 : 14, fontWeight: selected ? 600 : 400, color: selected ? 'var(--theme-text1)' : 'var(--theme-text3)', marginTop: 8, letterSpacing: 0.2 }}>
+        <div style={{ fontSize: selected ? 18 : 14, fontWeight: selected ? 600 : 400, color: selected ? 'var(--theme-text1)' : 'var(--theme-text3)', marginTop: 10, letterSpacing: 0.2 }}>
           {selected ? `Enter PIN for ${selected.full_name}` : 'Who are you?'}
         </div>
       </div>
@@ -162,7 +170,7 @@ const pinDots = Math.max(4, pin.length)
                     key={s.id}
                     onClick={() => pickStaff(s)}
                     style={{
-                      width: 130, height: 128,
+                      width: 130, minHeight: 128,
                       display: 'flex', flexDirection: 'column', alignItems: 'center',
                       background: 'var(--theme-card)',
                       border: '1px solid var(--theme-border)',
@@ -186,7 +194,11 @@ const pinDots = Math.max(4, pin.length)
                     }}>
                       {getInitials(s.full_name)}
                     </div>
-                    <div style={{ textAlign: 'center' }}>{s.full_name}</div>
+                    <div style={{
+                      textAlign: 'center', width: '100%',
+                      overflowWrap: 'break-word', wordBreak: 'break-word',
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                    }}>{s.full_name}</div>
                     {s.pos_job_title && (
                       <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginTop: 3, textAlign: 'center' }}>
                         {s.pos_job_title}
@@ -240,17 +252,19 @@ const pinDots = Math.max(4, pin.length)
                   background: k ? 'var(--theme-card)' : 'transparent',
                   border: k ? '1px solid var(--theme-border)' : 'none',
                   borderRadius: '50%',
-                  color: 'var(--theme-text1)',
-                  fontSize: k === '⌫' ? 20 : 22,
-                  fontWeight: 500,
+                  color: k === 'C' ? 'var(--theme-text3)' : 'var(--theme-text1)',
+                  fontSize: k === '⌫' ? 20 : k === 'C' ? 15 : 22,
+                  fontWeight: k === 'C' ? 600 : 500,
+                  letterSpacing: k === 'C' ? '0.04em' : 'normal',
                   cursor: k ? 'pointer' : 'default',
-                  transition: 'background 0.12s, transform 0.08s',
+                  transition: 'background 0.12s, transform 0.08s, box-shadow 0.12s',
+                  boxShadow: 'none',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
                 onMouseEnter={e => { if (k) e.currentTarget.style.background = 'var(--theme-table-hover)' }}
-                onMouseLeave={e => { if (k) e.currentTarget.style.background = k ? 'var(--theme-card)' : 'transparent' }}
-                onMouseDown={e => { if (k) e.currentTarget.style.transform = 'scale(0.92)' }}
-                onMouseUp={e => { if (k) e.currentTarget.style.transform = 'scale(1)' }}
+                onMouseLeave={e => { if (k) { e.currentTarget.style.background = k ? 'var(--theme-card)' : 'transparent'; e.currentTarget.style.boxShadow = 'none' } }}
+                onMouseDown={e => { if (k) { e.currentTarget.style.transform = 'scale(0.92)'; e.currentTarget.style.boxShadow = '0 0 0 4px var(--theme-focus-ring), 0 0 14px var(--theme-accent)' } }}
+                onMouseUp={e => { if (k) { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none' } }}
               >
                 {k}
               </button>
@@ -287,6 +301,7 @@ const pinDots = Math.max(4, pin.length)
           </div>
         </div>
       )}
+    </div>
     </div>
   )
 }

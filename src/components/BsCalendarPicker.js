@@ -31,6 +31,7 @@ export default function BsCalendarPicker({
   lockYear, lockMonth,
   placeholder = 'Select BS date',
   disabled = false, clearable = false,
+  id, ariaLabel,
 }) {
   const locked = lockYear != null && lockMonth != null
   const today  = getBsToday()
@@ -270,6 +271,8 @@ export default function BsCalendarPicker({
     <div ref={triggerRef} style={{ position: 'relative' }}>
       <button
         type="button"
+        id={id}
+        aria-label={ariaLabel}
         disabled={disabled}
         onClick={() => !disabled && setOpen(o => !o)}
         style={{

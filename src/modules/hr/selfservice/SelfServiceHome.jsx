@@ -301,6 +301,7 @@ export default function SelfServiceHome() {
             <button
               key={val}
               className={`tab-btn${tab === val ? ' tab-btn--active' : ''}`}
+              aria-current={tab === val ? 'true' : undefined}
               onClick={() => setTab(val)}
               style={{ fontSize: 13, padding: '8px 18px', textTransform: 'uppercase', letterSpacing: '0.04em' }}
             >
@@ -340,33 +341,33 @@ export default function SelfServiceHome() {
               <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Submit Leave Request</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div>
-                  <label style={lbl}>Leave Type</label>
-                  <select className="form-select" style={{ width: '100%' }} value={leaveTypeId} onChange={e => setLeaveTypeId(e.target.value)}>
+                  <label style={lbl} htmlFor="ss-leave-type">Leave Type</label>
+                  <select id="ss-leave-type" className="form-select" style={{ width: '100%' }} value={leaveTypeId} onChange={e => setLeaveTypeId(e.target.value)}>
                     {leaveTypes.map(t => <option key={t.id} value={t.id}>{t.name}{t.annual_quota > 0 ? ` (${t.annual_quota}/yr)` : ''}</option>)}
                   </select>
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <div style={{ flex: 1 }}>
-                    <label style={lbl}>Start (BS)</label>
-                    <BsCalendarPicker value={startDate} onChange={setStartDate} placeholder="Select date" clearable />
+                    <label style={lbl} htmlFor="ss-leave-start">Start (BS)</label>
+                    <BsCalendarPicker id="ss-leave-start" value={startDate} onChange={setStartDate} placeholder="Select date" clearable />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <label style={lbl}>End (BS)</label>
-                    <BsCalendarPicker value={endDate} onChange={setEndDate} placeholder="Select date" clearable />
+                    <label style={lbl} htmlFor="ss-leave-end">End (BS)</label>
+                    <BsCalendarPicker id="ss-leave-end" value={endDate} onChange={setEndDate} placeholder="Select date" clearable />
                   </div>
                 </div>
                 {isSingleDay && (
                   <div>
-                    <label style={lbl}>Day Type</label>
-                    <select className="form-select" style={{ width: '100%' }} value={dayType} onChange={e => setDayType(e.target.value)}>
+                    <label style={lbl} htmlFor="ss-leave-daytype">Day Type</label>
+                    <select id="ss-leave-daytype" className="form-select" style={{ width: '100%' }} value={dayType} onChange={e => setDayType(e.target.value)}>
                       {DAY_TYPES.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
                     </select>
                   </div>
                 )}
                 {days > 0 && <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{days} day{days !== 1 ? 's' : ''}</div>}
                 <div>
-                  <label style={lbl}>Reason</label>
-                  <textarea style={{ ...inp, height: 60, resize: 'vertical' }} value={reason} onChange={e => setReason(e.target.value)} />
+                  <label style={lbl} htmlFor="ss-leave-reason">Reason</label>
+                  <textarea id="ss-leave-reason" style={{ ...inp, height: 60, resize: 'vertical' }} value={reason} onChange={e => setReason(e.target.value)} />
                 </div>
                 {msg && <div style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{msg.replace(/^(ok|error):/, '')}</div>}
                 <button className="btn btn-primary" onClick={submitLeave} disabled={submitting} style={{ alignSelf: 'flex-end' }}>
@@ -403,8 +404,9 @@ export default function SelfServiceHome() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <div style={{ flex: 1 }}>
-                    <label style={lbl}>Start Point</label>
+                    <label style={lbl} htmlFor="ss-tada-startpoint">Start Point</label>
                     <select
+                      id="ss-tada-startpoint"
                       className="form-select" style={{ width: '100%' }}
                       value={tadaStartPointMode === 'custom' ? OTHER_PURPOSE : tadaForm.start_point}
                       onChange={e => {
@@ -417,12 +419,13 @@ export default function SelfServiceHome() {
                       <option value={OTHER_PURPOSE}>Other (type below)</option>
                     </select>
                     {tadaStartPointMode === 'custom' && (
-                      <input style={{ ...inp, marginTop: 6 }} placeholder="Where did the trip start?" value={tadaForm.start_point} onChange={e => setTada('start_point', e.target.value)} />
+                      <input aria-label="Trip start point" style={{ ...inp, marginTop: 6 }} placeholder="Where did the trip start?" value={tadaForm.start_point} onChange={e => setTada('start_point', e.target.value)} />
                     )}
                   </div>
                   <div style={{ flex: 1 }}>
-                    <label style={lbl}>Purpose</label>
+                    <label style={lbl} htmlFor="ss-tada-purpose">Purpose</label>
                     <select
+                      id="ss-tada-purpose"
                       className="form-select" style={{ width: '100%' }}
                       value={tadaPurposeMode === 'custom' ? OTHER_PURPOSE : tadaForm.trip_purpose}
                       onChange={e => {
@@ -435,13 +438,13 @@ export default function SelfServiceHome() {
                       <option value={OTHER_PURPOSE}>Other (type below)</option>
                     </select>
                     {tadaPurposeMode === 'custom' && (
-                      <input style={{ ...inp, marginTop: 6 }} placeholder="Describe the purpose" value={tadaForm.trip_purpose} onChange={e => setTada('trip_purpose', e.target.value)} />
+                      <input aria-label="Trip purpose" style={{ ...inp, marginTop: 6 }} placeholder="Describe the purpose" value={tadaForm.trip_purpose} onChange={e => setTada('trip_purpose', e.target.value)} />
                     )}
                   </div>
                 </div>
                 <div>
-                  <label style={lbl}>Destination</label>
-                  <input style={inp} placeholder="e.g. Pokhara" value={tadaForm.destination} onChange={e => setTada('destination', e.target.value)} />
+                  <label style={lbl} htmlFor="ss-tada-destination">Destination</label>
+                  <input id="ss-tada-destination" style={inp} placeholder="e.g. Pokhara" value={tadaForm.destination} onChange={e => setTada('destination', e.target.value)} />
                   {tadaForm.trip_purpose === PURCHASE_PURPOSE && (
                     <div style={{ marginTop: 6 }}>
                       <SearchableSelect
@@ -454,12 +457,12 @@ export default function SelfServiceHome() {
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <div style={{ flex: 1 }}>
-                    <label style={lbl}>Start (BS)</label>
-                    <BsCalendarPicker value={tadaForm.start_date} onChange={v => setTada('start_date', v)} placeholder="Select date" clearable />
+                    <label style={lbl} htmlFor="ss-tada-start">Start (BS)</label>
+                    <BsCalendarPicker id="ss-tada-start" value={tadaForm.start_date} onChange={v => setTada('start_date', v)} placeholder="Select date" clearable />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <label style={lbl}>End (BS)</label>
-                    <BsCalendarPicker value={tadaForm.end_date} onChange={v => setTada('end_date', v)} placeholder="Select date" clearable />
+                    <label style={lbl} htmlFor="ss-tada-end">End (BS)</label>
+                    <BsCalendarPicker id="ss-tada-end" value={tadaForm.end_date} onChange={v => setTada('end_date', v)} placeholder="Select date" clearable />
                   </div>
                 </div>
 
@@ -471,23 +474,23 @@ export default function SelfServiceHome() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {tadaForm.items.map((it, idx) => (
                       <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <select className="form-select" style={{ width: 130, flexShrink: 0 }} value={it.category} onChange={e => setTadaItem(idx, 'category', e.target.value)}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <select aria-label="Expense category" className="form-select" style={{ width: 130, flexShrink: 0 }} value={it.category} onChange={e => setTadaItem(idx, 'category', e.target.value)}>
                             {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                           </select>
-                          <input style={inp} placeholder="Description (optional)" value={it.description} onChange={e => setTadaItem(idx, 'description', e.target.value)} />
-                          <input style={{ ...inp, width: 100, flexShrink: 0 }} type="number" min="0" placeholder="Amount" value={it.amount} onChange={e => setTadaItem(idx, 'amount', e.target.value)} />
+                          <input aria-label="Expense description" style={{ ...inp, flex: 1, minWidth: 120 }} placeholder="Description (optional)" value={it.description} onChange={e => setTadaItem(idx, 'description', e.target.value)} />
+                          <input aria-label="Amount" style={{ ...inp, width: 100, flexShrink: 0 }} type="number" min="0" placeholder="Amount" value={it.amount} onChange={e => setTadaItem(idx, 'amount', e.target.value)} />
                           {tadaForm.items.length > 1 && (
-                            <button style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 16, flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => removeTadaItemRow(idx)}>✕</button>
+                            <button aria-label="Remove expense line" style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 16, flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => removeTadaItemRow(idx)}>✕</button>
                           )}
                         </div>
                         {it.category === 'Transport' && (
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingLeft: 2, flexWrap: 'wrap' }}>
                             <span style={{ fontSize: 12, flexShrink: 0 }}>🧮</span>
-                            <select className="form-select" style={{ width: 100, flexShrink: 0, fontSize: 12 }} value={it.vehicle} onChange={e => setTadaItemVehicle(idx, e.target.value)}>
+                            <select aria-label="Vehicle type" className="form-select" style={{ width: 100, flexShrink: 0, fontSize: 12 }} value={it.vehicle} onChange={e => setTadaItemVehicle(idx, e.target.value)}>
                               {VEHICLE_TYPES.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
                             </select>
-                            <input style={{ ...inp, width: 90, flexShrink: 0 }} type="number" min="0" step="0.1" placeholder="Distance (km)" value={it.distanceKm} onChange={e => setTadaItemDistance(idx, e.target.value)} />
+                            <input aria-label="Distance in kilometers" style={{ ...inp, width: 90, flexShrink: 0 }} type="number" min="0" step="0.1" placeholder="Distance (km)" value={it.distanceKm} onChange={e => setTadaItemDistance(idx, e.target.value)} />
                             {tadaVehicleRates[it.vehicle] == null ? (
                               <span style={{ fontSize: 11, color: 'var(--theme-amber)' }}>No rate set. Enter amount manually</span>
                             ) : (
@@ -504,8 +507,8 @@ export default function SelfServiceHome() {
                 </div>
 
                 <div>
-                  <label style={lbl}>Notes</label>
-                  <textarea style={{ ...inp, height: 50, resize: 'vertical' }} placeholder="Optional" value={tadaForm.notes} onChange={e => setTada('notes', e.target.value)} />
+                  <label style={lbl} htmlFor="ss-tada-notes">Notes</label>
+                  <textarea id="ss-tada-notes" style={{ ...inp, height: 50, resize: 'vertical' }} placeholder="Optional" value={tadaForm.notes} onChange={e => setTada('notes', e.target.value)} />
                 </div>
 
                 {tadaMsg && <div style={{ fontSize: 12, color: tadaMsg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{tadaMsg.replace(/^(ok|error):/, '')}</div>}
@@ -542,10 +545,10 @@ export default function SelfServiceHome() {
         {tab === 'roster' && (
           <div>
             <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-              <select className="form-select" value={rosterMonth} onChange={e => setRosterMonth(parseInt(e.target.value, 10))}>
+              <select aria-label="Month" className="form-select" value={rosterMonth} onChange={e => setRosterMonth(parseInt(e.target.value, 10))}>
                 {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
               </select>
-              <select className="form-select" value={rosterYear} onChange={e => setRosterYear(parseInt(e.target.value, 10))}>
+              <select aria-label="Year" className="form-select" value={rosterYear} onChange={e => setRosterYear(parseInt(e.target.value, 10))}>
                 {Array.from({ length: 3 }, (_, i) => today.year - 1 + i).map(y => <option key={y} value={y}>BS {y}</option>)}
               </select>
             </div>
@@ -577,19 +580,19 @@ export default function SelfServiceHome() {
                           ) : coworkerNames.length === 0 ? (
                             <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>No coworkers have a published shift this month yet.</div>
                           ) : (
-                            <select className="form-select" style={{ width: '100%' }} value={swapTargetEmpId}
+                            <select aria-label="Swap with" className="form-select" style={{ width: '100%' }} value={swapTargetEmpId}
                               onChange={e => { setSwapTargetEmpId(e.target.value); setSwapTargetDay('') }}>
                               <option value="">Swap with…</option>
                               {coworkerNames.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
                             </select>
                           )}
                           {swapTargetEmpId && (
-                            <select className="form-select" style={{ width: '100%' }} value={swapTargetDay} onChange={e => setSwapTargetDay(e.target.value)}>
+                            <select aria-label="Their day" className="form-select" style={{ width: '100%' }} value={swapTargetDay} onChange={e => setSwapTargetDay(e.target.value)}>
                               <option value="">Their day…</option>
                               {coworkerDays.map(d => <option key={d.bs_day} value={d.bs_day}>Day {d.bs_day} — {d.shift_type_name || '—'}</option>)}
                             </select>
                           )}
-                          <textarea placeholder="Note (optional)" style={{ ...inp, height: 44, resize: 'vertical' }} value={swapNote} onChange={e => setSwapNote(e.target.value)} />
+                          <textarea aria-label="Note for the swap request" placeholder="Note (optional)" style={{ ...inp, height: 44, resize: 'vertical' }} value={swapNote} onChange={e => setSwapNote(e.target.value)} />
                           {swapMsg && <div style={{ fontSize: 11, color: 'var(--theme-red)' }}>{swapMsg}</div>}
                           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setSwapDay(null)}>Cancel</button>
