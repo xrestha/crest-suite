@@ -51,6 +51,7 @@ function CalcDetail({ row, monthDays, advances }) {
           {ATTENDANCE_STATUSES.map(s => (
             <Line key={s.key} label={s.label} value={t[s.key] || 0} />
           ))}
+          <Line label="Total Days" value={ATTENDANCE_STATUSES.reduce((sum, s) => sum + (t[s.key] || 0), 0)} strong />
           <Line label="Hours Worked" value={(t.sumHours || 0).toFixed(1)} />
         </Section>
 

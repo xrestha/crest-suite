@@ -141,6 +141,12 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S366 — 2026-07-11 — feat(hr): Payroll Calculation's Attendance Tally gets a bold Total Days row
+
+Small addition to `PayrollCalculation.jsx`'s expanded breakdown — a "Total Days" row summing all nine attendance statuses (Present + Half-day + Absent + Paid Leave + Unpaid Leave + Half-day Paid Leave + Half-day Unpaid Leave + Off + Holiday), bold, sitting between the individual status rows and Hours Worked. Full HR suite (37 tests) passes; build compiles clean.
+
+**Files:** `src/modules/hr/payroll/PayrollCalculation.jsx`
+
 ### S365 — 2026-07-11 — fix: TDS was computed on full contractual gross instead of income actually earned/paid
 
 User's question, using the new Calculation page: an employee absent 13 of 32 days (net pay NPR 14,630 after a NPR 10,156 absence deduction) was still being taxed 1% TDS on the full NPR 25,000 contractual gross — NPR 250, not proportional to what they actually received. Researched Nepal's Income Tax Act: TDS is withheld on remuneration **actually paid**, not contractual salary — confirmed by multiple sources describing TDS as deducted "at the time of payment." Also notably: SSF in the very same payslip was *already* correctly computed on the absence-adjusted amount (`ssfBase = Basic × Paid Fraction`) — TDS was the one line item that had been missed, an internal-consistency bug as much as a compliance one.
