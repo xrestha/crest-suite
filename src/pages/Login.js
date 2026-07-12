@@ -19,10 +19,12 @@ async function edgeOp(action, params = {}) {
 }
 
 const HIGHLIGHTS = [
-  { icon: '📊', text: 'Recipe FC% recalculates on every purchase — always see your real food cost' },
-  { icon: '📦', text: 'Track stock & catch variance before it hurts' },
-  { icon: '📅', text: 'Bikram Sambat calendar · Supplier tracking · Payables aging' },
-  { icon: '📈', text: 'Menu engineering, reports & food cost trends' },
+  'Stop guessing which dishes lose money — Menu Repricing finds them',
+  'Catch ingredient waste before it eats your margin — Theoretical Variance',
+  'Roster, attendance & payroll in one place — no manual hour reconciliation',
+  'SSF & TDS calculated automatically, deadline-ready every month',
+  'Count stock without losing your place when the wifi drops',
+  'See which dishes actually sell well together — real order data, not guesswork',
 ]
 
 export default function Login() {
@@ -123,10 +125,10 @@ export default function Login() {
           </div>
 
           <ul className="login-highlights">
-            {HIGHLIGHTS.map((h, i) => (
+            {HIGHLIGHTS.map((text, i) => (
               <li key={i}>
-                <span className="login-highlight-icon">{h.icon}</span>
-                <span>{h.text}</span>
+                <span className="login-highlight-bullet" />
+                <span>{text}</span>
               </li>
             ))}
           </ul>

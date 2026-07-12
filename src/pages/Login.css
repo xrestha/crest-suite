@@ -15,7 +15,7 @@
   background: var(--theme-card, #181c27);
   border: 1px solid var(--theme-border, #2a2f3d);
   border-radius: var(--radius-xl, 24px);
-  box-shadow: 0 4px 40px rgba(0,0,0,0.35);
+  box-shadow: var(--theme-card-shadow, 0 4px 40px rgba(0,0,0,0.35));
   overflow: hidden;
 }
 
@@ -87,17 +87,19 @@
 
 .login-highlights li {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
   font-size: 13px;
   color: var(--theme-text2);
   line-height: 1.4;
 }
 
-.login-highlight-icon {
-  font-size: 14px;
+.login-highlight-bullet {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--theme-accent, #c9a84c);
   flex-shrink: 0;
-  margin-top: 1px;
 }
 
 /* ── Section label ── */
@@ -141,7 +143,7 @@
 .login-field input {
   background: var(--theme-input-bg, #0f1117);
   border: 1px solid var(--theme-border, #2a2f3d);
-  border-radius: 6px;
+  border-radius: var(--radius-md, 12px);
   padding: 7px 10px;
   font-size: 14px;
   color: var(--theme-text1, #e8e0d0);
@@ -188,15 +190,15 @@
   color: var(--theme-red, #f87171);
   margin: 0;
   padding: 7px 10px;
-  background: rgba(248,113,113,0.08);
-  border-radius: 6px;
+  background: color-mix(in srgb, var(--theme-red, #f87171) 8%, transparent);
+  border-radius: var(--radius-md, 12px);
 }
 
 .login-btn {
   background: var(--theme-accent, #c9a84c);
-  color: #0f1117;
+  color: var(--theme-accent-text, #0f1117);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md, 12px);
   padding: 9px 20px;
   font-size: 14px;
   font-weight: 700;
@@ -207,12 +209,16 @@
 }
 
 .login-btn--trial {
-  background: #34d399;
-  color: #0f1117;
+  background: var(--theme-green, #34d399);
+  /* accent-text, not a dedicated green-text token — reused because within any one preset, accent
+     and green are picked from the same lightness "class" (dark presets: light/pastel accent+green
+     needing dark text; light presets: medium/saturated accent+green needing light text), so this
+     approximation holds across all 10 presets without needing a parallel per-color text token. */
+  color: var(--theme-accent-text, #0f1117);
 }
 
 .login-btn--trial:hover:not(:disabled) {
-  background: #10b981;
+  filter: brightness(0.92);
 }
 
 .login-btn:hover:not(:disabled) {
@@ -246,10 +252,11 @@
 
 /* ── Staff (PIN) login shortcut — same size as the Sign in button ── */
 .login-staff-btn {
-  background: #8b5cf6;
-  color: #ffffff;
+  background: var(--theme-purple, #8b5cf6);
+  /* accent-text reused here too — same lightness-class reasoning as .login-btn--trial above. */
+  color: var(--theme-accent-text, #ffffff);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md, 12px);
   padding: 9px 20px;
   font-size: 14px;
   font-weight: 700;
