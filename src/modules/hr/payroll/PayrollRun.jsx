@@ -401,7 +401,7 @@ export default function PayrollRun() {
                               {!isMonthly && <span style={{ fontSize: 10, fontWeight: 700, color: '#60a5fa', background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: 8, padding: '1px 6px' }}>{s.pay_basis}</span>}
                               {!emp.ssf_enrolled && <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>no SSF</span>}
                               {otBothSources && (
-                                <Tip text={`OT recorded in TWO places for this employee — ${attOtHrs} hr in the attendance sheet's OT column AND approved Overtime entries. Both are paid, so the same hours may be paid twice. Zero out one source and Regenerate.`} width={290}>
+                                <Tip text={`OT recorded in TWO places for this employee — ${attOtHrs.toFixed(1)} hr in the attendance sheet's OT column AND approved Overtime entries. Both are paid, so the same hours may be paid twice. Zero out one source and Regenerate.`} width={290}>
                                   <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>⚠ OT ×2?</span>
                                 </Tip>
                               )}
@@ -522,8 +522,8 @@ function PayslipBody({ slip, emp, periodLabel, forPrint }) {
       <div style={{ fontSize: 10, color: c1, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Earnings</div>
       <Row label={isMonthly ? 'Basic Salary' : `Wage (${slip.pay_basis})`} value={slip.basic} />
       {isMonthly && slip.allowances > 0 && <Row label="Allowances (incl. Dearness)" value={slip.allowances} />}
-      {!isMonthly && <Row label={slip.pay_basis === 'hourly' ? `Hours worked (${slip.hours_worked})` : `Days worked (${slip.worked_days})`} value={slip.gross} />}
-      {slip.ot_amount > 0 && <Row label={`Overtime (${slip.ot_hours} hrs)`} value={slip.ot_amount} />}
+      {!isMonthly && <Row label={slip.pay_basis === 'hourly' ? `Hours worked (${(slip.hours_worked || 0).toFixed(1)})` : `Days worked (${(slip.worked_days || 0).toFixed(1)})`} value={slip.gross} />}
+      {slip.ot_amount > 0 && <Row label={`Overtime (${(slip.ot_hours || 0).toFixed(1)} hrs)`} value={slip.ot_amount} />}
       <Row label="Gross Earnings" value={slip.gross + slip.ot_amount} strong />
 
       <div style={{ fontSize: 10, color: c1, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '12px 0 4px' }}>Deductions</div>

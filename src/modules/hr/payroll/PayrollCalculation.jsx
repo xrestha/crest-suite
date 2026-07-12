@@ -104,21 +104,21 @@ function CalcDetail({ row, monthDays, advances }) {
         )}
 
         <Section title="Overtime — Attendance Sheet">
-          <Line label="Attendance OT Hours" value={`${b.otAttendanceHrs || 0}h`} />
+          <Line label="Attendance OT Hours" value={`${(b.otAttendanceHrs || 0).toFixed(1)}h`} />
           <Line label="Hourly Rate" op="×" value={`NPR ${fmt(b.hourlyRate)}`} />
           <Line label="OT Multiplier" op="×" value={`${OT_MULTIPLIER}×`} />
           <Line label="Attendance OT Amount" op="=" value={`NPR ${fmt(b.otAttendanceAmt)}`} strong color="var(--theme-green)" />
         </Section>
 
         <Section title="Overtime — Approved Entries (Overtime module)">
-          <Line label="Approved OT Hours" value={`${b.otApprovedHrs || 0}h`} hint="From the Overtime module's approval workflow — a separate source from the Attendance sheet's OT column." />
+          <Line label="Approved OT Hours" value={`${(b.otApprovedHrs || 0).toFixed(1)}h`} hint="From the Overtime module's approval workflow — a separate source from the Attendance sheet's OT column." />
           <Line label="Approved OT Amount" op="=" value={`NPR ${fmt(b.otApprovedAmt)}`} strong color="var(--theme-green)" />
           {b.otDoubleCountRisk && (
             <div style={{ fontSize: 11, color: 'var(--theme-amber)', marginTop: 4 }}>
               ⚠ Both sources have hours this period — the same OT may be paid twice. Zero out one source.
             </div>
           )}
-          <Line label="Total OT (both sources)" value={`${b.otAttendanceHrs + (b.otApprovedHrs || 0)}h → NPR ${fmt(slip.ot_amount)}`} strong color="var(--theme-green)" />
+          <Line label="Total OT (both sources)" value={`${((b.otAttendanceHrs || 0) + (b.otApprovedHrs || 0)).toFixed(1)}h → NPR ${fmt(slip.ot_amount)}`} strong color="var(--theme-green)" />
         </Section>
       </div>
 

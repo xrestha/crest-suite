@@ -141,6 +141,14 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S363 — 2026-07-11 — fix: raw OT-hour sums displaying long floating-point tails ("3.6999999999999997h")
+
+User caught it on the new Calculation page's Overtime section. Root cause: `t.sumOt`/`t.sumHours` in `tallyAttendance()` accumulate via repeated `+= parseFloat(...)` — standard JS float addition, so a sequence like `0.2 + 1.3 + 2.2` doesn't land on a clean `3.7`. Every other hours display already ran the result through `.toFixed(n)` before rendering except a handful that displayed the raw sum directly in a template string.
+
+Fixed four spots: `PayrollCalculation.jsx`'s three new Overtime lines (Attendance OT Hours, Approved OT Hours, Total OT), and — found while checking for the same pattern elsewhere — a **pre-existing bug in the actual printed Payslip** (`PayrollRun.jsx`'s `PayslipBody`, `Overtime (${slip.ot_hours} hrs)` and the daily/hourly Hours/Days-worked label) and the ⚠ OT ×2? tooltip's hour count. The Payslip one is user-facing — an actual employee could have received a payslip with this in a printed document — so worth fixing regardless of the new page. All now `.toFixed(1)`. Full HR suite (37 tests) passes; build compiles clean.
+
+**Files:** `src/modules/hr/payroll/PayrollCalculation.jsx`, `src/modules/hr/payroll/PayrollRun.jsx`
+
 ### S362 — 2026-07-11 — feat(hr): Payroll Calculation gets a Print button + fully exploded Gross/OT/Absence/SSF math
 
 Follow-up to S361. User asked for a print function plus a fully "exploded" breakdown of gross salary and the OT-per-hour math specifically. Two changes to `PayrollCalculation.jsx`:
