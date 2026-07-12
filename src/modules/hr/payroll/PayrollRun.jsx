@@ -101,7 +101,11 @@ export default function PayrollRun() {
       const ytd   = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0 }
       const tds   = computeMonthlyTds({
         period,
-        monthlyGross:          slip.gross,
+        // Actual income earned this month, not contractual gross — Nepal's Income Tax Act
+        // withholds TDS on remuneration actually paid, and absence_deduction is exactly the
+        // portion of gross this employee never received (forfeited unpaid days). SSF just below
+        // already uses the same absence-adjusted base (ssfBase); TDS previously didn't (S365).
+        monthlyGross:          slip.gross - slip.absence_deduction,
         monthlySsf:            slip.ssf_employee,
         ytdGross:              ytd.gross,
         ytdSsf:                ytd.ssf,

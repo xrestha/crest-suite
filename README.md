@@ -141,6 +141,14 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S365 — 2026-07-11 — fix: TDS was computed on full contractual gross instead of income actually earned/paid
+
+User's question, using the new Calculation page: an employee absent 13 of 32 days (net pay NPR 14,630 after a NPR 10,156 absence deduction) was still being taxed 1% TDS on the full NPR 25,000 contractual gross — NPR 250, not proportional to what they actually received. Researched Nepal's Income Tax Act: TDS is withheld on remuneration **actually paid**, not contractual salary — confirmed by multiple sources describing TDS as deducted "at the time of payment." Also notably: SSF in the very same payslip was *already* correctly computed on the absence-adjusted amount (`ssfBase = Basic × Paid Fraction`) — TDS was the one line item that had been missed, an internal-consistency bug as much as a compliance one.
+
+Fixed the `monthlyGross` fed into `computeMonthlyTds()`/`computeMonthlyTdsBreakdown()` in both `PayrollRun.jsx`'s `buildRows` and `PayrollCalculation.jsx` — now `slip.gross - slip.absence_deduction` (actual income earned this month) instead of `slip.gross` (full contractual gross). No-op for daily/hourly bases (`absence_deduction` is always 0 there, since their `gross` already only reflects days/hours actually worked). For this example: TDS drops from NPR 250 to NPR 148, correctly proportional to the NPR 14,844 actually earned. The Calculation page's exploded TDS section now shows the Gross → Absence Deduction → Actual Gross step explicitly. Full HR suite (37 tests, `tds.js` itself untouched — the fix is entirely at the call sites) passes; build compiles clean.
+
+**Files:** `src/modules/hr/payroll/PayrollRun.jsx`, `src/modules/hr/payroll/PayrollCalculation.jsx`
+
 ### S364 — 2026-07-11 — fix: Payroll Calculation print output was flush against the page's left edge
 
 `@media print` zeroes `.main-content`'s padding (`Layout.css`) so every page can control its own print margins precisely — a convention the new Calculation page's `print-only` block hadn't picked up yet, since it inherited the app's normal on-screen padding instead of setting its own. Added explicit `28px 36px` padding directly on that block, matching the pattern other printable views in the app already use (their own margin, not the app chrome's).

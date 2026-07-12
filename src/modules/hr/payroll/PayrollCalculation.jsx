@@ -139,8 +139,11 @@ function CalcDetail({ row, monthDays, advances }) {
         )}
 
         <Section title={`TDS — FY ${fyLabel}, month ${tdsBreakdown.monthInFy} of 12`}>
+          <Line label="Gross" value={`NPR ${fmt(slip.gross)}`} />
+          <Line label="Absence Deduction" op="−" value={`NPR ${fmt(slip.absence_deduction)}`} hint="TDS is withheld on income actually paid, not contractual salary" />
+          <Line label="This Month's Actual Gross" op="=" value={`NPR ${fmt(slip.gross - slip.absence_deduction)}`} strong />
           <Line label="YTD Gross (prior finalized months)" value={`NPR ${fmt(tdsBreakdown.ytdGross)}`} />
-          <Line label="This Month's Gross" op="+" value={`NPR ${fmt(slip.gross)} × ${tdsBreakdown.monthsAtCurrent} remaining month(s)`} />
+          <Line label="This Month's Actual Gross" op="+" value={`NPR ${fmt(slip.gross - slip.absence_deduction)} × ${tdsBreakdown.monthsAtCurrent} remaining month(s)`} />
           <Line label="Projected Annual Gross" op="=" value={`NPR ${fmt(tdsBreakdown.annualGross)}`} strong />
           <Line label="SSF Deduction" op="−" value={`NPR ${fmt(tdsBreakdown.ssfDeduction)}`} />
           <Line label="Insurance Deduction" op="−" value={`NPR ${fmt(tdsBreakdown.insuranceDeduction)}`} />
@@ -265,7 +268,9 @@ export default function PayrollCalculation() {
     const ytd             = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0 }
     const tdsBreakdown = computeMonthlyTdsBreakdown({
       period,
-      monthlyGross: slip.gross,
+      // Actual income earned this month, not contractual gross — see the matching comment in
+      // PayrollRun.jsx's buildRows (S365). Must stay identical between the two files.
+      monthlyGross: slip.gross - slip.absence_deduction,
       monthlySsf:   slip.ssf_employee,
       ytdGross:     ytd.gross,
       ytdSsf:       ytd.ssf,
