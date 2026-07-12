@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { adToBs, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS } from '../../../utils/bsCalendar'
+import { adToBs, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, formatAd } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
 import {
@@ -332,7 +332,11 @@ export default function Roster() {
         const map = {}
         for (const r of data || []) {
           if (!map[r.employee_id]) map[r.employee_id] = []
-          map[r.employee_id].push({ start: new Date(r.start_date), end: new Date(r.end_date) })
+          // Keep as YYYY-MM-DD strings (already what Postgres returns for a `date` column) and
+          // compare lexicographically below — new Date("YYYY-MM-DD") parses as UTC midnight,
+          // which in Nepal (UTC+5:45) is later than local midnight, so a Date-object comparison
+          // silently missed single-day leave and the first day of every multi-day leave.
+          map[r.employee_id].push({ start: r.start_date, end: r.end_date })
         }
         setApprovedLeaveByEmp(map)
       })
@@ -341,8 +345,7 @@ export default function Roster() {
   function isOnApprovedLeave(empId, col) {
     const ranges = approvedLeaveByEmp[empId]
     if (!ranges || ranges.length === 0) return false
-    const d = bsToAd(col.bsYear, col.bsMonth, col.bsDay)
-    d.setHours(0, 0, 0, 0)
+    const d = formatAd(bsToAd(col.bsYear, col.bsMonth, col.bsDay))
     return ranges.some(r => d >= r.start && d <= r.end)
   }
 

@@ -141,16 +141,17 @@ function CalcDetail({ row, monthDays, advances }) {
 
         <Section title={`TDS — FY ${fyLabel}, month ${tdsBreakdown.monthInFy} of 12`}>
           <Line label="Gross" value={`NPR ${fmt(slip.gross)}`} />
+          <Line label="Overtime" op="+" value={`NPR ${fmt(slip.ot_amount)}`} hint="OT pay is taxable remuneration too" />
           <Line label="Absence Deduction" op="−" value={`NPR ${fmt(slip.absence_deduction)}`} hint="TDS is withheld on income actually paid, not contractual salary" />
-          <Line label="This Month's Actual Gross" op="=" value={`NPR ${fmt(slip.gross - slip.absence_deduction)}`} strong />
+          <Line label="This Month's Actual Gross" op="=" value={`NPR ${fmt(slip.gross + slip.ot_amount - slip.absence_deduction)}`} strong />
           <Line label="YTD Gross (prior finalized months)" value={`NPR ${fmt(tdsBreakdown.ytdGross)}`} />
-          <Line label="This Month's Actual Gross" op="+" value={`NPR ${fmt(slip.gross - slip.absence_deduction)} × ${tdsBreakdown.monthsAtCurrent} remaining month(s)`} />
+          <Line label="This Month's Actual Gross" op="+" value={`NPR ${fmt(slip.gross + slip.ot_amount - slip.absence_deduction)} × ${tdsBreakdown.monthsAtCurrent} remaining month(s)`} />
           <Line label="Projected Annual Gross" op="=" value={`NPR ${fmt(tdsBreakdown.annualGross)}`} strong />
           <Line label="SSF Deduction" op="−" value={`NPR ${fmt(tdsBreakdown.ssfDeduction)}`} />
           <Line label="Insurance Deduction" op="−" value={`NPR ${fmt(tdsBreakdown.insuranceDeduction)}`} />
           <Line label="Annual Taxable" op="=" value={`NPR ${fmt(tdsBreakdown.annualTaxable)}`} strong />
           <Line label="Annual Tax (FY slabs)" value={`NPR ${fmt(tdsBreakdown.annualTax)}`} />
-          <Line label="Cumulative Due" value={`NPR ${fmt(tdsBreakdown.cumulativeDue)}`} hint={`Annual Tax ÷ 12 × month ${tdsBreakdown.monthInFy}`} />
+          <Line label="Cumulative Due" value={`NPR ${fmt(tdsBreakdown.cumulativeDue)}`} hint={`Annual Tax × month ${tdsBreakdown.monthsEmployedSoFar} of ${tdsBreakdown.monthsEmployedTotal} employed this FY`} />
           <Line label="Already Withheld YTD" op="−" value={`NPR ${fmt(tdsBreakdown.ytdWithheld)}`} />
           <Line label="This Month's TDS" op="=" value={`− NPR ${fmt(tdsBreakdown.tds)}`} strong color="var(--theme-red)" />
         </Section>
@@ -266,16 +267,17 @@ export default function PayrollCalculation() {
     const empOtEntries = otEntries.filter(e => e.employee_id === emp.id)
     const advDed        = Math.round(advMap[emp.id] || 0)
     const slip           = computePayslip(emp, comps, att, period, 0, empOtEntries, advDed)
-    const ytd             = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0 }
+    const ytd             = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0, count: 0 }
     const tdsBreakdown = computeMonthlyTdsBreakdown({
       period,
       // Actual income earned this month, not contractual gross — see the matching comment in
       // PayrollRun.jsx's buildRows (S365). Must stay identical between the two files.
-      monthlyGross: slip.gross - slip.absence_deduction,
+      monthlyGross: slip.gross - slip.absence_deduction + slip.ot_amount,
       monthlySsf:   slip.ssf_employee,
       ytdGross:     ytd.gross,
       ytdSsf:       ytd.ssf,
       ytdWithheld:  ytd.withheld,
+      ytdMonths:    ytd.count,
       isSsf:        !!emp.ssf_enrolled,
       isMarried:    emp.marital_status === 'married',
       annualLifeInsurance:   parseFloat(emp.life_insurance_premium) || 0,

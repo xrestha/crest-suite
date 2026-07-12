@@ -39,7 +39,18 @@ export default function SwapRequestsPanel({ employees, shiftMap }) {
     const { error: e1 } = await scopedUpdate('hr_roster', { employee_id: swap.target_employee_id }).eq('id', reqRow.id)
     if (e1) { setMsg('Failed to swap: ' + e1.message); setBusyId(null); return }
     const { error: e2 } = await scopedUpdate('hr_roster', { employee_id: swap.requester_employee_id }).eq('id', tgtRow.id)
-    if (e2) { setMsg('Partially applied — please check the roster manually: ' + e2.message); setBusyId(null); return }
+    if (e2) {
+      // Roll back the first update — without this, a partial failure left the roster
+      // half-swapped (target owned both shifts) AND made the request unrecoverable through this
+      // UI (a retry's row lookup above matches on employee_id, which the first update already
+      // moved off the requester, so it would report "shift no longer exists").
+      const { error: rollbackErr } = await scopedUpdate('hr_roster', { employee_id: swap.requester_employee_id }).eq('id', reqRow.id)
+      setMsg(rollbackErr
+        ? 'Swap failed and rollback also failed — please check the roster manually: ' + e2.message
+        : 'Swap failed: ' + e2.message + ' — no changes were applied, you can retry.')
+      setBusyId(null)
+      return
+    }
 
     await scopedUpdate('hr_shift_swap_requests', {
       status: 'approved', admin_decided_by: profile?.id, admin_decided_at: new Date().toISOString(),

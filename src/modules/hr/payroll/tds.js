@@ -79,7 +79,7 @@ export function applySlabs(taxable, slabs, isSsfContributor) {
 // isMarried: use married tax schedule (only effective for FY 2082/83 and earlier).
 // festivalBonus: one-time bonus included in this month's annual income projection.
 export function computeMonthlyTdsBreakdown({
-  period, monthlyGross, monthlySsf, ytdGross = 0, ytdSsf = 0, ytdWithheld = 0,
+  period, monthlyGross, monthlySsf, ytdGross = 0, ytdSsf = 0, ytdWithheld = 0, ytdMonths,
   isSsf = false, annualLifeInsurance = 0, annualHealthInsurance = 0,
   isMarried = false, festivalBonus = 0,
 }) {
@@ -94,14 +94,24 @@ export function computeMonthlyTdsBreakdown({
   const insuranceDeduction = Math.min(annualLifeInsurance, LIFE_INS_CAP) + Math.min(annualHealthInsurance, HEALTH_INS_CAP)
   const annualTaxable      = Math.max(0, annualGross - ssfDeduction - insuranceDeduction)
 
-  const annualTax     = applySlabs(annualTaxable, slabs, isSsf)
-  const cumulativeDue = (annualTax / 12) * monthInFy
+  const annualTax = applySlabs(annualTaxable, slabs, isSsf)
+  // Spread annualTax evenly across the months this employee is actually paid within the FY —
+  // NOT always /12. A mid-year joiner has fewer prior months (ytdMonths) than a continuously
+  // employed staffer, so annualTax/12*monthInFy would front-load most of the year's tax into
+  // their first paycheck. `ytdMonths` defaults to `monthInFy - 1` (continuous employment since
+  // FY start) when the caller doesn't supply the real prior-payslip count, which makes
+  // monthsEmployedTotal reduce to exactly 12 — i.e. the original monthInFy/12 formula.
+  const priorMonths         = ytdMonths ?? (monthInFy - 1)
+  const monthsEmployedSoFar = priorMonths + 1
+  const monthsEmployedTotal = priorMonths + monthsAtCurrent
+  const cumulativeDue = monthsEmployedTotal > 0 ? (annualTax * monthsEmployedSoFar) / monthsEmployedTotal : annualTax
   const tds = Math.max(0, Math.round(cumulativeDue - ytdWithheld))
 
   return {
     tds, fyStart, monthInFy, monthsAtCurrent, slabs, isSsf,
     ytdGross, ytdSsf, ytdWithheld, annualGross, annualSsf,
     ssfDeduction, insuranceDeduction, annualTaxable, annualTax, cumulativeDue,
+    monthsEmployedSoFar, monthsEmployedTotal,
   }
 }
 

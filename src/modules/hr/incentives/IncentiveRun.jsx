@@ -123,7 +123,7 @@ export default function IncentiveRun() {
     if (!clientId || !runLabel.trim()) { setMsg('error:Enter a run label first.'); return }
     if (employees.length === 0) return
     setBusy(true); setMsg('')
-    const { error } = await scopedUpsert('hr_incentives', buildRows(), { onConflict: 'client_id,employee_id,run_label' })
+    const { error } = await scopedUpsert('hr_incentives', buildRows(), { onConflict: 'client_id,employee_id,bs_year,run_label' })
     if (error) { setMsg('error:' + error.message); setBusy(false); return }
     await load(); setMsg('ok:Generated'); setBusy(false)
   }
@@ -132,7 +132,7 @@ export default function IncentiveRun() {
     if (finalized) return
     if (!window.confirm('Recompute all amounts from current salaries/config? Manual edits will be reset.')) return
     setBusy(true); setMsg('')
-    const { error } = await scopedUpsert('hr_incentives', buildRows(), { onConflict: 'client_id,employee_id,run_label' })
+    const { error } = await scopedUpsert('hr_incentives', buildRows(), { onConflict: 'client_id,employee_id,bs_year,run_label' })
     if (error) { setMsg('error:' + error.message); setBusy(false); return }
     await load(); setMsg('ok:Recomputed'); setBusy(false)
   }

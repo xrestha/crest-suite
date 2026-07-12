@@ -24,7 +24,7 @@ function bsLabel(iso) {
 
 export default function LeaveManagement() {
   const { clientId } = useAuth()
-  const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate } = useScopedDb()
+  const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
   const today = adToBs(new Date())
   const [bsYear,    setBsYear]    = useState(today.year)
   const [tab,       setTab]       = useState('requests')
@@ -117,6 +117,23 @@ export default function LeaveManagement() {
     return missing
   }
 
+  // Undo an approved request's attendance marks by deleting those hr_attendance rows, rather
+  // than overwriting them with a guessed status. We never recorded what a day's attendance was
+  // BEFORE the leave was approved (e.g. it may have been 'absent'), so forcing it back to
+  // 'present' silently fabricated an attendance record. Deleting leaves the day blank — the same
+  // "no signal, needs manual entry" state AttendanceSheet.jsx already uses for un-rostered days —
+  // so an admin can correct it instead of payroll silently trusting a wrong guess.
+  async function revertAttendance(req) {
+    const periodMap = {}
+    periods.forEach(p => { periodMap[`${p.bs_year}:${p.bs_month}`] = p })
+    const days = workingDaysInRange(req.start_date, req.end_date)
+    for (const d of days) {
+      const p = periodMap[`${d.bsYear}:${d.bsMonth}`]
+      if (!p) continue
+      await scopedDelete('hr_attendance').eq('employee_id', req.employee_id).eq('period_id', p.id).eq('bs_day', d.bsDay)
+    }
+  }
+
   async function approveRequest(req) {
     if (!clientId) { setMsg('error:No client selected'); return }
     const type = typeMap[req.leave_type_id]
@@ -140,8 +157,11 @@ export default function LeaveManagement() {
     const verb = newStatus === 'rejected' ? 'Reject' : 'Cancel'
     if (!window.confirm(`${verb} this leave request?`)) return
     setBusy(true); setMsg('')
-    // Only an already-approved request has attendance rows to undo.
-    if (req.status === 'approved') await syncAttendance(req, 'present')
+    // Re-check the request's current status from the DB rather than trusting the client-cached
+    // `req` — another admin session may have approved/decided it since our last load(), and
+    // deciding off a stale 'pending' would skip reverting attendance a concurrent approval wrote.
+    const { data: fresh } = await scopedFrom('hr_leave_requests', 'status').eq('id', req.id).maybeSingle()
+    if (fresh?.status === 'approved') await revertAttendance(req)
     await scopedUpdate('hr_leave_requests', { status: newStatus, decided_at: new Date().toISOString() }).eq('id', req.id)
     await load(); setMsg(`ok:${verb}ed`); setBusy(false)
   }

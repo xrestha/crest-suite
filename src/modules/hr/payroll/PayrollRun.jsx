@@ -98,18 +98,22 @@ export default function PayrollRun() {
       const { breakdown, ...slip } = computePayslip(emp, comps, att, period, 0, empOtEntries, advDed)
       const isSsf    = !!(emp.ssf_enrolled)
       const isMarried = emp.marital_status === 'married'
-      const ytd   = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0 }
+      const ytd   = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0, count: 0 }
       const tds   = computeMonthlyTds({
         period,
         // Actual income earned this month, not contractual gross — Nepal's Income Tax Act
         // withholds TDS on remuneration actually paid, and absence_deduction is exactly the
         // portion of gross this employee never received (forfeited unpaid days). SSF just below
         // already uses the same absence-adjusted base (ssfBase); TDS previously didn't (S365).
-        monthlyGross:          slip.gross - slip.absence_deduction,
+        // OT pay is taxable remuneration too and must be included, not just added post-tax.
+        monthlyGross:          slip.gross - slip.absence_deduction + slip.ot_amount,
         monthlySsf:            slip.ssf_employee,
         ytdGross:              ytd.gross,
         ytdSsf:                ytd.ssf,
         ytdWithheld:           ytd.withheld,
+        // Actual count of prior finalized months this FY — lets a mid-year joiner's tax spread
+        // over the months they'll actually work instead of being front-loaded (see tds.js).
+        ytdMonths:             ytd.count,
         isSsf,
         isMarried,
         annualLifeInsurance:   parseFloat(emp.life_insurance_premium) || 0,

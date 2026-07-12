@@ -49,6 +49,7 @@ export default function HrDashboard() {
   const [advOutstanding, setAdvOutstanding] = useState(0)
   const [empMap,      setEmpMap]      = useState({})
   const [typeMap,     setTypeMap]     = useState({})
+  const [pendingCounts, setPendingCounts] = useState({ leave: 0, ot: 0, tada: 0, swap: 0 })
 
   useEffect(() => {
     if (!clientId) return
@@ -68,6 +69,10 @@ export default function HrDashboard() {
       { data: runs },
       { data: advs },
       { data: reps },
+      { count: leaveCount },
+      { count: otCount },
+      { count: tadaCount },
+      { count: swapCount },
     ] = await Promise.all([
       scopedFrom('hr_employees', 'id, full_name, status, retirement_date, basic_salary'),
       scopedFrom('hr_leave_types', 'id, name'),
@@ -90,6 +95,12 @@ export default function HrDashboard() {
         .order('created_at', { ascending: false }).limit(1),
       scopedFrom('hr_advances', 'id, amount').eq('status', 'active'),
       scopedFrom('hr_advance_repayments', 'advance_id, amount'),
+      // True counts for the Approvals KPI row — the queries above are capped at 8 for the preview
+      // tables, so `.length` on them undercounts past 8. head:true skips fetching rows entirely.
+      scopedFrom('hr_leave_requests', 'id', { count: 'exact', head: true }).eq('status', 'pending'),
+      scopedFrom('hr_overtime_entries', 'id', { count: 'exact', head: true }).eq('status', 'pending'),
+      scopedFrom('hr_tada_claims', 'id', { count: 'exact', head: true }).eq('status', 'pending'),
+      scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true }).eq('status', 'pending_admin'),
     ])
 
     // ── Employee stats ─────────────────────────────────────────────────────────
@@ -122,6 +133,7 @@ export default function HrDashboard() {
     setOtList(otPending || [])
     setTadaList(tadaPending || [])
     setSwapList(swapPending || [])
+    setPendingCounts({ leave: leaveCount || 0, ot: otCount || 0, tada: tadaCount || 0, swap: swapCount || 0 })
 
     // ── Advances outstanding ───────────────────────────────────────────────────
     const repMap = {}
@@ -151,10 +163,10 @@ export default function HrDashboard() {
 
   if (loading) return <div className="page-container"><div className="loading-state">Loading HR Dashboard…</div></div>
 
-  const pendingLeave = leaveList.length
-  const pendingOt    = otList.length
-  const pendingTada  = tadaList.length
-  const pendingSwap  = swapList.length
+  const pendingLeave = pendingCounts.leave
+  const pendingOt    = pendingCounts.ot
+  const pendingTada  = pendingCounts.tada
+  const pendingSwap  = pendingCounts.swap
   const pendingTotal = pendingLeave + pendingOt + pendingTada + pendingSwap
 
   return (

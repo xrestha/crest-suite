@@ -9,7 +9,7 @@ import { fiscalYearOf } from './tds'
 // in the same fiscal year (months before the current one).
 export async function fetchYtdMap(scopedFrom, period) {
   const cur = fiscalYearOf(period.bs_year, period.bs_month)
-  const { data } = await scopedFrom('hr_payslips', 'employee_id, gross, ssf_employee, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+  const { data } = await scopedFrom('hr_payslips', 'employee_id, gross, ot_amount, ssf_employee, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
     .eq('hr_payroll_runs.status', 'finalized')
   const map = {}
   ;(data || []).forEach(r => {
@@ -18,10 +18,12 @@ export async function fetchYtdMap(scopedFrom, period) {
     if (!mp) return
     const fy = fiscalYearOf(mp.bs_year, mp.bs_month)
     if (fy.fyStart !== cur.fyStart || fy.monthInFy >= cur.monthInFy) return
-    const e = map[r.employee_id] || { gross: 0, ssf: 0, withheld: 0 }
-    e.gross += r.gross || 0
+    const e = map[r.employee_id] || { gross: 0, ssf: 0, withheld: 0, count: 0 }
+    // OT pay is taxable income too — must stay in sync with monthlyGross below (S365 + OT fix).
+    e.gross += (r.gross || 0) + (r.ot_amount || 0)
     e.ssf   += r.ssf_employee || 0
     e.withheld += r.tds || 0
+    e.count += 1 // prior finalized months this FY — feeds tds.js's ytdMonths (mid-year-joiner fix)
     map[r.employee_id] = e
   })
   return map

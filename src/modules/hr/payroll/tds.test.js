@@ -74,6 +74,29 @@ describe('computeMonthlyTds', () => {
     })
     expect(tds).toBe(0)
   })
+
+  test('a mid-year joiner is taxed over the months they actually work, not front-loaded', () => {
+    // Hired in FY month 7 (bs_month 10 -> monthInFy 7) — ytdMonths=0 (no prior payslips),
+    // monthsAtCurrent=6 (months 7..12 of the FY remain, including this one).
+    const hirePeriod = { bs_year: 2083, bs_month: 10 }
+    const month1 = computeMonthlyTds({
+      period: hirePeriod, monthlyGross: 100000, monthlySsf: 0, ytdMonths: 0,
+    })
+    // annualGross = 100,000 * 6 = 600,000 -> annualTax = 6,000 -> spread over 6 employed months
+    // (not 12) -> 1,000/month, not front-loaded to 7/12 of the year's tax.
+    expect(month1).toBe(1000)
+  })
+
+  test('a mid-year joiner reaches the same steady monthly TDS as a full-year employee with equal pay', () => {
+    const month1 = computeMonthlyTds({
+      period: { bs_year: 2083, bs_month: 10 }, monthlyGross: 100000, monthlySsf: 0, ytdMonths: 0,
+    })
+    const month2 = computeMonthlyTds({
+      period: { bs_year: 2083, bs_month: 11 }, monthlyGross: 100000, monthlySsf: 0,
+      ytdGross: 100000, ytdWithheld: month1, ytdMonths: 1,
+    })
+    expect(month2).toBe(month1)
+  })
 })
 
 describe('computeBonusTds', () => {
