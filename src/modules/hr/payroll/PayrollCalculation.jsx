@@ -3,10 +3,11 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
-import { computePayslip } from './payrollCompute'
+import { computePayslip, calcAmount } from './payrollCompute'
 import { computeMonthlyTdsBreakdown } from './tds'
 import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap } from './payrollData'
-import { ATTENDANCE_STATUSES } from '../payrollConstants'
+import { ATTENDANCE_STATUSES, OT_MULTIPLIER } from '../payrollConstants'
+import { printWithTitle } from '../../../utils/printTitle'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
 
@@ -19,65 +20,105 @@ function Section({ title, children }) {
   )
 }
 
-function Line({ label, value, tip, strong, color }) {
+// No Tip/hover here on purpose — this panel is also what gets printed, and a hover tooltip
+// never renders on paper. Any number that needs explaining gets its own visible row instead
+// (an `op` operator prefix like "×"/"÷"/"+" reads as a step in a running calculation) or a
+// small always-visible `hint` caption underneath.
+function Line({ label, value, op, hint, strong, color }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '3px 0', fontSize: 12.5, borderBottom: '1px dotted var(--theme-border-lt)' }}>
-      <span style={{ color: 'var(--theme-text2)' }}>{tip ? <Tip text={tip} width={240}>{label}</Tip> : label}</span>
-      <span style={{ color: color || 'var(--theme-text1)', fontWeight: strong ? 700 : 400, whiteSpace: 'nowrap' }}>{value}</span>
+    <div style={{ padding: '3px 0', borderBottom: '1px dotted var(--theme-border-lt)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5 }}>
+        <span style={{ color: 'var(--theme-text2)' }}>{op ? `${op} ${label}` : label}</span>
+        <span style={{ color: color || 'var(--theme-text1)', fontWeight: strong ? 700 : 400, whiteSpace: 'nowrap' }}>{value}</span>
+      </div>
+      {hint && <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{hint}</div>}
     </div>
   )
 }
 
 function CalcDetail({ row, monthDays, advances }) {
-  const { emp, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay } = row
+  const { emp, comps, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay } = row
   const b = slip.breakdown
+  const t = b.tally
   const empAdvances = advances.filter(a => a.employee_id === emp.id && a.status === 'active')
   const fyLabel = `${tdsBreakdown.fyStart % 100}/${(tdsBreakdown.fyStart + 1) % 100}`
+  const earningComps = comps.filter(c => c.type === 'earning')
 
   return (
     <div style={{ padding: '18px 22px', background: 'var(--theme-bg)', borderTop: '1px solid var(--theme-border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 36px' }}>
       <div>
         <Section title="Attendance Tally">
           {ATTENDANCE_STATUSES.map(s => (
-            <Line key={s.key} label={s.label} value={b.tally[s.key] || 0} />
+            <Line key={s.key} label={s.label} value={t[s.key] || 0} />
           ))}
-          <Line label="Hours Worked" value={(b.tally.sumHours || 0).toFixed(1)} />
+          <Line label="Hours Worked" value={(t.sumHours || 0).toFixed(1)} />
         </Section>
 
         {b.basis === 'monthly' && (
-          <Section title="Absence Deduction">
-            <Line label="Unpaid Days" value={`${b.unpaidDays.toFixed(2)} days`} tip="Absent + Unpaid Leave + Half-day×0.5 + Half-day Unpaid Leave×0.5" />
-            <Line label="Per-Day Rate" value={`NPR ${fmt(b.perDay)}`} tip={`Gross (NPR ${fmt(b.gross)}) ÷ Days in Month (${monthDays})`} />
-            <Line label="Absence Deduction" value={`− NPR ${fmt(slip.absence_deduction)}`} color="var(--theme-red)" strong
-              tip={`NPR ${fmt(b.perDay)}/day × ${b.unpaidDays.toFixed(2)} days`} />
+          <Section title="Gross Salary">
+            <Line label="Basic Salary" value={`NPR ${fmt(emp.basic_salary)}`} />
+            {earningComps.map(c => (
+              <Line key={c.id} label={c.name || 'Allowance'} op="+" value={`NPR ${fmt(calcAmount(c, emp.basic_salary))}`} />
+            ))}
+            <Line label="Gross" op="=" value={`NPR ${fmt(slip.gross)}`} strong color="var(--theme-accent)" />
           </Section>
         )}
         {b.basis === 'daily' && (
           <Section title="Gross (Daily)">
-            <Line label="Worked Days" value={`${b.workedDays.toFixed(2)} days`} tip="Present + Half-day×0.5 + Paid Leave + Half-day Paid Leave×0.5" />
+            <Line label="Present Days" value={t.present || 0} />
+            <Line label="Half-day × 0.5" op="+" value={((t.half_day || 0) * 0.5).toFixed(2)} />
+            <Line label="Paid Leave Days" op="+" value={t.paid_leave || 0} />
+            <Line label="Half-day Paid Leave × 0.5" op="+" value={((t.half_paid_leave || 0) * 0.5).toFixed(2)} />
+            <Line label="Worked Days" op="=" value={`${b.workedDays.toFixed(2)} days`} strong />
             <Line label="Daily Rate" value={`NPR ${fmt(b.dailyRate)}`} />
-            <Line label="Gross" value={`NPR ${fmt(slip.gross)}`} strong tip={`NPR ${fmt(b.dailyRate)} × ${b.workedDays.toFixed(2)} days`} />
+            <Line label="Worked Days" op="×" value={`${b.workedDays.toFixed(2)} days`} />
+            <Line label="Gross" op="=" value={`NPR ${fmt(slip.gross)}`} strong color="var(--theme-accent)" />
           </Section>
         )}
         {b.basis === 'hourly' && (
           <Section title="Gross (Hourly)">
-            <Line label="Paid Hours" value={`${b.paidHours.toFixed(2)} hrs`} tip="Hours Worked + Paid Leave×8h + Half-day Paid Leave×4h" />
+            <Line label="Hours Worked" value={(t.sumHours || 0).toFixed(2)} />
+            <Line label="Paid Leave × 8h" op="+" value={((t.paid_leave || 0) * 8).toFixed(2)} />
+            <Line label="Half-day Paid Leave × 4h" op="+" value={((t.half_paid_leave || 0) * 4).toFixed(2)} />
+            <Line label="Paid Hours" op="=" value={`${b.paidHours.toFixed(2)} hrs`} strong />
             <Line label="Hourly Rate" value={`NPR ${fmt(b.hourlyRate)}`} />
-            <Line label="Gross" value={`NPR ${fmt(slip.gross)}`} strong tip={`NPR ${fmt(b.hourlyRate)} × ${b.paidHours.toFixed(2)} hrs`} />
+            <Line label="Paid Hours" op="×" value={`${b.paidHours.toFixed(2)} hrs`} />
+            <Line label="Gross" op="=" value={`NPR ${fmt(slip.gross)}`} strong color="var(--theme-accent)" />
           </Section>
         )}
 
-        <Section title="Overtime">
-          <Line label="Attendance OT" value={`${b.otAttendanceHrs || 0}h → NPR ${fmt(b.otAttendanceAmt)}`}
-            tip={`${b.otAttendanceHrs || 0}h × NPR ${fmt(b.hourlyRate)}/hr × 1.5`} />
-          <Line label="Approved OT Entries" value={`${b.otApprovedHrs || 0}h → NPR ${fmt(b.otApprovedAmt)}`}
-            tip="From the Overtime module — a separate approval workflow, not the Attendance sheet." />
+        {b.basis === 'monthly' && (
+          <Section title="Absence Deduction">
+            <Line label="Absent Days" value={t.absent || 0} />
+            <Line label="Unpaid Leave Days" op="+" value={t.unpaid_leave || 0} />
+            <Line label="Half-day × 0.5" op="+" value={((t.half_day || 0) * 0.5).toFixed(2)} />
+            <Line label="Half-day Unpaid Leave × 0.5" op="+" value={((t.half_unpaid_leave || 0) * 0.5).toFixed(2)} />
+            <Line label="Unpaid Days" op="=" value={`${b.unpaidDays.toFixed(2)} days`} strong />
+            <Line label="Gross" value={`NPR ${fmt(b.gross)}`} />
+            <Line label="Days in Month" op="÷" value={monthDays} />
+            <Line label="Per-Day Rate" op="=" value={`NPR ${fmt(b.perDay)}`} strong />
+            <Line label="Per-Day Rate" value={`NPR ${fmt(b.perDay)}`} />
+            <Line label="Unpaid Days" op="×" value={`${b.unpaidDays.toFixed(2)} days`} />
+            <Line label="Absence Deduction" op="=" value={`− NPR ${fmt(slip.absence_deduction)}`} strong color="var(--theme-red)" />
+          </Section>
+        )}
+
+        <Section title="Overtime — Attendance Sheet">
+          <Line label="Attendance OT Hours" value={`${b.otAttendanceHrs || 0}h`} />
+          <Line label="Hourly Rate" op="×" value={`NPR ${fmt(b.hourlyRate)}`} />
+          <Line label="OT Multiplier" op="×" value={`${OT_MULTIPLIER}×`} />
+          <Line label="Attendance OT Amount" op="=" value={`NPR ${fmt(b.otAttendanceAmt)}`} strong color="var(--theme-green)" />
+        </Section>
+
+        <Section title="Overtime — Approved Entries (Overtime module)">
+          <Line label="Approved OT Hours" value={`${b.otApprovedHrs || 0}h`} hint="From the Overtime module's approval workflow — a separate source from the Attendance sheet's OT column." />
+          <Line label="Approved OT Amount" op="=" value={`NPR ${fmt(b.otApprovedAmt)}`} strong color="var(--theme-green)" />
           {b.otDoubleCountRisk && (
             <div style={{ fontSize: 11, color: 'var(--theme-amber)', marginTop: 4 }}>
               ⚠ Both sources have hours this period — the same OT may be paid twice. Zero out one source.
             </div>
           )}
-          <Line label="Total OT" value={`NPR ${fmt(slip.ot_amount)}`} strong color="var(--theme-green)" />
+          <Line label="Total OT (both sources)" value={`${b.otAttendanceHrs + (b.otApprovedHrs || 0)}h → NPR ${fmt(slip.ot_amount)}`} strong color="var(--theme-green)" />
         </Section>
       </div>
 
@@ -85,24 +126,29 @@ function CalcDetail({ row, monthDays, advances }) {
         {!!emp.ssf_enrolled && (
           <Section title="SSF">
             {b.basis === 'monthly' && (
-              <Line label="SSF Base" value={`NPR ${fmt(b.ssfBase)}`} tip={`min(Basic × Paid Fraction (${(b.paidFraction * 100).toFixed(1)}%), NPR 100,000 cap)`} />
+              <>
+                <Line label="Basic Salary" value={`NPR ${fmt(emp.basic_salary)}`} />
+                <Line label="Paid Fraction" op="×" value={`${(b.paidFraction * 100).toFixed(1)}%`} hint="1 − (Unpaid Days ÷ Days in Month)" />
+              </>
             )}
-            <Line label="Employee (11%)" value={`− NPR ${fmt(slip.ssf_employee)}`} color="var(--theme-red)" />
-            <Line label="Employer (20%)" value={`NPR ${fmt(slip.ssf_employer)}`} color="var(--theme-text2)" />
+            <Line label="SSF Base" op={b.basis === 'monthly' ? '=' : undefined} value={`NPR ${fmt(b.ssfBase)}`} hint="Capped at NPR 100,000" />
+            <Line label="Employee Rate" op="×" value="11%" />
+            <Line label="Employee SSF" op="=" value={`− NPR ${fmt(slip.ssf_employee)}`} strong color="var(--theme-red)" />
+            <Line label="Employer SSF (20%)" value={`NPR ${fmt(slip.ssf_employer)}`} color="var(--theme-text2)" />
           </Section>
         )}
 
         <Section title={`TDS — FY ${fyLabel}, month ${tdsBreakdown.monthInFy} of 12`}>
           <Line label="YTD Gross (prior finalized months)" value={`NPR ${fmt(tdsBreakdown.ytdGross)}`} />
-          <Line label="This Month × Remaining Months" value={`NPR ${fmt(slip.gross)} × ${tdsBreakdown.monthsAtCurrent}`} />
-          <Line label="Projected Annual Gross" value={`NPR ${fmt(tdsBreakdown.annualGross)}`} strong />
-          <Line label="− SSF Deduction" value={`NPR ${fmt(tdsBreakdown.ssfDeduction)}`} />
-          <Line label="− Insurance Deduction" value={`NPR ${fmt(tdsBreakdown.insuranceDeduction)}`} />
-          <Line label="Annual Taxable" value={`NPR ${fmt(tdsBreakdown.annualTaxable)}`} strong />
+          <Line label="This Month's Gross" op="+" value={`NPR ${fmt(slip.gross)} × ${tdsBreakdown.monthsAtCurrent} remaining month(s)`} />
+          <Line label="Projected Annual Gross" op="=" value={`NPR ${fmt(tdsBreakdown.annualGross)}`} strong />
+          <Line label="SSF Deduction" op="−" value={`NPR ${fmt(tdsBreakdown.ssfDeduction)}`} />
+          <Line label="Insurance Deduction" op="−" value={`NPR ${fmt(tdsBreakdown.insuranceDeduction)}`} />
+          <Line label="Annual Taxable" op="=" value={`NPR ${fmt(tdsBreakdown.annualTaxable)}`} strong />
           <Line label="Annual Tax (FY slabs)" value={`NPR ${fmt(tdsBreakdown.annualTax)}`} />
-          <Line label="Cumulative Due (÷12 × month)" value={`NPR ${fmt(tdsBreakdown.cumulativeDue)}`} />
-          <Line label="− Already Withheld YTD" value={`NPR ${fmt(tdsBreakdown.ytdWithheld)}`} />
-          <Line label="This Month's TDS" value={`− NPR ${fmt(tdsBreakdown.tds)}`} strong color="var(--theme-red)" />
+          <Line label="Cumulative Due" value={`NPR ${fmt(tdsBreakdown.cumulativeDue)}`} hint={`Annual Tax ÷ 12 × month ${tdsBreakdown.monthInFy}`} />
+          <Line label="Already Withheld YTD" op="−" value={`NPR ${fmt(tdsBreakdown.ytdWithheld)}`} />
+          <Line label="This Month's TDS" op="=" value={`− NPR ${fmt(tdsBreakdown.tds)}`} strong color="var(--theme-red)" />
         </Section>
 
         <Section title="Advance & TADA">
@@ -114,14 +160,14 @@ function CalcDetail({ row, monthDays, advances }) {
 
         <Section title="Net Pay">
           <Line label="Gross" value={`NPR ${fmt(slip.gross)}`} />
-          <Line label="+ OT" value={`NPR ${fmt(slip.ot_amount)}`} color="var(--theme-green)" />
-          <Line label="− Absence" value={`NPR ${fmt(slip.absence_deduction)}`} color="var(--theme-red)" />
-          <Line label="− SSF" value={`NPR ${fmt(slip.ssf_employee)}`} color="var(--theme-red)" />
-          <Line label="− Other Deductions" value={`NPR ${fmt(slip.other_deductions)}`} color="var(--theme-red)" />
-          <Line label="− TDS" value={`NPR ${fmt(tdsBreakdown.tds)}`} color="var(--theme-red)" />
-          <Line label="− Advance" value={`NPR ${fmt(advDed)}`} color="var(--theme-red)" />
-          <Line label="+ TADA" value={`NPR ${fmt(tadaAmount)}`} color="var(--theme-green)" />
-          <Line label="= Net Pay" value={`NPR ${fmt(netPay)}`} strong color="var(--theme-accent)" />
+          <Line label="OT" op="+" value={`NPR ${fmt(slip.ot_amount)}`} color="var(--theme-green)" />
+          <Line label="Absence" op="−" value={`NPR ${fmt(slip.absence_deduction)}`} color="var(--theme-red)" />
+          <Line label="SSF" op="−" value={`NPR ${fmt(slip.ssf_employee)}`} color="var(--theme-red)" />
+          <Line label="Other Deductions" op="−" value={`NPR ${fmt(slip.other_deductions)}`} color="var(--theme-red)" />
+          <Line label="TDS" op="−" value={`NPR ${fmt(tdsBreakdown.tds)}`} color="var(--theme-red)" />
+          <Line label="Advance" op="−" value={`NPR ${fmt(advDed)}`} color="var(--theme-red)" />
+          <Line label="TADA" op="+" value={`NPR ${fmt(tadaAmount)}`} color="var(--theme-green)" />
+          <Line label="Net Pay" op="=" value={`NPR ${fmt(netPay)}`} strong color="var(--theme-accent)" />
         </Section>
       </div>
     </div>
@@ -145,6 +191,7 @@ export default function PayrollCalculation() {
   const [payslips,   setPayslips]   = useState([])
   const [loading,    setLoading]    = useState(true)
   const [expandedId, setExpandedId] = useState(null)
+  const [printRow,   setPrintRow]   = useState(null)
 
   useEffect(() => {
     if (!clientId) return
@@ -233,7 +280,7 @@ export default function PayrollCalculation() {
     const netPay = slip.net_pay - tdsBreakdown.tds + tadaAmount
     const stored = payslipByEmp[emp.id]
     const stale = stored && Math.round(stored.net_pay) !== Math.round(netPay)
-    return { emp, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay, stored, stale }
+    return { emp, comps, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay, stored, stale }
   }) : []
 
   const flaggedCount = rows.filter(r => r.slip.breakdown.otDoubleCountRisk || r.stale).length
@@ -241,8 +288,14 @@ export default function PayrollCalculation() {
   const totalNet   = rows.reduce((s, r) => s + r.netPay, 0)
   const runStatusLabel = !run ? 'No Payroll run yet' : run.status === 'finalized' ? 'Finalized' : (flaggedCount > 0 ? `Draft — review before finalizing` : 'Draft — matches this calculation')
 
+  function handlePrint(row) {
+    setPrintRow(row)
+    setTimeout(() => { printWithTitle(`Payroll Calculation - ${row.emp.full_name} - ${periodLabel}`); setPrintRow(null) }, 60)
+  }
+
   return (
     <div>
+      <div className={printRow ? 'no-print' : ''}>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title">Payroll Calculation</h1>
@@ -334,6 +387,9 @@ export default function PayrollCalculation() {
                         {expanded && (
                           <tr>
                             <td colSpan={10} style={{ padding: 0 }}>
+                              <div style={{ padding: '10px 22px 0', background: 'var(--theme-bg)', borderTop: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'flex-end' }}>
+                                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => handlePrint(row)}>🖨 Print</button>
+                              </div>
                               <CalcDetail row={row} monthDays={monthDays} advances={advances} />
                             </td>
                           </tr>
@@ -346,6 +402,16 @@ export default function PayrollCalculation() {
             </div>
           </div>
         </>
+      )}
+      </div>
+
+      {printRow && (
+        <div className="print-only">
+          <h1 style={{ fontSize: 20, marginBottom: 2 }}>Payroll Calculation</h1>
+          <div style={{ fontSize: 13, marginBottom: 2 }}>{printRow.emp.full_name}{printRow.emp.employee_code ? ` (${printRow.emp.employee_code})` : ''}</div>
+          <div style={{ fontSize: 12, color: '#555', marginBottom: 14 }}>{periodLabel} — generated {new Date().toLocaleDateString('en-NP')}</div>
+          <CalcDetail row={printRow} monthDays={monthDays} advances={advances} />
+        </div>
       )}
     </div>
   )

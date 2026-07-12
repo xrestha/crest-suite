@@ -141,6 +141,18 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S362 — 2026-07-11 — feat(hr): Payroll Calculation gets a Print button + fully exploded Gross/OT/Absence/SSF math
+
+Follow-up to S361. User asked for a print function plus a fully "exploded" breakdown of gross salary and the OT-per-hour math specifically. Two changes to `PayrollCalculation.jsx`:
+
+**Print** — a 🖨 Print button on each expanded employee row (mirrors `PayrollRun.jsx`'s existing per-payslip print pattern: a `printRow` state, the normal screen wrapped in `no-print`, a `print-only` block with the same `CalcDetail` panel plus a header, `printWithTitle()` for a sensible default filename).
+
+**Fully exploded math, and why it's not just cosmetic:** the detail panel previously hid several formulas behind `Tip` hover tooltips (e.g. "Absence Deduction — hover for formula"). Since this same panel is now also the print output, and a hover tooltip never renders on paper, every one of those got converted to visible calculation rows instead — Gross Salary lists Basic Salary + each earning component by name (via `calcAmount()`) down to Gross; Overtime is split into two separate sections (Attendance Sheet OT: hours × hourly rate × 1.5× multiplier, and Overtime-module Approved Entries, each shown as its own multiplication chain) rather than one collapsed line; Absence Deduction, SSF, and TDS walk through every intermediate step (unpaid-day tally → per-day rate → deduction; paid fraction → SSF base → employee/employer amounts). New `Line` component takes an `op` prop ("+"/"−"/"×"/"÷"/"=") so each row reads as one step in a running calculation instead of an isolated number.
+
+`computePayslip()`'s `breakdown` gained one new field for daily/hourly bases — `ssfBase` (previously only computed for monthly) — so the SSF section's math is complete for all three pay bases without a fallback approximation. Full HR suite (37 tests) passes; build compiles clean.
+
+**Files:** `src/modules/hr/payroll/PayrollCalculation.jsx`, `src/modules/hr/payroll/payrollCompute.js`, `src/pages/Help.js`
+
 ### S361 — 2026-07-11 — feat(hr): new Payroll Calculation page — verify the math behind every payslip line
 
 User flagged a real workflow gap: Roster → Attendance → Leave → Overtime feed straight into Payroll with no checkpoint in between, so a wrong-looking number (like the two just found and fixed — the absence-deduction/TDS confusion and the stale-TDS-after-Regenerate question) could only be diagnosed by reverse-engineering the formulas by hand. Asked for, and built, a dedicated read-only Calculation/Review page sitting one step above Payroll in the nav.

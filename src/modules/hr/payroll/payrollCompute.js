@@ -93,7 +93,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
       allowances: 0, gross: earned, absence_deduction: 0, other_deductions: 0,
       ot_amount: otAmount, ssf_employee: ssfEmp, ssf_employer: ssfEmpr,
       net_pay: earned + otAmount - ssfEmp - tdsVal - advDed,
-      breakdown: { basis, monthDays, tally: t, dailyRate: basic, workedDays, hourlyRate: basic / STANDARD_HOURS_PER_DAY, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount },
+      breakdown: { basis, monthDays, tally: t, dailyRate: basic, workedDays, hourlyRate: basic / STANDARD_HOURS_PER_DAY, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount, ssfBase: Math.min(earned, SSF_CAP) },
     }
   } else if (basis === 'hourly') {
     // Paid-leave days credit a standard working day of hours for hourly staff.
@@ -107,7 +107,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
       allowances: 0, gross: earned, absence_deduction: 0, other_deductions: 0,
       ot_amount: otAmount, ssf_employee: ssfEmp, ssf_employer: ssfEmpr,
       net_pay: earned + otAmount - ssfEmp - tdsVal - advDed,
-      breakdown: { basis, monthDays, tally: t, hourlyRate: basic, paidHours, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount },
+      breakdown: { basis, monthDays, tally: t, hourlyRate: basic, paidHours, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount, ssfBase: Math.min(earned, SSF_CAP) },
     }
   } else {
     // monthly
