@@ -129,10 +129,16 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
     })
 
     if (editingGroupId) {
-      const { error: delErr } = await supabase.from('purchase_entries').delete().eq('purchase_group_id', editingGroupId)
-      if (delErr) { setError(delErr.message); setSaving(false); return }
-      const { error: insErr } = await supabase.from('purchase_entries').insert(entries.map(e => ({ ...e, purchase_group_id: editingGroupId })))
+      // Insert the new lines BEFORE removing the old ones (not delete-then-insert) — if the
+      // insert fails partway (network blip, an item deleted mid-edit), the bill keeps its
+      // previous, still-valid line items instead of being left with none.
+      const { data: inserted, error: insErr } = await supabase.from('purchase_entries')
+        .insert(entries.map(e => ({ ...e, purchase_group_id: editingGroupId }))).select('id')
       if (insErr) { setError(insErr.message); setSaving(false); return }
+      const newIds = (inserted || []).map(r => r.id)
+      const { error: delErr } = await supabase.from('purchase_entries')
+        .delete().eq('purchase_group_id', editingGroupId).not('id', 'in', `(${newIds.join(',')})`)
+      if (delErr) { setError(delErr.message); setSaving(false); return }
     } else {
       const groupId = crypto.randomUUID()
       const { error: insErr } = await supabase.from('purchase_entries').insert(entries.map(e => ({ ...e, purchase_group_id: groupId })))

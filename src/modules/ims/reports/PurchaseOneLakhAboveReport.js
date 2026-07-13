@@ -49,8 +49,6 @@ export default function PurchaseOneLakhAboveReport() {
       scopedFrom('vendor_returns', '*, vendors(name, pan_vat_no), purchase_entries(vat_inclusive)').in('period_id', periodIds),
     ])
     const entries = entData || []
-    const vatEntries = entries.filter(e => e.vat_inclusive)
-    const vatReturns = (retData || []).filter(r => r.purchase_entries?.vat_inclusive)
 
     const billGroups = {}
     entries.forEach(e => {
@@ -59,7 +57,13 @@ export default function PurchaseOneLakhAboveReport() {
       billGroups[gid].all.push(e)
     })
 
-    setVendors(buildVendorSummary(vatEntries, vatReturns, billGroups))
+    // Annexure 13 discloses a vendor's TOTAL cumulative purchases for the fiscal year, not just
+    // the VAT-taxable portion — the previous vatEntries/vatReturns filter (borrowed from
+    // VatReport's own vendor summary, which genuinely only cares about VAT-taxable purchases)
+    // silently dropped every non-VAT bill from the vendor total, understating or fully omitting
+    // a vendor who should have been disclosed. Pass every entry, with the bill-level discount
+    // prorated across the whole bill (discountScope:'all') rather than just its VAT-taxable lines.
+    setVendors(buildVendorSummary(entries, retData || [], billGroups, { discountScope: 'all' }))
     setLoading(false)
   }, [effectiveClientId, selectedFy, periods, scopedFrom])
 

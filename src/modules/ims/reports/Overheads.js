@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { daysInBsMonth } from '../../../utils/bsCalendar'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -121,7 +122,7 @@ export default function Overheads() {
       supabase.from('purchase_entries').select('qty, rate').eq('period_id', periodId),
       scopedFrom('vendor_returns', 'qty, rate').eq('period_id', periodId),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp'),
+      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', periodId).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, selling_price')
     ])
 
@@ -131,9 +132,17 @@ export default function Overheads() {
 
     const recipeMap = {}
     ;(recipes || []).forEach(r => { recipeMap[r.id] = parseFloat(r.selling_price) || 0 })
-    const soldMap = {}
-    ;(salesData || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold) })
-    const revenue = Object.entries(soldMap).reduce((s, [id, qty]) => s + qty * (recipeMap[id] || 0), 0)
+    // unit_price captured on the row (price actually charged) used per-row when present, else
+    // falls back to the recipe's current price — previously always used the current price, so
+    // this period's revenue silently reflected today's menu price, not what was charged then.
+    const soldMap = {}, revenueBySold = {}
+    ;(salesData || []).forEach(s => {
+      const qty = parseFloat(s.qty_sold || 0)
+      const price = s.unit_price != null ? parseFloat(s.unit_price) : (recipeMap[s.recipe_id] || 0)
+      soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + qty
+      revenueBySold[s.recipe_id] = (revenueBySold[s.recipe_id] || 0) + qty * price
+    })
+    const revenue = Object.values(revenueBySold).reduce((s, v) => s + v, 0)
     const covers  = Object.values(soldMap).reduce((s, qty) => s + qty, 0)
 
     setPeriodData({ revenue, foodCost, covers })
@@ -188,6 +197,10 @@ export default function Overheads() {
   const foodCost = periodData?.foodCost || 0
   const covers   = periodData?.covers   || 0
   const netProfit = revenue > 0 ? revenue - foodCost - totalFixed : null
+  // BS months run 28-32 days, never 30 — a hardcoded /30 over/understates daily burn by up to
+  // ~7% depending on the period.
+  const selectedPeriodObj = periods.find(p => p.id === periodId)
+  const daysInSelectedMonth = selectedPeriodObj ? daysInBsMonth(selectedPeriodObj.bs_year, selectedPeriodObj.bs_month) : 30
 
   const hasSales = revenue > 0
 
@@ -308,8 +321,8 @@ export default function Overheads() {
             tip: 'Sum of all three buckets. Every month you must earn more than this just to survive.'
           },
           {
-            label: 'Daily Fixed Cost', value: fmt(totalFixed / 30),
-            sub: '÷ 30 days estimate',
+            label: 'Daily Fixed Cost', value: fmt(totalFixed / daysInSelectedMonth),
+            sub: `÷ ${daysInSelectedMonth} days this month`,
             color: 'var(--theme-text2)',
             tip: 'How much your fixed costs burn each day, even if the cafe is closed.'
           },

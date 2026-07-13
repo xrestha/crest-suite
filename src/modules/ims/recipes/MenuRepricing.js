@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import { getSuggestedPrice } from '../../../utils/recipeCost'
+import { getSuggestedPrice, computeRecipeCosts } from '../../../utils/recipeCost'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -58,18 +58,11 @@ export default function MenuRepricing() {
         .eq('is_active', true),
     ])
 
+    // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
+    // hand-rolled costMap reading only direct item_id ingredients (as this used to) silently
+    // costs any sub-recipe-based ingredient at zero, understating cost and repricing suggestions.
     const recipeIds = (recipes || []).map(r => r.id)
-    const { data: ingredients } = recipeIds.length > 0
-      ? await supabase.from('recipe_ingredients')
-          .select('recipe_id, qty_per_portion, items(per_uom_rate)')
-          .in('recipe_id', recipeIds)
-      : { data: [] }
-
-    const costMap = {}
-    for (const ing of (ingredients || [])) {
-      const c = parseFloat(ing.qty_per_portion || 0) * parseFloat(ing.items?.per_uom_rate || 0)
-      costMap[ing.recipe_id] = (costMap[ing.recipe_id] || 0) + c
-    }
+    const costMap = await computeRecipeCosts(supabase, recipeIds)
 
     const qtyMap = {}
     for (const s of (salesData || [])) {

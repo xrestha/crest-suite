@@ -74,7 +74,11 @@ export default function MenuPricing() {
       subIngMap[ri.recipe_id].push(ri)
     }
 
-    function subCostPerUnit(srId) {
+    // seen guards against a cycle (sub-recipe A contains B, B later edited to contain A) turning
+    // into unbounded recursion — the UI only blocks a sub-recipe referencing itself directly.
+    function subCostPerUnit(srId, seen = new Set()) {
+      if (seen.has(srId)) return 0
+      seen.add(srId)
       const sr = (subRecipeData || []).find(r => r.id === srId)
       if (!sr) return 0
       const ings = subIngMap[srId] || []
@@ -84,7 +88,7 @@ export default function MenuPricing() {
           const yf = (parseFloat(ri.items.yield_pct) || 100) / 100
           total += (parseFloat(ri.qty_per_portion || 0) / yf) * parseFloat(ri.items.per_uom_rate || 0)
         } else if (ri.sub_recipe_id) {
-          total += parseFloat(ri.qty_per_portion || 0) * subCostPerUnit(ri.sub_recipe_id)
+          total += parseFloat(ri.qty_per_portion || 0) * subCostPerUnit(ri.sub_recipe_id, seen)
         }
       }
       return total / (parseFloat(sr.yield_qty) || 1)

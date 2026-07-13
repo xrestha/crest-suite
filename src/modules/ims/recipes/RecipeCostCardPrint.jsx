@@ -70,7 +70,10 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
             if (ri.item_id && ri.items) {
               ingName = ri.items.name; ingUom = ri.items.uom
               ingRate = parseFloat(ri.items.per_uom_rate || 0)
-              ingCost = parseFloat(ri.qty_per_portion) * ingRate
+              // Previously omitted yield_pct (trim/prep loss) — the TOTAL FOOD COST row below
+              // (calcRecipeCost) already applies it, so line items didn't sum to the printed total.
+              const yieldFactor = (parseFloat(ri.items.yield_pct) || 100) / 100
+              ingCost = (parseFloat(ri.qty_per_portion) / yieldFactor) * ingRate
             } else if (ri.sub_recipe_id && ri.sub_recipe) {
               const cpu = calcSubRecipeCostPerUnit(ri.sub_recipe, recipes)
               ingName = `⚙ ${ri.sub_recipe.name}`; ingUom = ri.sub_recipe.yield_uom

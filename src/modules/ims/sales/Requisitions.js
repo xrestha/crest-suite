@@ -9,6 +9,7 @@ import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { printWithTitle } from '../../../utils/printTitle'
+import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const DEPARTMENTS = [
@@ -139,11 +140,96 @@ export default function Requisitions() {
     setFormLines(prev => prev.map(l => l._key === key ? { ...l, [field]: value } : l))
   }
 
+  // Estimated on-hand qty per item for this period — same formula as StockReport.js's own
+  // "on hand" figure (physical closing count if taken, else opening + net purchases − sales usage
+  // (recipe-exploded, sub-recipe-recursive) − wastage − staff meals − already-issued
+  // requisitions), so issuing a requisition and viewing Stock Report agree on what "available"
+  // means. Neither saveReq('issued') nor confirmIssue() checked this before — a requisition could
+  // silently issue more of an item than physically exists, corrupting the Requisitioned vs Used
+  // reconciliation in Stock.js's Summary tab with no warning at all.
+  async function getOnHandMap(periodId, excludeReqId) {
+    const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns },
+      { data: wastages }, { data: staffMealsData }, { data: sales }, { data: clientRecipes },
+      { data: reqLines }] = await Promise.all([
+      supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
+      supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
+      supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId),
+      scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
+      supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
+      scopedFrom('recipes', 'id'),
+      supabase.from('requisition_lines').select('item_id, qty_issued, requisitions!inner(id, period_id, status)')
+        .eq('requisitions.period_id', periodId).eq('requisitions.status', 'issued'),
+    ])
+
+    const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
+    const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
+    const purchMap = {}
+    ;(purchases || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
+    ;(returns   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - (parseFloat(r.qty) || 0) })
+    const wasteMap = {}; (wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
+    const staffMap = {}; (staffMealsData || []).forEach(r => { staffMap[r.item_id] = (staffMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
+    const reqMap = {}
+    ;(reqLines || []).forEach(r => {
+      if (excludeReqId && r.requisitions?.id === excludeReqId) return
+      reqMap[r.item_id] = (reqMap[r.item_id] || 0) + (parseFloat(r.qty_issued) || 0)
+    })
+
+    const recipeIds = (clientRecipes || []).map(r => r.id)
+    const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    const soldMap = {}
+    ;(sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0) })
+    const usageMap = {}
+    Object.entries(breakdown).forEach(([recipeId, rows]) => {
+      const sold = soldMap[recipeId] || 0
+      if (sold <= 0) return
+      rows.forEach(({ item_id, qty }) => { usageMap[item_id] = (usageMap[item_id] || 0) + sold * qty })
+    })
+
+    const onHand = {}
+    items.forEach(item => {
+      const hasClosing = item.id in closeMap
+      const rawTheoretical = (openMap[item.id] || 0) + (purchMap[item.id] || 0)
+        - (usageMap[item.id] || 0) - (wasteMap[item.id] || 0) - (staffMap[item.id] || 0) - (reqMap[item.id] || 0)
+      onHand[item.id] = hasClosing ? closeMap[item.id] : Math.max(0, rawTheoretical)
+    })
+    return onHand
+  }
+
+  // Returns a confirm-worthy warning string if any line would issue more than estimated on-hand,
+  // or null if everything's within stock. Not a hard block — this app's stock model is periodic/
+  // physical-count based (see CLAUDE.md), so "on hand" here is an estimate, not a live ledger.
+  async function checkStockShortfall(periodId, lines, excludeReqId) {
+    const onHand = await getOnHandMap(periodId, excludeReqId)
+    const shortfalls = lines
+      .map(l => {
+        const issuing = parseFloat(l.qty_issued) || 0
+        const available = onHand[l.item_id] ?? 0
+        if (issuing <= available) return null
+        const item = items.find(i => i.id === l.item_id)
+        return `${item?.name || l.item_id}: issuing ${issuing} ${item?.uom || ''}, only ~${available.toFixed(1)} estimated on hand`
+      })
+      .filter(Boolean)
+    if (shortfalls.length === 0) return null
+    return `This issues more than the estimated stock on hand for:\n\n${shortfalls.join('\n')}\n\nIssue anyway?`
+  }
+
   async function saveReq(statusOverride) {
     if (!effectiveClientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return }
     if (!formDay) { setError('Select a day.'); return }
     const validLines = formLines.filter(l => l.item_id && parseFloat(l.qty_requested) > 0)
     if (validLines.length === 0) { setError('Add at least one item with a requested quantity.'); return }
+
+    if (statusOverride === 'issued') {
+      const checkLines = validLines.map(l => ({
+        item_id: l.item_id,
+        qty_issued: l.qty_issued !== '' ? l.qty_issued : l.qty_requested,
+      }))
+      const warning = await checkStockShortfall(selectedPeriod.id, checkLines, null)
+      if (warning && !window.confirm(warning)) return
+    }
+
     setSaving(true)
     setError('')
 
@@ -190,6 +276,9 @@ export default function Requisitions() {
   }
 
   async function confirmIssue() {
+    const warning = await checkStockShortfall(selectedPeriod.id, issueLines, selectedReq.id)
+    if (warning && !window.confirm(warning)) return
+
     setSaving(true)
     const { error: hErr } = await scopedUpdate('requisitions', { status: 'issued' }).eq('id', selectedReq.id)
     if (hErr) { setSaving(false); return }

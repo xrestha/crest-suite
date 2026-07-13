@@ -50,9 +50,17 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
     const retCf = getCf(linked.items)
     const baseRetQty = retQty * retCf
     const linkedQty = parseFloat(linked.qty)
-    if (baseRetQty > linkedQty) {
-      const maxDisplay = retCf > 1 ? `${(linkedQty / retCf).toFixed(3)} ${linked.items?.purchase_unit}` : `${linkedQty} ${linked.items?.uom}`
-      setReturnError(`Return qty cannot exceed original purchase qty (${maxDisplay}).`)
+    // Previously only checked THIS return against the original purchase qty, never against
+    // returns already recorded against the same purchase_entry_id — two 8kg returns against a
+    // 10kg purchase both individually passed (8 <= 10), returning 16kg total and producing
+    // negative effective stock in Variance/FIFO. Excludes the row being edited from its own cap.
+    const priorReturnedQty = returns
+      .filter(r => r.purchase_entry_id === linked.id && r.id !== editingReturnId)
+      .reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0)
+    const remainingQty = linkedQty - priorReturnedQty
+    if (baseRetQty > remainingQty) {
+      const maxDisplay = retCf > 1 ? `${(remainingQty / retCf).toFixed(3)} ${linked.items?.purchase_unit}` : `${remainingQty} ${linked.items?.uom}`
+      setReturnError(`Return qty cannot exceed remaining returnable qty (${maxDisplay} — ${priorReturnedQty > 0 ? 'some was already returned' : 'exceeds original purchase qty'}).`)
       return
     }
 

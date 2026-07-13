@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
+import { computeRecipeCosts } from '../../../utils/recipeCost'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -51,18 +52,12 @@ export default function RecipeMargin() {
         .eq('is_active', true),
     ])
 
+    // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
+    // hand-rolled costMap reading only direct item_id ingredients (as this used to) silently
+    // costs any sub-recipe-based ingredient (sauces, batters, prepped components) at zero and
+    // ignores trim/prep loss, understating food cost and margin for exactly those dishes.
     const recipeIds = (recipes || []).map(r => r.id)
-    const { data: ingredients } = recipeIds.length > 0
-      ? await supabase.from('recipe_ingredients')
-          .select('recipe_id, qty_per_portion, items(per_uom_rate)')
-          .in('recipe_id', recipeIds)
-      : { data: [] }
-
-    const costMap = {}
-    for (const ing of (ingredients || [])) {
-      const c = parseFloat(ing.qty_per_portion || 0) * parseFloat(ing.items?.per_uom_rate || 0)
-      costMap[ing.recipe_id] = (costMap[ing.recipe_id] || 0) + c
-    }
+    const costMap = await computeRecipeCosts(supabase, recipeIds)
 
     const qtyMap = {}
     for (const s of (salesData || [])) {

@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
+import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -47,15 +48,28 @@ export default function FifoReport() {
   }
 
   async function buildReport(periodId) {
-    // Fetch purchases with expiry dates AND returns for the same period
-    const [{ data: purchases }, { data: returns }] = await Promise.all([
+    // This used to net batches against returns ONLY — never against anything actually sold,
+    // wasted, or used in a recipe since purchase, so a batch bought months ago and long since
+    // fully used still showed its full original qty as "at risk," wildly overstating expiry
+    // exposure. There's no batch-level consumption ledger in the schema (sales_entries/wastages/
+    // staff_meals only track item-level totals, not which specific purchase lot), so this can't
+    // be a true batch-precise FIFO allocation — instead it allocates each item's total period
+    // consumption (sales usage, exploded through recipes same as Variance.js/StockReport.js,
+    // plus wastage and staff meals) against that item's own batches oldest-first (by bs_day),
+    // which is the standard FIFO assumption and the same level of precision every other report
+    // in this app already works at.
+    const [{ data: purchases }, { data: returns }, { data: sales }, { data: wastages }, { data: staffMeals }, { data: clientRecipes }] = await Promise.all([
       supabase.from('purchase_entries')
         .select('*, items(name, uom, per_uom_rate, categories(name))')
         .eq('period_id', periodId)
         .not('expiry_date', 'is', null)
         .order('expiry_date'),
       scopedFrom('vendor_returns', 'purchase_entry_id, qty')
-        .eq('period_id', periodId)
+        .eq('period_id', periodId),
+      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
+      supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      scopedFrom('recipes', 'id'),
     ])
 
     // Build a map of returned qty per purchase entry
@@ -66,11 +80,31 @@ export default function FifoReport() {
       }
     })
 
+    // Item-level total consumption this period: sales usage (recipe-exploded) + wastage + staff meals
+    const recipeIds = (clientRecipes || []).map(r => r.id)
+    const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    const soldMap = {}
+    ;(sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0) })
+    const consumedMap = {}
+    Object.entries(breakdown).forEach(([recipeId, ingRows]) => {
+      const sold = soldMap[recipeId] || 0
+      if (sold <= 0) return
+      ingRows.forEach(({ item_id, qty }) => { consumedMap[item_id] = (consumedMap[item_id] || 0) + sold * qty })
+    })
+    ;(wastages || []).forEach(w => { consumedMap[w.item_id] = (consumedMap[w.item_id] || 0) + parseFloat(w.qty || 0) })
+    ;(staffMeals || []).forEach(m => { consumedMap[m.item_id] = (consumedMap[m.item_id] || 0) + parseFloat(m.qty || 0) })
+
+    // Allocate each item's remaining consumption against its own batches, oldest bs_day first
+    const remainingConsumption = { ...consumedMap }
+    const sortedPurchases = [...(purchases || [])].sort((a, b) => (a.bs_day || 0) - (b.bs_day || 0))
+
     const today = new Date()
-    const reportRows = (purchases || []).map(p => {
-      // PATCHED: subtract returned qty from this purchase row
+    const reportRows = sortedPurchases.map(p => {
       const returnedQty = returnedMap[p.id] || 0
-      const netQty = Math.max(0, p.qty - returnedQty)
+      const afterReturns = Math.max(0, p.qty - returnedQty)
+      const toConsume = Math.min(afterReturns, remainingConsumption[p.item_id] || 0)
+      remainingConsumption[p.item_id] = (remainingConsumption[p.item_id] || 0) - toConsume
+      const netQty = afterReturns - toConsume
       const expiry = new Date(p.expiry_date)
       const daysUntilExpiry = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24))
       const value = netQty * p.rate
@@ -87,6 +121,7 @@ export default function FifoReport() {
         qty: netQty,
         originalQty: p.qty,
         returnedQty,
+        consumedQty: toConsume,
         rate: p.rate,
         value,
         expiryDate: p.expiry_date,
@@ -95,7 +130,7 @@ export default function FifoReport() {
         perUomRate: p.items?.per_uom_rate,
         bsDay: p.bs_day
       }
-    }).filter(r => r.qty > 0) // hide fully-returned rows
+    }).filter(r => r.qty > 0.001) // hide fully-consumed/returned rows
 
     setRows(reportRows)
   }
@@ -143,7 +178,7 @@ export default function FifoReport() {
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title"><Tip text="First In, First Out — tracks which stock batches expire soonest so you use older stock before newer stock." width={240}>FIFO</Tip> / Expiry Report</h1>
-          <p className="page-subtitle">Stock expiry tracking — net of returns — {periodLabel}</p>
+          <p className="page-subtitle">Stock expiry tracking — net of returns, sales usage, wastage and staff meals (allocated oldest-batch-first) — {periodLabel}</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
@@ -206,7 +241,7 @@ export default function FifoReport() {
                   <tr>
                     <th>Item</th>
                     <th>Category</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Original purchased quantity minus any returns to vendor. This is the stock still on hand from this batch." width={230}>Net Qty</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Original purchased quantity minus returns and this period's consumption (sales usage, wastage, staff meals), allocated against this item's batches oldest-first. This is the estimated stock still on hand from this batch — not batch-precise, since consumption isn't tracked per-batch." width={280}>Net Qty</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}>Returned</th>
                     <th>UOM</th>
                     <th style={{ textAlign: 'right' }}>Rate</th>

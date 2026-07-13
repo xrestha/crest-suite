@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
+import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const npr = n => Number(n || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })
@@ -66,9 +67,11 @@ export default function StockReport() {
     ])
 
     const recipeIds = (clientRecipes || []).map(r => r.id)
-    const { data: recipeIngs } = recipeIds.length > 0
-      ? await supabase.from('recipe_ingredients').select('recipe_id, item_id, qty_per_portion').in('recipe_id', recipeIds)
-      : { data: [] }
+    // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
+    // the previous direct recipe_ingredients read only picked up rows with item_id set (dropping
+    // sub-recipe ingredients) and never divided by yield_pct at all, understating usage and
+    // overstating the computed on-hand qty for any item with trim/prep loss.
+    const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
@@ -82,12 +85,14 @@ export default function StockReport() {
     ;(purchases || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
     ;(returns   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - (parseFloat(r.qty) || 0) })
 
-    // Usage from sales × recipe
+    // Usage from sales × recipe. breakdown[recipeId] is already yield_pct-adjusted, per-one-
+    // portion raw-ingredient qty (recursed through any sub-recipe nesting).
     const soldMap = {}; (sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0) })
     const usageMap = {}
-    ;(recipeIngs || []).forEach(ri => {
-      const sold = soldMap[ri.recipe_id] || 0
-      if (sold > 0 && ri.item_id) usageMap[ri.item_id] = (usageMap[ri.item_id] || 0) + sold * parseFloat(ri.qty_per_portion)
+    Object.entries(breakdown).forEach(([recipeId, rows]) => {
+      const sold = soldMap[recipeId] || 0
+      if (sold <= 0) return
+      rows.forEach(({ item_id, qty }) => { usageMap[item_id] = (usageMap[item_id] || 0) + sold * qty })
     })
 
     const built = (items || []).map(item => {

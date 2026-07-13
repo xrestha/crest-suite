@@ -183,13 +183,22 @@ export async function runForecast(clientId, horizonDays = 7) {
       }
     }
 
-    // Clear this client+horizon's previous run before writing the new one — demand_forecast_daily
-    // has no natural upsert key (recipe-level rows share a date), so without this, every recompute
-    // click stacks duplicate day-rows and loadStored's read-back non-deterministically picks
-    // between old and new values instead of always showing the latest run.
-    await scopedDelete('demand_forecast_daily', clientId).eq('horizon_days', horizonDays)
+    // Write the new run's rows BEFORE clearing the previous one (not delete-then-insert) — if the
+    // insert fails partway (network drop, RLS hiccup), the prior run's rows stay intact instead of
+    // being wiped with nothing to replace them (the UI would otherwise fall back to "No forecast
+    // yet" instead of the last good run). demand_forecast_daily has no natural upsert key
+    // (recipe-level rows share a date), so old rows are still cleared by id exclusion afterward —
+    // every recompute click would otherwise stack duplicate day-rows and loadStored's read-back
+    // would non-deterministically pick between old and new values.
     if (rows.length > 0) {
-      await scopedInsert('demand_forecast_daily', clientId, rows)
+      const { data: inserted, error: insErr } = await scopedInsert('demand_forecast_daily', clientId, rows)
+      if (insErr) throw insErr
+      const newIds = (inserted || []).map(r => r.id)
+      if (newIds.length > 0) {
+        await scopedDelete('demand_forecast_daily', clientId).eq('horizon_days', horizonDays).not('id', 'in', `(${newIds.join(',')})`)
+      }
+    } else {
+      await scopedDelete('demand_forecast_daily', clientId).eq('horizon_days', horizonDays)
     }
     await scopedInsert('demand_forecast_run_log', clientId, {
       run_at: runStartedAt, method: 'weekday_moving_average',

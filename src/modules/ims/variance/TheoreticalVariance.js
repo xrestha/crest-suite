@@ -96,13 +96,14 @@ export default function TheoreticalVariance() {
   }
 
   async function computeVariance(periodId, itemList, allRecipes) {
-    const [{ data: sales }, { data: opening }, { data: closing }, { data: purch }, { data: rets }, { data: wast }] = await Promise.all([
+    const [{ data: sales }, { data: opening }, { data: closing }, { data: purch }, { data: rets }, { data: wast }, { data: staffMeals }] = await Promise.all([
       supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
       supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
     ])
 
     // Sales map: recipe_id → total qty sold
@@ -120,18 +121,21 @@ export default function TheoreticalVariance() {
     })
 
     // Actual consumption maps
-    const openMap = {}, closeMap = {}, purchMap = {}, retMap = {}, wastMap = {}
+    const openMap = {}, closeMap = {}, purchMap = {}, retMap = {}, wastMap = {}, staffMap = {}
     ;(opening || []).forEach(r => { openMap[r.item_id]  = parseFloat(r.qty || 0) })
     ;(closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty || 0) })
     ;(purch   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + parseFloat(r.qty || 0) })
     ;(rets    || []).forEach(r => { retMap[r.item_id]   = (retMap[r.item_id]   || 0) + parseFloat(r.qty || 0) })
     ;(wast    || []).forEach(r => { wastMap[r.item_id]  = (wastMap[r.item_id]  || 0) + parseFloat(r.qty || 0) })
+    ;(staffMeals || []).forEach(r => { staffMap[r.item_id] = (staffMap[r.item_id] || 0) + parseFloat(r.qty || 0) })
 
     const computed = itemList
       .filter(item => (theoretical[item.id] || 0) > 0.001)
       .map(item => {
         const theor  = theoretical[item.id] || 0
-        const actual = (openMap[item.id] || 0) + (purchMap[item.id] || 0) - (retMap[item.id] || 0) - (closeMap[item.id] || 0) - (wastMap[item.id] || 0)
+        // Staff meals were previously omitted here (unlike Variance.js/Stock.js) — legitimate,
+        // logged staff-meal consumption was misclassified as unexplained "over-consumption".
+        const actual = (openMap[item.id] || 0) + (purchMap[item.id] || 0) - (retMap[item.id] || 0) - (closeMap[item.id] || 0) - (wastMap[item.id] || 0) - (staffMap[item.id] || 0)
         const variance    = actual - theor
         const variancePct = theor > 0 ? (variance / theor) * 100 : 0
         const rate        = parseFloat(item.per_uom_rate || 0)

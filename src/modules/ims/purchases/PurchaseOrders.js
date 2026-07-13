@@ -177,15 +177,24 @@ export default function PurchaseOrders() {
       const { error } = await scopedUpdate('purchase_orders', poPayload).eq('id', editingPo.id)
       if (error) { setFormError(error.message); setSaving(false); return }
       poId = editingPo.id
-      await supabase.from('purchase_order_items').delete().eq('po_id', poId)
     } else {
-      const poNumber = await getNextPoNumber()
-      const { data, error } = await scopedInsert('purchase_orders', { ...poPayload, po_number: poNumber, status: 'draft' }, { single: true })
+      // getNextPoNumber() computes from in-memory state, not a DB sequence — a genuine collision
+      // (two tabs, a fast double-click) is now caught by a client_id+po_number unique constraint
+      // instead of silently succeeding twice. Retry with a freshly recomputed number a few times
+      // before giving up, rather than surfacing a raw constraint-violation error to the user.
+      let data, error
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const poNumber = await getNextPoNumber()
+        ;({ data, error } = await scopedInsert('purchase_orders', { ...poPayload, po_number: poNumber, status: 'draft' }, { single: true }))
+        if (!error || error.code !== '23505') break
+      }
       if (error) { setFormError(error.message); setSaving(false); return }
       poId = data.id
     }
 
-    const { error: itemErr } = await supabase.from('purchase_order_items').insert(
+    // Insert the new line items BEFORE removing the old ones (not delete-then-insert) — if the
+    // insert fails partway, the PO keeps its previous, still-valid line items instead of zero.
+    const { data: insertedItems, error: itemErr } = await supabase.from('purchase_order_items').insert(
       validItems.map(x => ({
         po_id: poId,
         item_id: x.item_id,
@@ -193,8 +202,12 @@ export default function PurchaseOrders() {
         unit_price: parseFloat(x.unit_price) || 0,
         qty_received: 0,
       }))
-    )
+    ).select('id')
     if (itemErr) { setFormError(itemErr.message); setSaving(false); return }
+    if (editingPo) {
+      const newIds = (insertedItems || []).map(r => r.id)
+      await supabase.from('purchase_order_items').delete().eq('po_id', poId).not('id', 'in', `(${newIds.join(',')})`)
+    }
 
     setSaving(false)
     await loadPos(selectedPeriod.id)
@@ -255,6 +268,14 @@ export default function PurchaseOrders() {
     const day = parseInt(receiveBsDay)
     if (!day || day < 1 || day > 32) { setReceiveError('Enter a valid BS day (1–32).'); return }
 
+    // The "max" on the qty input was only an HTML hint, never actually enforced — a typo (e.g.
+    // 100 instead of 10) silently over-received, inflating qty_received past qty_ordered.
+    const overReceived = toReceive.find(l => parseFloat(l.receiving) > (l.qty_ordered - l.qty_received))
+    if (overReceived) {
+      setReceiveError(`Receiving ${overReceived.receiving} for "${overReceived.name || overReceived.item_id}" exceeds the remaining ${(overReceived.qty_ordered - overReceived.qty_received)} still on order.`)
+      return
+    }
+
     setReceiveSaving(true)
     setReceiveError('')
 
@@ -273,10 +294,22 @@ export default function PurchaseOrders() {
     )
     if (purchErr) { setReceiveError(purchErr.message); setReceiveSaving(false); return }
 
+    // Stock/purchase history is now written for every line — if a qty_received update fails
+    // partway through this loop, that line would otherwise still show its old remaining qty and
+    // let staff receive (and double-book) the same delivery again next time. Stop on first
+    // failure and say exactly which lines are now out of sync, instead of failing silently.
     for (const l of toReceive) {
-      await supabase.from('purchase_order_items')
+      const { error: updErr } = await supabase.from('purchase_order_items')
         .update({ qty_received: l.qty_received + parseFloat(l.receiving) })
         .eq('id', l.id)
+      if (updErr) {
+        setReceiveError(
+          `Stock was recorded, but updating "${l.name || l.item_id}"'s received qty failed (${updErr.message}). ` +
+          `Reload this PO before receiving again to avoid double-counting.`
+        )
+        setReceiveSaving(false)
+        return
+      }
     }
 
     const updatedLines = receiveLines.map(l => ({

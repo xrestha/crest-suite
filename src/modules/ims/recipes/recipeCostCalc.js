@@ -16,8 +16,14 @@ export function fmtNutrient(def, value) {
 export const vatOf = rec => (rec?.vat_rate === null || rec?.vat_rate === undefined) ? 0.13 : parseFloat(rec.vat_rate)
 
 // Cost of one output unit of a sub-recipe (recursively resolves nested sub-recipes).
-export function calcSubRecipeCostPerUnit(subRecipe, allRecipes) {
-  if (!subRecipe) return 0
+// `seen` guards against a cycle (A contains B, B is later edited to contain A — the UI only
+// blocks a sub-recipe from referencing itself directly, not an indirect cycle like this) turning
+// into unbounded recursion and crashing every page that costs a recipe. Matches the same-file
+// `recipeHasIngredient`'s existing seen-set pattern; a cyclic recipe just costs as 0 for the
+// ingredient that would re-enter the cycle, rather than climbing the stack until it overflows.
+export function calcSubRecipeCostPerUnit(subRecipe, allRecipes, seen = new Set()) {
+  if (!subRecipe || seen.has(subRecipe.id)) return 0
+  seen.add(subRecipe.id)
   const ings = subRecipe.recipe_ingredients || []
   let total = 0
   ings.forEach(ri => {
@@ -27,7 +33,7 @@ export function calcSubRecipeCostPerUnit(subRecipe, allRecipes) {
     } else if (ri.sub_recipe_id) {
       const nested = allRecipes.find(r => r.id === ri.sub_recipe_id)
       if (nested) {
-        const nestedCostPerUnit = calcSubRecipeCostPerUnit(nested, allRecipes)
+        const nestedCostPerUnit = calcSubRecipeCostPerUnit(nested, allRecipes, seen)
         total += parseFloat(ri.qty_per_portion) * nestedCostPerUnit
       }
     }

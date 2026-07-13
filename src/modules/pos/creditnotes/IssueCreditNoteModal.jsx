@@ -136,6 +136,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       if (open && today.year === open.bs_year && today.month === open.bs_month) {
         const rows = payableItems.filter(i => i.recipe_id).map(i => ({
           period_id: open.id, recipe_id: i.recipe_id, bs_day: today.day, qty_sold: -i.qty, source: 'pos_credit',
+          unit_price: i.unit_price, vat_rate: i.vat_rate,
         }))
         if (rows.length > 0) await supabase.from('sales_entries').insert(rows)
       }

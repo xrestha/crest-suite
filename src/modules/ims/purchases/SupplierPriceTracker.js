@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
+import { getCf } from './purchasesHelpers'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -34,9 +35,9 @@ export default function SupplierPriceTracker() {
     setLoading(true)
     const [{ data: v }, { data: i }, { data: p }, { data: pu }] = await Promise.all([
       scopedFrom('vendors', 'id, name').eq('is_active', true).order('name'),
-      scopedFrom('items', 'id, name, item_code, uom, rate, per_uom_rate, purchase_qty, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
+      scopedFrom('items', 'id, name, item_code, uom, rate, per_uom_rate, purchase_qty, purchase_unit, conversion_factor, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       scopedFrom('monthly_periods').order('bs_year').order('bs_month'),
-      supabase.from('purchase_entries').select('id, item_id, vendor_id, period_id, rate, qty, bs_day, items(purchase_qty), monthly_periods!inner(client_id)')
+      supabase.from('purchase_entries').select('id, item_id, vendor_id, period_id, rate, qty, bs_day, monthly_periods!inner(client_id)')
         .eq('monthly_periods.client_id', effectiveClientId)
     ])
 
@@ -68,13 +69,21 @@ export default function SupplierPriceTracker() {
       if (!period) return
       const item = itemMap[pe.item_id]
       if (!item) return
-      const purchaseQty = parseFloat(pe.items?.purchase_qty || item.purchase_qty || 1)
+      // purchase_entries.rate is stored ex-VAT and ALREADY converted to base-unit terms at entry
+      // time (rate = entered_rate / conversion_factor — see PurchaseBillModal.jsx's saveBill).
+      // This used to divide it AGAIN, by items.purchase_qty — an unrelated legacy field (paired
+      // with items.rate for that table's own generated per_uom_rate column, nothing to do with
+      // purchase-unit-to-base-unit conversion) — corrupting every converted item's tracked rate.
+      // pe.rate IS the per-base-unit rate already; "per pack" is reconstructed by multiplying
+      // back by the item's CURRENT conversion factor (the true factor at time of purchase isn't
+      // stored per-entry, so this is a best-effort approximation if it's since changed).
+      const cf = getCf(item)
       // For "all vendors" mode, key by vendor+item so same item from different vendors shows separately
       const key = vendorId === 'all' ? `${pe.vendor_id}__${pe.item_id}` : pe.item_id
       const entry = {
         id: pe.id,
-        rate: parseFloat(pe.rate),
-        perUomRate: parseFloat(pe.rate) / purchaseQty,
+        rate: parseFloat(pe.rate) * cf,
+        perUomRate: parseFloat(pe.rate),
         qty: parseFloat(pe.qty),
         bs_day: pe.bs_day || 1,
         period_label: `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,

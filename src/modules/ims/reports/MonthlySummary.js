@@ -60,7 +60,7 @@ export default function MonthlySummary() {
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for. See
       // migration 20260706170000 for why sales_entries now carries that source separately.
-      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp'),
+      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', periodId).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, selling_price')
     ])
 
@@ -86,14 +86,23 @@ export default function MonthlySummary() {
     })
 
     // Revenue
-    const soldMap = {}
-    ;(salesData || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold) })
-    const totalRevenue = (recipes || []).reduce((s, r) => s + (soldMap[r.id] || 0) * (parseFloat(r.selling_price) || 0), 0)
+    // Revenue is computed per sale row using the price actually charged at the time (unit_price,
+    // captured on the row) — falling back to the recipe's current price only for historical rows
+    // recorded before that column existed (unit_price NULL). Previously always used the recipe's
+    // CURRENT price for every row, so a closed period's revenue silently shifted whenever a menu
+    // price changed later.
+    const currentPriceMap = {}
+    ;(recipes || []).forEach(r => { currentPriceMap[r.id] = parseFloat(r.selling_price) || 0 })
+    const totalRevenue = (salesData || []).reduce((s, row) => {
+      const price = row.unit_price != null ? parseFloat(row.unit_price) : (currentPriceMap[row.recipe_id] || 0)
+      return s + parseFloat(row.qty_sold || 0) * price
+    }, 0)
 
     // Per-category summary — COGS now uses net purchases (purchases − returns)
-    const catRows = (categories || []).map(cat => {
-      const catItems = (items || []).filter(i => i.categories?.id === cat.id)
-
+    // items.category_id is nullable — an uncategorized item used to match no category's
+    // catItems filter and so was silently excluded from every total on this report with no
+    // indication. Grouped into a synthetic "Uncategorized" row instead, same shape as a real one.
+    function buildCatRow(catName, catItems) {
       const openingVal  = catItems.reduce((s, i) => s + (openMap[i.id] || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const purchaseVal = catItems.reduce((s, i) => s + (purchMap[i.id]?.value || 0), 0)
       const returnVal   = catItems.reduce((s, i) => s + (retMap[i.id]?.value || 0), 0)
@@ -102,13 +111,22 @@ export default function MonthlySummary() {
       const staffMealsVal = catItems.reduce((s, i) => s + (staffMealMap[i.id] || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const closingVal    = catItems.reduce((s, i) => s + (closeMap[i.id]     || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const cogsVal = openingVal + netPurchaseVal - wastageVal - staffMealsVal - closingVal
-
       return {
-        category: cat.name,
+        category: catName,
         openingVal, purchaseVal, returnVal, netPurchaseVal, wastageVal, staffMealsVal, closingVal, cogsVal,
         itemCount: catItems.length
       }
-    }).filter(r => r.openingVal > 0 || r.purchaseVal > 0 || r.closingVal > 0)
+    }
+
+    const uncategorizedItems = (items || []).filter(i => !i.categories?.id)
+    const catRows = [
+      ...(categories || []).map(cat => buildCatRow(cat.name, (items || []).filter(i => i.categories?.id === cat.id))),
+      ...(uncategorizedItems.length > 0 ? [buildCatRow('Uncategorized', uncategorizedItems)] : []),
+    ]
+      // A category whose only activity this period was wastage/staff-meals (no opening/purchase/
+      // closing) used to be dropped here entirely — including its wastage/staff-meals value —
+      // from every downstream total (totalWastage, totalStaffMeals, totalCOGS).
+      .filter(r => r.openingVal > 0 || r.purchaseVal > 0 || r.closingVal > 0 || r.wastageVal > 0 || r.staffMealsVal > 0)
 
     const totalOpening     = catRows.reduce((s, r) => s + r.openingVal, 0)
     const totalPurchase    = catRows.reduce((s, r) => s + r.purchaseVal, 0)

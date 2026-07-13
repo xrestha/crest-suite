@@ -251,19 +251,33 @@ export default function Stock() {
       if (qty > 0) await supabase.from('wastages').insert({ period_id: periodId, item_id: itemId, qty, bs_day: null })
     }
     if (fieldKey === 'staff_meal') {
-      await supabase.from('staff_meals').delete().eq('period_id', periodId).eq('item_id', itemId)
+      await supabase.from('staff_meals').delete().eq('period_id', periodId).eq('item_id', itemId).eq('type', 'staff')
       if (qty > 0) await supabase.from('staff_meals').insert({ period_id: periodId, item_id: itemId, qty, type: 'staff' })
     }
   }
 
+  // Wastage/staff-meal saves are delete()-then-insert() (two round trips, unlike opening/
+  // closing's atomic upsert) — an onBlur autosave racing an immediate "Save All"/"Clear All"
+  // click for the SAME item+field could otherwise interleave (both DELETEs land before either
+  // INSERT), leaving two rows for that item+period and double-counting its cost downstream.
+  // Serializing every persistValue call through a per-(item,field) promise chain means a second
+  // call for the same key always waits for the first's round trip to fully finish before it
+  // starts its own, so the two delete/insert pairs can never overlap.
+  const persistLocks = useRef({})
   async function persistValue(itemId, fieldKey, qty) {
-    if (!navigator.onLine) {
-      await enqueue({ periodId: selectedPeriod.id, itemId, fieldKey, qty })
-      setPendingSync(prev => prev + 1)
-      setPendingItems(prev => new Set([...prev, itemId]))
-      return
-    }
-    await persistValueDirect(selectedPeriod.id, itemId, fieldKey, qty)
+    const key = `${itemId}:${fieldKey}`
+    const prior = persistLocks.current[key] || Promise.resolve()
+    const run = prior.then(async () => {
+      if (!navigator.onLine) {
+        await enqueue({ periodId: selectedPeriod.id, itemId, fieldKey, qty })
+        setPendingSync(prev => prev + 1)
+        setPendingItems(prev => new Set([...prev, itemId]))
+        return
+      }
+      await persistValueDirect(selectedPeriod.id, itemId, fieldKey, qty)
+    }).catch(() => {}) // don't let one failed save wedge the chain for this key forever
+    persistLocks.current[key] = run
+    return run
   }
 
   async function flushQueue() {

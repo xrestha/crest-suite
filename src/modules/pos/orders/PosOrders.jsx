@@ -1220,10 +1220,14 @@ export default function PosOrders() {
     // for — while consumption-facing reports (Variance, TheoreticalVariance, ShrinkageReport,
     // ReorderReport, StockReport, Recipes.js's per-cover overhead) keep summing every source
     // unfiltered, since that food was still prepared and consumed regardless of who paid for it.
+    // unit_price/vat_rate snapshot the actual price charged on THIS bill (not just the recipe's
+    // current default, which could differ later — or already did, via a per-order override) —
+    // every IMS revenue report used to join the recipe's CURRENT selling_price instead, so a past
+    // period's revenue/Food Cost % silently shifted whenever a menu price changed after the fact.
     const rows = []
-    qtySplit.forEach(({ recipe_id, saleQty, compQty }) => {
-      if (saleQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: saleQty, source: 'pos' })
-      if (compQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: compQty, source: 'pos_comp' })
+    qtySplit.forEach(({ recipe_id, saleQty, compQty, unit_price, vat_rate }) => {
+      if (saleQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: saleQty, source: 'pos', unit_price, vat_rate })
+      if (compQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: compQty, source: 'pos_comp', unit_price, vat_rate })
     })
     if (rows.length > 0) await supabase.from('sales_entries').insert(rows)
 

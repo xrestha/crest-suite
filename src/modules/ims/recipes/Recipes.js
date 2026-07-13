@@ -343,6 +343,27 @@ export default function Recipes() {
     )
     if (validIngs.length === 0) { setError('Add at least one ingredient with qty.'); return }
 
+    // Cycle check — only possible when editing an EXISTING sub-recipe (a brand-new one can't yet
+    // be referenced by anything else). The ingredient picker already blocks a sub-recipe from
+    // listing itself directly (see subRecipeOptions above), but nothing stopped an INDIRECT cycle
+    // (A contains B, then B is edited to contain A) — both edits individually looked fine, but
+    // together they made every cost calculation over that pair recurse forever. Caught here at
+    // save time instead of just surviving it at cost-calc time (calcSubRecipeCostPerUnit).
+    if (selectedRecipe && recipeForm.category === 'Sub-Recipe') {
+      const wouldCreateCycle = (targetId, subRecipeId, seen = new Set()) => {
+        if (subRecipeId === targetId) return true
+        if (seen.has(subRecipeId)) return false
+        seen.add(subRecipeId)
+        const sr = recipes.find(r => r.id === subRecipeId)
+        return (sr?.recipe_ingredients || []).some(ri => ri.sub_recipe_id && wouldCreateCycle(targetId, ri.sub_recipe_id, seen))
+      }
+      const cyclic = validIngs.some(i => i.type === 'sub_recipe' && wouldCreateCycle(selectedRecipe.id, i.sub_recipe_id))
+      if (cyclic) {
+        setError('This would create a circular reference (this sub-recipe would end up containing itself through another sub-recipe). Remove that ingredient.')
+        return
+      }
+    }
+
     setSaving(true)
     setError('')
 
@@ -367,9 +388,20 @@ export default function Recipes() {
       const { error } = await scopedUpdate('recipes', payload).eq('id', selectedRecipe.id)
       if (error) { setError(error.message); setSaving(false); return }
       recipeId = selectedRecipe.id
-      await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId)
+    } else if (isSubRecipe) {
+      // getNextSubRecipeCode() computes from in-memory state, not a DB sequence — a genuine
+      // collision (two tabs, a fast double-click) is now caught by a per-client unique index on
+      // recipe_code instead of silently succeeding twice. Retry with a freshly recomputed code a
+      // few times before giving up, rather than surfacing a raw constraint-violation error.
+      let data, error
+      for (let attempt = 0; attempt < 3; attempt++) {
+        payload.recipe_code = getNextSubRecipeCode()
+        ;({ data, error } = await scopedInsert('recipes', payload, { single: true }))
+        if (!error || error.code !== '23505') break
+      }
+      if (error) { setError(error.message); setSaving(false); return }
+      recipeId = data.id
     } else {
-      if (isSubRecipe) payload.recipe_code = getNextSubRecipeCode()
       const { data, error } = await scopedInsert('recipes', payload, { single: true })
       if (error) { setError(error.message); setSaving(false); return }
       recipeId = data.id
@@ -382,8 +414,15 @@ export default function Recipes() {
       qty_per_portion: parseFloat(ing.qty_per_portion)
     }))
 
-    const { error: ingError } = await supabase.from('recipe_ingredients').insert(ingPayload)
+    // Insert the new ingredient rows BEFORE removing the old ones (not delete-then-insert) — if
+    // the insert fails partway (network blip, an ingredient's item/sub-recipe deleted mid-edit),
+    // the recipe keeps its previous, still-valid ingredient list instead of being left with zero.
+    const { data: insertedIngs, error: ingError } = await supabase.from('recipe_ingredients').insert(ingPayload).select('id')
     if (ingError) { setError(ingError.message); setSaving(false); return }
+    if (selectedRecipe) {
+      const newIds = (insertedIngs || []).map(r => r.id)
+      await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId).not('id', 'in', `(${newIds.join(',')})`)
+    }
 
     if (isSubRecipe) {
       const cpu = liveCost / (parseFloat(recipeForm.yield_qty) || 1)
@@ -423,6 +462,13 @@ export default function Recipes() {
       if (linkedItemId) {
         await scopedUpdate('recipes', { linked_item_id: linkedItemId }).eq('id', recipeId)
       }
+    } else if (selectedRecipe?.linked_item_id) {
+      // This recipe WAS a sub-recipe (had a mirror item) but its category was just changed away
+      // from "Sub-Recipe" — the sync block above only ever runs `if (isSubRecipe)`, so without
+      // this the mirror row in `items` stayed is_active/is_sub_recipe=true forever, frozen at its
+      // last cost, orphaned from the recipe that used to own it.
+      await scopedUpdate('items', { is_active: false }).eq('id', selectedRecipe.linked_item_id)
+      await scopedUpdate('recipes', { linked_item_id: null }).eq('id', recipeId)
     }
 
     await init()
@@ -431,12 +477,28 @@ export default function Recipes() {
   }
 
   async function deleteRecipe(recipe) {
+    // A sub-recipe can be an ingredient of other recipes (recipe_ingredients.sub_recipe_id) —
+    // deleting it without checking left those rows pointing at a now-gone id; init()'s join
+    // resolves ri.sub_recipe to null for them, and calcRecipeCost/calcSubRecipeCostPerUnit
+    // silently skip any ingredient row where sub_recipe_id is set but sub_recipe isn't — the
+    // parent recipe's food cost quietly dropped with no warning. Block the delete instead.
+    const { data: referencing } = await supabase
+      .from('recipe_ingredients')
+      .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
+      .eq('sub_recipe_id', recipe.id)
+    const usedByNames = [...new Set((referencing || []).map(r => r.recipes?.name).filter(Boolean))]
+    if (usedByNames.length > 0) {
+      setError(`Can't delete "${recipe.name}" — it's used as an ingredient in: ${usedByNames.join(', ')}. Remove it from those recipes first.`)
+      return
+    }
+
     if (!window.confirm(`Delete "${recipe.name}"?`)) return
     await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipe.id)
     if (recipe.linked_item_id) {
       await scopedUpdate('items', { is_active: false }).eq('id', recipe.linked_item_id)
     }
-    await scopedDelete('recipes').eq('id', recipe.id)
+    const { error } = await scopedDelete('recipes').eq('id', recipe.id)
+    if (error) { setError('Delete failed — ' + error.message); return }
     init()
   }
 

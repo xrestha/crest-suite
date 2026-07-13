@@ -118,17 +118,33 @@ export default function Sales() {
       merged[r.id] = (typed !== null && !isNaN(typed)) ? typed : saved
     })
     await supabase.from('sales_entries').delete().eq('period_id', selectedPeriod.id).eq('bs_day', selectedDay)
+    // unit_price/vat_rate snapshot the recipe's price at entry time — manual entry has no other
+    // price source, but capturing it now is still far more stable than every report joining the
+    // recipe's CURRENT price at view time (which used to silently reprice past periods' revenue
+    // whenever a menu price changed later).
     const inserts = recipes
       .filter(r => (merged[r.id] || 0) > 0)
-      .map(r => ({ period_id: selectedPeriod.id, recipe_id: r.id, bs_day: selectedDay, qty_sold: merged[r.id] }))
+      .map(r => ({
+        period_id: selectedPeriod.id, recipe_id: r.id, bs_day: selectedDay, qty_sold: merged[r.id],
+        unit_price: parseFloat(r.selling_price) || 0, vat_rate: r.vat_rate,
+      }))
     if (inserts.length > 0) {
       const { error } = await supabase.from('sales_entries').insert(inserts)
       if (error) { console.error('Daily save error:', error.message); setDailySaving(false); return }
+      // Bulk (bs_day=0) and Daily (bs_day>0) rows for the same recipe+period aren't mutually
+      // exclusive at the DB level (unique constraint is period_id+recipe_id+bs_day, which differs
+      // between them) — every downstream report/Variance sums ALL sales_entries rows for a period
+      // with no bs_day distinction, so having both silently double-counts. Switching a recipe to
+      // Daily mode here supersedes any bulk entry it had.
+      await supabase.from('sales_entries').delete()
+        .eq('period_id', selectedPeriod.id).eq('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id))
     }
     setDailySaving(false)
     setDailySaved(true)
     setTimeout(() => setDailySaved(false), 2500)
-    await Promise.all([loadDailySales(selectedPeriod.id, selectedDay), loadAllDaySums(selectedPeriod.id)])
+    // loadSales too — a bulk row may have just been cleared by the cross-mode delete above, and
+    // the Bulk tab's `sales` map would otherwise stay stale until the next period switch.
+    await Promise.all([loadDailySales(selectedPeriod.id, selectedDay), loadAllDaySums(selectedPeriod.id), loadSales(selectedPeriod.id)])
   }
 
   // From SalesImportButton — writes only into dailyForm, the same local state the manual qty
@@ -171,13 +187,16 @@ export default function Sales() {
       .eq('period_id', selectedPeriod.id)
       .eq('bs_day', 0)
 
+    // unit_price/vat_rate snapshot the recipe's price at entry time — see saveDaily for why.
     const inserts = recipes
       .filter(r => (merged[r.id] || 0) > 0)
       .map(r => ({
         period_id: selectedPeriod.id,
         recipe_id: r.id,
         bs_day: 0,
-        qty_sold: merged[r.id]
+        qty_sold: merged[r.id],
+        unit_price: parseFloat(r.selling_price) || 0,
+        vat_rate: r.vat_rate,
       }))
 
     if (inserts.length > 0) {
@@ -187,6 +206,12 @@ export default function Sales() {
         setBulkSaving(false)
         return
       }
+      // Same exclusivity guard as saveDaily — Bulk and Daily rows for the same recipe+period
+      // aren't mutually exclusive at the DB level and every downstream report sums both with no
+      // distinction, silently double-counting. Switching a recipe to Bulk here supersedes any
+      // dated Daily entries it had.
+      await supabase.from('sales_entries').delete()
+        .eq('period_id', selectedPeriod.id).gt('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id))
     }
 
     setBulkSaving(false)

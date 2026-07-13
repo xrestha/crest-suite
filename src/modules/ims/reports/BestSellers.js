@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import Tip from '../../../components/Tip'
 import ChartCard from '../../../components/ChartCard'
+import { computeRecipeCosts } from '../../../utils/recipeCost'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -48,33 +49,38 @@ export default function BestSellers() {
     const [{ data: entries }, { data: recipes }] = await Promise.all([
       // "Best seller" ranks by real demand — comps (source='pos_comp') never sold at menu
       // price and would misleadingly inflate a heavily-comped item's qty/revenue rank.
-      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp'),
+      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', periodId).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, name, category, selling_price').neq('category', 'Sub-Recipe'),
     ])
 
+    // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
+    // hand-rolled costMap reading only direct item_id ingredients (as this used to) silently
+    // costs any sub-recipe-based ingredient at zero, understating COGS/inflating margin here.
     const recipeIds = (recipes || []).map(r => r.id)
-    const { data: ingredients } = recipeIds.length > 0
-      ? await supabase.from('recipe_ingredients').select('recipe_id, qty_per_portion, items(per_uom_rate)').in('recipe_id', recipeIds)
-      : { data: [] }
+    const costMap = recipeIds.length > 0 ? await computeRecipeCosts(supabase, recipeIds) : {}
 
-    const costMap = {}
-    for (const ing of ingredients || []) {
-      const c = (parseFloat(ing.qty_per_portion) || 0) * (parseFloat(ing.items?.per_uom_rate) || 0)
-      costMap[ing.recipe_id] = (costMap[ing.recipe_id] || 0) + c
-    }
+    const currentPriceMap = {}
+    ;(recipes || []).forEach(r => { currentPriceMap[r.id] = parseFloat(r.selling_price || 0) })
 
-    const qtyMap = {}
+    // unit_price captured on the row (price actually charged) is used per-row when present, else
+    // that specific row falls back to the recipe's current price — previously this report always
+    // used the recipe's current price for every row, so past-period revenue silently shifted
+    // whenever a menu price changed later.
+    const qtyMap = {}, revenueMap = {}
     for (const e of entries || []) {
-      qtyMap[e.recipe_id] = (qtyMap[e.recipe_id] || 0) + parseFloat(e.qty_sold || 0)
+      const qty = parseFloat(e.qty_sold || 0)
+      const price = e.unit_price != null ? parseFloat(e.unit_price) : (currentPriceMap[e.recipe_id] || 0)
+      qtyMap[e.recipe_id] = (qtyMap[e.recipe_id] || 0) + qty
+      revenueMap[e.recipe_id] = (revenueMap[e.recipe_id] || 0) + qty * price
     }
 
     const built = (recipes || [])
       .filter(r => qtyMap[r.id] > 0)
       .map(r => {
         const qty      = qtyMap[r.id] || 0
-        const price    = parseFloat(r.selling_price || 0)
+        const revenue  = revenueMap[r.id] || 0
+        const price    = qty > 0 ? revenue / qty : currentPriceMap[r.id]
         const cost     = costMap[r.id] || 0
-        const revenue  = qty * price
         const cogs     = qty * cost
         const profit   = revenue - cogs
         const margin   = revenue > 0 ? (profit / revenue) * 100 : 0

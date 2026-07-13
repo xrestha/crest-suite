@@ -13,9 +13,15 @@ function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-export function buildVendorSummary(vatEntries, returns, billGroups) {
+// entries: the purchase_entries rows to aggregate (caller decides which — VatReport wants only
+// VAT-inclusive ones, PurchaseOneLakhAboveReport wants every purchase from the vendor). discount
+// proration defaults to the VAT-taxable portion of each bill only (VatReport's "Taxable" column
+// only cares about VAT-attributable discount); pass discountScope:'all' to prorate a bill-level
+// discount across every line on the bill instead — used by Annexure-13 disclosure, which is about
+// total purchase value net of discount, not just the VAT-taxable slice of it.
+export function buildVendorSummary(entries, returns, billGroups, { discountScope = 'vat' } = {}) {
   const map = {}
-  vatEntries.forEach(e => {
+  entries.forEach(e => {
     const key  = e.vendor_id || '__unknown__'
     const name = e.vendors?.name || 'Unknown Vendor'
     const pan  = e.vendors?.pan_vat_no || ''
@@ -23,17 +29,17 @@ export function buildVendorSummary(vatEntries, returns, billGroups) {
     map[key].count += 1
     map[key].gross += e.qty * e.rate
   })
-  // Prorate bill-level discount to each VAT entry's vendor
+  // Prorate bill-level discount to each entry's vendor
   Object.values(billGroups).forEach(bill => {
     if (!bill.disc) return
-    const billTotal = bill.all.reduce((s, e) => s + e.qty * e.rate, 0)
-    const vatItems  = bill.all.filter(e => e.vat_inclusive)
-    const vatBase   = vatItems.reduce((s, e) => s + e.qty * e.rate, 0)
-    const vatDisc   = billTotal > 0 ? bill.disc * (vatBase / billTotal) : 0
-    vatItems.forEach(e => {
+    const billTotal   = bill.all.reduce((s, e) => s + e.qty * e.rate, 0)
+    const scopedItems = discountScope === 'all' ? bill.all : bill.all.filter(e => e.vat_inclusive)
+    const scopedBase  = scopedItems.reduce((s, e) => s + e.qty * e.rate, 0)
+    const scopedDisc  = billTotal > 0 ? bill.disc * (scopedBase / billTotal) : 0
+    scopedItems.forEach(e => {
       const key = e.vendor_id || '__unknown__'
       if (!map[key]) return
-      map[key].discount += vatBase > 0 ? vatDisc * ((e.qty * e.rate) / vatBase) : 0
+      map[key].discount += scopedBase > 0 ? scopedDisc * ((e.qty * e.rate) / scopedBase) : 0
     })
   })
   returns.forEach(r => {

@@ -123,17 +123,20 @@ export default function RecipeImportButton({ items, subRecipes, recipes, clientI
       }
       ings.forEach((ri, idx) => {
         const isFirst = idx === 0
-        let ingName, ingUom, ingRate
+        let ingName, ingUom, ingRate, yieldFactor = 1
         if (ri.item_id && ri.items) {
           ingName = ri.items.name
           ingUom = ri.items.uom
           ingRate = parseFloat(ri.items.per_uom_rate || 0)
+          // Previously omitted here (matching Recipe Food Cost, which does apply it via
+          // calcRecipeCost) — line items didn't sum to the printed/exported recipe total.
+          yieldFactor = (parseFloat(ri.items.yield_pct) || 100) / 100
         } else {
           ingName = ri.sub_recipe.name
           ingUom = ri.sub_recipe.yield_uom
           ingRate = calcSubRecipeCostPerUnit(ri.sub_recipe, recipes)
         }
-        const ingCost = parseFloat(ri.qty_per_portion) * ingRate
+        const ingCost = (parseFloat(ri.qty_per_portion) / yieldFactor) * ingRate
         rows.push([
           isFirst ? r.name : '',
           isFirst ? r.category : '',

@@ -55,7 +55,7 @@ export default function PeriodComparison() {
       supabase.from('opening_stock').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
       supabase.from('closing_stock').select('period_id, physical_qty, items(per_uom_rate)').in('period_id', ids),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      supabase.from('sales_entries').select('period_id, qty_sold, recipes(selling_price)').in('period_id', ids).neq('source', 'pos_comp'),
+      supabase.from('sales_entries').select('period_id, qty_sold, unit_price, recipes(selling_price)').in('period_id', ids).neq('source', 'pos_comp'),
     ])
 
     const result = {}
@@ -65,7 +65,14 @@ export default function PeriodComparison() {
       const wasteV   = (wastes||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
       const openV    = (openings||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
       const closeV   = (closings||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.physical_qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
-      const revenue  = (sales||[]).filter(r=>r.period_id===pid&&r.recipes?.selling_price).reduce((s,r)=>s+parseFloat(r.qty_sold||0)*parseFloat(r.recipes?.selling_price||0),0)
+      // Uses unit_price captured on the row (the price actually charged that period) when
+      // present, falling back to the joined recipe's current price only for rows recorded before
+      // that column existed — otherwise the "vs Prev" trend was comparing today's menu price
+      // against itself across periods, not what was actually charged in each one.
+      const revenue  = (sales||[]).filter(r=>r.period_id===pid&&(r.unit_price!=null||r.recipes?.selling_price)).reduce((s,r)=>{
+        const price = r.unit_price != null ? parseFloat(r.unit_price) : parseFloat(r.recipes?.selling_price||0)
+        return s + parseFloat(r.qty_sold||0) * price
+      },0)
       const netPurch = purchV - retV
       const cogs     = openV + netPurch - wasteV - closeV
       const fcPct    = revenue > 0 ? (cogs / revenue) * 100 : null

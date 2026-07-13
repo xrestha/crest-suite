@@ -55,6 +55,18 @@ export default function Items() {
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function checkAllUsage() {
+    // None of these 8 tables were filtered at all — for an admin "viewing as" a client, RLS
+    // allows every tenant's rows, so this pulled every client's ENTIRE purchase/stock/wastage/
+    // requisition/return history into the browser just to compute a "Used In" badge (a real
+    // cross-tenant data exposure + unbounded-payload perf bug). Most of these tables are
+    // period/parent-scoped rather than client_id-scoped directly (see CLAUDE.md), so the
+    // reliable fix across all 8 is to intersect on this client's own item ids instead — an
+    // item_id can only ever belong to one client, so this is exactly as tight as a client_id
+    // filter would be, without needing per-table-specific scoping logic.
+    const { data: myItems } = await scopedFrom('items', 'id')
+    const myItemIds = (myItems || []).map(i => i.id)
+    if (myItemIds.length === 0) { setUsageMap({}); return }
+
     // Every table whose FK references items.id — any row here blocks a DB delete.
     // qtyCol present = also require qty > 0 to count it as "active" usage for the badge.
     const referenceTables = [
@@ -69,7 +81,7 @@ export default function Items() {
     ]
     const map = {}
     for (const { table, label, qtyCol } of referenceTables) {
-      const { data, error } = await supabase.from(table).select(qtyCol ? `item_id, ${qtyCol}` : 'item_id')
+      const { data, error } = await supabase.from(table).select(qtyCol ? `item_id, ${qtyCol}` : 'item_id').in('item_id', myItemIds)
       if (error || !data) continue // table may not exist for this client/plan — skip quietly
       data.forEach(row => {
         if (!row.item_id) return

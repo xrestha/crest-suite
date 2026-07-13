@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ChartCard from '../../../components/ChartCard'
+import { computeRecipeCosts } from '../../../utils/recipeCost'
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid,
   Tooltip as RTooltip, ReferenceLine, ResponsiveContainer,
@@ -110,14 +111,13 @@ export default function MenuEngineering() {
       .neq('is_active', false)
       .neq('category', 'Sub-Recipe')
 
-    // Load recipe_ingredients for cost calculation — scoped to this client's recipe IDs
-    // (recipe_ingredients has no client_id column of its own, see CLAUDE.md)
-    const { data: ingredients } = (recipes || []).length > 0
-      ? await supabase
-          .from('recipe_ingredients')
-          .select('recipe_id, qty_per_portion, item_id, sub_recipe_id, items(per_uom_rate)')
-          .in('recipe_id', recipes.map(r => r.id))
-      : { data: [] }
+    // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
+    // hand-rolled ingMap reading only direct item_id ingredients (as this used to) silently
+    // costs any sub-recipe-based ingredient at zero, which could misclassify a genuinely
+    // unprofitable dish as a "Star" in the quadrant below.
+    const ingMap = (recipes || []).length > 0
+      ? await computeRecipeCosts(supabase, recipes.map(r => r.id))
+      : {}
 
     // Load sales for this period — comps (source='pos_comp') excluded, since the BCG-style
     // revenue/margin quadrant below is about what actually sold at menu price, not what was
@@ -134,16 +134,6 @@ export default function MenuEngineering() {
     const salesMap = {}
     ;(sales || []).forEach(s => {
       salesMap[s.recipe_id] = (salesMap[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0)
-    })
-
-    // Build ingredient cost map per recipe
-    const ingMap = {}
-    ;(ingredients || []).forEach(ing => {
-      if (!ingMap[ing.recipe_id]) ingMap[ing.recipe_id] = 0
-      const qty = parseFloat(ing.qty_per_portion) || 0
-      if (ing.item_id && ing.items?.per_uom_rate) {
-        ingMap[ing.recipe_id] += qty * parseFloat(ing.items.per_uom_rate)
-      }
     })
 
     // Enrich recipes

@@ -55,6 +55,7 @@ export default function ShrinkageReport() {
       { data: purchases },
       { data: returns },
       { data: wastages },
+      { data: staffMeals },
       { data: sales },
       { data: clientRecipes },
     ] = await Promise.all([
@@ -64,6 +65,7 @@ export default function ShrinkageReport() {
       supabase.from('purchase_entries').select('period_id, item_id, qty').in('period_id', periodIds),
       scopedFrom('vendor_returns', 'period_id, item_id, qty').in('period_id', periodIds),
       supabase.from('wastages').select('period_id, item_id, qty').in('period_id', periodIds),
+      supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', periodIds),
       supabase.from('sales_entries').select('period_id, recipe_id, qty_sold').in('period_id', periodIds),
       scopedFrom('recipes', 'id'),
     ])
@@ -85,6 +87,10 @@ export default function ShrinkageReport() {
 
     const openMap  = makeMap(opening, 'qty')
     const wasteMap = makeMap(wastages, 'qty')
+    // Previously omitted — logged staff-meal consumption was misclassified as unexplained
+    // "shrinkage", contradicting this report's own definition (shrinkage is unexplained;
+    // staff meals are logged too, just like wastage, which was already excluded).
+    const staffMap = makeMap(staffMeals, 'qty')
 
     const closeMap = {}
     ;(closing || []).forEach(r => {
@@ -132,7 +138,8 @@ export default function ShrinkageReport() {
         const close  = closeMap[pid]?.[item.id] || 0
         const purch  = purchMap[pid]?.[item.id] || 0
         const waste  = wasteMap[pid]?.[item.id] || 0
-        const actual = open + purch - close - waste
+        const staffMealQty = staffMap[pid]?.[item.id] || 0
+        const actual = open + purch - close - waste - staffMealQty
         const variance = actual - theor
         if (variance > 0.001) {
           shrinkCount++
