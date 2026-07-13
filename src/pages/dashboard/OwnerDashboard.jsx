@@ -29,6 +29,19 @@ export default function OwnerDashboard() {
   const [reorderStats, setReorderStats] = useState(null)
   const [payablesStats, setPayablesStats] = useState(null)
   const [laborCostTotal, setLaborCostTotal] = useState(null)
+  // Every sub-loader used to destructure only { data } and silently discard { error } — a failed
+  // query zeroed out its stat, indistinguishable from "this figure is genuinely zero," on the one
+  // dashboard whose whole purpose is making these numbers trustworthy enough to act on. Keyed per
+  // sub-loader so one section's failure doesn't clobber another's message.
+  const [loadErrors, setLoadErrors] = useState({})
+
+  function retryLoad(section) {
+    if (section === 'period') loadAll()
+    else if (section === 'ims') loadImsFigures(activePeriod)
+    else if (section === 'reorder') loadReorderStats(activePeriod)
+    else if (section === 'payables') loadOverduePayables()
+    else if (section === 'labor' && activePeriod) loadLaborCost(activePeriod)
+  }
 
   useEffect(() => {
     if (authLoading || !effectiveClientId) return
@@ -37,11 +50,14 @@ export default function OwnerDashboard() {
 
   async function loadAll() {
     setLoading(true)
-    const { data: period } = await scopedFrom('monthly_periods')
+    // .single() reports error.code 'PGRST116' when the result set isn't exactly one row — for
+    // this query that just means "no open period right now," a normal state, not a failure.
+    const { data: period, error: periodErr } = await scopedFrom('monthly_periods')
       .eq('status', 'open')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .limit(1).single()
     setActivePeriod(period)
+    setLoadErrors(prev => ({ ...prev, period: (periodErr && periodErr.code !== 'PGRST116') ? 'Could not check for an open period — figures below may be wrong.' : '' }))
 
     await Promise.all([
       loadImsFigures(period),
@@ -56,7 +72,7 @@ export default function OwnerDashboard() {
   // Same tables/formulas as ClientDashboard.jsx's loadStats() — Revenue excludes comps
   // (source='pos_comp', never actually paid for).
   async function loadImsFigures(period) {
-    const [{ data: purchases }, { data: returns }, { data: salesData }, { data: recipes }, { data: overheadsData }, { data: wastagesData }, { data: items }] = await Promise.all([
+    const results = await Promise.all([
       period ? supabase.from('purchase_entries').select('item_id, qty, rate, payment_method').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
@@ -65,6 +81,8 @@ export default function OwnerDashboard() {
       period ? supabase.from('wastages').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       scopedFrom('items', 'id, per_uom_rate'),
     ])
+    setLoadErrors(prev => ({ ...prev, ims: results.some(r => r.error) ? 'Revenue/food cost figures failed to load — may be incomplete or stale.' : '' }))
+    const [{ data: purchases }, { data: returns }, { data: salesData }, { data: recipes }, { data: overheadsData }, { data: wastagesData }, { data: items }] = results
 
     const grossTotal  = (purchases || []).reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
     const returnTotal = (returns   || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
@@ -97,7 +115,7 @@ export default function OwnerDashboard() {
 
   // ── Items below reorder par — a live inventory position, not a period total ──
   async function loadReorderStats(period) {
-    const [{ data: purchases }, { data: returns }, { data: opening }, { data: closing }, { data: items }, { data: parLevels }, { data: recipes }, { data: sales }] = await Promise.all([
+    const results = await Promise.all([
       period ? supabase.from('purchase_entries').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
@@ -107,6 +125,8 @@ export default function OwnerDashboard() {
       scopedFrom('recipes', 'id, selling_price'),
       period ? supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
     ])
+    setLoadErrors(prev => ({ ...prev, reorder: results.some(r => r.error) ? 'Reorder figures failed to load — may be incomplete or stale.' : '' }))
+    const [{ data: purchases }, { data: returns }, { data: opening }, { data: closing }, { data: items }, { data: parLevels }, { data: recipes }, { data: sales }] = results
 
     const dashRecipeIds = (recipes || []).map(r => r.id)
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
@@ -152,7 +172,7 @@ export default function OwnerDashboard() {
 
   // ── Overdue vendor payables (>60 days) — cross-period by nature, doesn't wait on `period` ──
   async function loadOverduePayables() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('purchase_entries')
       .select('id, bs_day, qty, rate, monthly_periods!inner(client_id, bs_year, bs_month)')
       .eq('monthly_periods.client_id', effectiveClientId)
@@ -161,7 +181,8 @@ export default function OwnerDashboard() {
 
     const rows = data || []
     const ids = rows.map(e => e.id)
-    const { data: pmts } = ids.length ? await scopedFrom('payable_payments').in('purchase_entry_id', ids) : { data: [] }
+    const { data: pmts, error: pmtsErr } = ids.length ? await scopedFrom('payable_payments').in('purchase_entry_id', ids) : { data: [] }
+    setLoadErrors(prev => ({ ...prev, payables: (error || pmtsErr) ? 'Overdue payables failed to load — may be incomplete or stale.' : '' }))
     const paidMap = {}
     ;(pmts || []).forEach(p => { paidMap[p.purchase_entry_id] = (paidMap[p.purchase_entry_id] || 0) + parseFloat(p.amount || 0) })
 
@@ -194,12 +215,14 @@ export default function OwnerDashboard() {
     const isCurrentMonth = period.bs_year === bsToday.year && period.bs_month === bsToday.month
     const elapsedDays = isCurrentMonth ? Math.min(bsToday.day, monthDays) : monthDays
 
-    const [{ data: employees }, { data: components }, { data: otEntries }] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('hr_employees', 'id, status, basic_salary, pay_basis, ssf_enrolled, join_date, end_date'),
       scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value'),
       scopedFrom('hr_overtime_entries', 'employee_id, ot_hours, ot_type, status, bs_year, bs_month')
         .eq('status', 'approved').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
     ])
+    setLoadErrors(prev => ({ ...prev, labor: results.some(r => r.error) ? 'Labor cost failed to load — may be incomplete or stale.' : '' }))
+    const [{ data: employees }, { data: components }, { data: otEntries }] = results
 
     const empMap = Object.fromEntries((employees || []).map(e => [e.id, e]))
 
@@ -296,6 +319,12 @@ export default function OwnerDashboard() {
 
   return (
     <div>
+      {/* Screen-reader-only announcement — the visible loading state is a shimmering skeleton
+          per KPI, which on its own gives no indication to a screen reader that the page is still
+          loading, or when it's finished. */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {loading ? 'Loading dashboard data…' : 'Dashboard data loaded'}
+      </div>
       <div className="page-header">
         <h1 className="page-title">Owner Dashboard</h1>
         <p className="page-subtitle">
@@ -305,6 +334,30 @@ export default function OwnerDashboard() {
       </div>
 
       <SuiteGate minTier="growth" featureKey="owner_dashboard">
+        {/* A load failure used to be indistinguishable from "this figure is genuinely zero" —
+            every sub-loader silently discarded Supabase's error field. Each one sets its own key
+            here and clears it on a successful (re)load, so a real fetch failure shows a
+            dismissible, retry-able banner instead of a wrong-looking number on the one dashboard
+            whose whole purpose is trustworthy figures. */}
+        {Object.entries(loadErrors).filter(([, msg]) => msg).map(([section, msg]) => (
+          <div key={section} className="card" style={{
+            marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+            borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
+            background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+          }}>
+            <p style={{ color: 'var(--theme-red)', margin: 0, fontSize: 13 }}>
+              <span aria-hidden="true">⚠</span> {msg}
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => retryLoad(section)}>Retry</button>
+              <button
+                className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
+                onClick={() => setLoadErrors(prev => ({ ...prev, [section]: '' }))} aria-label="Dismiss"
+              >×</button>
+            </div>
+          </div>
+        ))}
+
         {/* SuiteGate bypasses everything for admins, but this page's own data load only runs
             when BOTH clientModules.ims and clientModules.hr are true — a client (or an admin
             viewing as one) with only one of the two modules enabled otherwise saw every KPI as
@@ -313,7 +366,7 @@ export default function OwnerDashboard() {
         {!(clientModules.ims && clientModules.hr) && !loading && (
           <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
             <p style={{ color: 'var(--theme-amber)', margin: 0, fontSize: 14 }}>
-              ⚠ Owner Dashboard needs both Crest IMS and Crest HR enabled — this property has {clientModules.ims ? 'only IMS' : clientModules.hr ? 'only HR' : 'neither'}.
+              <span aria-hidden="true">⚠</span> Owner Dashboard needs both Crest IMS and Crest HR enabled — this property has {clientModules.ims ? 'only IMS' : clientModules.hr ? 'only HR' : 'neither'}.
             </p>
           </div>
         )}
@@ -323,7 +376,7 @@ export default function OwnerDashboard() {
             onClick={() => navigate('/periods')} role="button" tabIndex={0}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/periods') } }}
           >
-            <p style={{ color: 'var(--theme-accent)', margin: 0, fontSize: 14 }}>⚠ No open period. Click here to create one in Periods →</p>
+            <p style={{ color: 'var(--theme-accent)', margin: 0, fontSize: 14 }}><span aria-hidden="true">⚠</span> No open period. Click here to create one in Periods →</p>
           </div>
         )}
 

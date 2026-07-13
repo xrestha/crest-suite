@@ -611,6 +611,51 @@ tr.interactive-row:focus-visible {
   outline-offset: 2px;
 }
 
+/* Every dashboard KPI card already declares `transition: border-color 0.15s` inline (kpiCard()/
+   KCard() in ClientDashboard.jsx/OwnerDashboard.jsx/HrDashboard.jsx) — implying a hover state that
+   never actually fired, since no rule existed to change the border color on :hover. Steps to
+   accent, the same "this became interactive" cue DESIGN.md documents for ghost buttons. (Queue
+   table rows don't need an equivalent — they already get one from the existing
+   `table.data-table tr:hover td` rule.) */
+.interactive-card:hover {
+  border-color: var(--theme-accent);
+}
+
+/* ClientDashboard.jsx's two "period expired" action buttons (admin's "Go to Periods", the
+   client's "End Month & Start Month") were duplicated inline style objects with no hover state at
+   all — every other button in the app (.btn, .btn-ghost, .ticket-btn) has one. Consolidated here
+   so both share one definition and get real hover feedback instead of reimplementing button
+   styling from scratch. */
+.amber-action-btn {
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--theme-amber) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-amber) 40%, transparent);
+  color: var(--theme-amber);
+  border-radius: var(--radius-md);
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.amber-action-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--theme-amber) 20%, transparent);
+  border-color: var(--theme-amber);
+}
+
+.amber-action-btn:focus-visible {
+  outline: 2px solid var(--theme-focus-ring);
+  outline-offset: 2px;
+}
+
+.amber-action-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 /* Standard visually-hidden pattern — for a heading that gives screen-reader users a landmark to
    navigate by on a section that has no visible title of its own (e.g. Owner Dashboard's two KPI
    rows), without adding a label that wasn't part of the visual design. */

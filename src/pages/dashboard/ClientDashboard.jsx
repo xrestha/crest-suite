@@ -44,6 +44,21 @@ export default function ClientDashboard() {
   // still current before committing any setState.
   const loadIdRef = useRef(0)
   const [advancingPeriod, setAdvancingPeriod] = useState(false)
+  // Every load function used to destructure only { data } from each Supabase call and silently
+  // discard { error } — a failed query either zeroed out a KPI (indistinguishable from "this
+  // client genuinely has none") or, for the period fetch specifically, showed the misleading
+  // "No open period" banner even when one was open, with no indication anything had actually gone
+  // wrong. Keyed per section so IMS/HR/POS/the FC trend chart can each surface (and clear) their
+  // own failure independently without one clobbering another's message.
+  const [loadErrors, setLoadErrors] = useState({})
+
+  function retryLoad(section) {
+    const myId = ++loadIdRef.current
+    if (section === 'ims') loadStats(myId)
+    else if (section === 'hr') loadHrStats(myId)
+    else if (section === 'pos') loadPosStats(myId)
+    else if (section === 'fcTrend') loadFcTrend(activePeriod, stats?.revenueTotal > 0 ? (stats.purchaseTotal / stats.revenueTotal) * 100 : null, myId)
+  }
 
   useEffect(() => {
     if (authLoading) return
@@ -66,7 +81,10 @@ export default function ClientDashboard() {
   async function loadStats(myId) {
     setLoading(true)
 
-    const { data: period } = await scopedFrom('monthly_periods')
+    // .single() reports error.code 'PGRST116' when the result set isn't exactly one row — for
+    // this query that just means "no open period right now," a normal, common state, not a
+    // failure. Only anything else is a genuine fetch failure worth surfacing.
+    const { data: period, error: periodErr } = await scopedFrom('monthly_periods')
       .eq('status', 'open')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .limit(1).single()
@@ -74,23 +92,7 @@ export default function ClientDashboard() {
 
     setActivePeriod(period)
 
-    const [
-      { count: itemCount },
-      { count: vendorCount },
-      { count: recipeCount },
-      { count: subRecipeCount },
-      { data: purchases },
-      { data: returns },
-      { data: salesData },
-      { data: recipes },
-      { data: opening },
-      { data: closing },
-      { data: items },
-      { data: parLevels },
-      { data: overheadsData },
-      { data: wastagesData },
-      { data: allItems }
-    ] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('items', '*', { count: 'exact', head: true }).eq('is_active', true).eq('is_sub_recipe', false),
       scopedFrom('vendors', '*', { count: 'exact', head: true }).eq('is_active', true),
       scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).neq('category', 'Sub-Recipe'),
@@ -113,6 +115,26 @@ export default function ClientDashboard() {
       // still correctly limits Variance/Reorder/the item COUNT to currently-active stock items).
       scopedFrom('items', 'id, name, per_uom_rate').eq('is_sub_recipe', false),
     ])
+    const hadRealError = (periodErr && periodErr.code !== 'PGRST116') || results.some(r => r.error)
+    setLoadErrors(prev => ({ ...prev, ims: hadRealError ? 'Inventory data failed to load — figures below may be incomplete or stale.' : '' }))
+
+    const [
+      { count: itemCount },
+      { count: vendorCount },
+      { count: recipeCount },
+      { count: subRecipeCount },
+      { data: purchases },
+      { data: returns },
+      { data: salesData },
+      { data: recipes },
+      { data: opening },
+      { data: closing },
+      { data: items },
+      { data: parLevels },
+      { data: overheadsData },
+      { data: wastagesData },
+      { data: allItems }
+    ] = results
 
     // recipe_ingredients has no client_id — must be scoped by this client's recipe IDs
     const dashRecipeIds = (recipes || []).map(r => r.id)
@@ -368,8 +390,9 @@ export default function ClientDashboard() {
   }
 
   async function loadHrStats(myId) {
-    const { data: employees } = await scopedFrom('hr_employees', 'status, basic_salary')
+    const { data: employees, error } = await scopedFrom('hr_employees', 'status, basic_salary')
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
+    setLoadErrors(prev => ({ ...prev, hr: error ? 'HR data failed to load — figures below may be incomplete or stale.' : '' }))
     const total     = employees?.length || 0
     const active    = employees?.filter(e => e.status === 'active').length || 0
     const probation = employees?.filter(e => e.status === 'probation').length || 0
@@ -399,19 +422,22 @@ export default function ClientDashboard() {
   }
 
   async function loadPosStats(myId) {
-    const { data: period } = await scopedFrom('monthly_periods')
+    // See loadStats' identical .single() comment above — PGRST116 (no open period) is expected,
+    // not a failure.
+    const { data: period, error: periodErr } = await scopedFrom('monthly_periods')
       .eq('status', 'open')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .limit(1).single()
 
-    let orders = []
+    let orders = [], ordersErr = null
     if (period) {
       const fromTs = bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false)
       const lastDay = daysInBsMonth(period.bs_year, period.bs_month)
       const toTs = bsDayBoundaryIso(period.bs_year, period.bs_month, lastDay, true)
-      const { data } = await scopedFrom('pos_orders', 'id, covers, paid_amount, credit_note_id, close_type, closed_at')
+      const { data, error } = await scopedFrom('pos_orders', 'id, covers, paid_amount, credit_note_id, close_type, closed_at')
         .eq('close_type', 'paid')
         .gte('closed_at', fromTs).lte('closed_at', toTs)
+      ordersErr = error
       // Same exclusion as Sales/Covers Report — a since-Credit-Noted bill's revenue correction
       // posts on the day the Credit Note is issued, not retroactively here.
       orders = (data || []).filter(o => !o.credit_note_id)
@@ -422,10 +448,13 @@ export default function ClientDashboard() {
     const billCount     = orders.length
     const avgCheck      = billCount > 0 ? revenueTotal / billCount : 0
 
-    const { data: tables } = await scopedFrom('pos_tables', 'status').neq('status', 'inactive')
+    const { data: tables, error: tablesErr } = await scopedFrom('pos_tables', 'status').neq('status', 'inactive')
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
     const tablesOccupied = (tables || []).filter(t => t.status === 'occupied').length
     const tablesTotal    = (tables || []).length
+
+    const hadRealError = (periodErr && periodErr.code !== 'PGRST116') || ordersErr || tablesErr
+    setLoadErrors(prev => ({ ...prev, pos: hadRealError ? 'POS data failed to load — figures below may be incomplete or stale.' : '' }))
 
     setPosStats({ revenueTotal, coversTotal, billCount, avgCheck, tablesOccupied, tablesTotal })
   }
@@ -446,7 +475,7 @@ export default function ClientDashboard() {
   }
 
   async function loadFcTrend(currentPeriod, currentFcPct, myId) {
-    const { data: closedPeriods } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month')
+    const { data: closedPeriods, error: closedErr } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month')
       .eq('status', 'closed')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
@@ -455,31 +484,41 @@ export default function ClientDashboard() {
     const closed = closedPeriods || []
     const periodIds = closed.map(p => p.id)
 
-    const [{ data: allPurch }, { data: allRet }, { data: allSales }, { data: recipeData }] = await Promise.all([
+    const trendResults = await Promise.all([
       periodIds.length ? supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', periodIds) : { data: [] },
       periodIds.length ? supabase.from('vendor_returns').select('period_id, qty, rate').in('period_id', periodIds)   : { data: [] },
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
       periodIds.length ? supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price').in('period_id', periodIds).neq('source', 'pos_comp') : { data: [] },
       scopedFrom('recipes', 'id, selling_price'),
     ])
+    const [{ data: allPurch }, { data: allRet }, { data: allSales }, { data: recipeData }] = trendResults
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
+
+    const hadRealError = closedErr || trendResults.some(r => r.error)
+    setLoadErrors(prev => ({ ...prev, fcTrend: hadRealError ? 'Food Cost % trend failed to load.' : '' }))
 
     const priceMap = {}
     ;(recipeData || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price || 0) })
 
+    // Grouped by period_id in one pass each, instead of re-filtering the full purchases/returns/
+    // sales arrays once per period below (O(periods × rows) → O(rows)) — bounded by the .limit(11)
+    // above so it never ran away, but scales with purchase/sales volume across those 11 months.
+    const grossMap = {}, retMap = {}, revMap = {}
+    ;(allPurch || []).forEach(e => { grossMap[e.period_id] = (grossMap[e.period_id] || 0) + parseFloat(e.qty) * parseFloat(e.rate) })
+    ;(allRet   || []).forEach(e => { retMap[e.period_id]   = (retMap[e.period_id]   || 0) + parseFloat(e.qty) * parseFloat(e.rate) })
+    // unit_price captured on the row when present, else falls back to the recipe's current
+    // price — this 11-month trend is exactly where always using today's price hurt most,
+    // since a single menu price change would retroactively distort every past month's Food
+    // Cost % line on the chart.
+    ;(allSales || []).forEach(e => {
+      const price = e.unit_price != null ? parseFloat(e.unit_price) : (priceMap[e.recipe_id] || 0)
+      revMap[e.period_id] = (revMap[e.period_id] || 0) + parseFloat(e.qty_sold) * price
+    })
+
     const points = closed.map(p => {
-      const gross = (allPurch || []).filter(e => e.period_id === p.id).reduce((s, e) => s + parseFloat(e.qty) * parseFloat(e.rate), 0)
-      const ret   = (allRet   || []).filter(e => e.period_id === p.id).reduce((s, e) => s + parseFloat(e.qty) * parseFloat(e.rate), 0)
-      const net   = gross - ret
-      // unit_price captured on the row when present, else falls back to the recipe's current
-      // price — this 11-month trend is exactly where always using today's price hurt most,
-      // since a single menu price change would retroactively distort every past month's Food
-      // Cost % line on the chart.
-      const rev   = (allSales || []).filter(e => e.period_id === p.id).reduce((s, e) => {
-        const price = e.unit_price != null ? parseFloat(e.unit_price) : (priceMap[e.recipe_id] || 0)
-        return s + parseFloat(e.qty_sold) * price
-      }, 0)
-      const fc    = rev > 0 ? parseFloat(((net / rev) * 100).toFixed(1)) : null
+      const net = (grossMap[p.id] || 0) - (retMap[p.id] || 0)
+      const rev = revMap[p.id] || 0
+      const fc  = rev > 0 ? parseFloat(((net / rev) * 100).toFixed(1)) : null
       return { label: `${BS_MONTHS[p.bs_month - 1].slice(0, 3)} ${p.bs_year}`, fc, purchases: Math.round(net), revenue: Math.round(rev), open: false }
     }).reverse()
 
@@ -507,6 +546,9 @@ export default function ClientDashboard() {
   const netMarginPct = stats?.revenueTotal > 0
     ? ((stats.revenueTotal - stats.purchaseTotal - (stats.overheadTotal || 0)) / stats.revenueTotal) * 100
     : null
+  // Computed once per render instead of inside the pie-legend .map() below, where every row was
+  // redundantly re-reducing the same, unchanging total.
+  const categorySpendTotal = categorySpend.reduce((s, r) => s + r.value, 0)
 
   // Shared mini card style + a11y — returns a spreadable props object so every KPI card gets
   // keyboard support (role/tabIndex/onKeyDown) and a visible focus ring for free, instead of each
@@ -546,7 +588,7 @@ export default function ClientDashboard() {
     }
     const h = hues[hue] || hues.blue
     return (
-      <div style={{
+      <div aria-hidden="true" style={{
         width: 30, height: 30, borderRadius: 'var(--radius-md)', display: 'flex',
         alignItems: 'center', justifyContent: 'center', fontSize: 14, marginBottom: 10,
         background: h.bg, color: h.fg,
@@ -574,7 +616,7 @@ export default function ClientDashboard() {
       }}
     >
       <div style={{ ...kpiLabelStyle, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
-        <span>{label}</span><span>🔒</span>
+        <span>{label}</span><span aria-hidden="true">🔒</span>
       </div>
       <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-purple)', lineHeight: 1.2 }}>Unlock with {tier}</div>
       <div style={kpiSubtextStyle}>{blurb} · View plans →</div>
@@ -609,6 +651,12 @@ export default function ClientDashboard() {
 
   return (
     <div>
+      {/* Screen-reader-only announcement — the visible loading state is a shimmering skeleton
+          per KPI, which on its own gives no indication to a screen reader that the page is still
+          loading, or when it's finished. */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {loading ? 'Loading dashboard data…' : 'Dashboard data loaded'}
+      </div>
       {/* ── Header ── */}
       <div className="page-header">
         <h1 className="page-title">{dashTitle}</h1>
@@ -618,6 +666,29 @@ export default function ClientDashboard() {
         </p>
       </div>
 
+      {/* A load failure used to be indistinguishable from "this client genuinely has no data" —
+          every section here silently discarded Supabase's error field. Each section sets its own
+          key in loadErrors and clears it on a successful (re)load, so a real fetch failure now
+          shows a dismissible, retry-able banner instead of a wrong-looking zero. */}
+      {Object.entries(loadErrors).filter(([, msg]) => msg).map(([section, msg]) => (
+        <div key={section} className="card" style={{
+          marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+          borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
+          background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+        }}>
+          <p style={{ color: 'var(--theme-red)', margin: 0, fontSize: 13 }}>
+            <span aria-hidden="true">⚠</span> {msg}
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => retryLoad(section)}>Retry</button>
+            <button
+              className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
+              onClick={() => setLoadErrors(prev => ({ ...prev, [section]: '' }))} aria-label="Dismiss"
+            >×</button>
+          </div>
+        </div>
+      ))}
+
       {!isAdmin && (() => {
         const s = getSubStatus(profile?.clients)
         if (!s.label || s.days === null || s.days > 7) return null
@@ -625,7 +696,8 @@ export default function ClientDashboard() {
         return (
           <div className="card" style={{ marginBottom: 20, borderColor: s.border, background: s.bg }}>
             <p style={{ color: s.color, margin: 0, fontSize: 14, fontWeight: 600 }}>
-              {isExpired ? '⚠ Your subscription has expired' : `⚠ Your ${s.label.startsWith('Trial') ? 'trial' : 'subscription'} expires in ${s.days} day${s.days !== 1 ? 's' : ''}`}
+              <span aria-hidden="true">⚠</span>{' '}
+              {isExpired ? 'Your subscription has expired' : `Your ${s.label.startsWith('Trial') ? 'trial' : 'subscription'} expires in ${s.days} day${s.days !== 1 ? 's' : ''}`}
             </p>
             <p style={{ color: 'var(--theme-text2)', margin: '4px 0 0', fontSize: 12 }}>
               Contact your consultant to renew and keep your data accessible.
@@ -640,7 +712,7 @@ export default function ClientDashboard() {
           onClick={() => navigate('/periods')} role="button" tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/periods') } }}
         >
-          <p style={{ color: 'var(--theme-accent)', margin: 0, fontSize: 14 }}>⚠ No open period. Click here to create one in Periods →</p>
+          <p style={{ color: 'var(--theme-accent)', margin: 0, fontSize: 14 }}><span aria-hidden="true">⚠</span> No open period. Click here to create one in Periods →</p>
         </div>
       )}
 
@@ -649,7 +721,7 @@ export default function ClientDashboard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
             <div>
               <p style={{ color: 'var(--theme-amber)', margin: 0, fontSize: 14, fontWeight: 600 }}>
-                ◷ {BS_MONTHS[activePeriod.bs_month - 1]} {activePeriod.bs_year} has ended
+                <span aria-hidden="true">◷</span> {BS_MONTHS[activePeriod.bs_month - 1]} {activePeriod.bs_year} has ended
               </p>
               <p style={{ color: 'var(--theme-text2)', margin: '4px 0 0', fontSize: 12 }}>
                 {isAdmin
@@ -658,28 +730,11 @@ export default function ClientDashboard() {
               </p>
             </div>
             {isAdmin ? (
-              <button
-                onClick={() => navigate('/periods')}
-                style={{
-                  flexShrink: 0, background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)',
-                  border: '1px solid color-mix(in srgb, var(--theme-amber) 40%, transparent)', color: 'var(--theme-amber)',
-                  borderRadius: 6, padding: '8px 18px', cursor: 'pointer',
-                  fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap'
-                }}
-              >
+              <button className="amber-action-btn" onClick={() => navigate('/periods')}>
                 Go to Periods →
               </button>
             ) : (
-              <button
-                onClick={closeAndAdvancePeriod}
-                disabled={advancingPeriod}
-                style={{
-                  flexShrink: 0, background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)',
-                  border: '1px solid color-mix(in srgb, var(--theme-amber) 40%, transparent)', color: 'var(--theme-amber)',
-                  borderRadius: 6, padding: '8px 18px', cursor: advancingPeriod ? 'default' : 'pointer',
-                  fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', opacity: advancingPeriod ? 0.6 : 1
-                }}
-              >
+              <button className="amber-action-btn" onClick={closeAndAdvancePeriod} disabled={advancingPeriod}>
                 {advancingPeriod ? 'Closing…' : `End ${BS_MONTHS[activePeriod.bs_month - 1]} & Start ${BS_MONTHS[nextAdvMonth - 1]} →`}
               </button>
             )}
@@ -690,7 +745,7 @@ export default function ClientDashboard() {
       {/* ── No modules enabled ── */}
       {!showIms && !showHr && !showPos && (
         <div className="card" style={{ textAlign: 'center', padding: '48px 24px' }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>⊛</div>
+          <div style={{ fontSize: 32, marginBottom: 12 }} aria-hidden="true">⊛</div>
           <p style={{ fontSize: 15, color: 'var(--theme-text1)', fontWeight: 600, margin: '0 0 8px' }}>No modules enabled</p>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>Contact your consultant to activate Crest IMS, Crest HR, or Crest POS.</p>
         </div>
@@ -879,12 +934,11 @@ export default function ClientDashboard() {
                   </ResponsiveContainer>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
                     {categorySpend.map((entry, i) => {
-                      const total = categorySpend.reduce((s, r) => s + r.value, 0)
                       return (
                         <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                           <div style={{ width: 8, height: 8, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
                           <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{entry.name}</span>
-                          <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{total > 0 ? `${((entry.value / total) * 100).toFixed(0)}%` : ''}</span>
+                          <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
                         </div>
                       )
                     })}
@@ -1169,7 +1223,11 @@ export default function ClientDashboard() {
               <div style={kpiValueStyle(18)}>
                 {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.coversTotal}
               </div>
-              <div style={kpiSubtextStyle}>{!posStats ? '' : `${posStats.billCount} bill${posStats.billCount === 1 ? '' : 's'}`} →</div>
+              <div style={kpiSubtextStyle}>
+                {!posStats
+                  ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+                  : <>{posStats.billCount} bill{posStats.billCount === 1 ? '' : 's'} →</>}
+              </div>
             </div>
             <div {...kpiCard(null)}>
               <div style={kpiLabelStyle}>Avg Check</div>

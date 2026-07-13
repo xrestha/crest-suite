@@ -141,6 +141,36 @@ Architecture: single React app, single Supabase project, feature flags per clien
 
 ## Session Log
 
+### S379 — 2026-07-13 — Dashboards: Supabase fetch failures no longer silently swallowed
+
+Follow-up to a question about a code-review observation: none of the 3 dashboards ever checked Supabase's `error` field, only `data` — a failed query either zeroed out a KPI (indistinguishable from "this client genuinely has none"), or for the `.single()` period-fetch specifically, showed the misleading "No open period" banner even when a period genuinely was open. Confirmed by grepping all three files for the word "error" — zero matches anywhere.
+
+Designed and implemented one consistent fix across `ClientDashboard.jsx`, `OwnerDashboard.jsx`, and `HrDashboard.jsx`: every load function now captures `error` alongside `data` from each Supabase call (a `results = await Promise.all([...])` array checked with `results.some(r => r.error)` where a function makes several calls at once) and surfaces a dismissible, retry-able banner — reusing the same `card`/`.btn-ghost`/`color-mix()` pattern already established this session, not a new one-off. `.single()` period-fetches specifically ignore Supabase's `PGRST116` code ("no rows matched") — that's the normal "no period open right now" state, not a failure, and must not trip the banner.
+
+- **`ClientDashboard.jsx`** and **`OwnerDashboard.jsx`** — errors are keyed per section (`ims`/`hr`/`pos`/`fcTrend` on Client; `ims`/`reorder`/`payables`/`labor`/`period` on Owner) in a `loadErrors` map, so one section's failure can't clobber another's message, and each section's Retry button re-invokes only that section's own load function.
+- **`HrDashboard.jsx`** — one `loadError` string covers its single integrated 13-query batch plus the conditional payslips follow-up query, since this file only has one load function.
+
+Build clean, 91/91 tests pass (`App.test.js`'s pre-existing unrelated `react-router-dom` resolution failure aside).
+
+**Files:** `src/pages/dashboard/{ClientDashboard.jsx,OwnerDashboard.jsx}`, `src/modules/hr/dashboard/HrDashboard.jsx`
+
+### S378 — 2026-07-13 — Dashboard audit P3 fixes + a flagship `/impeccable polish` pass
+
+Closed out the last tier of the dashboard audit (P3), then ran `/impeccable polish` against the same 3 dashboards at a flagship quality bar.
+
+**P3 fixes:** decorative emoji/glyphs (🔒 ⚠ ◷ ⊛ plus the `kpiIcon()` badge glyphs) marked `aria-hidden="true"` across `ClientDashboard.jsx`/`OwnerDashboard.jsx`, so screen readers stop announcing redundant Unicode names alongside the adjacent text; a visually-hidden `aria-live="polite"` region added to all 3 dashboards, since S377's skeleton-based loading states are otherwise silent to assistive tech; `loadFcTrend` (`ClientDashboard.jsx`) rewritten from a per-period `.filter()` re-scan of the full purchases/returns/sales arrays to a single group-by pass; the pie-legend `reduce()` hoisted out of its `.map()` into one `categorySpendTotal` computed per render instead of once per row.
+
+**Polish pass** (code-level — no browser/screenshot tooling available in this environment, so not literal pixel-zoom QA) surfaced 3 genuine gaps the technical audit's checklist doesn't cover, since they're about *missing states* rather than measurable rules:
+- Every KPI card across all 3 dashboards declared `transition: 'border-color 0.15s'` inline, implying a hover effect that never actually fired — no CSS rule anywhere changed the border color on `:hover`. Added `.interactive-card:hover { border-color: var(--theme-accent) }` to `Layout.css`.
+- `ClientDashboard.jsx`'s two amber "period" action buttons (admin's "Go to Periods", the client's "End Month & Start Month") were a duplicated one-off — full inline style objects repeated twice, no hover feedback at all, unlike every other button in the app. Consolidated into one `.amber-action-btn` class with a real hover state and a focus-visible ring; caught real drift while doing it — both were still hardcoded to a `6px` radius, predating DESIGN.md's documented button-radius bump to `--radius-md` (12px), fixed to match.
+- The POS "Covers Served" card's subtext rendered as a lone floating "→" during loading (the bill-count text vanished via an empty-string fallback, but the arrow stayed outside that conditional) — inconsistent with the skeleton treatment used for the value directly above it. Now shows a matching skeleton bar.
+
+Scanned all three files for dead code, `console.log`/TODO leftovers, and copy inconsistencies (arrow usage, capitalization) — none found. One out-of-scope observation surfaced during the pass (every dashboard silently discarding Supabase's `error` field) was deliberately not fixed inline — see S379 below.
+
+Build clean, 91/91 tests pass throughout (`App.test.js`'s pre-existing unrelated `react-router-dom` resolution failure aside).
+
+**Files:** `src/pages/dashboard/{ClientDashboard.jsx,OwnerDashboard.jsx}`, `src/modules/hr/dashboard/HrDashboard.jsx`, `src/components/Layout.css`
+
 ### S377 — 2026-07-13 — Dashboard audit P2 fixes: skeleton loading, heading hierarchy, responsive grids, touch targets, color consolidation
 
 The 5 remaining medium-severity findings from S376's dashboard audit, across `ClientDashboard.jsx`, `OwnerDashboard.jsx`, and `HrDashboard.jsx`.

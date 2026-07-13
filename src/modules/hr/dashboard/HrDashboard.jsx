@@ -59,6 +59,10 @@ export default function HrDashboard() {
   // PREVIOUS client land last and silently repaint this screen with the wrong tenant's approval
   // counts/SSF figures — exactly the numbers an admin acts on directly from this page.
   const loadIdRef = useRef(0)
+  // load() used to destructure only { data } from every query and silently discard { error } — a
+  // failed query just zeroed out its stat/emptied its list, indistinguishable from "this client
+  // genuinely has none," with no indication anything had actually gone wrong.
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     if (!clientId) return
@@ -68,21 +72,7 @@ export default function HrDashboard() {
   async function load(myId) {
     setLoading(true)
 
-    const [
-      { data: emps },
-      { data: ltypes },
-      { data: leaves },
-      { data: otPending },
-      { data: tadaPending },
-      { data: swapPending },
-      { data: runs },
-      { data: advs },
-      { data: reps },
-      { count: leaveCount },
-      { count: otCount },
-      { count: tadaCount },
-      { count: swapCount },
-    ] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('hr_employees', 'id, full_name, status, retirement_date, basic_salary'),
       scopedFrom('hr_leave_types', 'id, name'),
       scopedFrom('hr_leave_requests', 'id, employee_id, leave_type_id, status, start_date, end_date, created_at')
@@ -112,6 +102,23 @@ export default function HrDashboard() {
       scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true }).eq('status', 'pending_admin'),
     ])
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
+
+    const [
+      { data: emps },
+      { data: ltypes },
+      { data: leaves },
+      { data: otPending },
+      { data: tadaPending },
+      { data: swapPending },
+      { data: runs },
+      { data: advs },
+      { data: reps },
+      { count: leaveCount },
+      { count: otCount },
+      { count: tadaCount },
+      { count: swapCount },
+    ] = results
+    let hadRealError = results.some(r => r.error)
 
     // ── Employee stats ─────────────────────────────────────────────────────────
     const todayMs = new Date().setHours(0, 0, 0, 0)
@@ -160,9 +167,10 @@ export default function HrDashboard() {
     // ── Last finalized payroll ─────────────────────────────────────────────────
     const lastRun = runs?.[0]
     if (lastRun) {
-      const { data: slips } = await scopedFrom('hr_payslips', 'net_pay, ssf_employee, ssf_employer')
+      const { data: slips, error: slipsErr } = await scopedFrom('hr_payslips', 'net_pay, ssf_employee, ssf_employer')
         .eq('run_id', lastRun.id)
       if (loadIdRef.current !== myId) return // superseded again after this extra await
+      hadRealError = hadRealError || slipsErr
       const mp = lastRun.monthly_periods
       setPayInfo({
         periodLabel:  mp ? `${BS_MONTHS[mp.bs_month - 1]} ${mp.bs_year}` : '—',
@@ -175,6 +183,7 @@ export default function HrDashboard() {
       })
     }
 
+    setLoadError(hadRealError ? 'Some dashboard data failed to load — figures below may be incomplete or stale.' : '')
     setLoading(false)
   }
 
@@ -183,6 +192,9 @@ export default function HrDashboard() {
   // client and owner dashboards.
   if (loading) return (
     <div className="page-container">
+      {/* Screen-reader-only announcement — the visible loading state is a shimmering skeleton,
+          which on its own gives no indication to a screen reader that the page is still loading. */}
+      <div role="status" aria-live="polite" className="sr-only">Loading dashboard data…</div>
       <div style={{ marginBottom: 20 }}>
         <h1 className="page-title">HR Dashboard</h1>
         <p className="page-subtitle">Headcount · Payroll · Approval queues · SSF · Advances at a glance</p>
@@ -208,10 +220,32 @@ export default function HrDashboard() {
 
   return (
     <div className="page-container">
+      <div role="status" aria-live="polite" className="sr-only">Dashboard data loaded</div>
       <div style={{ marginBottom: 20 }}>
         <h1 className="page-title">HR Dashboard</h1>
         <p className="page-subtitle">Headcount · Payroll · Approval queues · SSF · Advances at a glance</p>
       </div>
+
+      {/* A load failure used to be indistinguishable from "this client genuinely has no data" —
+          every query above silently discarded Supabase's error field. */}
+      {loadError && (
+        <div className="card" style={{
+          marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+          borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
+          background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+        }}>
+          <p style={{ color: 'var(--theme-red)', margin: 0, fontSize: 13 }}>
+            <span aria-hidden="true">⚠</span> {loadError}
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => load(++loadIdRef.current)}>Retry</button>
+            <button
+              className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
+              onClick={() => setLoadError('')} aria-label="Dismiss"
+            >×</button>
+          </div>
+        </div>
+      )}
 
       {/* ── KPI Row 1 — Approvals (everything a staff submission needs a manager to act on) ── */}
       <h2 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
