@@ -80,6 +80,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [imsEndsAt, setImsEndsAt] = useState(client.ims_ends_at ? formatAd(new Date(client.ims_ends_at)) : _legacyEnd)
   const [hrEndsAt,  setHrEndsAt]  = useState(client.hr_ends_at  ? formatAd(new Date(client.hr_ends_at))  : '')
   const [posEndsAt, setPosEndsAt] = useState(client.pos_ends_at ? formatAd(new Date(client.pos_ends_at)) : '')
+  const [suiteEndsAt, setSuiteEndsAt] = useState(client.suite_ends_at ? formatAd(new Date(client.suite_ends_at)) : '')
   const [billingCycle, setBillingCycle] = useState(client.billing_cycle || 'monthly')
   const [savingSub, setSavingSub] = useState(false)
   const [subMsg, setSubMsg]       = useState('')
@@ -112,6 +113,35 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     if (activeTab === 'settings' || activeTab === 'thresholds' || activeTab === 'qr') fetchClientSettings()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
+
+  // One-time reconciliation: a suite_plan that predates handleSuitePlanPick (or was edited
+  // directly in the DB) can be inconsistent with the modules/plans it should imply — self-corrects
+  // the moment this client's drawer opens, instead of only enforcing consistency on the next
+  // manual re-pick. Writes straight to the DB (not staged for Save Subscription) since this is
+  // fixing bad existing data, not a pending edit the admin should get to review first.
+  useEffect(() => {
+    if (!client.suite_plan) return
+    const inconsistent =
+      client.ims_enabled === false || !client.hr_enabled || !client.pos_enabled ||
+      client.plan !== client.suite_plan || client.hr_plan !== client.suite_plan || client.pos_plan !== client.suite_plan
+    if (!inconsistent) return
+    setImsEnabled(true)
+    setHrEnabled(true)
+    setPosEnabled(true)
+    setCurrentPlan(client.suite_plan)
+    setHrPlan(client.suite_plan)
+    setPosPlan(client.suite_plan)
+    supabase.from('clients').update({
+      ims_enabled: true, hr_enabled: true, pos_enabled: true,
+      plan: client.suite_plan, hr_plan: client.suite_plan, pos_plan: client.suite_plan,
+    }).eq('id', client.id).then(({ error }) => {
+      if (error) { setSubMsg('error:' + error.message); return }
+      setSubMsg('ok:Suite Bundle was out of sync with modules/plans — auto-corrected.')
+      onClientUpdated()
+      if (client.id === adminViewClientId) refreshViewModules()
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client.id])
 
   // ── Users ──
   async function loadUsers() {
@@ -275,8 +305,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setSavingSettings(false)
   }
 
-  // ── Module toggles (instant save) ──
+  // ── Module toggles (instant save) — a no-op while a Suite Bundle is active, since the bundle
+  // requires all three modules together; toggle one off first only after dropping back to
+  // "Not Subscribed" on the Suite Bundle picker below. ──
   async function handleToggleIms() {
+    if (suitePlan) return
     const next = !imsEnabled
     setImsEnabled(next)
     await supabase.from('clients').update({ ims_enabled: next }).eq('id', client.id)
@@ -285,6 +318,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
 
   async function handleToggleHr() {
+    if (suitePlan) return
     const next = !hrEnabled
     setHrEnabled(next)
     await supabase.from('clients').update({ hr_enabled: next }).eq('id', client.id)
@@ -293,11 +327,29 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
 
   async function handleTogglePos() {
+    if (suitePlan) return
     const next = !posEnabled
     setPosEnabled(next)
     await supabase.from('clients').update({ pos_enabled: next }).eq('id', client.id)
     onClientUpdated()
     if (client.id === adminViewClientId) refreshViewModules()
+  }
+
+  // Picking a bundle means all three modules are included — keep this tab's other fields
+  // consistent with that instead of allowing a contradictory state (e.g. Suite Pro selected while
+  // IMS sits toggled off). Takes effect on the next Save Subscription, same as the plan/date
+  // fields below; picking "Not Subscribed" (key=null) only clears the bundle and leaves whatever
+  // modules/plans were already set untouched, since modules can still be sold individually.
+  function handleSuitePlanPick(key) {
+    setSuitePlan(key)
+    if (key) {
+      setImsEnabled(true)
+      setHrEnabled(true)
+      setPosEnabled(true)
+      setCurrentPlan(key)
+      setHrPlan(key)
+      setPosPlan(key)
+    }
   }
 
   // ── Billing ──
@@ -310,9 +362,16 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   async function handleSaveSub() {
     setSavingSub(true); setSubMsg('')
     const { error } = await supabase.from('clients').update({
+      // Included here (not just the instant-save toggles above) so picking a Suite Bundle — which
+      // updates these locally via handleSuitePlanPick but doesn't write to the DB itself — actually
+      // persists on Save, instead of silently reverting the next time this drawer is opened.
+      ims_enabled:   imsEnabled,
+      hr_enabled:    hrEnabled,
+      pos_enabled:   posEnabled,
       ims_ends_at:   imsEndsAt || null,
       hr_ends_at:    hrEndsAt  || null,
       pos_ends_at:   posEndsAt || null,
+      suite_ends_at: suiteEndsAt || null,
       plan:          currentPlan,
       hr_plan:       hrPlan,
       pos_plan:      posPlan,
@@ -320,7 +379,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       billing_cycle: billingCycle,
     }).eq('id', client.id)
     if (error) { setSubMsg('error:' + error.message) }
-    else { setSubMsg('ok:Subscription saved.'); onClientUpdated() }
+    else {
+      setSubMsg('ok:Subscription saved.')
+      onClientUpdated()
+      if (client.id === adminViewClientId) refreshViewModules()
+    }
     setSavingSub(false)
   }
 
@@ -624,35 +687,43 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
                     Modules
                   </p>
+                  {suitePlan && (
+                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
+                      Locked while a Suite Bundle is active — all three modules are included. Set Suite Bundle to "Not Subscribed" below to toggle these individually again.
+                    </p>
+                  )}
                   {[
                     { key: 'ims', label: 'Crest IMS', sub: 'Inventory Management', enabled: imsEnabled, toggle: handleToggleIms },
                     { key: 'hr',  label: 'Crest HR',  sub: 'Human Resources',      enabled: hrEnabled,  toggle: handleToggleHr  },
                     { key: 'pos', label: 'Crest POS', sub: 'Point of Sale',        enabled: posEnabled, toggle: handleTogglePos  },
                   ].map(mod => (
-                    <div key={mod.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
+                    <div key={mod.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--theme-border-lt)', opacity: suitePlan ? 0.6 : 1 }}>
                       <div>
                         <p style={{ margin: '0 0 1px', fontSize: 13, fontWeight: 700, color: mod.enabled ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{mod.label}</p>
                         <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text2)' }}>{mod.sub}</p>
                       </div>
-                      <div onClick={mod.toggle} style={{ position: 'relative', width: 38, height: 22, borderRadius: 11, cursor: 'pointer', flexShrink: 0, background: mod.enabled ? 'var(--theme-accent)' : '#374151', transition: 'background 0.2s' }}>
+                      <div onClick={mod.toggle} style={{ position: 'relative', width: 38, height: 22, borderRadius: 11, cursor: suitePlan ? 'not-allowed' : 'pointer', flexShrink: 0, background: mod.enabled ? 'var(--theme-accent)' : '#374151', transition: 'background 0.2s' }}>
                         <div style={{ position: 'absolute', top: 3, left: mod.enabled ? 19 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.35)' }} />
                       </div>
                     </div>
                   ))}
                 </div>
 
-                {/* Suite Bundle — an independent gating axis from the per-module plans above;
-                    unlocks cross-module features like Owner Dashboard. Null = not subscribed. */}
+                {/* Suite Bundle — a bundle-tier subscription (IMS+HR+POS together) that unlocks
+                    cross-module features like Owner Dashboard. Null = not subscribed. Picking a
+                    tier also enables all three modules and syncs their plan to match (see
+                    handleSuitePlanPick) — it's billed and priced as one bundle, not summed from
+                    three independently-set module plans. */}
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>
-                  <Tip text="A separate bundle-tier subscription (IMS+HR+POS together) that unlocks cross-module features like Owner Dashboard — independent of each module's own plan tier above." width={300}>
+                  <Tip text="A bundle-tier subscription (IMS+HR+POS together) that unlocks cross-module features like Owner Dashboard. Picking a tier enables all three modules below and syncs their plan to match — it's billed as one bundle, not three separate module plans." width={300}>
                     Suite Bundle
                   </Tip>
                 </p>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                   {[{ key: null, label: 'Not Subscribed' }, ...SUITE_BUNDLES].map(opt => {
                     const active = suitePlan === opt.key
                     return (
-                      <button key={opt.key ?? 'none'} onClick={() => setSuitePlan(opt.key)} style={{
+                      <button key={opt.key ?? 'none'} onClick={() => handleSuitePlanPick(opt.key)} style={{
                         padding: '8px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
                         border: active ? '1px solid var(--theme-accent)' : '1px solid var(--theme-border)',
                         background: active ? 'rgba(201,168,76,0.1)' : 'none',
@@ -668,6 +739,42 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     )
                   })}
                 </div>
+                <p style={{ fontSize: 11, color: '#fff', margin: '0 0 24px' }}>
+                  Selecting a bundle disables individual module pricing below.
+                </p>
+
+                {/* Suite Bundle expiry — its own renewal schedule, independent of any single
+                    module's end date (borrowing IMS's date as a proxy elsewhere is a fallback
+                    for pre-migration clients only, not a substitute for tracking this directly). */}
+                {suitePlan && (() => {
+                  const s = getDateStatus(suiteEndsAt)
+                  return (
+                    <div style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Suite Bundle</p>
+                        {s.label && (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 3, color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
+                            {s.label}
+                          </span>
+                        )}
+                      </div>
+                      <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 6px' }}>
+                        <Tip text="Date when this client's Suite Bundle subscription expires — independent of each module's own expiry above. Gates Owner Dashboard access alongside the tier picked above." width={300}>Suite subscription end date</Tip>
+                      </p>
+                      <div style={{ marginBottom: 8 }}>
+                        <BsCalendarPicker value={suiteEndsAt} onChange={setSuiteEndsAt} clearable />
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {[{ label: '+7 Days', days: 7 }, { label: '+1 Month', days: 30 }, { label: '+3 Months', days: 90 }, { label: '+1 Year', days: 365 }].map(({ label, days }) => (
+                          <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(setSuiteEndsAt, days)}>{label}</button>
+                        ))}
+                        {suiteEndsAt && (
+                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} onClick={() => setSuiteEndsAt('')}>Clear</button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })()}
 
                 {/* Billing cycle toggle */}
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>
@@ -695,12 +802,20 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   const s = getDateStatus(mod.endsAt)
                   const flatPricing = mod.key === 'hr' ? HR_PRICING : mod.key === 'pos' ? POS_PRICING : null
                   const accentBase = MODULE_COLORS[mod.key]
+                  // Suite Bundle replaces per-module pricing/dates entirely in clientMRR (it's a
+                  // single discounted subscription, not an add-on) — disable these sections while
+                  // it's selected so admins aren't led to believe editing them changes billing.
+                  const lockedBySuite = !!suitePlan
                   return (
-                    <div key={mod.key} style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)' }}>
+                    <div key={mod.key} style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)', opacity: lockedBySuite ? 0.45 : 1, pointerEvents: lockedBySuite ? 'none' : 'auto' }}>
                       {/* Header */}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                         <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: accentBase, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{mod.label}</p>
-                        {s.label && (
+                        {lockedBySuite ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 3, color: 'var(--theme-text3)', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)' }}>
+                            Controlled by Suite Bundle
+                          </span>
+                        ) : s.label && (
                           <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 3, color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
                             {s.label}
                           </span>
@@ -727,7 +842,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                               const active = mod.plan === p.key
                               const accentColor = MODULE_COLORS.ims
                               return (
-                                <button key={p.key} onClick={() => mod.setPlan(p.key)} style={{
+                                <button key={p.key} disabled={lockedBySuite} onClick={() => mod.setPlan(p.key)} style={{
                                   flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
                                   border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
                                   background: active ? `${accentColor}1a` : 'none',
@@ -754,14 +869,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         <Tip text="Date when this module's subscription expires. Client sees a warning in the last 7 days and is blocked after expiry." width={300}>Subscription end date</Tip>
                       </p>
                       <div style={{ marginBottom: 8 }}>
-                        <BsCalendarPicker value={mod.endsAt} onChange={mod.setEndsAt} clearable />
+                        <BsCalendarPicker value={mod.endsAt} onChange={mod.setEndsAt} clearable disabled={lockedBySuite} />
                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         {[{ label: '+7 Days', days: 7 }, { label: '+1 Month', days: 30 }, { label: '+3 Months', days: 90 }, { label: '+1 Year', days: 365 }].map(({ label, days }) => (
-                          <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(mod.setEndsAt, days)}>{label}</button>
+                          <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} disabled={lockedBySuite} onClick={() => extendModule(mod.setEndsAt, days)}>{label}</button>
                         ))}
                         {mod.endsAt && (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} onClick={() => mod.setEndsAt('')}>Clear</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} disabled={lockedBySuite} onClick={() => mod.setEndsAt('')}>Clear</button>
                         )}
                       </div>
                     </div>

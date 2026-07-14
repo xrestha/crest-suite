@@ -28,7 +28,7 @@ export default function AdminDashboardOverview() {
     const since24h = new Date(Date.now() - 86400000).toISOString()
     const [{ data: clients }, { data: periods }, { data: recentProfiles }] = await Promise.all([
       supabase.from('clients')
-        .select('id, name, plan, hr_plan, pos_plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, is_trial, subscribe_requested, trial_expires_at')
+        .select('id, name, plan, hr_plan, pos_plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, is_trial, subscribe_requested, trial_expires_at')
         .order('name'),
       supabase.from('monthly_periods')
         .select('client_id, bs_year, bs_month, status')
@@ -102,10 +102,12 @@ export default function AdminDashboardOverview() {
 
     // Suite Bundle is a single discounted subscription covering IMS+HR+POS together, not an
     // add-on — if it's set, it replaces the per-module sum entirely (summing on top of it would
-    // double-count). Anchored on IMS being active since every bundle key requires IMS. There's no
-    // separate suite_ends_at column, so IMS's own active window stands in for "is this client's
-    // subscription currently active" here.
-    if (c.suite_plan && imsActive) {
+    // double-count). Tracked by its own suite_ends_at (added alongside suite_plan's own renewal
+    // schedule, independent of any single module's expiry) — falls back to IMS's active window
+    // only for pre-migration rows that have suite_plan set but predate suite_ends_at existing.
+    const suiteEnd = c.suite_ends_at || (imsActive ? imsEnd : null)
+    const suiteActive = c.suite_plan && suiteEnd && Math.ceil((new Date(suiteEnd) - Date.now()) / 86400000) > 0
+    if (suiteActive) {
       const bundle = SUITE_BUNDLES.find(b => b.key === c.suite_plan)
       if (bundle) return c.billing_cycle === 'annual' ? bundle.annual : bundle.monthly
     }

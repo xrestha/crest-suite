@@ -71,8 +71,9 @@ export default function AdminClients() {
     const now = new Date().toISOString()
     const expired = (data || []).filter(c => {
       if (!c.is_active) return false
-      // Check module-specific dates; fall back to legacy subscription_ends_at
-      const moduleDates = [c.ims_ends_at, c.hr_ends_at, c.pos_ends_at].filter(Boolean)
+      // Check module-specific dates (+ Suite Bundle's own independent expiry); fall back to
+      // legacy subscription_ends_at
+      const moduleDates = [c.ims_ends_at, c.hr_ends_at, c.pos_ends_at, c.suite_ends_at].filter(Boolean)
       if (moduleDates.length > 0) {
         // Active if ANY module still has time remaining
         return moduleDates.every(d => d < now)

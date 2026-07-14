@@ -417,7 +417,12 @@ export default function Recipes() {
     // Insert the new ingredient rows BEFORE removing the old ones (not delete-then-insert) — if
     // the insert fails partway (network blip, an ingredient's item/sub-recipe deleted mid-edit),
     // the recipe keeps its previous, still-valid ingredient list instead of being left with zero.
-    const { data: insertedIngs, error: ingError } = await supabase.from('recipe_ingredients').insert(ingPayload).select('id')
+    // Upsert (not insert) — an ingredient row whose item_id is unchanged from before this save
+    // would otherwise collide with its own still-present old row on the recipe_id+item_id unique
+    // constraint, since the old row isn't deleted until after this call succeeds. sub_recipe_id
+    // rows (item_id null) never match the conflict target, so they always insert fresh as before.
+    const { data: insertedIngs, error: ingError } = await supabase.from('recipe_ingredients')
+      .upsert(ingPayload, { onConflict: 'recipe_id,item_id' }).select('id')
     if (ingError) { setError(ingError.message); setSaving(false); return }
     if (selectedRecipe) {
       const newIds = (insertedIngs || []).map(r => r.id)

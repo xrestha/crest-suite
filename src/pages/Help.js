@@ -503,14 +503,14 @@ export default function Help() {
   const email   = settings?.contact_email   || ''
   const website = settings?.contact_website || ''
 
-  // Per-module (IMS/HR/POS) collapse on the Module Guide tab — same persisted-localStorage
-  // pattern as Layout.js's sidebar nav groups. Defaults open so nothing hides on first visit;
-  // collapsing a module you don't need is what shortens the page.
+  // Per-module (IMS/HR/POS) collapse on the Module Guide tab — defaults *closed* (same
+  // rolled-up-until-chosen pattern as the Getting Started tab's openGS below), so a Suite client
+  // sees three clickable module headings instead of every feature card unrolled on first load.
   const [openModules, setOpenModules] = useState(() => {
     try { return JSON.parse(localStorage.getItem('crest_help_modules')) || {} } catch { return {} }
   })
   function moduleOpen(key, state = openModules) {
-    return state[key] !== undefined ? state[key] : true
+    return state[key] === true
   }
   function toggleModule(key) {
     setOpenModules(prev => {
@@ -880,7 +880,7 @@ export default function Help() {
           {/* ── Crest IMS ── */}
           {imsEnabled && (
             <div style={{ marginBottom: 32 }}>
-              {/* Module header */}
+              {/* Module header — rolled up by default; click to reveal this module's topic list. */}
               <div
                 onClick={() => toggleModule('ims')}
                 style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid rgba(201,168,76,0.2)', cursor: 'pointer' }}

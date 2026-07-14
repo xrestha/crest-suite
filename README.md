@@ -149,6 +149,22 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S381 — 2026-07-14 — Suite Bundle billing consistency + sidebar/help follow-ups + recipe-ingredient duplicate-key fix
+
+Four smaller, linked fixes following on from S380's pricing rework.
+
+**Suite Bundle got its own independent expiry + consistency guarantees.** `suite_plan` previously had no expiry column of its own — a Suite Bundle client's countdown silently fell back to whichever per-module `*_ends_at` happened to be set, which drifted the moment a bundle was renewed independently of its modules. Added `clients.suite_ends_at` (migration `20260714000000_suite_ends_at.sql`), wired into `getSubStatus()` (`subscription.js`), the auto-deactivation date scan (`AdminClients.js`), and `AdminDashboardOverview.jsx`'s `clientMRR()` (now checks `suite_ends_at` before falling through to `ims_ends_at` for pre-migration rows). Real inconsistency then surfaced on a live client (Suite Pro selected but IMS disabled, HR still on Starter) — `suite_plan` and the per-module enabled/plan fields were two fully independent axes with no sync logic. Fixed in `ClientDrawer.js`: picking a Suite Bundle tier (`handleSuitePlanPick`) now force-enables all three modules and sets all three plans to match; the per-module toggles/plan pickers are disabled and dimmed with a "Controlled by Suite Bundle" badge whenever a bundle is active; `handleSaveSub` now persists the enabled flags and `suite_ends_at` together; and a one-time reconciliation effect auto-corrects any already-inconsistent client the moment its drawer is opened, writing the fix back to the DB and refreshing the sidebar if that client is currently being viewed as. A white-text note under the bundle picker ("Selecting a bundle disables individual module pricing below") makes the lockout visible before it's hit.
+
+**Sidebar:** Sales Entry moved in the `NAV` array to sit between Purchases and Purchase Orders, matching the actual IMS workflow order.
+
+**Help & Guide:** the Module Guide tab's Crest IMS/HR/POS sections briefly went always-expanded during this session's work, then were corrected back to collapsed-by-default (click a module header to roll it open) — same convention as the Getting Started tab's `openGS`, so a Suite client sees three clickable topics instead of a wall of content on first load.
+
+**Recipe-ingredient duplicate-key bug.** Editing a recipe and adding a new ingredient could throw `duplicate key value violates unique constraint "recipe_ingredients_recipe_id_item_id_key"` on an *unrelated*, unchanged ingredient (e.g. adding a sub-recipe to "Tea - Oolong" failed on its existing "Tea - Oolong" item ingredient). Root cause: S375's insert-then-delete save order (insert new rows first, delete stale ones after, so a failed insert never leaves the recipe with zero ingredients) inserts a fresh row for every current ingredient, including ones unchanged from before the edit — for an item-type ingredient that already existed on the recipe, the fresh insert collided with the still-present old row on `(recipe_id, item_id)` before the delete step ever ran. Sub-recipe rows never hit this since their `item_id` is NULL and Postgres doesn't treat NULL=NULL as a duplicate. Fixed by swapping `insert()` for `upsert(ingPayload, { onConflict: 'recipe_id,item_id' })` — an unchanged item ingredient now updates its existing row instead of colliding; sub-recipe rows are unaffected since they never match that conflict target.
+
+Compiled clean via Babel/`react-app` preset. `suite_ends_at` migration file exists but has not yet been confirmed applied against the live Supabase DB.
+
+**Files:** `src/pages/adminClients/ClientDrawer.js`, `src/pages/dashboard/AdminDashboardOverview.jsx`, `src/pages/AdminClients.js`, `src/utils/subscription.js`, `src/components/Layout.js`, `src/pages/Help.js`, `src/modules/ims/recipes/Recipes.js`, `supabase/migrations/20260714000000_suite_ends_at.sql`
+
 ### S380 — 2026-07-13 — Sidebar visual re-skin (lucide-react icons + pill nav) + admin viewModules staleness fix + Plan Pricing rebuilt to match real pricing (Monthly/Annual, Suite Bundle-aware MRR)
 
 Two linked engagements: a full visual re-skin of the app sidebar, and — surfaced while testing it — a chain of billing/pricing fixes on the Admin side.
