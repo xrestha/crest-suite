@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { TriangleAlert } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
@@ -349,13 +350,13 @@ export default function OwnerDashboard() {
             borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
             background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
           }}>
-            <p style={{ color: 'var(--theme-red)', margin: 0, fontSize: 13 }}>
-              <span aria-hidden="true">⚠</span> {msg}
+            <p style={{ color: 'var(--theme-red)', margin: 0, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <TriangleAlert size={14} aria-hidden="true" /> {msg}
             </p>
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => retryLoad(section)}>Retry</button>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={() => retryLoad(section)}>Retry</button>
               <button
-                className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
+                className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }}
                 onClick={() => setLoadErrors(prev => ({ ...prev, [section]: '' }))} aria-label="Dismiss"
               >×</button>
             </div>
@@ -369,8 +370,8 @@ export default function OwnerDashboard() {
             the missing module, not a missing period. */}
         {!(clientModules.ims && clientModules.hr) && !loading && (
           <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
-            <p style={{ color: 'var(--theme-amber)', margin: 0, fontSize: 14 }}>
-              <span aria-hidden="true">⚠</span> Owner Dashboard needs both Crest IMS and Crest HR enabled — this property has {clientModules.ims ? 'only IMS' : clientModules.hr ? 'only HR' : 'neither'}.
+            <p style={{ color: 'var(--theme-amber)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <TriangleAlert size={15} aria-hidden="true" /> Owner Dashboard needs both Crest IMS and Crest HR enabled — this property has {clientModules.ims ? 'only IMS' : clientModules.hr ? 'only HR' : 'neither'}.
             </p>
           </div>
         )}
@@ -380,7 +381,7 @@ export default function OwnerDashboard() {
             onClick={() => navigate('/periods')} role="button" tabIndex={0}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/periods') } }}
           >
-            <p style={{ color: 'var(--theme-accent)', margin: 0, fontSize: 14 }}><span aria-hidden="true">⚠</span> No open period. Click here to create one in Periods →</p>
+            <p style={{ color: 'var(--theme-accent)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert size={15} aria-hidden="true" /> No open period. Click here to create one in Periods →</p>
           </div>
         )}
 
