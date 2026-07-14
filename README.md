@@ -149,6 +149,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S383 — 2026-07-14 — Vendor Report: click-through bill drilldown with payment status
+
+Client asked to drill down from a vendor row in Vendor Purchase Report → Vendor Summary to see all purchase bills and their status. Clicking a vendor name now opens a modal listing every bill for that vendor in the selected period — Day, Invoice, item count, payment method, bill total, discount, returns, net, and a status badge: Cash/FonePay bills show `Paid` (settle at purchase time); Credit bills reuse the same `payable_payments`/`paid_at` aging logic as `OutstandingPayables.js` (`Paid` / `Partial` / `Current` / `31–60 days` / `61–90 days` / `90+ days`), so status reads consistently across both reports.
+
+Each bill row is itself clickable and expands accordion-style (same pattern as `OutstandingPayables.js`) to show its line items, any linked returns, and payment history. No schema change — reads only the existing `purchase_entries`, `vendor_returns`, and `payable_payments` tables. Verified live in-browser: opened the modal for two vendors (mixed Cash/Credit bills, and a single large 10-line Credit bill), expanded multiple rows, confirmed conditional Returns/Payment History sections render only when present, no console errors.
+
+**Files:** `src/modules/ims/reports/VendorReport.js`, `src/pages/Help.js`
+
 ### S382 — 2026-07-14 — Admin Danger Zone: rewired clear/delete buttons for 3 features shipped after they were built + live circular-FK fix
 
 Prompted by an admin screenshot review of AdminClients → Danger Zone on a real Pro client (BHATTI CHOILA): the per-module "Clear Transactions" and "Clear Client Data"/"Delete Client" buttons in `admin-user-ops`'s `clearModuleData`/`deleteClientData` actions hadn't been touched since they were first built, while three later features added client-scoped tables that were never wired in — POS credit notes, HR TADA/Incentives/Roster-publish/Shift-swap (S306/S307), and POS guest-ordering/payment-webhook scaffold. None of those tables' `client_id` FKs have `ON DELETE CASCADE`, so this wasn't just stale leftover data: **Clear POS Transactions, Clear Client Data, and Delete Client would throw a foreign-key-violation and abort mid-sequence** for any client that had ever issued a credit note, submitted a TADA claim, run an incentive calc, published a roster, or requested a shift swap.

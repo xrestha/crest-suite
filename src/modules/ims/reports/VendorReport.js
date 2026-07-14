@@ -1,11 +1,21 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
+import Modal from '../../../components/Modal'
+import { bsToAd } from '../../../utils/bsCalendar'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
+const EPS = 0.001
+
+function billAging(days) {
+  if (days <= 30) return { label: 'Current',    color: 'var(--theme-green)' }
+  if (days <= 60) return { label: '31–60 days', color: 'var(--theme-accent)' }
+  if (days <= 90) return { label: '61–90 days', color: 'var(--theme-amber)' }
+  return                 { label: '90+ days',   color: 'var(--theme-red)' }
+}
 
 // Vendor split needs up to 8 distinct hues for an arbitrary vendor count — reuses theme tokens
 // where available (accent/green/red/purple) and falls back to fixed hex for the rest, same
@@ -25,6 +35,9 @@ export default function VendorReport() {
   const [viewMode, setViewMode] = useState('summary')
   const [vendorSearch, setVendorSearch] = useState('')
   const [showVendorDrop, setShowVendorDrop] = useState(false)
+  const [paymentsMap, setPaymentsMap] = useState({})
+  const [drilldownVendor, setDrilldownVendor] = useState(null)
+  const [expandedBillKey, setExpandedBillKey] = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -56,6 +69,19 @@ export default function VendorReport() {
     ])
     setPurchases(p || [])
     setReturns(r || [])
+
+    const creditIds = (p || []).filter(e => e.payment_method === 'Credit').map(e => e.id)
+    if (creditIds.length > 0) {
+      const { data: pmts } = await scopedFrom('payable_payments').in('purchase_entry_id', creditIds)
+      const map = {}
+      ;(pmts || []).forEach(pm => {
+        if (!map[pm.purchase_entry_id]) map[pm.purchase_entry_id] = []
+        map[pm.purchase_entry_id].push(pm)
+      })
+      setPaymentsMap(map)
+    } else {
+      setPaymentsMap({})
+    }
   }
 
   // Per-vendor discount: sum unique bill discounts attributed to each vendor
@@ -144,6 +170,58 @@ export default function VendorReport() {
     })
     return Object.values(map).sort((a, b) => b.totalDiscount - a.totalDiscount)
   })()
+
+  // Bill-level drilldown — one row per bill (vendor + invoice + day), any payment method,
+  // with a payment status: Cash/FonePay settle immediately, Credit follows payable_payments/aging.
+  const allBills = (() => {
+    const seen = new Set()
+    const bills = []
+    purchases.forEach(e => {
+      const gid = e.purchase_group_id || `${e.vendor_id}|${e.invoice_ref || ''}|${e.bs_day}`
+      if (seen.has(gid)) return
+      seen.add(gid)
+      const billEntries = purchases.filter(p =>
+        (p.purchase_group_id || `${p.vendor_id}|${p.invoice_ref || ''}|${p.bs_day}`) === gid
+      )
+      const total = billEntries.reduce((s, p) => s + p.qty * p.rate, 0)
+      const disc  = Math.max(0, ...billEntries.map(p => parseFloat(p.discount_amount) || 0))
+      const billReturns = returns.filter(r => billEntries.some(p => p.id === r.purchase_entry_id))
+      const returnedAmt = billReturns.reduce((s, r) => s + r.qty * r.rate, 0)
+      const net = total - disc - returnedAmt
+      const paymentMethod = e.payment_method || 'Cash'
+
+      let status, remaining = 0
+      if (paymentMethod !== 'Credit') {
+        status = { label: 'Paid', color: 'var(--theme-green)' }
+      } else {
+        const paid = billEntries.reduce((s, p) =>
+          s + (paymentsMap[p.id] || []).reduce((s2, pm) => s2 + parseFloat(pm.amount), 0), 0)
+        remaining = Math.max(0, total - paid)
+        if (remaining <= EPS) status = { label: 'Paid', color: 'var(--theme-green)' }
+        else if (paid > EPS) status = { label: 'Partial', color: 'var(--theme-purple)' }
+        else if (selectedPeriod) {
+          const adDate = bsToAd(selectedPeriod.bs_year, selectedPeriod.bs_month, e.bs_day || 1)
+          const daysOld = Math.max(0, Math.floor((new Date() - adDate) / (1000 * 60 * 60 * 24)))
+          status = billAging(daysOld)
+        } else {
+          status = { label: 'Outstanding', color: 'var(--theme-red)' }
+        }
+      }
+
+      const payments = billEntries.flatMap(p => paymentsMap[p.id] || []).sort((x, y) => (x.paid_at > y.paid_at ? 1 : -1))
+
+      bills.push({
+        key: gid, vendor_id: e.vendor_id, vendorName: e.vendors?.name || 'Unassigned',
+        day: e.bs_day, invoice: e.invoice_ref, itemCount: billEntries.length,
+        total, discount: disc, returned: returnedAmt, net, paymentMethod, status, remaining,
+        entries: billEntries, billReturns, payments,
+      })
+    })
+    return bills.sort((a, b) => a.day - b.day)
+  })()
+
+  const drilldownBills = drilldownVendor ? allBills.filter(b => b.vendor_id === drilldownVendor.id) : []
+  const drilldownOutstanding = drilldownBills.reduce((s, b) => s + b.remaining, 0)
 
   const searchLower = vendorSearch.toLowerCase()
   const filteredSummary = vendorSearch
@@ -397,10 +475,18 @@ export default function VendorReport() {
                   return (
                     <tr key={r.vendor.id}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
-                        {r.vendor.vendor_code && (
-                          <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--theme-accent)', marginRight: 8 }}>{r.vendor.vendor_code}</span>
-                        )}
-                        {r.vendor.name}
+                        <span
+                          onClick={() => { setDrilldownVendor(r.vendor); setExpandedBillKey(null) }}
+                          title="View purchase bills"
+                          style={{ cursor: 'pointer' }}
+                          onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                          onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                        >
+                          {r.vendor.vendor_code && (
+                            <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--theme-accent)', marginRight: 8 }}>{r.vendor.vendor_code}</span>
+                          )}
+                          {r.vendor.name}
+                        </span>
                         {r.returnCount > 0 && <span style={{ fontSize: 11, color: 'var(--theme-red)', marginLeft: 6 }}>({r.returnCount} return{r.returnCount > 1 ? 's' : ''})</span>}
                       </td>
                       <td style={{ textAlign: 'right' }}>{r.count}</td>
@@ -577,6 +663,135 @@ export default function VendorReport() {
           )
         )}
       </div>
+
+      {drilldownVendor && (
+        <Modal title={`${drilldownVendor.name} — Purchase Bills`} onClose={() => { setDrilldownVendor(null); setExpandedBillKey(null) }} maxWidth={900}>
+          <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '-8px 0 14px' }}>{periodLabel}</p>
+          {drilldownBills.length === 0 ? (
+            <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No bills recorded for this vendor this period.</p>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 20, marginBottom: 14, fontSize: 12, color: 'var(--theme-text2)' }}>
+                <span>{drilldownBills.length} bill{drilldownBills.length !== 1 ? 's' : ''}</span>
+                <span>Net: <strong style={{ color: 'var(--theme-accent)' }}>NPR {drilldownBills.reduce((s, b) => s + b.net, 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}</strong></span>
+                {drilldownOutstanding > 0 && (
+                  <span>Outstanding: <strong style={{ color: 'var(--theme-red)' }}>NPR {drilldownOutstanding.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</strong></span>
+                )}
+              </div>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Day</th>
+                      <th>Invoice</th>
+                      <th style={{ textAlign: 'right' }}>Items</th>
+                      <th>Payment</th>
+                      <th style={{ textAlign: 'right' }}>Bill Total</th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-green)' }}>Discount</th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}>Returns</th>
+                      <th style={{ textAlign: 'right' }}>Net</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drilldownBills.map(b => {
+                      const isExpanded = expandedBillKey === b.key
+                      return (
+                        <Fragment key={b.key}>
+                          <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedBillKey(prev => prev === b.key ? null : b.key)}>
+                            <td style={{ color: 'var(--theme-accent)', fontWeight: 700 }}>{b.day}</td>
+                            <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{b.invoice || '—'}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.itemCount}</td>
+                            <td><span className={`badge ${b.paymentMethod === 'Cash' ? 'badge-green' : b.paymentMethod === 'Credit' ? 'badge-red' : 'badge-gray'}`}>{b.paymentMethod}</span></td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>NPR {b.total.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-green)' }}>{b.discount > 0 ? `−NPR ${b.discount.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{b.returned > 0 ? `−NPR ${b.returned.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)' }}>NPR {b.net.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                            <td>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: b.status.color, background: `color-mix(in srgb, ${b.status.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${b.status.color} 40%, transparent)`, borderRadius: 4, padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.status.label}</span>
+                            </td>
+                            <td style={{ color: 'var(--theme-text3)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : '▼ Details'}</td>
+                          </tr>
+
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={9} style={{ padding: 0, background: 'rgba(10,12,18,0.7)' }}>
+                                <div style={{ padding: '16px 20px' }}>
+                                  <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Items in this bill ({b.entries.length})</div>
+                                  <table style={{ borderCollapse: 'collapse', fontSize: 13, width: '100%', maxWidth: 620, marginBottom: b.payments.length > 0 || b.billReturns.length > 0 ? 20 : 0 }}>
+                                    <thead>
+                                      <tr>
+                                        <th style={{ textAlign: 'left', padding: '4px 16px 4px 0', color: 'var(--theme-text2)', fontWeight: 600, fontSize: 11 }}>Item</th>
+                                        <th style={{ textAlign: 'right', padding: '4px 16px', color: 'var(--theme-text2)', fontWeight: 600, fontSize: 11 }}>Qty</th>
+                                        <th style={{ textAlign: 'right', padding: '4px 16px', color: 'var(--theme-text2)', fontWeight: 600, fontSize: 11 }}>Rate</th>
+                                        <th style={{ textAlign: 'right', padding: '4px 0 4px 16px', color: 'var(--theme-text2)', fontWeight: 600, fontSize: 11 }}>Total</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {b.entries.map(e => (
+                                        <tr key={e.id}>
+                                          <td style={{ padding: '4px 16px 4px 0', color: 'var(--theme-text1)' }}>{e.items?.name}</td>
+                                          <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.qty).toLocaleString()}</td>
+                                          <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.rate).toLocaleString()}</td>
+                                          <td style={{ padding: '4px 0 4px 16px', textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>NPR {(e.qty * e.rate).toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+
+                                  {b.billReturns.length > 0 && (
+                                    <div style={{ marginBottom: b.payments.length > 0 ? 20 : 0 }}>
+                                      <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Returns Against This Bill</div>
+                                      <table style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: 400 }}>
+                                        <tbody>
+                                          {b.billReturns.map(r => (
+                                            <tr key={r.id}>
+                                              <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text1)' }}>{r.items?.name}</td>
+                                              <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(r.qty).toLocaleString()}</td>
+                                              <td style={{ padding: '5px 0 5px 16px', textAlign: 'right', color: 'var(--theme-red)', fontWeight: 600 }}>−NPR {(r.qty * r.rate).toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+
+                                  {b.payments.length > 0 && (
+                                    <div>
+                                      <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Payment History</div>
+                                      <table style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: 400 }}>
+                                        <tbody>
+                                          {b.payments.map(p => (
+                                            <tr key={p.id}>
+                                              <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green)' }}>{p.paid_at}</td>
+                                              <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {parseFloat(p.amount).toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                                              <td style={{ padding: '5px 0 5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
+                                            </tr>
+                                          ))}
+                                          <tr style={{ borderTop: '1px solid var(--theme-border)' }}>
+                                            <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
+                                            <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)' }}>NPR {(b.total - b.remaining).toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                                            <td />
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </Modal>
+      )}
     </div>
   )
 }
