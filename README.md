@@ -149,6 +149,19 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S393 — 2026-07-14 — Sidebar Admin/module-row split + global scrollbar-color theme bug
+
+User-reported: as admin "viewing as" Casa Acai Cafe, the POS tab wasn't showing in the sidebar even though the client has `pos_enabled = true` (confirmed live by logging in as the client's real Owner account — POS tab and dashboard section both rendered correctly there). Root-caused to a stale/race-prone `viewModules` fetch in `AuthContext.js` (refetches `clients.pos_enabled` on `adminViewClientId` change) — a hard refresh while "viewing as" the client resolved it, confirming the fetch rather than the DB flag was the problem. Not fixed at the fetch layer this session (no reliable repro without admin credentials); logged for future investigation if it recurs.
+
+Two things were fixed directly:
+
+- **Sidebar Admin/module row split** — `moduleTabs` used to render `Admin` alongside `IMS`/`HR`/`POS` in a single flex row (`.module-switcher`), so an admin viewing a client only ever saw 3-4 cramped pills sharing one row, making it easy to misread which tabs actually existed. Split into two stacked rows in [Layout.js](src/components/Layout.js): `adminTab` (its own `.module-switcher--admin` row) above `moduleTabs` (`IMS`/`HR`/`POS`, unchanged row). Extracted the shared `renderModuleTab()` helper so both rows render identical button markup. Preserved the existing "hide entirely if only one tab total" behavior via a new `totalTabCount` check, so a real client with exactly one module still sees no switcher at all.
+- **[Confirmed real bug] Black scrollbars on light themes** — [Layout.css:4](src/components/Layout.css#L4)'s global `* { scrollbar-color: #2a2f3d #0f1117; }` was hardcoded to the Dark preset's own thumb/track hex, unconditionally, on every element. The `::-webkit-scrollbar-*` rules directly below it already correctly used `var(--theme-border)`/`var(--theme-bg)`, but modern Chromium/Edge honor the standard `scrollbar-color` property over the legacy `::-webkit-scrollbar` pseudo-elements when both are present — so every light preset rendered dark scrollbars regardless of the (correct, unused-in-practice) fallback rules. Fixed by pointing `scrollbar-color` at the same theme variables.
+
+Verified: `CI=true npx react-scripts build` compiles clean after each change; user confirmed both fixes visually (sidebar row split screenshot, scrollbar color on a light theme) before this entry was written.
+
+**Files:** `src/components/Layout.js`, `src/components/Layout.css`
+
 ### S392 — 2026-07-14 — Kiosk/offline pages `/impeccable audit` fixes: keyboard access, tokens, ARIA
 
 Ran `/impeccable audit` on the four kiosk/offline-capable pages (`PosLogin.jsx`, `SelfServiceLogin.jsx`, `GuestMenu.jsx`, `PosOrders.jsx`) — scores 16/14/17/12 respectively, `PosOrders.jsx` lowest as the largest and highest-stakes file. Fixed all 6 findings, `PosOrders.jsx` first and verified in isolation given its size and real-time risk profile (this repo's own convention: "prefer the smallest safe cut" on this file — all changes here were purely additive/cosmetic, no state or business logic touched):

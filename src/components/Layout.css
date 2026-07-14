@@ -1,7 +1,7 @@
 * {
   box-sizing: border-box;
   scrollbar-width: thin;
-  scrollbar-color: #2a2f3d #0f1117;
+  scrollbar-color: var(--theme-border) var(--theme-bg);
 }
 
 @keyframes pulse-dot {
@@ -224,6 +224,20 @@
 .sidebar-wrap--collapsed .module-switcher {
   flex-direction: column;
   padding: 10px 8px 4px;
+}
+/* Admin row sits directly above the IMS/HR/POS row — tighten the seam between the two stacked
+   .module-switcher blocks instead of doubling each one's own top/bottom padding. */
+.module-switcher--admin {
+  padding-bottom: 3px;
+}
+.module-switcher--admin + .module-switcher {
+  padding-top: 3px;
+}
+.sidebar-wrap--collapsed .module-switcher--admin {
+  padding-bottom: 3px;
+}
+.sidebar-wrap--collapsed .module-switcher--admin + .module-switcher {
+  padding-top: 3px;
 }
 
 .module-tab {

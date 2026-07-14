@@ -463,11 +463,14 @@ export default function Layout() {
 
   // Module switcher tabs — one entry per module this user can see. Rendered as a horizontal pill
   // row when expanded, an icon column when collapsed (CSS flex-direction flip, same buttons).
+  // Admin is kept in its own row, separate from the IMS/HR/POS row below it — it's a different
+  // axis (which panel of the app, vs. which client module) and sharing one row made it look like
+  // a 4th module competing for the same space (2026-07-14).
+  const adminTab = isAdmin && {
+    key: 'admin', label: 'Admin', icon: ShieldCheck, tip: 'Admin',
+    dot: pendingTrialCount > 0 ? '#f87171' : newTrialCount > 0 ? '#f59e0b' : null,
+  }
   const moduleTabs = [
-    isAdmin && {
-      key: 'admin', label: 'Admin', icon: ShieldCheck, tip: 'Admin',
-      dot: pendingTrialCount > 0 ? '#f87171' : newTrialCount > 0 ? '#f59e0b' : null,
-    },
     imsVisible && { key: 'ims', label: 'IMS', icon: Warehouse, tip: 'Crest IMS', dot: null },
     hrVisible && {
       key: 'hr', label: 'HR', icon: Users2, dot: hrPending > 0 ? 'var(--theme-amber)' : null,
@@ -478,6 +481,29 @@ export default function Layout() {
       tip: posPending > 0 ? `Crest POS — ${posPending} pending` : 'Crest POS',
     },
   ].filter(Boolean)
+  const totalTabCount = (adminTab ? 1 : 0) + moduleTabs.length
+
+  function renderModuleTab(t) {
+    return (
+      <RailTip key={t.key} label={t.tip}>
+        <button
+          className={`module-tab${panel === t.key && !collapsed ? ' module-tab--active' : ''}`}
+          onClick={() => openPanel(t.key)}
+        >
+          <span className="module-tab-icon" style={{ position: 'relative' }}>
+            <t.icon size={18} strokeWidth={1.75} />
+            {t.dot && (
+              <span style={{
+                position: 'absolute', top: -3, right: -5, width: 9, height: 9, borderRadius: '50%',
+                background: t.dot, boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
+              }} />
+            )}
+          </span>
+          <span className="module-tab-label">{t.label}</span>
+        </button>
+      </RailTip>
+    )
+  }
 
   // Signed-in user's name/role — shown inline next to the client/property name (moved out of its
   // own footer section to reclaim vertical space; the empty space to the right of the client
@@ -517,30 +543,23 @@ export default function Layout() {
             </button>
           </div>
 
-          {/* Module switcher — hidden entirely for a single-module user (one pill reads as broken
-              UI, same case where today's rail just shows that one module's icon alone). */}
-          {moduleTabs.length > 1 && (
-            <div className="module-switcher">
-              {moduleTabs.map(t => (
-                <RailTip key={t.key} label={t.tip}>
-                  <button
-                    className={`module-tab${panel === t.key && !collapsed ? ' module-tab--active' : ''}`}
-                    onClick={() => openPanel(t.key)}
-                  >
-                    <span className="module-tab-icon" style={{ position: 'relative' }}>
-                      <t.icon size={18} strokeWidth={1.75} />
-                      {t.dot && (
-                        <span style={{
-                          position: 'absolute', top: -3, right: -5, width: 9, height: 9, borderRadius: '50%',
-                          background: t.dot, boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
-                        }} />
-                      )}
-                    </span>
-                    <span className="module-tab-label">{t.label}</span>
-                  </button>
-                </RailTip>
-              ))}
-            </div>
+          {/* Module switcher — hidden entirely for a single-tab user (one pill reads as broken UI,
+              same case where today's rail just shows that one module's icon alone). Admin gets its
+              own row above IMS/HR/POS: it's a different axis (which panel of the app) from the
+              module row (which client module), and sharing one row read as a 4th module. */}
+          {totalTabCount > 1 && (
+            <>
+              {adminTab && (
+                <div className="module-switcher module-switcher--admin">
+                  {renderModuleTab(adminTab)}
+                </div>
+              )}
+              {moduleTabs.length > 0 && (
+                <div className="module-switcher">
+                  {moduleTabs.map(renderModuleTab)}
+                </div>
+              )}
+            </>
           )}
 
         {/* Everything below hides when collapsed (CSS) — client badge, nav, footer. Kept mounted
