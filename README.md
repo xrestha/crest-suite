@@ -149,7 +149,28 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
-### S386 — 2026-07-14 — HR Employees: staff photo upload on Add/Edit Employee
+### S387 — 2026-07-14 — HR Employees staff photo upload (S386) reverted — Supabase Storage RLS never resolved
+
+S386's staff-photo upload was fully backed out after an exhaustive live-debugging session found no fixable cause. Every upload attempt from a real client login failed with `new row violates row-level security policy` (SQLSTATE 42501), and the diagnostic trail ruled out every SQL-level explanation in turn:
+
+- The RLS policy logic itself — proven correct via a temporary `SECURITY INVOKER` debug RPC that confirmed `auth.uid()`, `is_admin()`, `my_client_id()`, and the `storage.foldername(name)[1] = my_client_id()::text` comparison all resolved exactly as expected (`folder_equals_my_client_id: true`).
+- Table-level grants on `storage.objects`/`storage.buckets` for the `authenticated` role — all present (SELECT/INSERT/UPDATE/DELETE).
+- `USAGE` on the `storage` schema for `authenticated` — present.
+- Triggers on `storage.objects` — the only two (`protect_objects_delete`, `update_objects_updated_at`) fire on DELETE/UPDATE only, neither touches INSERT.
+- Constraints on `storage.objects` — just the expected PK and the `bucket_id` FK to `storage.buckets`, both satisfied.
+- Restrictive policies — none; all 5 policies on the table (including the pre-existing `Logos` ones) are `PERMISSIVE`.
+- The bucket row itself — correct `id`/`name`/`public=true`, no size/MIME restrictions.
+- Recreating the bucket via Dashboard UI instead of SQL (ruling out a stale-SQL-insert-into-`storage.buckets` cache theory) — no change.
+- A second bucket with no hyphen in the name (`staffphotos`, ruling out a bucket-name-parsing quirk) — no change.
+- A maximally permissive `FOR INSERT TO public WITH CHECK (true)` policy (ruling out any role-matching issue at all) — **still rejected identically.** This is the strongest signal: standard Postgres RLS semantics make this combination impossible to reject, which points to a Supabase Storage API-side issue rather than anything reachable from SQL.
+
+One genuine, if tangential, discovery along the way: this project has a **custom `storage.protect_delete()` trigger** (not vanilla Supabase) blocking direct SQL `DELETE` on storage tables — surfaced when attempting to clean up the test buckets via SQL, which had to be deleted through the Dashboard UI instead. Worth remembering for any future work touching `storage.*` directly.
+
+**Reverted:** `EmployeeForm.jsx` back to its pre-S386 state (no photo UI/state/handlers), `Help.js`'s Employees entry back to its original wording, and a new migration `20260714140000_hr_employee_photo_revert.sql` drops the `hr_employees.photo_url` column and all policy/function leftovers from the DB (bucket deletion itself done via Dashboard, not SQL, per the `protect_delete()` finding above). `20260714120000_hr_employee_photo.sql` (the original S386 migration) is kept in place as historical record rather than deleted, matching this repo's "migrations are the source of truth for schema history" convention — the revert is a new migration, not a rewrite of what actually happened.
+
+**Files:** `src/modules/hr/employees/EmployeeForm.jsx`, `src/pages/Help.js`, `supabase/migrations/20260714140000_hr_employee_photo_revert.sql`
+
+### S386 — 2026-07-14 — HR Employees: staff photo upload on Add/Edit Employee — REVERTED, see S387
 
 Added a circular photo avatar to `EmployeeForm.jsx`'s header (next to the "Add Employee"/"Edit — {name}" title) — click to upload a JPG/PNG/WebP under 2MB, uploads immediately on file select (same immediate-upload pattern as Settings.js's Logo upload, not gated behind Save), with a red ✕ badge to remove it. New nullable `hr_employees.photo_url` column plus a new dedicated public Storage bucket (`staff-photos`, migration `20260714120000_hr_employee_photo.sql` — **not yet run against the live DB, needs the usual SQL Editor paste-and-run step**) with real INSERT/UPDATE RLS policies scoped to the caller's own `client_id` via the path's first folder segment — tighter than the existing `Logos` bucket, whose policies are dashboard-only/undocumented and were flagged as a gap while researching the pattern to copy. No public SELECT/listing policy, same reasoning as the earlier Logos-bucket hardening pass (`20260712210000_security_advisor_anon_execute_hardening.sql`): a public bucket serves file GETs directly, the app never lists.
 

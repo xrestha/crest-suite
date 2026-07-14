@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 
 const EMPTY = {
   employee_code: '',
   full_name: '',
-  photo_url: '',
   gender: '',
   date_of_birth: '',
   pan_no: '',
@@ -87,8 +85,6 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   const [supervisors, setSupervisors] = useState([])
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState('')
-  const [photoUploading, setPhotoUploading] = useState(false)
-  const [photoMsg, setPhotoMsg] = useState('')
 
   // Active employees available as reporting supervisors (exclude self to prevent self-reporting).
   useEffect(() => {
@@ -100,31 +96,6 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   }, [clientId, employee?.id, scopedFrom])
 
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
-
-  // Uploads immediately on file select (same pattern as Settings.js's Logo upload) rather than
-  // waiting for Save — a brand-new employee has no id yet, so the path falls back to a
-  // timestamp; editing an existing employee overwrites their photo at a stable path.
-  async function handlePhotoUpload(e) {
-    const file = e.target.files[0]
-    e.target.value = ''
-    if (!file) return
-    if (file.size > 2 * 1024 * 1024) { setPhotoMsg('error:File must be under 2MB.'); return }
-    setPhotoUploading(true)
-    setPhotoMsg('')
-    const ext = file.name.split('.').pop()
-    const path = `${clientId}/${employee?.id || Date.now()}.${ext}`
-    const { error: upErr } = await supabase.storage.from('staff-photos').upload(path, file, { upsert: true, contentType: file.type })
-    if (upErr) { setPhotoMsg('error:' + upErr.message); setPhotoUploading(false); return }
-    const { data: { publicUrl } } = supabase.storage.from('staff-photos').getPublicUrl(path)
-    set('photo_url', `${publicUrl}?t=${Date.now()}`)
-    setPhotoUploading(false)
-    setPhotoMsg('ok:Photo uploaded.')
-    setTimeout(() => setPhotoMsg(''), 2500)
-  }
-
-  function handlePhotoRemove() {
-    set('photo_url', '')
-  }
 
   // Suggest retirement date = date of birth + 60 years (SSF pension age in Nepal).
   function calcRetirement() {
@@ -201,50 +172,11 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
 
         {/* Header */}
         <div style={{ padding: '20px 24px 0', borderBottom: '1px solid var(--theme-border)', flexShrink: 0 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, gap: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ position: 'relative', flexShrink: 0 }}>
-                <label
-                  title={photoUploading ? 'Uploading…' : 'Upload photo'}
-                  style={{
-                    width: 56, height: 56, borderRadius: '50%', overflow: 'hidden',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-                    cursor: photoUploading ? 'default' : 'pointer', flexShrink: 0,
-                  }}
-                >
-                  {form.photo_url ? (
-                    <img src={form.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : (
-                    <span style={{ fontSize: 20, color: 'var(--theme-text3)' }}>👤</span>
-                  )}
-                  <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} disabled={photoUploading} onChange={handlePhotoUpload} />
-                </label>
-                {form.photo_url && !photoUploading && (
-                  <button
-                    type="button"
-                    onClick={handlePhotoRemove}
-                    title="Remove photo"
-                    style={{
-                      position: 'absolute', top: -4, right: -4, width: 18, height: 18, borderRadius: '50%',
-                      background: 'var(--theme-red)', color: '#fff', border: '2px solid var(--theme-card)',
-                      fontSize: 10, lineHeight: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-                    }}
-                  >✕</button>
-                )}
-              </div>
-              <div>
-                <h2 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>
-                  {isEdit ? `Edit — ${employee.full_name}` : 'Add Employee'}
-                </h2>
-                {photoMsg && (
-                  <div style={{ fontSize: 11, marginTop: 3, color: photoMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
-                    {photoMsg.replace(/^(ok|error):/, '')}
-                  </div>
-                )}
-              </div>
-            </div>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 18, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h2 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>
+              {isEdit ? `Edit — ${employee.full_name}` : 'Add Employee'}
+            </h2>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 18, cursor: 'pointer' }}>✕</button>
           </div>
           <div className="tab-bar" style={{ marginBottom: 0 }}>
             {TABS.map(t => (
