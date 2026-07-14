@@ -208,17 +208,18 @@
   margin-top: 2px;
 }
 
+/* Solid fill demoted to a tinted/bordered treatment (2026-07-14 audit) — Sign In is this
+   screen's one full-strength accent button per DESIGN.md's One Accent Rule; Start Free Trial
+   and View Pricing (both share this class) stay visually distinct via green as a quiet cue
+   rather than a second competing solid block. */
 .login-btn--trial {
-  background: var(--theme-green, #34d399);
-  /* accent-text, not a dedicated green-text token — reused because within any one preset, accent
-     and green are picked from the same lightness "class" (dark presets: light/pastel accent+green
-     needing dark text; light presets: medium/saturated accent+green needing light text), so this
-     approximation holds across all 10 presets without needing a parallel per-color text token. */
-  color: var(--theme-accent-text, #0f1117);
+  background: color-mix(in srgb, var(--theme-green, #34d399) 12%, var(--theme-input-bg, #0f1117));
+  color: var(--theme-green, #34d399);
+  border: 1px solid color-mix(in srgb, var(--theme-green, #34d399) 40%, transparent);
 }
 
 .login-btn--trial:hover:not(:disabled) {
-  filter: brightness(0.92);
+  background: color-mix(in srgb, var(--theme-green, #34d399) 20%, var(--theme-input-bg, #0f1117));
 }
 
 .login-btn:hover:not(:disabled) {
@@ -250,12 +251,13 @@
   margin: 0 0 16px 0;
 }
 
-/* ── Staff (PIN) login shortcut — same size as the Sign in button ── */
+/* ── Staff (PIN) login shortcut — same size as the Sign in button. Tinted/bordered rather
+   than solid (2026-07-14 audit) — same One Accent Rule reasoning as .login-btn--trial above;
+   purple is the rationed 4th-color token, not a second general-purpose CTA fill. ── */
 .login-staff-btn {
-  background: var(--theme-purple, #8b5cf6);
-  /* accent-text reused here too — same lightness-class reasoning as .login-btn--trial above. */
-  color: var(--theme-accent-text, #ffffff);
-  border: none;
+  background: color-mix(in srgb, var(--theme-purple, #8b5cf6) 12%, var(--theme-input-bg, #0f1117));
+  color: var(--theme-purple, #8b5cf6);
+  border: 1px solid color-mix(in srgb, var(--theme-purple, #8b5cf6) 40%, transparent);
   border-radius: var(--radius-md, 12px);
   padding: 9px 20px;
   font-size: 14px;
@@ -263,11 +265,22 @@
   cursor: pointer;
   letter-spacing: 0.02em;
   margin-top: 10px;
-  transition: filter 0.15s;
+  transition: background 0.15s;
 }
 
 .login-staff-btn:hover {
-  filter: brightness(1.1);
+  background: color-mix(in srgb, var(--theme-purple, #8b5cf6) 20%, var(--theme-input-bg, #0f1117));
+}
+
+/* ── Just above the mobile breakpoint, the 2-col field grid (Your Name/Phone,
+   Email/Password) gets too narrow for its own placeholder text ("you@restaurant.com",
+   "e.g. Ramesh Shrestha" visibly clip in the ~641-750px range) before .login-split
+   itself collapses to a single column at 640px below. Collapse just this sub-grid
+   earlier so there's no pinch zone between the two breakpoints. ── */
+@media (max-width: 750px) {
+  .login-2col {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── Mobile: stack vertically ── */

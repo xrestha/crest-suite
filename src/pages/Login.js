@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { Hexagon } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { supabase } from '../supabaseClient'
@@ -108,7 +109,7 @@ export default function Login() {
         <div className="login-left">
           <div className="login-brand" style={{ justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-              <span style={{ fontSize: 30, color: 'var(--theme-accent)', lineHeight: 1 }}>⬢</span>
+              <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />
               <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
             </div>
             <button
@@ -136,33 +137,33 @@ export default function Login() {
           <div className="login-divider-label">Start your free trial</div>
 
           {trialSuccess ? (
-            <div style={{ padding: '16px', background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.25)', borderRadius: 8, fontSize: 13, color: 'var(--theme-green)', lineHeight: 1.6 }}>
+            <div style={{ padding: '16px', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--theme-green)', lineHeight: 1.6 }}>
               Account created! Sign in on the right with your email and password.
             </div>
           ) : (
             <form onSubmit={handleTrialSignup} className="login-form">
               <div className="login-field">
-                <label>Business Name *</label>
-                <input value={tBiz} onChange={e => setTBiz(e.target.value)} placeholder="e.g. Sunrise Café" autoFocus={startOnTrial} />
+                <label htmlFor="trial-biz">Business Name *</label>
+                <input id="trial-biz" value={tBiz} onChange={e => setTBiz(e.target.value)} placeholder="e.g. Sunrise Café" autoFocus={startOnTrial} />
               </div>
               <div className="login-2col">
                 <div className="login-field">
-                  <label>Your Name <span className="login-optional">(optional)</span></label>
-                  <input value={tName} onChange={e => setTName(e.target.value)} placeholder="e.g. Ramesh Shrestha" />
+                  <label htmlFor="trial-name">Your Name <span className="login-optional">(optional)</span></label>
+                  <input id="trial-name" value={tName} onChange={e => setTName(e.target.value)} placeholder="e.g. Ramesh Shrestha" />
                 </div>
                 <div className="login-field">
-                  <label>Phone *</label>
-                  <input type="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="98XXXXXXXX" />
+                  <label htmlFor="trial-phone">Phone *</label>
+                  <input id="trial-phone" type="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="98XXXXXXXX" />
                 </div>
               </div>
               <div className="login-2col">
                 <div className="login-field">
-                  <label>Email *</label>
-                  <input type="email" autoComplete="email" value={tEmail} onChange={e => setTEmail(e.target.value)} placeholder="you@restaurant.com" />
+                  <label htmlFor="trial-email">Email *</label>
+                  <input id="trial-email" type="email" autoComplete="email" value={tEmail} onChange={e => setTEmail(e.target.value)} placeholder="you@restaurant.com" />
                 </div>
                 <div className="login-field">
-                  <label>Password *</label>
-                  <input type={tShowPass ? 'text' : 'password'} autoComplete="new-password" value={tPass} onChange={e => setTPass(e.target.value)} placeholder="Min. 6 characters" />
+                  <label htmlFor="trial-password">Password *</label>
+                  <input id="trial-password" type={tShowPass ? 'text' : 'password'} autoComplete="new-password" value={tPass} onChange={e => setTPass(e.target.value)} placeholder="Min. 6 characters" />
                 </div>
               </div>
               <label className="login-show-pw">
@@ -187,12 +188,13 @@ export default function Login() {
           <p className="login-sub">Sign in to your account</p>
           <form onSubmit={handleSignIn} className="login-form">
             <div className="login-field">
-              <label>Email</label>
-              <input type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus={!startOnTrial} />
+              <label htmlFor="signin-email">Email</label>
+              <input id="signin-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus={!startOnTrial} />
             </div>
             <div className="login-field">
-              <label>Password</label>
+              <label htmlFor="signin-password">Password</label>
               <input
+                id="signin-password"
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
                 value={password} onChange={e => setPassword(e.target.value)}
