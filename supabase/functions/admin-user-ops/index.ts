@@ -338,7 +338,7 @@ Deno.serve(async (req) => {
           await del(admin.from('closing_stock').delete().in('period_id', periodIds), 'closing_stock')
           await del(admin.from('wastages').delete().in('period_id', periodIds), 'wastages')
           await del(admin.from('staff_meals').delete().in('period_id', periodIds), 'staff_meals')
-          await del(admin.from('sales_entries').delete().in('period_id', periodIds), 'sales_entries')
+          await del(admin.from('sales_entries').delete().in('period_id', periodIds).eq('source', 'manual'), 'sales_entries')
           await del(admin.from('budgets').delete().in('period_id', periodIds), 'budgets')
         }
 
@@ -406,7 +406,7 @@ Deno.serve(async (req) => {
         const { data: periods } = await admin.from('monthly_periods').select('id').eq('client_id', clientId)
         const periodIds = (periods || []).map((p: { id: string }) => p.id)
         if (periodIds.length > 0) {
-          await del(admin.from('sales_entries').delete().in('period_id', periodIds).eq('source', 'pos'), 'pos sales_entries')
+          await del(admin.from('sales_entries').delete().in('period_id', periodIds).in('source', ['pos', 'pos_comp', 'pos_credit']), 'pos sales_entries')
         }
         await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
         await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
