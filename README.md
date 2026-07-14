@@ -149,6 +149,46 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S391 — 2026-07-14 — Sidebar header `/impeccable audit` fixes: opacity-driven contrast, ARIA, icons
+
+Ran `/impeccable audit` on `Layout.js`'s sidebar header (brand mark, search trigger, admin-view dropdown, profile row) — 15/20 (Good), with a notable catch: three raw Unicode glyphs (`⬢` `⌕` `▼`) living in the very file previously cited as "the already-Lucide-re-skinned reference" across the last three audits (S388/S389/S390). The 2026-07-12 re-skin covered nav items and the module switcher — it never touched the sidebar's own brand/search/dropdown-arrow chrome.
+
+- **[P1] Dropdown arrow computed to ~1.96:1 contrast** — `.sidebar-dropdown-arrow`'s `opacity: 0.5` was halving an already token-correct `var(--theme-text2)` (which clears 4.9-7.3:1 on its own), landing well under the 3:1 WCAG floor for UI indicators. The token was never the problem — the multiplier stacked on top of it was. Fixed by dropping the `opacity: 0.5` entirely.
+- **[P2] Search button had no real accessible name** — `title="Search pages (Ctrl+K)"` isn't reliably read by screen readers; the actual computed accessible name was the confusing `"⌕Ctrl K"` text content. Added `aria-label="Search pages"`.
+- **[P2] Admin-view dropdown trigger had zero ARIA state** — no `aria-expanded`/`aria-haspopup` anywhere in the file; a screen reader user got no indication the button opens a client-switcher menu or whether it's open. Added both, `aria-expanded` wired to the live `clientDropdownOpen` state.
+- **[P3] Three raw Unicode glyphs** — brand mark `⬢`, search icon `⌕`, dropdown arrow `▼` swapped for Lucide's `Hexagon`/`Search`/`ChevronDown`. The brand icon fallback is `aria-hidden` (not `aria-label`, unlike its previous state) since the adjacent visible wordmark already names the brand — a labeled icon plus adjacent text double-announces it.
+
+Verified: `CI=true npx react-scripts build` compiles clean; live-checked the search button's `aria-label` and icon render via DOM query + screenshot (logged in as a non-admin client, so the admin-only dropdown/Hexagon-fallback weren't in the DOM to screenshot directly — both are the same proven pattern already confirmed working in `Login.js`/S390, plus the clean build).
+
+**Files:** `src/components/Layout.js`, `src/components/Layout.css`
+
+### S390 — 2026-07-14 — Login page `/impeccable audit` fixes: label a11y, breakpoint gap, One Accent Rule
+
+Ran `/impeccable audit` on `Login.js`/`Login.css` (13/20 — Acceptable, the lowest-scoring page audited so far — this is the product's only public, unauthenticated, conversion-critical surface). Live browser testing turned up two confirmed, visible failures the code alone wouldn't have proven:
+
+- **[P1] 7 of 9 form labels had zero programmatic association with their inputs** — confirmed live via DOM query (`htmlFor: null, wrapsInput: false` on Business Name, Your Name, Phone, both Emails, both Passwords; only the two "Show password" checkbox labels, which wrap their input, were actually associated). Fixed by adding matching `id`/`htmlFor` pairs to all 7 fields (`trial-biz`, `trial-name`, `trial-phone`, `trial-email`, `trial-password`, `signin-email`, `signin-password`). Re-verified live: all 7 now resolve.
+- **[P2] Placeholder text truncated in the ~641-750px range** — confirmed via screenshot at 660px width ("you@restaurant.c", "Ramesh Shre" visibly clipped): the `.login-2col` sub-grid (Your Name/Phone, Email/Password) got too narrow for its own placeholders in the gap between `.login-split`'s 640px mobile-stack breakpoint and comfortable 2-column width. Fixed with an earlier, dedicated breakpoint (`@media max-width: 750px { .login-2col { grid-template-columns: 1fr } }`) so the sub-grid collapses before the pinch zone. Re-verified at 660px: no truncation.
+- **[P2] Three fully-saturated competing button colors** — "View Pricing"/"Start Free Trial" (solid green) and "Staff Login" (solid purple) competed with "Sign in" (accent) at equal visual weight, a direct violation of DESIGN.md's own One Accent Rule (purple's documented job is "a rationed 4th/5th categorical color," not a second general-purpose CTA fill). Demoted both to a tinted/bordered treatment (`color-mix()` 12% background / 40% border, matching the existing Danger-button pattern) — Sign In is now the one solid accent button on the page.
+- **[P2] Hardcoded `rgba(52,211,153,*)`** in the trial-success message — literally Dark preset's exact green hex, would've visibly mismatched the token-correct green text next to it on any of the other 9 presets. Tokenized to `color-mix(in srgb, var(--theme-green) *%, transparent)`, matching the identical pattern `.login-error` already used two lines below in the same file.
+- **[P3] Raw `⬢` Unicode glyph** for the brand mark — third occurrence of the same icon-vocabulary tell found on `ClientDashboard.jsx` (S388) and `OwnerDashboard.jsx` (S389). Swapped for Lucide's `Hexagon` icon with `aria-hidden="true"` (redundant with the adjacent "Crest Suite" text anyway).
+
+Verified: `CI=true npx react-scripts build` compiles clean, all fixes re-confirmed live (label DOM query, screenshots at 1280px and 660px, button treatment visually distinct from Sign In).
+
+**Files:** `src/pages/Login.js`, `src/pages/Login.css`
+
+### S389 — 2026-07-14 — Owner Dashboard: same S388 fixes applied (tap targets, Lucide icon)
+
+Ran `/impeccable audit` on `OwnerDashboard.jsx` (17/20 — Good, one step from Excellent) — much smaller, cleaner surface than `ClientDashboard.jsx` (no charts, zero hardcoded hex at all). Found the same 2 issues S388 had already fixed one page over, and applied the identical fix:
+
+- **[P2] Ghost buttons under touch-target minimum** — Retry/Dismiss padding `5px 10px` → `8px 12px`, same values that measured 31px on `ClientDashboard.jsx`.
+- **[P2] Raw `⚠` Unicode glyph instead of Lucide** — the 3 warning banners (module-missing, no-open-period, load-error) swapped to `<TriangleAlert>`, matching `ClientDashboard.jsx`'s identical banner pattern and `Layout.js`'s existing sidebar icon set.
+
+`OwnerDashboard.jsx` was already ahead of `ClientDashboard.jsx`'s pre-audit state in a few ways worth noting: `sr-only` section headings ("Profitability"/"Operations") for screen-reader landmarks, and zero hardcoded hex (no charts on this page, so no SVG-color exception needed at all).
+
+Verified: `CI=true npx react-scripts build` compiles clean, live-checked in browser (no layout regression, contrast fix from S388 visible in KPI subtext since it's the same shared token).
+
+**Files:** `src/pages/dashboard/OwnerDashboard.jsx`
+
 ### S388 — 2026-07-14 — Dashboard `/impeccable audit` fixes: 5-preset contrast bug, icon vocabulary, a11y
 
 Ran an `/impeccable audit` on `ClientDashboard.jsx` (16/20 — Good) and fixed all 5 recommended actions:

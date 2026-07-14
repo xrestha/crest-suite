@@ -390,9 +390,12 @@
   color: var(--theme-text1);
 }
 
+/* opacity: 0.5 (2026-07-14 audit) computed to ~1.96:1 against the sidebar background on light
+   presets — well under the 3:1 WCAG floor for UI indicators, since it halves an already-token-
+   correct color rather than choosing a deliberately quieter one. Full-opacity var(--theme-text2)
+   (inherited from .sidebar-dropdown-trigger) already clears 4.9-7.3:1 on every preset — dropping
+   the opacity multiplier is the fix, not picking a new color. */
 .sidebar-dropdown-arrow {
-  font-size: 9px;
-  opacity: 0.5;
   margin-left: 4px;
   flex-shrink: 0;
   transition: transform 0.15s ease;

@@ -18,7 +18,7 @@ import {
   Settings, Palmtree, Calculator, PartyPopper, Gift, CreditCard, Briefcase, Coins, FileCheck2,
   ShieldCheck, Warehouse, Store,
   HelpCircle, PanelLeftClose, PanelLeftOpen, LogOut,
-  Crown, History, QrCode,
+  Crown, History, QrCode, Hexagon, Search, ChevronDown,
 } from 'lucide-react'
 import './Layout.css'
 
@@ -503,14 +503,16 @@ export default function Layout() {
             <div className="sidebar-brand-icon" title={settings?.app_name || 'Crest'}>
               {settings?.logo_url
                 ? <img src={settings.logo_url} alt="logo" style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 4 }} />
-                : <span aria-label="Crest" style={{ fontSize: 22, lineHeight: 1, color: 'var(--theme-accent)' }}>⬢</span>}
+                /* aria-hidden, not aria-label — the visible wordmark right next to it already
+                   names the brand; a labeled icon plus adjacent text double-announces it. */
+                : <Hexagon size={22} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--theme-accent)' }} />}
             </div>
             <div className="sidebar-brand-text">
               <div className="sidebar-brand-name">{settings?.app_name || 'Crest'}</div>
               <div className="sidebar-brand-sub">{PANEL_TITLES[panel] || 'Crest Suite'}</div>
             </div>
-            <button className="sidebar-search-btn" onClick={() => setPaletteOpen(true)} title="Search pages (Ctrl+K)">
-              <span style={{ fontSize: 13 }}>⌕</span>
+            <button className="sidebar-search-btn" onClick={() => setPaletteOpen(true)} title="Search pages (Ctrl+K)" aria-label="Search pages">
+              <Search size={13} strokeWidth={2} aria-hidden="true" />
               <span className="sidebar-search-label">Ctrl K</span>
             </button>
           </div>
@@ -558,11 +560,13 @@ export default function Layout() {
                   <button
                     className="sidebar-dropdown-trigger"
                     onClick={() => setClientDropdownOpen(o => !o)}
+                    aria-haspopup="listbox"
+                    aria-expanded={clientDropdownOpen}
                   >
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                       {allClients.find(c => c.id === adminViewClientId)?.name || 'Crest Admin'}
                     </span>
-                    <span className={`sidebar-dropdown-arrow${clientDropdownOpen ? ' sidebar-dropdown-arrow--open' : ''}`}>▼</span>
+                    <ChevronDown size={13} strokeWidth={2.25} aria-hidden="true" className={`sidebar-dropdown-arrow${clientDropdownOpen ? ' sidebar-dropdown-arrow--open' : ''}`} />
                   </button>
                 </div>
                 {userInfoBlock}
