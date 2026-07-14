@@ -48,7 +48,14 @@ export const PAYMENT_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay']
 export const VOID_REASONS    = ['Wrong table', 'Duplicate order', 'Test order', 'Order entry mistake', 'Other']
 export const COMP_REASONS    = ['Walkout / unpaid', 'Customer goodwill', 'Customer complaint', 'Staff error', 'Owners', 'Company Guest', 'Other']
 export const DEFAULT_DISCOUNT_REASONS = ['Loyalty customer', 'Promo / coupon code', 'Manager goodwill', 'Bulk / corporate order', 'Price match', 'Other']
-export const COPY_LABEL = n => n <= 1 ? 'ORIGINAL-COPY' : n === 2 ? 'SECOND-COPY' : n === 3 ? 'THIRD-COPY' : `REPRINT #${n}`
+// The 1st print (n=1) carries no label at all — it IS the original, nothing to distinguish it
+// from. Every print after that is "COPY OF ORIGINAL - (n)" where n counts the copy/reprint
+// itself, not the total print count — e.g. the 2nd print overall is copy 1, the 5th print
+// overall is copy 4. Matches Nepal e-billing reprint-labeling convention (sequential "Copy of
+// Original" count), not the earlier ORIGINAL-COPY/SECOND-COPY/THIRD-COPY/REPRINT#n scheme,
+// which borrowed Rule 17(2)'s triplicate (3 simultaneous distribution copies) wording for a
+// different concept (sequential reprints over time) — the two don't actually map cleanly.
+export const COPY_LABEL = n => n <= 1 ? '' : `COPY OF ORIGINAL - (${n - 1})`
 
 // 40x40 rather than the 44px touch-target ideal — the largest that comfortably fits the 320px
 // cart column and 52px top bar without reflowing either layout; still a large jump from the

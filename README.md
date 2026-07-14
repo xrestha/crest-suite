@@ -149,6 +149,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S385 — 2026-07-14 — POS bill reprint labeling revised to match actual IRD reprint convention
+
+Triggered by a client-supplied photo of a real reprinted bill from another system, which didn't match Crest's own output at all — traced that to confirm Crest wasn't running a stale build, then it turned into a deeper compliance question: should the header word "Tax" drop on reprints? Researched Nepal's VAT Rules 2053 (downloaded and read Rule 17(2) directly, plus three secondary e-billing compliance guides) — found no basis for dropping "Tax" on any copy (Rule 17(2) requires "Tax invoice... clearly and visibly written on the front page" with no carve-out), but did find that Crest's existing `ORIGINAL-COPY`/`SECOND-COPY`/`THIRD-COPY`/`REPRINT #N` scheme (from an earlier session, S218) had conflated two different concepts: Rule 17(2)'s *triplicate* provision (three simultaneous paper copies distributed at issuance — buyer/office/self) versus the actual documented reprint convention for computerized billing, which is a simpler sequential "Copy of Original – 1, 2, 3…" count.
+
+Replaced `COPY_LABEL` in `posOrdersConstants.js`: the first print now carries **no label at all** (nothing to distinguish the original from itself), every print after that shows **"COPY OF ORIGINAL - (n)"** where `n` counts the copy itself, not the total print count — the 2nd print overall is copy 1, the 5th print overall is copy 4 (matches the sourced example exactly: "if there are four copies, the last one indicates the invoice was printed 5 times"). No more `REPRINT #N` escape hatch needed past copy 3 — one consistent format extends indefinitely. Both `buildBillHtml()` and `buildCompSlipHtml()` in `posOrderPrintHtml.js` updated to conditionally render the copy-label div (skipped entirely on the original print, so there's no blank line reserved on the receipt). Header text ("TAX INVOICE"/"BILL") is unchanged on every print — only the copy-number line moves. Verified: pure-function output hand-checked for prints 1–6, dev bundle compiles clean (no console errors), the two Help.js POS billing entries that referenced the old ORIGINAL-COPY/SECOND-COPY/THIRD-COPY wording updated to match.
+
+**Files:** `src/modules/pos/orders/posOrdersConstants.js`, `src/modules/pos/orders/posOrderPrintHtml.js`, `src/pages/Help.js`
+
 ### S384 — 2026-07-14 — Overhead-to-food-costing audit: fixed 3 real bugs found by a deep-dive review
 
 Client asked for an in-depth analysis of how the Overheads feature affects food costing. A research pass found four independent, non-shared implementations of "period overhead total" across the codebase (`Overheads.js`, `Recipes.js`, `ClientDashboard.jsx`, `OwnerDashboard.jsx`) plus a mislabeled formula — reported back for confirmation before touching anything, then fixed the three the client approved:

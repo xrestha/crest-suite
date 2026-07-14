@@ -97,7 +97,7 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
   ${billingSettings.property_phone ? `<div class="c" style="font-size:11px">${esc(billingSettings.property_phone)}</div>` : ''}
   ${billingSettings.vat_number ? `<div class="c" style="font-size:11px">${vatReg ? 'VAT No' : 'PAN No'}: ${esc(billingSettings.vat_number)}</div>` : ''}
   <div class="c b lg" style="margin-top:4px">${vatReg ? 'TAX INVOICE' : 'BILL'}</div>
-  <div class="c copy">${esc(copyLabel)}</div>
+  ${copyLabel ? `<div class="c copy">${esc(copyLabel)}</div>` : ''}
   <hr>
   <div class="row"><span>Bill No:</span><span class="b">${invoiceNo}</span></div>
   <div class="row"><span>Date:</span><span>${adDateStr}</span></div>
@@ -228,7 +228,7 @@ export function buildCompSlipHtml({ order, items, costMap, copyLabel, outletName
   .copy { font-size:11px; letter-spacing:1px; }
 </style>
 </head><body>
-  <div class="c copy">${esc(copyLabel)}</div>
+  ${copyLabel ? `<div class="c copy">${esc(copyLabel)}</div>` : ''}
   ${outletName ? `<div class="c b" style="font-size:13px">${esc(outletName)}</div>` : ''}
   <div class="c b lg" style="margin-top:4px">COMPLIMENTARY SLIP</div>
   <div class="c" style="font-size:11px">Internal record — not a Tax Invoice or PAN Bill</div>
