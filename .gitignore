@@ -30,3 +30,4 @@ yarn-error.log*
 .impeccable/hook.cache.json
 __pycache__/
 *.pyc
+.playwright-mcp/
