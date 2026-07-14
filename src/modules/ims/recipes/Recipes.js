@@ -11,7 +11,7 @@ import { getSuggestedPrice } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
 import { suggestSeeds } from '../../../data/nutritionSeed'
 import { fetchUsdaNutrition } from '../../../utils/usdaNutrition'
-import { EMPTY_RECIPE, fmtNutrient, vatOf, calcSubRecipeCostPerUnit, calcRecipeCost, calcLiveCost, recipeHasIngredient } from './recipeCostCalc'
+import { EMPTY_RECIPE, fmtNutrient, vatOf, calcSubRecipeCostPerUnit, calcRecipeCost, calcLiveCost, recipeHasIngredient, allocateOverhead } from './recipeCostCalc'
 import RecipeCostCardPrint from './RecipeCostCardPrint'
 import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
@@ -22,7 +22,7 @@ export default function Recipes() {
   const { settings, recipeCategories } = useSettings()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const [recipes, setRecipes] = useState([])
-  const [overheadData, setOverheadData] = useState(null) // { totalOverheads, totalCovers, openPeriodId } | null
+  const [overheadData, setOverheadData] = useState(null) // { totalOverheads, totalRevenue, revenueByRecipe, coversByRecipe, openPeriodId } | null
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('list') // list | edit | detail
@@ -91,12 +91,32 @@ export default function Recipes() {
     if (openPeriodId) {
       const [{ data: ohRows }, { data: salesRows }] = await Promise.all([
         scopedFrom('overheads', 'amount').eq('period_id', openPeriodId).eq('bucket', 'overhead'),
-        supabase.from('sales_entries').select('qty_sold').eq('period_id', openPeriodId)
+        // Excludes comps (source='pos_comp') — never actually paid for, shouldn't earn a
+        // revenue share of overhead. Matches the exclusion Overheads.js/OwnerDashboard.jsx use.
+        supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', openPeriodId).neq('source', 'pos_comp')
       ])
       const totalOverheads = (ohRows || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
-      const totalCovers = (salesRows || []).reduce((s, se) => s + parseFloat(se.qty_sold || 0), 0)
-      if (totalOverheads > 0 && totalCovers > 0) {
-        setOverheadData({ totalOverheads, totalCovers, openPeriodId })
+
+      // Per-recipe revenue/covers so overhead can be allocated proportional to each recipe's
+      // share of period revenue (see allocateOverhead in recipeCostCalc.js), not a flat split.
+      // unit_price captured at sale time is used when present, else falls back to the recipe's
+      // current price — same convention as Overheads.js/OwnerDashboard.jsx's revenue totals.
+      const priceMap = {}
+      allRecipes.forEach(rec => { priceMap[rec.id] = parseFloat(rec.selling_price) || 0 })
+      const revenueByRecipe = {}
+      const coversByRecipe = {}
+      let totalRevenue = 0
+      ;(salesRows || []).forEach(se => {
+        const price = se.unit_price != null ? parseFloat(se.unit_price) : (priceMap[se.recipe_id] || 0)
+        const qty = parseFloat(se.qty_sold || 0)
+        const rev = qty * price
+        revenueByRecipe[se.recipe_id] = (revenueByRecipe[se.recipe_id] || 0) + rev
+        coversByRecipe[se.recipe_id] = (coversByRecipe[se.recipe_id] || 0) + qty
+        totalRevenue += rev
+      })
+
+      if (totalOverheads > 0 && totalRevenue > 0) {
+        setOverheadData({ totalOverheads, totalRevenue, revenueByRecipe, coversByRecipe, openPeriodId })
       } else {
         setOverheadData(null)
       }
@@ -1192,11 +1212,13 @@ export default function Recipes() {
 
             {/* Overhead panel — shown when overheads + sales exist for open period */}
             {!isSubRec && overheadData && price > 0 && (() => {
-              const ohPerPortion = overheadData.totalOverheads / overheadData.totalCovers
+              const { ohPerPortion, revenueSharePct, covers } = allocateOverhead(selectedRecipe.id, overheadData)
               const trueCost = cost + ohPerPortion
               const trueNetMargin = price > 0 ? ((price - trueCost) / price) * 100 : null
               const vat = vatOf(selectedRecipe)
-              const suggestedRaw = trueCost / 0.20
+              // Targets a 30% true margin (true cost = 70% of price), matching the health-check
+              // threshold below — not a 20%-food-cost-style ratio.
+              const suggestedRaw = trueCost / 0.70
               const suggestedVat = Math.ceil((suggestedRaw * (1 + vat)) / 5) * 5
               return (
                 <div style={{
@@ -1210,7 +1232,9 @@ export default function Recipes() {
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Overhead / Portion</div>
                       <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-green)' }}>NPR {ohPerPortion.toFixed(2)}</div>
-                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>NPR {overheadData.totalOverheads.toLocaleString()} ÷ {overheadData.totalCovers} covers</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
+                        {covers > 0 ? `${(revenueSharePct * 100).toFixed(1)}% of revenue ÷ ${covers} covers sold` : 'No sales this period'}
+                      </div>
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>True Cost / Portion</div>
@@ -1219,13 +1243,13 @@ export default function Recipes() {
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>True Net Margin %</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: trueNetMargin >= 20 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: trueNetMargin >= 30 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
                         {trueNetMargin != null ? `${trueNetMargin.toFixed(1)}%` : '—'}
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{trueNetMargin >= 20 ? '✓ Healthy' : '✗ Below 20%'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{trueNetMargin >= 30 ? '✓ Healthy' : '✗ Below 30%'}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Suggested Price @ 20% margin</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Suggested Price @ 30% margin</div>
                       <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-green)' }}>NPR {suggestedVat}</div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>incl. {(vat*100).toFixed(0)}% VAT, rounded to ÷5</div>
                     </div>

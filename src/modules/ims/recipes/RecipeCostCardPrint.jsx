@@ -1,5 +1,5 @@
 import { NUTRIENTS, calcRecipeNutrition } from '../../../utils/nutrition'
-import { calcRecipeCost, calcSubRecipeCostPerUnit, vatOf, fmtNutrient } from './recipeCostCalc'
+import { calcRecipeCost, calcSubRecipeCostPerUnit, vatOf, fmtNutrient, allocateOverhead } from './recipeCostCalc'
 
 // The A4 print-only Recipe Cost Card. Previously duplicated verbatim in two places in
 // Recipes.js — the detail view's "🖶 Print" and the list rows' 🖶 button — which had drifted
@@ -123,10 +123,11 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
 
       {/* Overhead section */}
       {!isSubRec && overheadData && price > 0 && (() => {
-        const ohPer = overheadData.totalOverheads / overheadData.totalCovers
+        const { ohPerPortion: ohPer } = allocateOverhead(recipe.id, overheadData)
         const trueCost = cost + ohPer
         const trueMargin = price > 0 ? ((price - trueCost) / price) * 100 : null
-        const suggested = Math.ceil(((trueCost / 0.20) * (1 + vat)) / 5) * 5
+        // Targets a 30% true margin (true cost = 70% of price) — matches Recipes.js's detail view.
+        const suggested = Math.ceil(((trueCost / 0.70) * (1 + vat)) / 5) * 5
         return (
           <div style={{ marginTop: 16, padding: '10px 12px', border: '1px solid #ccc', borderRadius: 3 }}>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#555', marginBottom: 8 }}>True Cost with Overheads</div>
@@ -135,7 +136,7 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
                 { label: 'Overhead / Portion', value: `NPR ${ohPer.toFixed(2)}` },
                 { label: 'True Cost / Portion', value: `NPR ${trueCost.toFixed(2)}` },
                 { label: 'True Net Margin %', value: trueMargin != null ? `${trueMargin.toFixed(1)}%` : '—' },
-                { label: 'Suggested @ 20% Margin', value: `NPR ${suggested}` },
+                { label: 'Suggested @ 30% Margin', value: `NPR ${suggested}` },
               ].map(m => (
                 <div key={m.label}>
                   <div style={{ fontSize: 9, color: '#777', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{m.label}</div>

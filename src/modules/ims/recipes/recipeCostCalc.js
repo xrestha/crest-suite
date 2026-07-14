@@ -74,6 +74,22 @@ export function calcLiveCost(ingList, itemsList, allRecipes) {
   }, 0)
 }
 
+// Allocates a period's fixed overhead to one recipe proportional to that recipe's share of
+// total period revenue (not a flat per-portion split) — a recipe that drove 10% of revenue
+// absorbs 10% of total overhead, then that share is divided by its own units sold to get a
+// per-portion figure. A recipe with no sales this period has no revenue share to base an
+// allocation on, so it gets zero. `overheadData` shape: { totalOverheads, totalRevenue,
+// revenueByRecipe: {recipeId: revenue}, coversByRecipe: {recipeId: qtySold} }.
+export function allocateOverhead(recipeId, overheadData) {
+  if (!overheadData || overheadData.totalRevenue <= 0) return { ohPerPortion: 0, revenueSharePct: 0, covers: 0 }
+  const revenue = overheadData.revenueByRecipe[recipeId] || 0
+  const covers = overheadData.coversByRecipe[recipeId] || 0
+  const revenueSharePct = revenue / overheadData.totalRevenue
+  const allocatedTotal = overheadData.totalOverheads * revenueSharePct
+  const ohPerPortion = covers > 0 ? allocatedTotal / covers : 0
+  return { ohPerPortion, revenueSharePct, covers }
+}
+
 // True if a recipe contains an ingredient (item or nested sub-recipe) whose name matches `q`.
 export function recipeHasIngredient(recipe, q, allRecipes, seen = new Set()) {
   if (!recipe || seen.has(recipe.id)) return false

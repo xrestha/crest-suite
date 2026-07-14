@@ -18,7 +18,8 @@ import { explodeRecipeIngredients } from '../../utils/recipeCost'
 // existing report in the codebase is period-bound; a true cross-period rolling window would need
 // new multi-period join logic with no precedent, so Phase 1 stays consistent with everything else).
 export default function OwnerDashboard() {
-  const { profile, clientId, clientModules, loading: authLoading } = useAuth()
+  const { profile, clientId, clientModules, hasFeature, loading: authLoading } = useAuth()
+  const canOverheads = hasFeature('overheads')
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const navigate = useNavigate()
@@ -70,14 +71,17 @@ export default function OwnerDashboard() {
 
   // ── IMS figures: Revenue, Food Cost (net purchases), Wastage, Overheads, Cash/Credit split ──
   // Same tables/formulas as ClientDashboard.jsx's loadStats() — Revenue excludes comps
-  // (source='pos_comp', never actually paid for).
+  // (source='pos_comp', never actually paid for). Overheads query here is scoped to
+  // bucket='overhead' only (unlike ClientDashboard's), since this page's True Net Margin
+  // also subtracts a separately-computed HR-payroll laborCostTotal — without the bucket
+  // filter, the Overheads page's "Labor Costs" tab rows would get subtracted a second time.
   async function loadImsFigures(period) {
     const results = await Promise.all([
       period ? supabase.from('purchase_entries').select('item_id, qty, rate, payment_method').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
       scopedFrom('recipes', 'id, selling_price'),
-      period ? supabase.from('overheads').select('amount').eq('period_id', period.id) : { data: [] },
+      period ? supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead') : { data: [] },
       period ? supabase.from('wastages').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       scopedFrom('items', 'id, per_uom_rate'),
     ])
@@ -412,15 +416,15 @@ export default function OwnerDashboard() {
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Estimate →</div>
           </div>
 
-          <div {...kpiCard(null)}>
+          <div {...kpiCard(canOverheads ? null : () => navigate('/overheads'))}>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
               <Tip text="Revenue minus food cost, labor cost, and overheads, as a % of revenue. This is what the business actually keeps." width={260}>True Net Margin % (MTD)</Tip>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green)' : netMarginPct >= 10 ? 'var(--theme-accent)' : 'var(--theme-red)' }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
+            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: !canOverheads || netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green)' : netMarginPct >= 10 ? 'var(--theme-accent)' : 'var(--theme-red)' }}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : !canOverheads ? '—' : netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>
-              {!loading && overheadTotal === 0 ? 'Excludes overhead — not entered' : 'After food, labor & overhead'}
+              {!canOverheads ? 'Requires Overheads (Pro) →' : !loading && overheadTotal === 0 ? 'Excludes overhead — not entered' : 'After food, labor & overhead'}
             </div>
           </div>
         </div>
