@@ -8,7 +8,7 @@ const KEYS = [
   ['1', '2', '3'],
   ['4', '5', '6'],
   ['7', '8', '9'],
-  ['',  '0', '⌫'],
+  ['C', '0', '⌫'],
 ]
 
 // Public, unauthenticated PIN login for HR Employee Self-Service — same shape as PosLogin.jsx,
@@ -36,6 +36,7 @@ export default function SelfServiceLogin() {
 
   const pressKey = useCallback((k) => {
     if (k === '⌫') { setPin(p => p.slice(0, -1)); setError(''); return }
+    if (k === 'C') { setPin(''); setError(''); return }
     if (!k) return
     setPin(p => p.length < 6 ? p + k : p)
     setError('')
@@ -46,6 +47,7 @@ export default function SelfServiceLogin() {
     function onKey(e) {
       if (e.key >= '0' && e.key <= '9') pressKey(e.key)
       else if (e.key === 'Backspace')    pressKey('⌫')
+      else if (e.key === 'Escape')       pressKey('C')
       else if (e.key === 'Enter')        handleSignIn()
     }
     window.addEventListener('keydown', onKey)
@@ -96,6 +98,14 @@ export default function SelfServiceLogin() {
     <div style={{
       minHeight: '100vh', background: 'var(--theme-bg)',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24,
+    }}>
+    {/* Elevated card wrapper (2026-07-14 audit) — this file's own comment claims "same shape as
+        PosLogin.jsx", but the content previously floated bare on the page background instead of
+        getting the same .card treatment. */}
+    <div className="card" style={{
+      padding: '40px 36px', borderRadius: 10,
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      width: '100%', maxWidth: 540,
     }}>
       <div style={{ marginBottom: 36, textAlign: 'center' }}>
         <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--theme-text1)', letterSpacing: 0.5 }}>Employee Self-Service</div>
@@ -161,7 +171,10 @@ export default function SelfServiceLogin() {
                 style={{
                   width: 72, height: 72, background: k ? 'var(--theme-card)' : 'transparent',
                   border: k ? '1px solid var(--theme-border)' : 'none', borderRadius: '50%',
-                  color: 'var(--theme-text1)', fontSize: k === '⌫' ? 20 : 22, fontWeight: 500,
+                  color: k === 'C' ? 'var(--theme-text3)' : 'var(--theme-text1)',
+                  fontSize: k === '⌫' ? 20 : k === 'C' ? 15 : 22,
+                  fontWeight: k === 'C' ? 600 : 500,
+                  letterSpacing: k === 'C' ? '0.04em' : 'normal',
                   cursor: k ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
               >
@@ -170,7 +183,7 @@ export default function SelfServiceLogin() {
             ))}
           </div>
 
-          {error && <p style={{ color: 'var(--theme-red)', fontSize: 13, textAlign: 'center', margin: 0 }}>{error}</p>}
+          {error && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 13, textAlign: 'center', margin: 0 }}>{error}</p>}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
             <button onClick={back} style={{
@@ -188,6 +201,7 @@ export default function SelfServiceLogin() {
           </div>
         </div>
       )}
+    </div>
     </div>
   )
 }

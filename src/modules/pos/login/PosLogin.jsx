@@ -276,7 +276,7 @@ const pinDots = Math.max(4, pin.length)
           </div>
 
           {error && (
-            <p style={{ color: 'var(--theme-red)', fontSize: 13, textAlign: 'center', margin: 0 }}>
+            <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 13, textAlign: 'center', margin: 0 }}>
               {error}
             </p>
           )}

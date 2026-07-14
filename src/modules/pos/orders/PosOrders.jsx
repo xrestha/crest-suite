@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
+import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { contrastRatio } from '../../../utils/avatarColor'
 import QRCode from 'qrcode'
 import { adToBs, getBsToday, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
@@ -25,6 +27,12 @@ import {
 export default function PosOrders() {
   const { clientId, profile, hasPosAccess, isAdmin, isOwner, posPlan, imsEnabled } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { colors } = useTheme()
+  // Solid-amber badges (offline-pending dot, pending-items count, writeoff button) were hardcoded
+  // to black text — passes on 9 of 10 presets but computes to 4.18:1 (fails WCAG AA) on Light's
+  // amber (#b45309), a genuinely dark burnt-orange. Same contrast-pick approach avatarColorFor()
+  // already uses, so this stays correct if a future preset's amber ever needs white too.
+  const amberBadgeText = contrastRatio(colors.amber, '#ffffff') >= contrastRatio(colors.amber, '#000000') ? '#ffffff' : '#000000'
 
   // Upsell/Cross-sell suggestion-chip tiering (product-roadmap memory, built S210 but never
   // actually gated by plan until now — every client got the full Pro+IMS experience for free).
@@ -1650,7 +1658,7 @@ export default function PosOrders() {
           <Tip text="Offline — this order is saved on this device and will sync when you reconnect">
             <span style={{
               fontSize: 12, fontWeight: 700, color: 'var(--theme-amber)',
-              background: 'rgba(251,191,36,0.12)', borderRadius: 5,
+              background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)', borderRadius: 5,
               padding: '2px 7px', cursor: 'default',
             }}>📵 Offline</span>
           </Tip>
@@ -1677,7 +1685,7 @@ export default function PosOrders() {
       {activeTable && (pendingGuestOrders[activeTable.id]?.length > 0) && (
         <div style={{
           flexShrink: 0, padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8,
-          background: 'rgba(201,168,76,0.10)', borderBottom: '1px solid var(--theme-border)',
+          background: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', borderBottom: '1px solid var(--theme-border)',
         }}>
           {pendingGuestOrders[activeTable.id].map(req => (
             <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -1826,7 +1834,7 @@ export default function PosOrders() {
                         <Tip text={`${item.qty - item.sent_qty} extra added since last ticket — press KOT or BOT to send the addition to the station`}>
                           <span style={{
                             fontSize: 9, fontWeight: 700, flexShrink: 0,
-                            background: 'var(--theme-amber)', color: '#000',
+                            background: 'var(--theme-amber)', color: amberBadgeText,
                             borderRadius: 4, padding: '1px 5px', cursor: 'default',
                           }}>
                             +{item.qty - item.sent_qty}
@@ -2427,7 +2435,7 @@ export default function PosOrders() {
               </button>
             )}
             {billingTab === 'writeoff' && (
-              <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-amber)', color: '#000', borderColor: 'var(--theme-amber)' }}
+              <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-amber)', color: amberBadgeText, borderColor: 'var(--theme-amber)' }}
                 onClick={() => closeOrder('writeoff')} disabled={closing || !closeReason}>
                 {closing ? 'Processing…' : 'Mark Complimentary (₨0 collected)'}
               </button>
@@ -2518,7 +2526,7 @@ export default function PosOrders() {
                 <button
                   onClick={clearAllOccupiedTables}
                   className="btn btn-ghost"
-                  style={{ fontSize: 13, flexShrink: 0, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}
+                  style={{ fontSize: 13, flexShrink: 0, color: 'var(--theme-red)', borderColor: 'color-mix(in srgb, var(--theme-red) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)' }}
                 >⚠ Clear Occupied</button>
               </Tip>
             )}
@@ -2536,7 +2544,7 @@ export default function PosOrders() {
           {pendingTableCount > 0 && (
             <Tip text="Tables with items added but not yet sent to the kitchen/bar — tap the table to review and send">
               <span style={{
-                fontSize: 12, fontWeight: 700, color: '#000',
+                fontSize: 12, fontWeight: 700, color: amberBadgeText,
                 background: 'var(--theme-amber)', borderRadius: 12,
                 padding: '4px 10px', cursor: 'default', whiteSpace: 'nowrap',
               }}>
@@ -2557,7 +2565,7 @@ export default function PosOrders() {
             onClick={() => firstTable && openTable(firstTable)}
             style={{
               display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
-              background: 'rgba(201,168,76,0.16)', border: '1px solid var(--theme-accent)',
+              background: 'color-mix(in srgb, var(--theme-accent) 16%, transparent)', border: '1px solid var(--theme-accent)',
               borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13.5, fontWeight: 700,
               color: 'var(--theme-accent)',
             }}
@@ -2570,25 +2578,25 @@ export default function PosOrders() {
       })()}
 
       {!isOnline && (
-        <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber)' }}>
           <span>📵</span>
           <span><strong>Offline</strong> — orders are saved on this device and will sync when you reconnect. Billing stays disabled until then.</span>
           {pendingOrderIds.size > 0 && (
-            <span style={{ marginLeft: 'auto', background: 'rgba(251,191,36,0.15)', borderRadius: 20, padding: '2px 10px', fontWeight: 600, flexShrink: 0 }}>
+            <span style={{ marginLeft: 'auto', background: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', borderRadius: 20, padding: '2px 10px', fontWeight: 600, flexShrink: 0 }}>
               {pendingOrderIds.size} pending
             </span>
           )}
         </div>
       )}
       {syncingOffline && (
-        <div style={{ background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.25)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green)' }}>
           ⟳ Syncing {pendingOrderIds.size} {pendingOrderIds.size === 1 ? 'order' : 'orders'}…
         </div>
       )}
       {floorMsg && (
         <div style={{
-          background: floorMsg.startsWith('error:') ? 'rgba(248,113,113,0.08)' : 'rgba(52,211,153,0.08)',
-          border: `1px solid ${floorMsg.startsWith('error:') ? 'rgba(248,113,113,0.25)' : 'rgba(52,211,153,0.25)'}`,
+          background: floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 8%, transparent)' : 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
+          border: `1px solid ${floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 25%, transparent)' : 'color-mix(in srgb, var(--theme-green) 25%, transparent)'}`,
           borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
           color: floorMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)',
         }}>
@@ -2596,7 +2604,7 @@ export default function PosOrders() {
         </div>
       )}
       {conflictOrders.map(c => (
-        <div key={c.order_id} style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red)' }}>
+        <div key={c.order_id} style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red)' }}>
           <span>⚠</span>
           <span>
             <strong>{c.table_name}</strong>'s bill was closed on another device while you were offline —
@@ -2642,6 +2650,11 @@ export default function PosOrders() {
                   overflow: 'hidden',
                   ...(ord ? { borderColor: 'var(--theme-accent)' } : {}),
                 }}
+                {...(!inactive ? {
+                  role: 'button',
+                  tabIndex: 0,
+                  onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTable(t) } },
+                } : {})}
               >
                 {/* Glanceable status strip — readable across the room, unlike the small badge chip alone */}
                 <div style={{ margin: '-16px -18px 2px', height: 6, background: STATUS_COLOR[t.status] || 'var(--theme-border)', flexShrink: 0 }} />
@@ -2668,7 +2681,7 @@ export default function PosOrders() {
                     {ord?.offlinePending && (
                       <Tip text="Not yet synced to the server — will upload automatically once this device reconnects">
                         <span style={{
-                          fontSize: 9, fontWeight: 700, color: '#000',
+                          fontSize: 9, fontWeight: 700, color: amberBadgeText,
                           background: 'var(--theme-amber)', borderRadius: '50%',
                           width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
                           cursor: 'default',
@@ -2680,7 +2693,7 @@ export default function PosOrders() {
                     {ord?.pending > 0 && (
                       <Tip text="Items added but not sent to the kitchen/bar yet — tap to open and send">
                         <span style={{
-                          fontSize: 9, fontWeight: 700, color: '#000',
+                          fontSize: 9, fontWeight: 700, color: amberBadgeText,
                           background: 'var(--theme-amber)', borderRadius: 4,
                           padding: '1px 6px', cursor: 'default', whiteSpace: 'nowrap',
                         }}>

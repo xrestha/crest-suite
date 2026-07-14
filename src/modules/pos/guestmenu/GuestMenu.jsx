@@ -563,11 +563,15 @@ function MenuItemCard({ item, nutritionEnabled, orderingEnabled, qty, onQtyChang
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             {item.is_veg != null && (
-              <span title={item.is_veg ? 'Veg' : 'Non-Veg'} style={{
-                display: 'inline-block', width: 12, height: 12, borderRadius: 2, flexShrink: 0,
-                border: `1.5px solid ${item.is_veg ? 'var(--theme-green)' : 'var(--theme-red)'}`,
-              }}>
-                <span style={{
+              <span
+                role="img"
+                aria-label={item.is_veg ? 'Vegetarian' : 'Non-vegetarian'}
+                title={item.is_veg ? 'Veg' : 'Non-Veg'}
+                style={{
+                  display: 'inline-block', width: 12, height: 12, borderRadius: 2, flexShrink: 0,
+                  border: `1.5px solid ${item.is_veg ? 'var(--theme-green)' : 'var(--theme-red)'}`,
+                }}>
+                <span aria-hidden="true" style={{
                   display: 'block', width: 6, height: 6, margin: '2px auto', borderRadius: '50%',
                   background: item.is_veg ? 'var(--theme-green)' : 'var(--theme-red)',
                 }} />

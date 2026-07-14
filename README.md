@@ -149,6 +149,23 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S392 — 2026-07-14 — Kiosk/offline pages `/impeccable audit` fixes: keyboard access, tokens, ARIA
+
+Ran `/impeccable audit` on the four kiosk/offline-capable pages (`PosLogin.jsx`, `SelfServiceLogin.jsx`, `GuestMenu.jsx`, `PosOrders.jsx`) — scores 16/14/17/12 respectively, `PosOrders.jsx` lowest as the largest and highest-stakes file. Fixed all 6 findings, `PosOrders.jsx` first and verified in isolation given its size and real-time risk profile (this repo's own convention: "prefer the smallest safe cut" on this file — all changes here were purely additive/cosmetic, no state or business logic touched):
+
+- **[P1] `PosOrders.jsx` table cards had zero keyboard operability** — "tap a table to open its order" is the screen's entire reason to exist, and it was a `<div onClick>` with no `role`/`tabIndex`/`onKeyDown`. Added the same pattern the dashboards already use (`kpiCard()`'s role="button" + Enter/Space handler), gated on `!inactive` to match the existing click-guard.
+- **[P2] 20 hardcoded status-banner colors in `PosOrders.jsx`** — `rgba(52,211,153,*)` / `rgba(248,113,113,*)` / `rgba(251,191,36,*)` / `rgba(201,168,76,*)`, literally the Dark preset's exact green/red/amber/accent hex, hardcoded across the offline/syncing/guest-order/conflict banners and pending-count badges. Tokenized to `color-mix(in srgb, var(--theme-X) N%, transparent)`, same fix already applied to `Login.js` (S390).
+- **[P3 → confirmed real bug] `color: '#000'` hardcoded on 5 solid-amber badges** — flagged in the audit as "likely low practical risk," but computing actual contrast per preset found Light's amber (`#b45309`) genuinely fails WCAG AA with black text (4.18:1). Rather than hardcode a per-preset guess, added a computed `amberBadgeText` using the same `contrastRatio()` utility `avatarColorFor()` already relies on — correct across all 10 presets automatically, including any future one.
+- **[P2] `SelfServiceLogin.jsx` didn't match its own documented twin** — its file comment claims "same shape as `PosLogin.jsx`," but had no `.card` elevation wrapper (content floated bare on the page background) and a dead numpad Clear-key slot (`''` instead of `'C'`, with no handler at all — not just a labeling gap). Added the card wrapper and restored the working Clear key, including the `Escape`-key shortcut `PosLogin.jsx` already has.
+- **[P2] PIN error messages had no `aria-live`** (both `PosLogin.jsx` and `SelfServiceLogin.jsx`) — a screen reader user who mistypes a PIN got no announcement. Added `role="alert"`.
+- **[P2] Veg/Non-Veg indicator relied on `title` + color alone** ([GuestMenu.jsx](src/modules/pos/guestmenu/GuestMenu.jsx)) — added `role="img"` + `aria-label="Vegetarian"/"Non-vegetarian"` on the outer swatch, `aria-hidden` on the now-decorative inner dot.
+
+Also confirmed, file-wide via grep, that `PosOrders.jsx` has 19 raw Unicode/emoji glyphs (`⌫ ⚠ 📄 🔔 📵 ⟳`) on top of the `⬢ ⌕ ▼` already fixed in the sidebar (S391) and Login page (S390) — **not fixed this session**, flagged instead as needing a project-wide sweep rather than another one-off page fix, since this is now the 4th file found with the same tell.
+
+Verified: `CI=true npx react-scripts build` compiles clean after each stage (`PosOrders.jsx` fixes verified in isolation before touching the other three files). No active admin/POS session available to click-test `PosOrders.jsx` live; relied on the identical, already-proven `kpiCard()` pattern from the dashboards plus the clean build. `PosLogin.jsx` re-confirmed live to render its fallback screen correctly post-fix (device-not-activated state, no crash).
+
+**Files:** `src/modules/pos/orders/PosOrders.jsx`, `src/modules/hr/selfservice/SelfServiceLogin.jsx`, `src/modules/pos/login/PosLogin.jsx`, `src/modules/pos/guestmenu/GuestMenu.jsx`
+
 ### S391 — 2026-07-14 — Sidebar header `/impeccable audit` fixes: opacity-driven contrast, ARIA, icons
 
 Ran `/impeccable audit` on `Layout.js`'s sidebar header (brand mark, search trigger, admin-view dropdown, profile row) — 15/20 (Good), with a notable catch: three raw Unicode glyphs (`⬢` `⌕` `▼`) living in the very file previously cited as "the already-Lucide-re-skinned reference" across the last three audits (S388/S389/S390). The 2026-07-12 re-skin covered nav items and the module switcher — it never touched the sidebar's own brand/search/dropdown-arrow chrome.
