@@ -150,6 +150,19 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S397 — 2026-07-15 — Stock Movements "silent zero" root-caused + no-BOM warnings + a stray hardcoded color fixed
+
+User reported Stock Movements showing 0 entries for a client with two closed, paid POS bills (35 qty, NPR 7,000 gross per Sales Report). Not a bug in the report — root cause traced to `writeSalesEntries()`'s stock-depletion block ([PosOrders.jsx:1255-1278](src/modules/pos/orders/PosOrders.jsx#L1255-L1278)): it explodes each sold recipe into ingredients via `explodeRecipeIngredients()` ([recipeCost.js:16](src/utils/recipeCost.js#L16)), and if a recipe has zero `recipe_ingredients` rows the explosion is empty, so zero movement rows get written — silently, no error. Sales Report is unaffected since it reads `pos_orders`/`pos_order_items` directly, not `sales_entries`/`stock_movements`, so revenue reporting looked completely normal while the IMS-side depletion ledger quietly produced nothing. Confirmed live: the client's "COKE" recipe had never had an ingredient linked in Recipes → Ingredients; adding one immediately made the next sale show up correctly (40 qty, NPR 4,000, order #3).
+
+Since Recipes.js lets any recipe save with zero ingredients (the default blank ingredient row is entirely optional), added two proactive warnings so this doesn't require a support investigation next time:
+
+- **"No BOM" badge** — Recipes list ([Recipes.js:800-807](src/modules/ims/recipes/Recipes.js#L800-L807)) flags any `pos_enabled` recipe with zero `recipe_ingredients` rows, amber badge + tooltip next to the ingredient count. Sub-recipes tab excluded (never sold directly).
+- **Stock Movements cross-reference banner** ([StockMovements.js:53-79,151-158](src/modules/ims/stockcount/StockMovements.js#L53-L79)) — `loadReport()` now also pulls every distinct recipe sold this period from `sales_entries` (raw `supabase.from()` — period-scoped, not `client_id`-scoped) and diffs against which have zero `recipe_ingredients`, surfacing an amber banner naming them by name. Fires independently of the table's own empty/non-empty state, so it also catches the case where only *some* sold items are missing a BOM.
+- **Help.js** — added a tip to the existing Stock Movements entry explaining the no-BOM gap and pointing at both new indicators.
+- **Also fixed, unrelated:** a hardcoded `rgba(96,165,250,*)` blue in Recipes.js's USDA-candidates banner ([Recipes.js:1048](src/modules/ims/recipes/Recipes.js#L1048), flagged by the `/impeccable` design-lint hook mid-session) — swapped for `color-mix(in srgb, var(--theme-purple) *, transparent)`, matching the purple already used by that same banner's "Try USDA FoodData Central" button. Same literal-blue family was also spotted in Help.js (L643/732/764) but left untouched — pre-existing, out of scope for this session.
+
+**Files:** `src/modules/ims/recipes/Recipes.js`, `src/modules/ims/stockcount/StockMovements.js`, `src/pages/Help.js`
+
 ### S396 — 2026-07-15 — `/impeccable` pass on Stock Movements: keyboard-accessibility bug fix
 
 Ran `/impeccable stock movement page` (product register) against the new Stock Movements report and its Reorder Report cross-link from S395. Found one real, confirmed bug and one copy improvement:

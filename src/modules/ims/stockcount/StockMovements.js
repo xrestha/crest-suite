@@ -22,6 +22,7 @@ export default function StockMovements() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterSource, setFilterSource] = useState('all')
+  const [noBomRecipes, setNoBomRecipes] = useState([])
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -50,15 +51,32 @@ export default function StockMovements() {
   }
 
   async function loadReport(periodId, presetItemId) {
-    const [{ data: movements }, { data: profs }] = await Promise.all([
+    const [{ data: movements }, { data: profs }, { data: soldEntries }] = await Promise.all([
       scopedFrom('stock_movements',
         'id, item_id, bs_day, qty, source, ref_id, created_at, ' +
         'items(name, uom, item_code, per_uom_rate, categories(name)), ' +
         'pos_orders(order_no, close_type, closed_by)'
       ).eq('period_id', periodId).order('created_at', { ascending: false }),
       supabase.rpc('get_client_profile_names', { p_client_id: effectiveClientId }),
+      // sales_entries is period_id-scoped, not client_id-scoped — stays on raw supabase.from() (see scopedDb notes)
+      supabase.from('sales_entries').select('recipe_id').eq('period_id', periodId).in('source', ['pos', 'pos_comp']),
     ])
     setStaffNames(Object.fromEntries((profs || []).map(s => [s.id, s.full_name])))
+
+    // Cross-reference recipes actually sold this period against ones with zero recipe_ingredients
+    // rows — explodeRecipeIngredients() (PosOrders.jsx) produces nothing to deplete for those, so
+    // they were sold but never wrote a stock_movements row and would otherwise vanish silently.
+    const soldRecipeIds = [...new Set((soldEntries || []).map(s => s.recipe_id).filter(Boolean))]
+    if (soldRecipeIds.length > 0) {
+      const [{ data: ingRows }, { data: recipeRows }] = await Promise.all([
+        supabase.from('recipe_ingredients').select('recipe_id').in('recipe_id', soldRecipeIds),
+        scopedFrom('recipes', 'id, name').in('id', soldRecipeIds),
+      ])
+      const withIngredients = new Set((ingRows || []).map(r => r.recipe_id))
+      setNoBomRecipes((recipeRows || []).filter(r => !withIngredients.has(r.id)).map(r => r.name).sort())
+    } else {
+      setNoBomRecipes([])
+    }
 
     const built = (movements || []).map(m => {
       const item = m.items || {}
@@ -147,6 +165,15 @@ export default function StockMovements() {
           <div className="stat-sub">distinct items depleted</div>
         </div>
       </div>
+
+      {noBomRecipes.length > 0 && (
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber)' }}>
+          <span>⚠</span>
+          <span>
+            {noBomRecipes.length} item{noBomRecipes.length !== 1 ? 's' : ''} sold this period {noBomRecipes.length !== 1 ? 'have' : 'has'} no ingredients linked, so no stock was depleted for {noBomRecipes.length !== 1 ? 'them' : 'it'}: <strong>{noBomRecipes.join(', ')}</strong>. Add ingredients under Recipes to fix this going forward.
+          </span>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <input style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}

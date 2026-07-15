@@ -797,7 +797,14 @@ export default function Recipes() {
                             {subIngCount > 0 && <span style={{ fontSize: 10, color: 'var(--theme-accent)', marginLeft: 6 }}>⚙ {subIngCount} sub</span>}
                           </td>
                           {activeTab === 'all' && <td><span className="badge badge-yellow">{recipe.category}</span></td>}
-                          <td style={{ color: 'var(--theme-text2)' }}>{(recipe.recipe_ingredients || []).length} items</td>
+                          <td style={{ color: 'var(--theme-text2)' }}>
+                            {(recipe.recipe_ingredients || []).length} items
+                            {(recipe.recipe_ingredients || []).length === 0 && recipe.pos_enabled !== false && (
+                              <Tip text="No ingredients linked to this recipe. POS sales of this item won't deplete Item Master stock or show up in Stock Movements — add at least one ingredient here to fix that." width={280}>
+                                <span className="badge badge-amber" style={{ marginLeft: 6, fontSize: 10 }}>No BOM</span>
+                              </Tip>
+                            )}
+                          </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>NPR {cost.toFixed(2)}</td>
                           <td style={{ textAlign: 'right' }}>
                             {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toFixed(2)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
@@ -1038,7 +1045,7 @@ export default function Recipes() {
             {showNutrition && usdaCandidates.length > 0 && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12,
-                background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.25)',
+                background: 'color-mix(in srgb, var(--theme-purple) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 25%, transparent)',
                 borderRadius: 8, padding: '8px 12px', marginBottom: 18,
               }}>
                 <span style={{ color: 'var(--theme-text2)' }}>
