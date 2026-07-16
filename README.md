@@ -150,6 +150,16 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S403 — 2026-07-16 — Vendor Report: Daily Breakdown drills into the bill, skips blank days for a selected vendor
+
+User selecting a single vendor via the Vendor Purchase Report search box saw the Daily Breakdown tab still list every day in the period, with `—` for every day that vendor didn't buy anything, and no way to get from a day's number to the actual bill behind it.
+
+- **Blank-day filtering** — when the vendor search narrows to exactly one match, Daily Breakdown switches to a per-vendor view (`singleVendor`/`singleVendorDays` in [VendorReport.js](src/modules/ims/reports/VendorReport.js)) listing only the days that vendor actually has purchases on, plus a TOTAL row. Multi-vendor/no-search view is unchanged.
+- **Click-through to bill** — every day row (single-vendor view) or non-zero cell (multi-vendor view) now opens the same bill-detail modal already used by the Vendor Summary tab's vendor-name click (S383), pre-filtered to that vendor + day via a new `drilldownDay` state, with a "Show all days" link inside the modal to drop back to the full period.
+- **Theme bug fix, same file** — the modal's expanded bill-detail panel had a hardcoded `rgba(10,12,18,0.7)` background instead of a theme token, so it rendered dark regardless of the active theme preset. Changed to `var(--theme-bg)`.
+
+**Files:** `src/modules/ims/reports/VendorReport.js`
+
 ### S402 — 2026-07-15 — Payslip gets a company letterhead, SSF number, and a Net Pay highlight
 
 User pointed out the Payslip (S401) was "too generic" — no company identity anywhere on a document that exists specifically to tell one employee what one employer paid them. Researched what a payslip should contain (legally and for design) before touching anything: employer name/address/tax ID, employee SSF number, and clear visual emphasis on Net Pay came back as the consistent gaps versus what was already there. Confirmed with user: include the employer PAN/VAT number (same field already public on POS Tax Invoices, no new exposure) and keep the redesign modest — add the missing fields and polish, not a structural overhaul.

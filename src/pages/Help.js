@@ -212,8 +212,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '⊙', name: 'Vendor Report',
-        guide: 'Net spend per vendor with columns for Gross, Returns, Net, % of total, average per day, and payment method breakdown (Cash / Credit / FonePay). Search by vendor name or code. Click a vendor name to drill down into every bill for that vendor this period — payment status (Paid / Partial / aging), and click any bill row to expand its line items, returns, and payment history.',
-        tips: ['Sort by Net to find your top suppliers — good candidates for negotiating credit terms', '% of Net shows vendor concentration risk', 'Click the vendor name for a bill-by-bill breakdown with payment status']
+        guide: 'Net spend per vendor with columns for Gross, Returns, Net, % of total, average per day, and payment method breakdown (Cash / Credit / FonePay). Search by vendor name or code. Click a vendor name to drill down into every bill for that vendor this period — payment status (Paid / Partial / aging), and click any bill row to expand its line items, returns, and payment history. Searching down to a single vendor also switches the Daily Breakdown tab to show only that vendor\'s active days (no blank rows) — click any day to jump straight to that day\'s bill.',
+        tips: ['Sort by Net to find your top suppliers — good candidates for negotiating credit terms', '% of Net shows vendor concentration risk', 'Click the vendor name for a bill-by-bill breakdown with payment status', 'Select a vendor in the search box, then click a day in Daily Breakdown to open that day\'s bill directly']
       },
       {
         icon: '◫', name: 'Supplier Price Tracker',

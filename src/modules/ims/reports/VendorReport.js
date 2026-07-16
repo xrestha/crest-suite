@@ -37,6 +37,7 @@ export default function VendorReport() {
   const [showVendorDrop, setShowVendorDrop] = useState(false)
   const [paymentsMap, setPaymentsMap] = useState({})
   const [drilldownVendor, setDrilldownVendor] = useState(null)
+  const [drilldownDay, setDrilldownDay] = useState(null)
   const [expandedBillKey, setExpandedBillKey] = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -220,7 +221,9 @@ export default function VendorReport() {
     return bills.sort((a, b) => a.day - b.day)
   })()
 
-  const drilldownBills = drilldownVendor ? allBills.filter(b => b.vendor_id === drilldownVendor.id) : []
+  const drilldownBills = drilldownVendor
+    ? allBills.filter(b => b.vendor_id === drilldownVendor.id && (drilldownDay == null || b.day === drilldownDay))
+    : []
   const drilldownOutstanding = drilldownBills.reduce((s, b) => s + b.remaining, 0)
 
   const searchLower = vendorSearch.toLowerCase()
@@ -236,6 +239,10 @@ export default function VendorReport() {
         (v.vendor_code || '').toLowerCase().includes(searchLower)
       )
     : activeVendors
+  // A search narrowed to exactly one vendor switches Daily Breakdown into a
+  // per-vendor view: blank days dropped, each day drills into its bill(s).
+  const singleVendor = vendorSearch && filteredActiveVendors.length === 1 ? filteredActiveVendors[0] : null
+  const singleVendorDays = singleVendor ? allDays.filter(day => vendorDayNet(singleVendor.id, day) !== 0) : []
 
   function vendorDayNet(vendorId, day) {
     const gross = purchases.filter(p => p.vendor_id === vendorId && p.bs_day === day).reduce((s, p) => s + p.qty * p.rate, 0)
@@ -253,6 +260,12 @@ export default function VendorReport() {
     const gross = purchases.filter(p => p.vendor_id === vendorId).reduce((s, p) => s + p.qty * p.rate, 0)
     const ret   = returns.filter(r => r.vendor_id === vendorId).reduce((s, r) => s + r.qty * r.rate, 0)
     return gross - ret
+  }
+
+  function openVendorDrilldown(vendor, day = null) {
+    setDrilldownVendor(vendor)
+    setDrilldownDay(day)
+    setExpandedBillKey(null)
   }
 
   function fmt(val) {
@@ -476,7 +489,7 @@ export default function VendorReport() {
                     <tr key={r.vendor.id}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                         <span
-                          onClick={() => { setDrilldownVendor(r.vendor); setExpandedBillKey(null) }}
+                          onClick={() => openVendorDrilldown(r.vendor)}
                           title="View purchase bills"
                           style={{ cursor: 'pointer' }}
                           onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
@@ -533,49 +546,103 @@ export default function VendorReport() {
             </table>
           </div>
         ) : viewMode === 'daily' ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Day</th>
-                  {filteredActiveVendors.map(v => <th key={v.id} style={{ textAlign: 'right' }}>{v.name}</th>)}
-                  <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>Day Net Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allDays.map(day => {
-                  const dn = dayNet(day)
-                  return (
-                    <tr key={day}>
-                      <td style={{ fontWeight: 700, color: 'var(--theme-accent)' }}>{day}</td>
-                      {filteredActiveVendors.map(v => {
-                        const val = vendorDayNet(v.id, day)
-                        return (
-                          <td key={v.id} style={{ textAlign: 'right', color: val !== 0 ? 'var(--theme-text1)' : 'var(--theme-border)' }}>
-                            {val !== 0 ? val.toLocaleString('en-NP', { maximumFractionDigits: 0 }) : '—'}
-                          </td>
-                        )
-                      })}
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)' }}>
-                        NPR {dn.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
-                      </td>
+          singleVendor ? (
+            singleVendorDays.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-state-icon">⊙</div>
+                <p className="empty-state-text">No purchases from {singleVendor.name} this period.</p>
+              </div>
+            ) : (
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Day</th>
+                      <th style={{ textAlign: 'right' }}>{singleVendor.name}</th>
+                      <th></th>
                     </tr>
-                  )
-                })}
-                <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                  <td style={{ fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 12 }}>TOTAL</td>
-                  {filteredActiveVendors.map(v => (
-                    <td key={v.id} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 12 }}>
-                      NPR {vendorNet(v.id).toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                  </thead>
+                  <tbody>
+                    {singleVendorDays.map(day => {
+                      const val = vendorDayNet(singleVendor.id, day)
+                      return (
+                        <tr
+                          key={day}
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => openVendorDrilldown(singleVendor, day)}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--theme-table-hover)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                          title="View bill(s) for this day"
+                        >
+                          <td style={{ fontWeight: 700, color: 'var(--theme-accent)' }}>{day}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
+                            NPR {val.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                          </td>
+                          <td style={{ color: 'var(--theme-text3)', fontSize: 12, whiteSpace: 'nowrap' }}>▸ View bill</td>
+                        </tr>
+                      )
+                    })}
+                    <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
+                      <td style={{ fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 12 }}>TOTAL</td>
+                      <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent)', fontSize: 15, paddingTop: 12 }}>
+                        NPR {vendorNet(singleVendor.id).toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Day</th>
+                    {filteredActiveVendors.map(v => <th key={v.id} style={{ textAlign: 'right' }}>{v.name}</th>)}
+                    <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>Day Net Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allDays.map(day => {
+                    const dn = dayNet(day)
+                    return (
+                      <tr key={day}>
+                        <td style={{ fontWeight: 700, color: 'var(--theme-accent)' }}>{day}</td>
+                        {filteredActiveVendors.map(v => {
+                          const val = vendorDayNet(v.id, day)
+                          return (
+                            <td
+                              key={v.id}
+                              onClick={val !== 0 ? () => openVendorDrilldown(v, day) : undefined}
+                              title={val !== 0 ? 'View bill(s) for this day' : undefined}
+                              style={{ textAlign: 'right', color: val !== 0 ? 'var(--theme-text1)' : 'var(--theme-border)', cursor: val !== 0 ? 'pointer' : 'default' }}
+                            >
+                              {val !== 0 ? val.toLocaleString('en-NP', { maximumFractionDigits: 0 }) : '—'}
+                            </td>
+                          )
+                        })}
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)' }}>
+                          NPR {dn.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
+                    <td style={{ fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 12 }}>TOTAL</td>
+                    {filteredActiveVendors.map(v => (
+                      <td key={v.id} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 12 }}>
+                        NPR {vendorNet(v.id).toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                      </td>
+                    ))}
+                    <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent)', fontSize: 15, paddingTop: 12 }}>
+                      NPR {grandNet.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
                     </td>
-                  ))}
-                  <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent)', fontSize: 15, paddingTop: 12 }}>
-                    NPR {grandNet.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )
         ) : (
           /* ── DISCOUNTS TAB ── */
           discountedBills.length === 0 ? (
@@ -665,8 +732,25 @@ export default function VendorReport() {
       </div>
 
       {drilldownVendor && (
-        <Modal title={`${drilldownVendor.name} — Purchase Bills`} onClose={() => { setDrilldownVendor(null); setExpandedBillKey(null) }} maxWidth={900}>
-          <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '-8px 0 14px' }}>{periodLabel}</p>
+        <Modal
+          title={`${drilldownVendor.name} — Purchase Bills${drilldownDay != null ? ` (Day ${drilldownDay})` : ''}`}
+          onClose={() => { setDrilldownVendor(null); setDrilldownDay(null); setExpandedBillKey(null) }}
+          maxWidth={900}
+        >
+          <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '-8px 0 14px' }}>
+            {periodLabel}
+            {drilldownDay != null && (
+              <>
+                {' · '}
+                <span
+                  onClick={() => setDrilldownDay(null)}
+                  style={{ color: 'var(--theme-accent)', cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  Show all days
+                </span>
+              </>
+            )}
+          </p>
           {drilldownBills.length === 0 ? (
             <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No bills recorded for this vendor this period.</p>
           ) : (
@@ -716,7 +800,7 @@ export default function VendorReport() {
 
                           {isExpanded && (
                             <tr>
-                              <td colSpan={9} style={{ padding: 0, background: 'rgba(10,12,18,0.7)' }}>
+                              <td colSpan={9} style={{ padding: 0, background: 'var(--theme-bg)' }}>
                                 <div style={{ padding: '16px 20px' }}>
                                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Items in this bill ({b.entries.length})</div>
                                   <table style={{ borderCollapse: 'collapse', fontSize: 13, width: '100%', maxWidth: 620, marginBottom: b.payments.length > 0 || b.billReturns.length > 0 ? 20 : 0 }}>
