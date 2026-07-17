@@ -1101,9 +1101,11 @@ export default function Help() {
                 },
                 {
                   icon: '🅿', name: 'Parking Slips', path: '/pos/parking',
-                  desc: 'Issue a printable parking token for a customer\'s vehicle — no order or table required, so a walk-in can get one before ordering. Enter the vehicle number (required), plus optional vehicle type and customer name. Requires Supervisor role or above to issue/print; any staff can view the log and mark a slip Exited once the vehicle is retrieved.',
+                  desc: 'Issue a printable parking token for a customer\'s vehicle — no order or table required, so a walk-in can get one before ordering. Enter the vehicle number (required), plus optional vehicle type, customer name, a linked bill, and notes. Requires Supervisor role or above to issue/print; any staff can view the log and mark a slip Exited once the vehicle is retrieved.',
                   tips: [
                     'Prints an 80mm thermal token with the vehicle number in large text — the single detail a valet reads back to reunite car with customer',
+                    'Vehicle Type is a quick Two Wheeler / Four Wheeler toggle, not free text',
+                    'Bill Number optionally links the slip to a bill already issued today (e.g. to honor a "free parking with purchase" policy) — only today\'s bills are listed, since a past day\'s bill is never the right one to link. Click the bill number in the log to view it',
                     'The Open tab shows only vehicles still parked; switch to All to see the full history',
                     'Mark Exited as soon as the vehicle is retrieved — it closes the slip and records who closed it',
                     'Reprint is available to any staff if the original token is lost',

@@ -39,7 +39,9 @@ export function buildParkingSlipHtml(slip, outletName, propertyAddress, issuedBy
   <div class="vehicle">${esc(slip.vehicle_number)}</div>
   ${slip.vehicle_type ? `<div class="c" style="margin-bottom:4px">${esc(slip.vehicle_type)}</div>` : ''}
   ${slip.customer_name ? `<div class="row"><span>Customer:</span><span>${esc(slip.customer_name)}</span></div>` : ''}
+  ${slip.bill_invoice_no ? `<div class="row"><span>Bill No:</span><span>${esc(String(slip.bill_invoice_no))}</span></div>` : ''}
   <div class="row"><span>Issued By:</span><span>${esc(issuedByName || '')}</span></div>
+  ${slip.notes ? `<hr><div style="font-size:10px">${esc(slip.notes)}</div>` : ''}
   <hr>
   <div class="c" style="font-size:11px; margin-top:4px">Please retain this slip — required to reclaim your vehicle.</div>
 </body></html>`

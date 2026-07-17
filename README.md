@@ -150,6 +150,16 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S410 — 2026-07-17 — Parking Slip: bill link, vehicle type toggle, notes, date display
+
+User feedback on the S406 Parking Slip form: missing a read-only date, Notes, and a way to record which bill was issued to the parked customer; Vehicle Type should be a quick toggle, not free text.
+
+- `pos_parking_slips` gains `order_id` (FK to `pos_orders`, `ON DELETE SET NULL`) and `bill_invoice_no` (snapshot) — same shape as `ims_gate_passes.vendor_id`/`vendor_name` from the same original migration. Both nullable; the slip stays standalone/order-optional by design (a walk-in who hasn't ordered yet can still get one).
+- `NewParkingSlipModal.jsx`: a read-only Date field (today's BS date, matches the rest of the app's date convention, not editable — `time_in` itself is still DB-defaulted); Vehicle Type is now a Two Wheeler / Four Wheeler toggle instead of a text input; a new Notes textarea (the `notes` column already existed on the table, just wasn't exposed in the form); a Bill Number `SearchableSelect` populated from **today's** billed orders only (`status='billed'`, `invoice_no IS NOT NULL`, `closed_at >= start of today`) — a past day's bill is never the right one to link to a slip issued right now.
+- The linked bill's number now prints on the thermal token and shows in the Parking Slips log, where it's clickable — reuses the existing `viewPosBill()` utility (same read-only bill preview Sales Exceptions/Bill Register already use) rather than building a new preview path.
+
+**Files:** `supabase/migrations/20260717150000_pos_parking_slip_bill_link.sql`, `src/modules/pos/parking/NewParkingSlipModal.jsx`, `src/modules/pos/parking/PosParkingSlips.jsx`, `src/modules/pos/parking/parkingSlipHtml.js`, `src/pages/Help.js`
+
 ### S409 — 2026-07-17 — Fixed: Closing Stock now actually carries forward to next period's Opening Stock
 
 User asked whether closing Ashadh 2083 without finishing its month-end stock count would affect anything. In answering, found `Help.js`'s own Periods guide already claimed "Closing stock auto-carries to next month opening" — but `Periods.js`'s `closeAndAdvance`/`adminCloseAndAdvance` never actually did this; each period's `opening_stock`/`closing_stock` were entered fully independently. A real gap between documented and shipped behavior, not a new idea — fixed to match what was already promised.

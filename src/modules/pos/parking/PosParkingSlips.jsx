@@ -7,6 +7,7 @@ import Fab from '../../../components/Fab'
 import Tip from '../../../components/Tip'
 import { printParkingSlip } from './parkingSlipHtml'
 import NewParkingSlipModal from './NewParkingSlipModal'
+import { viewPosBill } from '../../../utils/viewPosBill'
 
 export default function PosParkingSlips() {
   const { clientId, profile, hasPosAccess } = useAuth()
@@ -82,6 +83,8 @@ export default function PosParkingSlips() {
                 <th>Type</th>
                 <th>Customer</th>
                 <th>Time In</th>
+                <th><Tip text="If this slip was linked to a bill at issue time (e.g. to honor a 'free parking with purchase' policy) — click to view that bill." width={280}>Bill No</Tip></th>
+                <th>Notes</th>
                 <th><Tip text="Open means the vehicle is still parked; Closed means it's been marked as exited/retrieved." width={260}>Status</Tip></th>
                 <th>Issued By</th>
                 <th></th>
@@ -95,6 +98,19 @@ export default function PosParkingSlips() {
                   <td>{s.vehicle_type || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                   <td>{s.customer_name || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                   <td>{new Date(s.time_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</td>
+                  <td>
+                    {s.bill_invoice_no ? (
+                      <button
+                        onClick={() => viewPosBill(clientId, { id: s.order_id })}
+                        style={{ background: 'none', border: 'none', color: 'var(--theme-accent)', cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}
+                      >
+                        #{s.bill_invoice_no}
+                      </button>
+                    ) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                  </td>
+                  <td style={{ maxWidth: 160, whiteSpace: 'normal', color: 'var(--theme-text2)', fontSize: 12 }}>
+                    {s.notes || <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                  </td>
                   <td>
                     <span className={`badge ${s.status === 'open' ? 'badge-amber' : 'badge-green'}`}>
                       {s.status === 'open' ? 'Open' : 'Closed'}
