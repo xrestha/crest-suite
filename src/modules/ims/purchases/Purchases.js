@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import Fab from '../../../components/Fab'
+import Modal from '../../../components/Modal'
 import * as XLSX from 'xlsx'
 import { getCf } from './purchasesHelpers'
 import PurchaseBillModal from './PurchaseBillModal'
@@ -44,6 +45,11 @@ export default function Purchases() {
 
   // Daily Register tab
   const [collapsedRegisterCats, setCollapsedRegisterCats] = useState(new Set())
+
+  // "Delete All" typed-confirmation (purchases/returns) — a whole-period wipe gets a heavier
+  // confirmation than a routine single-bill delete, which still uses window.confirm.
+  const [deleteAllTarget, setDeleteAllTarget] = useState(null) // 'purchases' | 'returns' | null
+  const [deleteAllTyped, setDeleteAllTyped]   = useState('')
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -181,18 +187,23 @@ export default function Purchases() {
   // Return form/list logic lives in ReturnsTab.jsx; this component only owns the "delete all"
   // bulk action (triggered from the tab bar above the tab content, not from within the tab).
 
-  async function deleteAllPurchases() {
+  async function performDeleteAllPurchases() {
     if (!selectedPeriod || purchases.length === 0) return
-    if (!window.confirm(`Delete ALL ${purchases.length} purchase entries for ${periodLabel}? This cannot be undone.`)) return
     await supabase.from('purchase_entries').delete().eq('period_id', selectedPeriod.id)
     await Promise.all([loadPurchases(selectedPeriod.id), loadReturns(selectedPeriod.id)])
   }
 
-  async function deleteAllReturns() {
+  async function performDeleteAllReturns() {
     if (!selectedPeriod || returns.length === 0) return
-    if (!window.confirm(`Delete ALL ${returns.length} return entries for ${periodLabel}? This cannot be undone.`)) return
     await scopedDelete('vendor_returns').eq('period_id', selectedPeriod.id)
     loadReturns(selectedPeriod.id)
+  }
+
+  async function confirmDeleteAll() {
+    if (deleteAllTarget === 'purchases') await performDeleteAllPurchases()
+    else if (deleteAllTarget === 'returns') await performDeleteAllReturns()
+    setDeleteAllTarget(null)
+    setDeleteAllTyped('')
   }
 
   // ─── DERIVED ─────────────────────────────────────────────
@@ -295,6 +306,41 @@ export default function Purchases() {
         </div>
       )}
 
+      {/* Delete All confirmation — a whole-period wipe needs more friction than a routine
+          single-bill delete, so it requires typing the period label rather than one confirm(). */}
+      {deleteAllTarget && (() => {
+        const count = deleteAllTarget === 'purchases' ? purchases.length : returns.length
+        const noun = deleteAllTarget === 'purchases' ? 'purchase' : 'return'
+        const matches = deleteAllTyped.trim().toLowerCase() === periodLabel.trim().toLowerCase()
+        return (
+          <Modal title={`⚠ Delete all ${noun} entries?`} maxWidth={440} onClose={() => { setDeleteAllTarget(null); setDeleteAllTyped('') }}>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', marginTop: 0 }}>
+              This permanently deletes <strong style={{ color: 'var(--theme-red)' }}>all {count} {noun} entr{count !== 1 ? 'ies' : 'y'}</strong> for <strong>{periodLabel}</strong>. This cannot be undone.
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--theme-text3)', marginBottom: 6 }}>
+              Type <strong style={{ color: 'var(--theme-text1)' }}>{periodLabel}</strong> to confirm.
+            </p>
+            <input
+              autoFocus
+              className="form-select"
+              style={{ width: '100%', marginBottom: 16 }}
+              value={deleteAllTyped}
+              onChange={e => setDeleteAllTyped(e.target.value)}
+              placeholder={periodLabel}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-danger" disabled={!matches} onClick={confirmDeleteAll} style={{ fontSize: 12, padding: '7px 16px' }}>
+                Delete All {count} Entries
+              </button>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '7px 16px' }}
+                onClick={() => { setDeleteAllTarget(null); setDeleteAllTyped('') }}>
+                Cancel
+              </button>
+            </div>
+          </Modal>
+        )
+      })()}
+
       {/* Locked banner */}
       {isLocked && (
         <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red)' }}>
@@ -369,7 +415,7 @@ export default function Purchases() {
           <button
             className="btn btn-ghost"
             style={{ fontSize: 12, padding: '5px 12px', marginBottom: 4, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}
-            onClick={activeTab === 'purchases' ? deleteAllPurchases : deleteAllReturns}
+            onClick={() => setDeleteAllTarget(activeTab === 'purchases' ? 'purchases' : 'returns')}
             disabled={activeTab === 'purchases' ? purchases.length === 0 : returns.length === 0}
           >
             Delete All

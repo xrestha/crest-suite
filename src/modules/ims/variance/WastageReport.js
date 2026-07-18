@@ -193,7 +193,7 @@ export default function WastageReport() {
       )}
 
       {loading ? (
-        <div className="loading-state">Loading...</div>
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</div>
       ) : rows.length === 0 ? (
         <div className="empty-state">No wastage entries for this period.</div>
       ) : (

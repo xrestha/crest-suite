@@ -301,7 +301,19 @@ export default function OutstandingPayables() {
                         const willSettle = payForm.amount && parseFloat(payForm.amount) + b.paid >= b.total - EPS
                         return (
                           <Fragment key={b.key}>
-                            <tr style={{ cursor: 'pointer' }} onClick={() => toggleBill(b.key)}>
+                            <tr
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => toggleBill(b.key)}
+                              role="button"
+                              tabIndex={0}
+                              aria-expanded={isExpanded}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault()
+                                  toggleBill(b.key)
+                                }
+                              }}
+                            >
                               <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{b.invoice_ref || '—'}</td>
                               <td style={{ color: 'var(--theme-text2)' }}>{BS_MONTHS[(b.period.bs_month || 1) - 1]} {b.period.bs_year}</td>
                               <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.entries.length}</td>

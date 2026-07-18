@@ -27,7 +27,7 @@ const BUCKET_CONFIG = {
   },
   labor: {
     label: 'Labor Costs',
-    color: '#60a5fa',
+    color: 'var(--theme-text1)',
     target: 30,
     presets: ['Manager / Head Chef', 'Kitchen Staff', 'Service Staff', 'Part-time / Hourly', 'Benefits & Bonuses'],
     placeholders: {
@@ -228,7 +228,7 @@ export default function Overheads() {
   // P&L rows
   const pnlRows = hasSales ? [
     { key: 'food',   label: 'Food Cost',  amount: foodCost,        target: 30, color: 'var(--theme-accent)' },
-    { key: 'labor',  label: 'Labor',      amount: totals.labor,    target: 30, color: '#60a5fa' },
+    { key: 'labor',  label: 'Labor',      amount: totals.labor,    target: 30, color: 'var(--theme-text1)' },
     { key: 'oh',     label: 'Overhead',   amount: totals.overhead, target: 25, color: 'var(--theme-green)' },
     { key: 'tax',    label: 'Tax & Fees', amount: totals.tax_fees, target: 5,  color: 'var(--theme-purple)' },
     { key: 'profit', label: 'Net Profit', amount: netProfit,       target: 10,
@@ -305,7 +305,7 @@ export default function Overheads() {
           {
             label: 'Labor Costs', value: fmt(totals.labor),
             sub: fmtPct(totals.labor, revenue) ? `${fmtPct(totals.labor, revenue)} of revenue` : 'No sales data',
-            color: '#60a5fa',
+            color: 'var(--theme-text1)',
             tip: 'Salaries, wages, and benefits. Industry target: ~30% of revenue.'
           },
           {
@@ -355,7 +355,7 @@ export default function Overheads() {
             >
               {c.label}
               {totals[key] > 0 && (
-                <span style={{ marginLeft: 8, fontSize: 11, background: 'rgba(255,255,255,0.06)', borderRadius: 10, padding: '2px 7px', color: c.color }}>
+                <span style={{ marginLeft: 8, fontSize: 11, background: 'color-mix(in srgb, var(--theme-text1) 8%, transparent)', borderRadius: 10, padding: '2px 7px', color: c.color }}>
                   {fmt(totals[key])}
                 </span>
               )}
@@ -499,7 +499,7 @@ export default function Overheads() {
                     </div>
                   </div>
                   <div style={{ height: 7, background: 'var(--theme-border)', borderRadius: 4, overflow: 'hidden' }}>
-                    <div style={{ width: `${barWidth}%`, height: '100%', background: barColor, borderRadius: 4, transition: 'width 0.4s ease' }} />
+                    <div style={{ width: '100%', height: '100%', background: barColor, borderRadius: 4, transform: `scaleX(${barWidth / 100})`, transformOrigin: 'left', transition: 'transform 0.4s ease' }} />
                   </div>
                 </div>
               )
@@ -539,7 +539,7 @@ export default function Overheads() {
           {/* Revenue cost stack — only when sales data available */}
           {hasSales && (() => {
             const fc  = { key: 'food',     label: 'Food Cost', color: 'var(--theme-accent)', amount: foodCost,        pct: pct(foodCost,        revenue) || 0 }
-            const lb  = { key: 'labor',    label: 'Labor',     color: '#60a5fa', amount: totals.labor,    pct: pct(totals.labor,    revenue) || 0 }
+            const lb  = { key: 'labor',    label: 'Labor',     color: 'var(--theme-text1)', amount: totals.labor,    pct: pct(totals.labor,    revenue) || 0 }
             const oh  = { key: 'overhead', label: 'Overhead',  color: 'var(--theme-green)', amount: totals.overhead, pct: pct(totals.overhead, revenue) || 0 }
             const tx  = { key: 'tax',      label: 'Tax & Fees',color: 'var(--theme-purple)', amount: totals.tax_fees, pct: pct(totals.tax_fees, revenue) || 0 }
             const prPct = netProfit != null ? pct(netProfit, revenue) : null
@@ -561,7 +561,7 @@ export default function Overheads() {
                       justifyContent: 'center', overflow: 'hidden', cursor: 'default',
                     }}>
                       {s.pct > 7 && (
-                        <span style={{ fontSize: 10, fontWeight: 800, color: '#0f1117', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--theme-bg)', whiteSpace: 'nowrap' }}>
                           {s.pct.toFixed(0)}%
                         </span>
                       )}
@@ -762,7 +762,7 @@ export default function Overheads() {
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Labor / Cover</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: '#60a5fa' }}>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>
                   {covers > 0 && totals.labor > 0 ? fmt(totals.labor / covers) : '—'}
                 </div>
               </div>

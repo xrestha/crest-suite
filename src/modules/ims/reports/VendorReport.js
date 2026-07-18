@@ -17,9 +17,11 @@ function billAging(days) {
   return                 { label: '90+ days',   color: 'var(--theme-red)' }
 }
 
-// Vendor split needs up to 8 distinct hues for an arbitrary vendor count — reuses theme tokens
-// where available (accent/green/red/purple) and falls back to fixed hex for the rest, same
-// reasoning as a chart legend needing more distinct colors than the semantic token set provides.
+// Vendor split needs up to 8 distinct hues for an arbitrary vendor count — a qualitative
+// chart-series palette, not a semantic status color, so it reuses theme tokens where available
+// (accent/green/red/purple) and falls back to fixed hex for the rest. The 4 semantic tokens
+// can't supply a 5th-8th maximally-distinguishable hue on their own without colliding with their
+// own status meanings (e.g. reusing --theme-red for "vendor #4" would read as an error state).
 const VENDOR_SPLIT_COLORS = ['var(--theme-accent)','var(--theme-green)','#60a5fa','var(--theme-red)','var(--theme-purple)','#fb923c','#22d3ee','#f472b6']
 
 export default function VendorReport() {
@@ -783,7 +785,19 @@ export default function VendorReport() {
                       const isExpanded = expandedBillKey === b.key
                       return (
                         <Fragment key={b.key}>
-                          <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedBillKey(prev => prev === b.key ? null : b.key)}>
+                          <tr
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => setExpandedBillKey(prev => prev === b.key ? null : b.key)}
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={isExpanded}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setExpandedBillKey(prev => prev === b.key ? null : b.key)
+                              }
+                            }}
+                          >
                             <td style={{ color: 'var(--theme-accent)', fontWeight: 700 }}>{b.day}</td>
                             <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{b.invoice || '—'}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.itemCount}</td>

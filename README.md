@@ -150,6 +150,22 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S412 — 2026-07-18 — `/impeccable critique` on the IMS module + all findings fixed
+
+User ran `/impeccable critique ims module`, then asked to fix everything found. Dual-agent critique (isolated design-review + detector sub-agents, cross-checked live in the running app after credentials were shared) scored the module 24/40 — solid craft in money-critical flows (Overheads.js, offline-first Stock Count), held back by DESIGN.md drift and consistency gaps, not by anything resembling AI-slop.
+
+- **Keyboard accessibility**: `VendorReport.js`'s bill drilldown and `OutstandingPayables.js`'s bill-detail rows were mouse-only while the identical expand/collapse pattern in `SupplierPriceTracker.js` was fully keyboard-accessible — both retrofitted with `role="button"`, `tabIndex`, `onKeyDown` (Enter/Space), `aria-expanded` to match.
+- **Delete-All confirmation**: `Purchases.js`'s "Delete All" (purchases/returns) wiped an entire period's financial history behind one generic `window.confirm()`, styled identically to a routine single-bill delete — now opens a modal requiring the user to type the exact period name before the danger button enables.
+- **Purple overloaded for two meanings**: `Stock.js`'s Summary tab used `--theme-purple` for both "Staff Meals" and "Requisitioned" columns simultaneously (verified live: both computed to the identical `rgb(167,139,250)`) — Requisitioned moved to neutral `--theme-text2`, leaving purple exclusively for Staff Meals.
+- **Hardcoded non-token colors in `Overheads.js`**: Labor's `#60a5fa` (5 call sites: KPI card, tab, P&L bar, cost-stack segment, per-cover stat) happened to look fine on the account's Bright theme by coincidence — forcing Dark live showed it as a rogue blue next to correctly-themed gold/purple siblings. Now `var(--theme-text1)`. The in-bar percentage label's hardcoded `#0f1117` (the literal Dark-preset ink color, would fail contrast on light presets) is now `var(--theme-bg)` — correct in both preset families since each theme's own `bg`/`text1` are already a validated contrast pair.
+- **`WastageReport.js`**: loading state used `className="loading-state"`, which doesn't exist in `Layout.css` — a live unstyled loading flash. Fixed to match every sibling report's `<div className="card">Loading…</div>` convention.
+- Caught along the way by the design-system hook: a hardcoded `rgba(255,255,255,0.06)` tab-count badge in `Overheads.js` (invisible on light presets) switched to `color-mix()`; two `transition: width` progress-bar animations (`Overheads.js`, `Stock.css`) converted to `transform: scaleX` to avoid layout thrash; `VendorReport.js`'s 8-color vendor-split palette comment corrected — it had misattributed its hardcoded hex to the Recharts-SVG exception, when the real reason is a qualitative chart palette needing more hues than the 4 semantic tokens provide.
+- Left alone on purpose: `Stock.css`'s mobile touch-target radius/font-size values, off the documented scale but plausibly deliberate phone-sizing — no device to test a change against, and it was a Minor Observation, not a Priority Issue.
+
+Full critique report persisted at `.impeccable/critique/2026-07-18T10-06-55Z__src-modules-ims-ims-module.md`.
+
+**Files:** `src/modules/ims/reports/VendorReport.js`, `src/modules/ims/reports/OutstandingPayables.js`, `src/modules/ims/purchases/Purchases.js`, `src/modules/ims/stockcount/Stock.js`, `src/modules/ims/stockcount/Stock.css`, `src/modules/ims/reports/Overheads.js`, `src/modules/ims/variance/WastageReport.js`
+
 ### S411 — 2026-07-17 — Parking Slips / Gate Passes auto-close on day rollover
 
 User asked what happens to a Parking Slip/Gate Pass left "open" if staff forget Mark Exited — answer was: nothing, it stays Open forever (no day-boundary reset existed). User wanted today's slips/passes to auto-close and the page to start fresh tomorrow, without losing the data — same ask for both features.

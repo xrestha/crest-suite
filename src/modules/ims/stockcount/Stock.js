@@ -618,7 +618,7 @@ export default function Stock() {
                     <th style={{ textAlign: 'right', color: 'var(--theme-purple)' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from Used separately from wastage." width={240}>Staff Meals</Tip></th>
                     <th style={{ textAlign: 'right' }}>Closing</th>
                     <th style={{ textAlign: 'right' }}><Tip text="Opening + Purchased − Returned − Wastage − Staff Meals − Closing. What was actually consumed this period." width={240}>Used</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-purple)' }}><Tip text="Total qty issued from the store via requisition slips this period. Should align with Used quantity." width={240}>Requisitioned</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-text2)' }}><Tip text="Total qty issued from the store via requisition slips this period. Should align with Used quantity." width={240}>Requisitioned</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)' }}><Tip text="Opening quantity × per-unit rate. Value of stock carried forward from the previous period." width={240}>Open. Value</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}><Tip text="Purchased quantity × per-unit purchase rate." width={220}>Purch. Value</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}><Tip text="Wastage quantity × per-unit rate. NPR cost of goods recorded as waste." width={240}>Wastage Value</Tip></th>
@@ -656,7 +656,7 @@ export default function Stock() {
                         <td style={{ textAlign: 'right', fontWeight: 600, color: used < 0 ? 'var(--theme-red)' : 'var(--theme-text1)' }}>
                           {hasData ? Number(used).toLocaleString() : '—'}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-purple)' }}>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                           {requisitioned[item.id] ? Number(requisitioned[item.id]).toLocaleString() : '—'}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)' }}>{fmtVal(openQty)}</td>
