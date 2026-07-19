@@ -15,9 +15,10 @@ import { EMPTY_RECIPE, fmtNutrient, vatOf, calcSubRecipeCostPerUnit, calcRecipeC
 import RecipeCostCardPrint from './RecipeCostCardPrint'
 import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
+import { Navigate } from 'react-router-dom'
 
 export default function Recipes() {
-  const { clientId, hasFeature, isAdmin } = useAuth()
+  const { clientId, hasFeature, isAdmin, hasImsAccess } = useAuth()
   const showNutrition = hasFeature('nutrition_facts')
   const { settings, recipeCategories } = useSettings()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
@@ -542,6 +543,8 @@ export default function Recipes() {
 
   // ── Tab state ─────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState('all')
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   // ── Filtered list ─────────────────────────────────────────────
   const fcWarn = settings.fc_warning_pct || 35

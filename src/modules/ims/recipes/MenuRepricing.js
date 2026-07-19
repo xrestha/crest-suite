@@ -6,6 +6,7 @@ import { getSuggestedPrice, computeRecipeCosts } from '../../../utils/recipeCost
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -21,7 +22,7 @@ function vatOf(r) {
 }
 
 export default function MenuRepricing() {
-  const { clientId, profile } = useAuth()
+  const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods]         = useState([])
@@ -140,6 +141,8 @@ export default function MenuRepricing() {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Menu Repricing')
     XLSX.writeFile(wb, `MenuRepricing-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div className="page-container">

@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const VAT_RATE = 0.13
@@ -53,7 +54,7 @@ export function buildVendorSummary(entries, returns, billGroups, { discountScope
 }
 
 export default function VatReport() {
-  const { clientId, profile } = useAuth()
+  const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods]         = useState([])
@@ -202,6 +203,8 @@ export default function VatReport() {
 
     XLSX.writeFile(wb, `VAT-Report-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -16,7 +17,7 @@ function fcColor(pct) {
 }
 
 export default function PeriodComparison() {
-  const { clientId, profile } = useAuth()
+  const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods] = useState([])
@@ -128,6 +129,8 @@ export default function PeriodComparison() {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Period Comparison')
     XLSX.writeFile(wb, `PeriodComparison.xlsx`)
   }
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   return (
     <div className="page-container">

@@ -6,12 +6,13 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { getBsFiscalYear } from '../../../utils/bsCalendar'
 import { buildVendorSummary } from './VatReport'
+import { Navigate } from 'react-router-dom'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const THRESHOLD = 100000
 
 export default function PurchaseOneLakhAboveReport() {
-  const { clientId, profile } = useAuth()
+  const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
 
@@ -93,6 +94,8 @@ export default function PurchaseOneLakhAboveReport() {
     XLSX.utils.book_append_sheet(wb, ws, 'Purchase One Lakh Above')
     XLSX.writeFile(wb, `purchase-one-lakh-above-${selectedFy.replace('/', '-')}.xlsx`)
   }
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1100 }}>

@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -16,7 +17,7 @@ function fcColor(pct) {
 }
 
 export default function RecipeMargin() {
-  const { clientId, profile } = useAuth()
+  const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods]         = useState([])
@@ -126,6 +127,8 @@ export default function RecipeMargin() {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Recipe Margin')
     XLSX.writeFile(wb, `RecipeMargin-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div className="page-container">

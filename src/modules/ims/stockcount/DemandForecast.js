@@ -6,12 +6,13 @@ import Tip from '../../../components/Tip'
 import { BS_MONTHS, bsToAd } from '../../../utils/bsCalendar'
 import { runForecast } from '../../../utils/demandForecastData'
 import { printWithTitle } from '../../../utils/printTitle'
+import { Navigate } from 'react-router-dom'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const fmtNpr = n => n == null ? '—' : `NPR ${Math.round(n).toLocaleString()}`
 
 export default function DemandForecast() {
-  const { clientId } = useAuth()
+  const { clientId, hasImsAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
   const [horizon, setHorizon] = useState(7)
   const [forecast, setForecast] = useState([])
@@ -73,6 +74,8 @@ export default function DemandForecast() {
   }, [clientId, horizon, scopedFrom])
 
   useEffect(() => { loadStored() }, [loadStored])
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   const horizonLabel = horizon === 7 ? 'Next 7 Days' : 'Next 30 Days'
 

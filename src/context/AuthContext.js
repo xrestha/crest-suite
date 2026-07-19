@@ -70,7 +70,7 @@ export function AuthProvider({ children }) {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, role, client_id, pos_role, hr_employee_id, hr_self_service')
+        .select('id, full_name, role, client_id, pos_role, hr_employee_id, hr_self_service, ims_role, ims_job_title')
         .eq('id', userId)
         .single()
 
@@ -133,18 +133,28 @@ export function AuthProvider({ children }) {
   const clientId = isAdmin ? adminViewClientId : (profile?.client_id || null)
 
   const posEnabled = isAdmin || (profile?.clients?.pos_enabled ?? false)
-  // Admin gets 'manager'; owner (client with no pos_role) gets 'manager' when POS enabled;
-  // PIN-based staff use their explicit pos_role. An HR self-service account also has role
-  // 'client' with no pos_role — without the explicit exclusion it would count as Owner and
-  // inherit POS manager access.
-  const isOwner = !isAdmin && profile?.role === 'client' && !profile?.pos_role && !profile?.hr_self_service
+  const imsEnabled = isAdmin || (profile?.clients?.ims_enabled ?? true)
+  // Admin gets 'manager'; owner (client with no pos_role/ims_role) gets 'manager' on the
+  // corresponding module when it's enabled; staff use their explicit pos_role/ims_role. An HR
+  // self-service account also has role 'client' with neither set — without excluding all three
+  // staff-account markers here, any one of them would incorrectly count as Owner and inherit
+  // manager-level access to a module it has no business in.
+  const isOwner = !isAdmin && profile?.role === 'client' && !profile?.pos_role && !profile?.hr_self_service && !profile?.ims_role
   const posRole = isAdmin || isOwner ? 'manager' : (profile?.pos_role || null)
+  const imsRole = isAdmin || isOwner ? 'manager' : (profile?.ims_role || null)
 
   const POS_RANK = { staff: 1, supervisor: 2, manager: 3 }
   function hasPosAccess(minLevel) {
     if (isAdmin) return true
     if (!posEnabled) return false
     return (POS_RANK[posRole] || 0) >= (POS_RANK[minLevel] || 0)
+  }
+
+  const IMS_RANK = { staff: 1, supervisor: 2, manager: 3 }
+  function hasImsAccess(minLevel) {
+    if (isAdmin) return true
+    if (!imsEnabled) return false
+    return (IMS_RANK[imsRole] || 0) >= (IMS_RANK[minLevel] || 0)
   }
 
   function switchAdminClient(id, name) {
@@ -253,12 +263,14 @@ export function AuthProvider({ children }) {
       plan, isTrialing, trialEndsAt,
       isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
       featureFlags, hasFeature,
-      imsEnabled: isAdmin || (profile?.clients?.ims_enabled ?? true),
+      imsEnabled,
       hrEnabled: isAdmin || (profile?.clients?.hr_enabled ?? false),
       posEnabled,
       posRole,
+      imsRole,
       isOwner,
       hasPosAccess,
+      hasImsAccess,
       clientModules, // displayed client's actual subscription (nav + dashboard sections)
       hrPlan: isAdmin ? 'pro' : (profile?.clients?.hr_plan || null),
       posPlan: isAdmin ? 'pro' : (profile?.clients?.pos_plan || null),

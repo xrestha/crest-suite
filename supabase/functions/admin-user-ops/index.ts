@@ -101,16 +101,25 @@ Deno.serve(async (req) => {
     // Use service-role client to fetch profile — RLS on profiles can block anon+JWT reads;
     // identity is already verified above via caller.auth.getUser()
     const { data: profile } = await admin
-      .from('profiles').select('role, pos_role, client_id').eq('id', user.id).single()
+      .from('profiles').select('role, pos_role, ims_role, hr_self_service, client_id').eq('id', user.id).single()
 
-    // ── POS manager-accessible actions (before admin-only guard) ─────────────
-    const isCallerAdmin   = profile?.role === 'admin'
-    const isCallerManager = profile?.pos_role === 'manager'
-    const isCallerOwner   = profile?.role === 'client' && !profile?.pos_role // owner has no pos_role
-    const isPosPrivileged = isCallerAdmin || isCallerManager || isCallerOwner
+    // ── POS/IMS manager-accessible actions (before admin-only guard) ─────────
+    // isCallerOwner must exclude every staff-account marker (pos_role, ims_role, hr_self_service)
+    // — a staff account of one type has none of the other two set, so without excluding all three
+    // here it would incorrectly pass as "owner" for privileged actions outside its own domain
+    // (e.g. an HR self-service PIN account calling create_pos_staff).
+    const isCallerAdmin      = profile?.role === 'admin'
+    const isCallerPosManager = profile?.pos_role === 'manager'
+    const isCallerImsManager = profile?.ims_role === 'manager'
+    const isCallerOwner      = profile?.role === 'client' && !profile?.pos_role && !profile?.ims_role && !profile?.hr_self_service
+    const isPosPrivileged    = isCallerAdmin || isCallerPosManager || isCallerOwner
+    const isImsPrivileged    = isCallerAdmin || isCallerImsManager || isCallerOwner
 
     if (action === 'create_pos_staff' || action === 'reset_pos_pin' || action === 'delete_pos_staff' || action === 'update_pos_role') {
       if (!isPosPrivileged) return json({ error: 'Forbidden' }, 403)
+    }
+    if (action === 'create_ims_staff' || action === 'reset_ims_password' || action === 'delete_ims_staff' || action === 'update_ims_role') {
+      if (!isImsPrivileged) return json({ error: 'Forbidden' }, 403)
     }
 
     // ── Create a POS staff member — name + PIN, auto-generated email ──────────
@@ -280,6 +289,121 @@ Deno.serve(async (req) => {
       }
 
       const { error: updateErr } = await admin.auth.admin.updateUserById(userId, { password: pin })
+      if (updateErr) return json({ error: updateErr.message }, 400)
+
+      return json({ success: true })
+    }
+
+    // ── Create an IMS staff member — real email + password (not a PIN like POS) ───────────────
+    // Optional employee_id links the new IMS account to an existing hr_employees record, same
+    // pattern as create_pos_staff's HR Employee mode — full_name is taken from that employee.
+    if (action === 'create_ims_staff') {
+      const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
+      if (!targetClientId) return json({ error: 'client_id required' }, 400)
+
+      const { email, password, ims_role, ims_job_title, employee_id } = params
+      let { full_name } = params
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: 'A valid email is required' }, 400)
+      if (!password || password.length < 8) return json({ error: 'Password must be at least 8 characters' }, 400)
+
+      const validRoles = ['staff', 'supervisor', 'manager']
+      if (ims_role && !validRoles.includes(ims_role)) return json({ error: 'Invalid ims_role' }, 400)
+
+      if (employee_id) {
+        const { data: employee } = await admin
+          .from('hr_employees').select('id, full_name, client_id')
+          .eq('id', employee_id).eq('client_id', targetClientId).single()
+        if (!employee) return json({ error: 'Employee not found' }, 400)
+
+        const { data: existingLink } = await admin
+          .from('profiles').select('id').eq('hr_employee_id', employee_id).not('ims_role', 'is', null).maybeSingle()
+        if (existingLink) return json({ error: 'This employee already has an IMS staff account' }, 400)
+
+        full_name = employee.full_name
+      }
+      if (!full_name) return json({ error: 'full_name is required' }, 400)
+
+      const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name },
+      })
+      if (authErr || !authData?.user) {
+        return json({ error: authErr?.message || 'Failed to create user' }, 400)
+      }
+
+      const { error: profileErr } = await admin.from('profiles').upsert({
+        id:             authData.user.id,
+        full_name,
+        role:           'client',
+        client_id:      targetClientId,
+        ims_role:       ims_role || null,
+        ims_job_title:  ims_job_title || null,
+        hr_employee_id: employee_id || null,
+      }, { onConflict: 'id' })
+
+      if (profileErr) {
+        await admin.auth.admin.deleteUser(authData.user.id)
+        return json({ error: profileErr.message }, 400)
+      }
+
+      return json({ success: true, userId: authData.user.id })
+    }
+
+    // ── Update an IMS staff member's role ────────────────────────────────────
+    if (action === 'update_ims_role') {
+      const { userId, ims_role, ims_job_title } = params
+      if (!userId) return json({ error: 'userId is required' }, 400)
+
+      const validRoles = ['staff', 'supervisor', 'manager']
+      if (ims_role && !validRoles.includes(ims_role)) return json({ error: 'Invalid ims_role' }, 400)
+
+      if (!isCallerAdmin) {
+        const { data: targetProfile } = await admin
+          .from('profiles').select('client_id').eq('id', userId).single()
+        if (targetProfile?.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
+      }
+
+      const { error: updateErr } = await admin.from('profiles')
+        .update({ ims_role: ims_role || null, ims_job_title: ims_job_title || null })
+        .eq('id', userId)
+      if (updateErr) return json({ error: updateErr.message }, 400)
+      return json({ success: true })
+    }
+
+    // ── Delete an IMS staff member ────────────────────────────────────────────
+    if (action === 'delete_ims_staff') {
+      const { userId } = params
+      if (!userId) return json({ error: 'userId is required' }, 400)
+
+      if (!isCallerAdmin) {
+        const { data: targetProfile } = await admin
+          .from('profiles').select('client_id, ims_role').eq('id', userId).single()
+        if (targetProfile?.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
+        if (targetProfile?.ims_role === 'manager') return json({ error: 'Managers can only be deleted by admin' }, 403)
+      }
+
+      const { error: delErr } = await admin.auth.admin.deleteUser(userId)
+      if (delErr) return json({ error: delErr.message }, 400)
+      return json({ success: true })
+    }
+
+    // ── Reset an IMS staff member's password ──────────────────────────────────
+    if (action === 'reset_ims_password') {
+      const { userId, password } = params
+      if (!userId || !password) return json({ error: 'userId and password are required' }, 400)
+      if (password.length < 8) return json({ error: 'Password must be at least 8 characters' }, 400)
+
+      if (!isCallerAdmin) {
+        const { data: targetProfile } = await admin
+          .from('profiles').select('client_id').eq('id', userId).single()
+        if (targetProfile?.client_id !== profile?.client_id) {
+          return json({ error: 'Forbidden' }, 403)
+        }
+      }
+
+      const { error: updateErr } = await admin.auth.admin.updateUserById(userId, { password })
       if (updateErr) return json({ error: updateErr.message }, 400)
 
       return json({ success: true })

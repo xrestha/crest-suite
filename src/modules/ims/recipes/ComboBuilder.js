@@ -4,12 +4,13 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
+import { Navigate } from 'react-router-dom'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const WINDOW_OPTIONS = [30, 90, 180]
 
 export default function ComboBuilder() {
-  const { clientId } = useAuth()
+  const { clientId, hasImsAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
 
   const [menu, setMenu] = useState([])
@@ -65,6 +66,8 @@ export default function ComboBuilder() {
   const maxCo = rows.length > 0 ? rows[0].coCount : 0
 
   const menuOptions = menu.map(r => ({ value: r.id, label: `${r.name}${r.category ? ` (${r.category})` : ''}` }))
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1000 }}>

@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -17,7 +18,7 @@ function dispPurch(baseQty, item) {
 }
 
 export default function Variance() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods] = useState([])
@@ -162,6 +163,8 @@ export default function Variance() {
     if (flag === 'under') return <span className="badge badge-yellow">Under</span>
     return <span className="badge badge-green">OK</span>
   }
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

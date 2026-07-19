@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -60,7 +61,7 @@ function seedBucket(key) {
 }
 
 export default function Overheads() {
-  const { profile, clientId, isAdmin } = useAuth()
+  const { profile, clientId, isAdmin, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedDelete } = useScopedDb()
 
@@ -264,6 +265,8 @@ export default function Overheads() {
   const cfg = BUCKET_CONFIG[activeBucket]
   const activeRows  = rows[activeBucket]
   const bucketTotal = totals[activeBucket]
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

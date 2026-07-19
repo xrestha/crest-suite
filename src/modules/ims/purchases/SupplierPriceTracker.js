@@ -6,11 +6,12 @@ import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
 import { getCf } from './purchasesHelpers'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 export default function SupplierPriceTracker() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
 
@@ -223,6 +224,8 @@ export default function SupplierPriceTracker() {
   })
 
   const risingCount = filteredKeys.filter(k => getTrend(vendorPurchases[k]) === 'up').length
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   if (loading) {
     return (

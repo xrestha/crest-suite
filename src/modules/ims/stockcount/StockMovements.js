@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -10,7 +10,7 @@ import { viewPosBill } from '../../../utils/viewPosBill'
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 export default function StockMovements() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [searchParams] = useSearchParams()
@@ -128,6 +128,9 @@ export default function StockMovements() {
   }
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+
   return (
     <div>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

@@ -7,6 +7,7 @@ import { useTheme, PRESETS } from '../context/ThemeContext'
 import Tip from '../components/Tip'
 import { MODULE_COLORS, DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
 import ImsGuideTab from './settings/ImsGuideTab'
+import { Navigate } from 'react-router-dom'
 
 const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Recipe Categories', 'Contact', 'Plan Pricing', 'Data', 'Theme', 'Guides']
 
@@ -18,7 +19,7 @@ function deriveInvoicePrefix(name) {
 
 export default function Settings() {
   const { settings, saveSettings, loadSettings, recipeCategories } = useSettings()
-  const { clientId, isAdmin, hasFeature } = useAuth()
+  const { clientId, isAdmin, hasFeature, hasImsAccess } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
   const ADMIN_TABS = new Set(['Branding', 'Property', 'Contact', 'Plan Pricing', 'Theme', 'Data', 'Guides'])
@@ -214,6 +215,8 @@ export default function Settings() {
     }
     setRegeneratingSrc(false)
   }
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

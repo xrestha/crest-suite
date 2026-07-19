@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import * as XLSX from 'xlsx'
 import { printWithTitle } from '../../../utils/printTitle'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -15,7 +16,7 @@ function getFiscalYear(bs_year, bs_month) {
 }
 
 export default function AnnualSummary() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
 
@@ -164,6 +165,8 @@ export default function AnnualSummary() {
   }
 
   const selectedLabel = yearOptions.find(y => y.value === selectedYear)?.label ?? '—'
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

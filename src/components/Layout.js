@@ -24,54 +24,56 @@ import {
 import './Layout.css'
 
 // minPlan: 'growth' | 'pro' — used for lock icon and tier badge
+// minImsRole: 'staff' | 'supervisor' | 'manager' — IMS staff-role gate (S417), same shape as POS's
+// minPosRole. Absent = floor tier (Staff), reachable by everyone with any IMS access.
 const NAV = [
   { to: '/dashboard',        label: 'Dashboard',        icon: LayoutDashboard },
-  { to: '/periods',          label: 'Periods',           icon: CalendarRange },
-  { to: '/items',            label: 'Item Master',       icon: Package },
-  { to: '/vendors',          label: 'Vendors',           icon: Truck },
+  { to: '/periods',          label: 'Periods',           icon: CalendarRange, minImsRole: 'supervisor' },
+  { to: '/items',            label: 'Item Master',       icon: Package, minImsRole: 'supervisor' },
+  { to: '/vendors',          label: 'Vendors',           icon: Truck, minImsRole: 'supervisor' },
   { to: '/purchases',        label: 'Purchases',         icon: ShoppingCart },
   { to: '/gate-passes',      label: 'Gate Passes',       icon: IdCardLanyard },
   { to: '/sales',            label: 'Sales Entry',       icon: TrendingUp, featureKey: 'sales_entry',     minPlan: 'starter' },
-  { to: '/purchase-orders',  label: 'Purchase Orders',   icon: ClipboardList, featureKey: 'purchase_orders', minPlan: 'growth' },
+  { to: '/purchase-orders',  label: 'Purchase Orders',   icon: ClipboardList, featureKey: 'purchase_orders', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/stock',            label: 'Stock Count',       icon: ClipboardCheck },
   { to: '/requisitions',     label: 'Requisitions',      icon: ArrowRightLeft, featureKey: 'requisitions',    minPlan: 'growth' },
-  { to: '/recipes',          label: 'Recipe Costing',    icon: ChefHat, featureKey: 'recipe_costing',  minPlan: 'growth' },
-  { to: '/menu-pricing',     label: 'Menu Pricing',      icon: Tag, featureKey: 'menu_pricing',    minPlan: 'starter' },
-  { to: '/menu-engineering', label: 'Menu Engineering',  icon: PieChart, featureKey: 'menu_engineering',minPlan: 'pro' },
-  { to: '/overheads',        label: 'Overheads',         icon: Receipt, featureKey: 'overheads',       minPlan: 'pro' },
+  { to: '/recipes',          label: 'Recipe Costing',    icon: ChefHat, featureKey: 'recipe_costing',  minPlan: 'growth', minImsRole: 'supervisor' },
+  { to: '/menu-pricing',     label: 'Menu Pricing',      icon: Tag, featureKey: 'menu_pricing',    minPlan: 'starter', minImsRole: 'manager' },
+  { to: '/menu-engineering', label: 'Menu Engineering',  icon: PieChart, featureKey: 'menu_engineering',minPlan: 'pro', minImsRole: 'manager' },
+  { to: '/overheads',        label: 'Overheads',         icon: Receipt, featureKey: 'overheads',       minPlan: 'pro', minImsRole: 'manager' },
 ]
 
 // cat: which characteristic report-group the item renders under in the sidebar
 const REPORTS = [
   // Summaries & planning
-  { to: '/summary',              label: 'Monthly Summary',      icon: FileBarChart, featureKey: 'monthly_summary',   cat: 'summary' },
-  { to: '/annual-summary',       label: 'Annual Summary',       icon: CalendarDays, featureKey: 'annual_summary',    cat: 'summary' },
-  { to: '/period-comparison',    label: 'Period Comparison',    icon: GitCompare, featureKey: 'period_comparison', cat: 'summary', minPlan: 'pro' },
-  { to: '/budget',               label: 'Budget vs Actual',     icon: Target, featureKey: 'budget_vs_actual',  cat: 'summary', minPlan: 'growth' },
+  { to: '/summary',              label: 'Monthly Summary',      icon: FileBarChart, featureKey: 'monthly_summary',   cat: 'summary', minImsRole: 'supervisor' },
+  { to: '/annual-summary',       label: 'Annual Summary',       icon: CalendarDays, featureKey: 'annual_summary',    cat: 'summary', minImsRole: 'supervisor' },
+  { to: '/period-comparison',    label: 'Period Comparison',    icon: GitCompare, featureKey: 'period_comparison', cat: 'summary', minPlan: 'pro', minImsRole: 'supervisor' },
+  { to: '/budget',               label: 'Budget vs Actual',     icon: Target, featureKey: 'budget_vs_actual',  cat: 'summary', minPlan: 'growth', minImsRole: 'supervisor' },
   // Stock & variance
-  { to: '/stock-report',         label: 'Stock Report',         icon: Boxes, featureKey: 'stock_report',         cat: 'stock' },
-  { to: '/reorder',              label: 'Reorder Report',       icon: RefreshCw, featureKey: 'reorder_report',       cat: 'stock' },
-  { to: '/stock-movements',      label: 'Stock Movements',      icon: History, featureKey: 'stock_movement_log',  cat: 'stock' },
-  { to: '/demand-forecast',      label: 'Demand Forecast',      icon: LineChart, featureKey: 'demand_forecast',      cat: 'stock', minPlan: 'pro' },
-  { to: '/wastage-report',       label: 'Wastage Report',       icon: Trash2, featureKey: 'wastage_report',       cat: 'stock' },
-  { to: '/dead-stock',           label: 'Dead Stock',           icon: PackageX, featureKey: 'dead_stock',           cat: 'stock', minPlan: 'growth' },
-  { to: '/variance',             label: 'Variance Report',      icon: ArrowUpDown, featureKey: 'variance_report',      cat: 'stock', minPlan: 'growth' },
-  { to: '/fifo',                 label: 'FIFO / Expiry',        icon: CalendarClock, featureKey: 'fifo_report',           cat: 'stock', minPlan: 'pro' },
-  { to: '/theoretical-variance', label: 'Theoretical Variance', icon: Sigma, featureKey: 'theoretical_variance', cat: 'stock', minPlan: 'pro' },
-  { to: '/shrinkage',            label: 'Shrinkage Report',     icon: PackageMinus, featureKey: 'shrinkage_report',     cat: 'stock', minPlan: 'pro' },
+  { to: '/stock-report',         label: 'Stock Report',         icon: Boxes, featureKey: 'stock_report',         cat: 'stock', minImsRole: 'supervisor' },
+  { to: '/reorder',              label: 'Reorder Report',       icon: RefreshCw, featureKey: 'reorder_report',       cat: 'stock', minImsRole: 'supervisor' },
+  { to: '/stock-movements',      label: 'Stock Movements',      icon: History, featureKey: 'stock_movement_log',  cat: 'stock', minImsRole: 'supervisor' },
+  { to: '/demand-forecast',      label: 'Demand Forecast',      icon: LineChart, featureKey: 'demand_forecast',      cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
+  { to: '/wastage-report',       label: 'Wastage Report',       icon: Trash2, featureKey: 'wastage_report',       cat: 'stock', minImsRole: 'supervisor' },
+  { to: '/dead-stock',           label: 'Dead Stock',           icon: PackageX, featureKey: 'dead_stock',           cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
+  { to: '/variance',             label: 'Variance Report',      icon: ArrowUpDown, featureKey: 'variance_report',      cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
+  { to: '/fifo',                 label: 'FIFO / Expiry',        icon: CalendarClock, featureKey: 'fifo_report',           cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
+  { to: '/theoretical-variance', label: 'Theoretical Variance', icon: Sigma, featureKey: 'theoretical_variance', cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
+  { to: '/shrinkage',            label: 'Shrinkage Report',     icon: PackageMinus, featureKey: 'shrinkage_report',     cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
   // Money & tax
-  { to: '/vat-report',           label: 'VAT Report',           icon: Percent, featureKey: 'vat_report',           cat: 'money' },
-  { to: '/non-vat-report',      label: 'Non-VAT Report',       icon: ReceiptText, featureKey: 'non_vat_report',       cat: 'money' },
-  { to: '/payments',             label: 'Payment Summary',      icon: Wallet, featureKey: 'payment_summary',      cat: 'money', minPlan: 'starter' },
-  { to: '/payables',             label: 'Outstanding Payables', icon: HandCoins, featureKey: 'outstanding_payables', cat: 'money', minPlan: 'growth' },
-  { to: '/purchase-one-lakh-report', label: 'Purchase 1L+ Report', icon: Banknote, featureKey: 'vat_report',       cat: 'money' },
+  { to: '/vat-report',           label: 'VAT Report',           icon: Percent, featureKey: 'vat_report',           cat: 'money', minImsRole: 'manager' },
+  { to: '/non-vat-report',      label: 'Non-VAT Report',       icon: ReceiptText, featureKey: 'non_vat_report',       cat: 'money', minImsRole: 'manager' },
+  { to: '/payments',             label: 'Payment Summary',      icon: Wallet, featureKey: 'payment_summary',      cat: 'money', minPlan: 'starter', minImsRole: 'manager' },
+  { to: '/payables',             label: 'Outstanding Payables', icon: HandCoins, featureKey: 'outstanding_payables', cat: 'money', minPlan: 'growth', minImsRole: 'manager' },
+  { to: '/purchase-one-lakh-report', label: 'Purchase 1L+ Report', icon: Banknote, featureKey: 'vat_report',       cat: 'money', minImsRole: 'manager' },
   // Menu & vendors
-  { to: '/best-sellers',         label: 'Best & Worst Sellers', icon: Trophy, featureKey: 'best_sellers',   cat: 'menu', minPlan: 'growth' },
-  { to: '/recipe-margin',        label: 'Recipe Margin',        icon: PiggyBank, featureKey: 'recipe_margin',  cat: 'menu', minPlan: 'growth' },
-  { to: '/combo-builder',        label: 'Combo Builder',        icon: Combine, featureKey: 'combo_builder',  cat: 'menu', minPlan: 'growth' },
-  { to: '/menu-repricing',       label: 'Menu Repricing',       icon: Tags, featureKey: 'menu_repricing', cat: 'menu', minPlan: 'growth' },
-  { to: '/supplier-prices',      label: 'Price Tracker',        icon: LineChart, featureKey: 'price_tracker',  cat: 'menu', minPlan: 'pro' },
-  { to: '/vendors-report',       label: 'Vendor Report',        icon: Building2, featureKey: 'vendor_report',  cat: 'menu', minPlan: 'pro' },
+  { to: '/best-sellers',         label: 'Best & Worst Sellers', icon: Trophy, featureKey: 'best_sellers',   cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
+  { to: '/recipe-margin',        label: 'Recipe Margin',        icon: PiggyBank, featureKey: 'recipe_margin',  cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
+  { to: '/combo-builder',        label: 'Combo Builder',        icon: Combine, featureKey: 'combo_builder',  cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
+  { to: '/menu-repricing',       label: 'Menu Repricing',       icon: Tags, featureKey: 'menu_repricing', cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
+  { to: '/supplier-prices',      label: 'Price Tracker',        icon: LineChart, featureKey: 'price_tracker',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
+  { to: '/vendors-report',       label: 'Vendor Report',        icon: Building2, featureKey: 'vendor_report',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
 ]
 
 // Collapsible nav groups for the IMS sidebar (Dashboard stays pinned above; Settings below).
@@ -83,6 +85,9 @@ const IMS_GROUPS = [
   { key: 'reports-stock',   label: 'Stock Reports',    items: REPORTS.filter(r => r.cat === 'stock') },
   { key: 'reports-money',   label: 'Finance Reports',  items: REPORTS.filter(r => r.cat === 'money') },
   { key: 'reports-menu',    label: 'Menu & Vendors',   items: REPORTS.filter(r => r.cat === 'menu') },
+  { key: 'ims-admin',       label: 'Admin',            items: [
+    { to: '/ims/staff', label: 'IMS Staff', icon: Users2, minImsRole: 'manager' },
+  ]},
 ]
 const HR_DASHBOARD = { to: '/hr/dashboard', label: 'HR Dashboard', icon: LayoutDashboard }
 
@@ -143,7 +148,7 @@ const HR_GROUPS = [
 export default function Layout() {
   const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient,
           isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
-          hasPosAccess, posRole, isOwner } = useAuth()
+          hasPosAccess, posRole, hasImsAccess, imsRole, isOwner } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
   const clientName = profile?.clients?.name
@@ -233,6 +238,7 @@ export default function Layout() {
   function isItemVisible(item) {
     if (item.featureKey && !hasFeature(item.featureKey)) return false
     if (item.minPosRole && !hasPosAccess(item.minPosRole)) return false
+    if (item.minImsRole && !hasImsAccess(item.minImsRole)) return false
     return true
   }
 
@@ -337,7 +343,7 @@ export default function Layout() {
   // IMS and HR are owner/admin-only panels — a POS PIN staff login (posRole set, not owner)
   // works the floor, and RLS blocks it from the IMS/HR tables anyway; don't show nav to pages
   // that would render empty.
-  const imsVisible = clientModules.ims && (!isAdmin || adminViewClientId) && (isAdmin || isOwner)
+  const imsVisible = clientModules.ims && (!isAdmin || adminViewClientId) && (isAdmin || imsRole || isOwner)
   const hrVisible  = clientModules.hr  && (!isAdmin || adminViewClientId) && (isAdmin || isOwner)
   const posVisible = clientModules.pos && (!isAdmin || adminViewClientId) && (isAdmin || posRole || isOwner)
   const panelOrder = [

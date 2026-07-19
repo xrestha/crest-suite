@@ -4,11 +4,12 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 export default function TheoreticalVariance() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
 
@@ -199,6 +200,8 @@ export default function TheoreticalVariance() {
     if (pct < -5) return 'var(--theme-amber)'  // amber — under-consumed (possible under-portioning)
     return 'var(--theme-green)'                // green — within tolerance
   }
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

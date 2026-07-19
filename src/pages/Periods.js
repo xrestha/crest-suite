@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient'
 import { scopedInsert as scopedInsertRaw, scopedUpdate as scopedUpdateRaw } from '../shared/scopedDb'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { getBsToday } from '../utils/bsCalendar'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Navigate } from 'react-router-dom'
 import Tip from '../components/Tip'
 
 const BS_MONTHS = [
@@ -13,7 +13,7 @@ const BS_MONTHS = [
 ]
 
 export default function Periods() {
-  const { isAdmin, clientId, switchAdminClient } = useAuth()
+  const { isAdmin, clientId, switchAdminClient, hasImsAccess, clientModules } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
   const [periods, setPeriods] = useState([])
@@ -250,6 +250,10 @@ export default function Periods() {
     const monthsAgo = (bsToday.year - p.bs_year) * 12 + (bsToday.month - p.bs_month)
     return monthsAgo <= 12
   }
+  // Periods is a shared cross-module page (HR/POS-only clients use it too, not just IMS) — the
+  // role gate must only apply when the client actually has IMS, same reasoning as MenuPricing.js.
+  if (clientModules?.ims && !hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+
   const visiblePeriods = showAll ? periods : periods.filter(p => p.status === 'open' || isRecent(p))
   const archivedCount  = periods.length - visiblePeriods.length
 

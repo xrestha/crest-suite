@@ -7,6 +7,7 @@ import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
@@ -30,7 +31,7 @@ function StatusBadge({ status }) {
 }
 
 export default function PurchaseOrders() {
-  const { clientId, profile, isAdmin, loading: authLoading } = useAuth()
+  const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
@@ -339,6 +340,8 @@ export default function PurchaseOrders() {
   const periodLabel = selectedPeriod
     ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
     : '—'
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   const thStyle = { textAlign: 'left', fontSize: 11, color: 'var(--theme-text2)', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }
   const tdStyle = { padding: '12px', fontSize: 13, verticalAlign: 'middle' }

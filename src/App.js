@@ -52,6 +52,7 @@ import PeriodComparison from './modules/ims/reports/PeriodComparison'
 import AnnualSummary from './modules/ims/reports/AnnualSummary'
 import OutstandingPayables from './modules/ims/reports/OutstandingPayables'
 import ShrinkageReport from './modules/ims/variance/ShrinkageReport'
+import ImsStaff from './modules/ims/staff/ImsStaff'
 import EmployeeList from './modules/hr/employees/EmployeeList'
 import PaySetup from './modules/hr/pay/PaySetup'
 import AttendanceSheet from './modules/hr/attendance/AttendanceSheet'
@@ -194,6 +195,7 @@ export default function App() {
                 element={<ModuleGate module="ims"><PremiumGate featureKey="overheads" minPlan="pro"><Overheads /></PremiumGate></ModuleGate>} />
               <Route path="/theoretical-variance"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="theoretical_variance" minPlan="pro"><TheoreticalVariance /></PremiumGate></ModuleGate>} />
+              <Route path="/ims/staff" element={<ModuleGate module="ims"><ImsStaff /></ModuleGate>} />
 
               {/* Crest HR — gated on hr_enabled */}
               <Route path="/hr/dashboard" element={<ModuleGate module="hr"><HrDashboard /></ModuleGate>} />

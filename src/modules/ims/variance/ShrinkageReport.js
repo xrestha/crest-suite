@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { Navigate } from 'react-router-dom'
 
 function shrinkageStatus(count, covered) {
   const ratio = covered > 0 ? count / covered : 0
@@ -13,7 +14,7 @@ function shrinkageStatus(count, covered) {
 }
 
 export default function ShrinkageReport() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
 
@@ -184,6 +185,8 @@ export default function ShrinkageReport() {
     .sort((a, b) => b.totalShrinkValue - a.totalShrinkValue)
 
   function fmt(v) { return `NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })}` }
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

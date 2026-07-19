@@ -10,6 +10,7 @@ import {
   Tooltip as RTooltip, ReferenceLine, ResponsiveContainer,
   Cell, BarChart, Bar,
 } from 'recharts'
+import { Navigate } from 'react-router-dom'
 
 const QUADRANTS = {
   Star:      { color: 'var(--theme-green)', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.30)', icon: '★', desc: 'High profit · High popularity' },
@@ -73,7 +74,7 @@ function median(arr) {
 }
 
 export default function MenuEngineering() {
-  const { profile, clientId: authClientId, loading: authLoading } = useAuth()
+  const { profile, clientId: authClientId, loading: authLoading, hasImsAccess } = useAuth()
   const clientId = authClientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
 
@@ -220,6 +221,8 @@ export default function MenuEngineering() {
     })
     return Object.entries(map).sort((a, b) => b[1].total - a[1].total)
   }, [items])
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

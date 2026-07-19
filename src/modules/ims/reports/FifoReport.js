@@ -6,11 +6,12 @@ import { supabase } from '../../../supabaseClient'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 export default function FifoReport() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { settings } = useSettings()
   const { scopedFrom } = useScopedDb()
@@ -172,6 +173,8 @@ export default function FifoReport() {
     if (flag === 'warning') return { color: 'var(--theme-accent)', badge: 'badge-yellow', label: `Expiring in ${warningDays}d` }
     return { color: 'var(--theme-green)', badge: 'badge-green', label: 'OK' }
   }
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

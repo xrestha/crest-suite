@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
+import { Navigate } from 'react-router-dom'
 
 const DEFAULT_CATEGORIES = [
   'Dairy & Bakery',
@@ -27,7 +28,7 @@ const EMPTY_FORM = {
 }
 
 export default function Items() {
-  const { clientId, isAdmin } = useAuth()
+  const { clientId, isAdmin, hasImsAccess } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate } = useScopedDb()
   const [items, setItems] = useState([])
@@ -345,6 +346,8 @@ export default function Items() {
     const bHas = !!(b.purchase_unit && b.conversion_factor > 1)
     return bHas - aHas
   })
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   const tabStyle = (tab) => ({
     padding: '8px 18px',

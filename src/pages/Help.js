@@ -55,6 +55,11 @@ const IMS_FEATURE_TIERS = [
         guide: 'Crest Suite can be installed on any smartphone — no app store required. On Android, open in Chrome and tap "Add to Home Screen". On iPhone, open in Safari, tap Share, and choose "Add to Home Screen". The app works offline: visit Stock Count once connected to cache all items, then count stock in the storeroom with no signal. Entries sync automatically when you reconnect.',
         tips: ['Open the app online at the start of each shift to refresh the cache', 'An amber "Offline" banner appears at the top when you have no connection', 'Cards with a dashed amber border are waiting to sync', 'Reinstall the app after a major update to ensure the latest version is cached']
       },
+      {
+        icon: '👥', name: 'IMS Staff', path: '/ims/staff',
+        guide: 'Assign IMS roles to your team. Staff log in with their own email and password (same mechanism as the Owner account), not a shared PIN. Roles: Staff (Purchases, Stock Count, Sales Entry, Requisitions, Gate Passes only — no cost or report pages), Supervisor (+ Periods, Item Master, Vendors, Purchase Orders, Recipe Costing, and every Stock/Summary report), Manager (+ Menu Pricing, Overheads, all Finance Reports, Settings, and staff role assignment — full Owner-equivalent access). Requires Manager role or above.',
+        tips: ['Start by assigning your own account the Manager role first if you plan to hand day-to-day IMS Staff management to someone else', 'Item Master and Vendors are Supervisor+ because they show purchase rates — Staff can still log purchases normally, since the item/vendor picker inside Purchases doesn\'t require visiting those pages directly', 'A staff account with no role assigned cannot see any IMS pages — the IMS section is hidden from their sidebar entirely', 'If Crest HR is also enabled, + Add Staff defaults to picking an existing HR Employee instead of typing a fresh name — the IMS login is linked to that employee record (shown with a 🔗 HR tag) so the name never drifts out of sync', 'Reset Password sets a new password immediately — there is no email/reset-link flow, so share the new password with the staff member directly']
+      },
     ]
   },
   {

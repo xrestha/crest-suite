@@ -6,12 +6,13 @@ import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const npr = n => Number(n || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })
 
 export default function StockReport() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
 
@@ -164,6 +165,8 @@ export default function StockReport() {
     XLSX.utils.book_append_sheet(wb, ws, 'Stock Report')
     XLSX.writeFile(wb, `Stock_Report_${period.replace(' ', '_')}.xlsx`)
   }
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const statusBadge = (st) => st === 'out'

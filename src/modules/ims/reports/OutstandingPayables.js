@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import { bsToAd } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const TODAY = new Date().toISOString().split('T')[0]
@@ -25,7 +26,7 @@ function aging(days) {
 }
 
 export default function OutstandingPayables() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert } = useScopedDb()
 
@@ -173,6 +174,8 @@ export default function OutstandingPayables() {
   const totalRemaining = filteredBills.reduce((s, b) => s + (activeTab === 'outstanding' ? b.remaining : b.total), 0)
   const overdueBills   = filteredBills.filter(b => b.daysOld > 60).length
   const urgentValue    = filteredBills.filter(b => b.daysOld > 90).reduce((s, b) => s + b.remaining, 0)
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

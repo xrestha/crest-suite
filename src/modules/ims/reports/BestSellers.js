@@ -6,6 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import Tip from '../../../components/Tip'
 import ChartCard from '../../../components/ChartCard'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -21,7 +22,7 @@ const RED   = 'var(--theme-red)'
 const MUTED = 'var(--theme-text2)'
 
 export default function BestSellers() {
-  const { clientId, profile } = useAuth()
+  const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods]         = useState([])
@@ -102,6 +103,8 @@ export default function BestSellers() {
 
   const fmt = (n) => `NPR ${Math.round(n).toLocaleString('en-NP')}`
   const periodLabel = (p) => p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : ''
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

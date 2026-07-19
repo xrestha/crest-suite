@@ -6,11 +6,12 @@ import { supabase } from '../../../supabaseClient'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
+import { Navigate } from 'react-router-dom'
 
 const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '' }
 
 export default function Vendors() {
-  const { clientId, isAdmin } = useAuth()
+  const { clientId, isAdmin, hasImsAccess } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom, scopedInsert } = useScopedDb()
   const [vendors, setVendors] = useState([])
@@ -121,6 +122,8 @@ export default function Vendors() {
     await supabase.from('vendors').delete().eq('id', vendor.id)
     loadVendors()
   }
+
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   const filtered = vendors.filter(v =>
     !search ||

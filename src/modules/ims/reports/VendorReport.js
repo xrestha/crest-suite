@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import { bsToAd } from '../../../utils/bsCalendar'
+import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const EPS = 0.001
@@ -25,7 +26,7 @@ function billAging(days) {
 const VENDOR_SPLIT_COLORS = ['var(--theme-accent)','var(--theme-green)','#60a5fa','var(--theme-red)','var(--theme-purple)','#fb923c','#22d3ee','#f472b6']
 
 export default function VendorReport() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods] = useState([])
@@ -317,6 +318,8 @@ export default function VendorReport() {
   }
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
+
+  if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

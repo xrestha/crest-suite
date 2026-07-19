@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -17,7 +18,7 @@ function vatOf(r) {
 const EMPTY_FORM = { name: '', category: '', price: '', vatRate: 0.13, costPrice: '' }
 
 export default function MenuPricing() {
-  const { clientId, profile, clientModules } = useAuth()
+  const { clientId, profile, clientModules, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const [recipes, setRecipes]   = useState([])
@@ -223,6 +224,10 @@ export default function MenuPricing() {
 
   const posOnCount  = recipes.filter(r => r.pos_enabled).length
   const posOffCount = recipes.filter(r => !r.pos_enabled).length
+
+  // IMS staff-role gate only applies to clients that actually have IMS — a POS-only client's
+  // Owner login has no ims_role at all and must never be blocked from this shared route.
+  if (clientModules?.ims && !hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   /* ── POS-only view (no IMS) ─────────────────────────────────────────────── */
   if (!clientModules?.ims) return (
