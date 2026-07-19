@@ -6,8 +6,9 @@ import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { useTheme, PRESETS } from '../context/ThemeContext'
 import Tip from '../components/Tip'
 import { MODULE_COLORS, DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
+import ImsGuideTab from './settings/ImsGuideTab'
 
-const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Recipe Categories', 'Contact', 'Plan Pricing', 'Data', 'Theme']
+const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Recipe Categories', 'Contact', 'Plan Pricing', 'Data', 'Theme', 'Guides']
 
 // Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
 function deriveInvoicePrefix(name) {
@@ -20,8 +21,8 @@ export default function Settings() {
   const { clientId, isAdmin, hasFeature } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
-  const ADMIN_TABS = new Set(['Branding', 'Property', 'Contact', 'Plan Pricing', 'Theme', 'Data'])
-  const CLIENT_HIDDEN = new Set(['Contact', 'Branding', 'Property', 'Data', 'Plan Pricing'])
+  const ADMIN_TABS = new Set(['Branding', 'Property', 'Contact', 'Plan Pricing', 'Theme', 'Data', 'Guides'])
+  const CLIENT_HIDDEN = new Set(['Contact', 'Branding', 'Property', 'Data', 'Plan Pricing', 'Guides'])
   const TABS = ALL_TABS.filter(t => {
     if (isAdmin) return ADMIN_TABS.has(t)
     if (CLIENT_HIDDEN.has(t)) return false
@@ -880,6 +881,8 @@ export default function Settings() {
           )}
         </div>
       )}
+
+      {activeTab === 'Guides' && <ImsGuideTab />}
     </div>
   )
 }

@@ -150,6 +150,27 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S417 — 2026-07-19 — Admin Settings gets a full in-depth Crest IMS user guide (new "Guides" tab)
+
+Built a comprehensive, admin-only reference doc covering all ~37 Crest IMS pages (every Operations, Costing, and report page across Summary/Stock/Finance/Menu & Vendor categories, plus the 5 IMS-relevant Settings tabs) as a new **Guides** tab in Admin Settings, separate from Help.js's existing client-facing "Module Guide" (which stays a short feature-tier catalog, untouched).
+
+**Decisions locked in before building** (asked via clarifying questions per user instruction):
+
+- **Static React content**, not DB-backed/admin-editable — matches Help.js's existing pattern; content lives in code, updated via a normal deploy.
+- **Full reference depth** — every IMS page gets its own section (purpose, step-by-step workflow, key fields, the actual formulas, gotchas, and cross-page connections), not just a narrower core-workflow walkthrough.
+- **Separate and additive** to Help.js's Module Guide tab, not a shared/refactored data source — deliberately duplicative rather than coupling two different audiences (client-facing quick reference vs. admin-facing deep doc) to one dataset.
+- **Sidebar + content-pane layout**, grouped to mirror the IMS sidebar's own `NAV_GROUPS` order (Operations → Costing → Summary Reports → Stock Reports → Finance Reports → Menu & Vendors → IMS Settings), with a search box to filter by page name.
+
+**Research approach**: rather than writing generic descriptions, dispatched 3 parallel Explore agents to read the actual source of every IMS page/util (`recipeCost.js`, `purchasesHelpers.js`, `demandForecastData.js`, etc.) and extract real formulas, field behavior, and validation logic before any guide prose was written — so the "How it calculates" and "Watch out for" sections are grounded in the code, not invented. This surfaced several genuine cross-page inconsistencies worth having on record (now documented in the guide itself):
+
+- Monthly Summary, Annual Summary, and Period Comparison each use slightly different Food-Cost-% color thresholds (35/45 vs 30/38) and Annual/Period-Comparison's COGS formula omits Staff Meals while Monthly Summary's includes it.
+- Overheads.js's "Food Cost" is pure purchase spend (no opening/closing adjustment) — a different number from every other page's COGS-based Food Cost %, and the single most likely source of "why don't these two reports agree" questions.
+- `Variance.js` (shared `explodeRecipeIngredients()` util, ±10% flag threshold) and `TheoreticalVariance.js` (its own locally-duplicated recursion, ±5% threshold) are near-duplicate reports that can disagree on the same item because they're independently maintained.
+- `VatReport.js`'s `buildVendorSummary()` is reused by `PurchaseOneLakhAboveReport.js` with different discount-scoping (`'vat'` vs `'all'`) — same vendor, two slightly different totals, by design.
+- `PaymentReport.js` has no discount handling at all (raw qty×rate), unlike `VendorReport.js`'s discount- and return-aware "Net Spend" for the same underlying data.
+
+**Files:** `src/pages/settings/imsGuideData.js` (new — all guide content), `src/pages/settings/ImsGuideTab.jsx` (new — sidebar/content-pane UI), `src/pages/Settings.js` (added `'Guides'` to `ALL_TABS`/`ADMIN_TABS`/`CLIENT_HIDDEN`, renders `<ImsGuideTab />`)
+
 ### S416 — 2026-07-19 — Purchase Bill Qty field: unit label no longer mistaken for an entered value
 
 Client screenshot: a purchase-bill line showed Rate 0.83, Total 25, and a Qty box reading "GM" — client thought the calculation was wrong. Actual cause: the Qty box's *placeholder* was the item's unit (`inputUnit || '0'`), so an empty Qty field rendered as bare "GM" text that looked like a typed value at a glance, especially on a dark theme screenshot. Qty was genuinely empty, so `Amount = Qty × Rate` was 0 and save correctly blocked with "Add at least one item with item, qty and rate filled" — not a calculation bug, but a confusing empty state.
