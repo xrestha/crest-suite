@@ -164,6 +164,28 @@ export default function SelfServiceHome() {
   useEffect(() => { if (profile?.hr_self_service && tab === 'tada') loadTada() }, [profile, tab, loadTada])
   useEffect(() => { if (profile?.hr_self_service && tab === 'roster') { loadRoster(); loadSwapRequests() } }, [profile, tab, loadRoster, loadSwapRequests])
 
+  // iOS "Add to Home Screen" PWAs get frozen/suspended on close rather than reloaded — reopening
+  // from the home screen icon resumes the exact in-memory state from last time (e.g. a payroll
+  // run finalized while the app sat suspended never shows up) with none of the effects above
+  // re-firing. Refetch whichever tab is active whenever the page becomes visible again.
+  useEffect(() => {
+    if (!profile?.hr_self_service) return
+    function refetchActiveTab() {
+      if (tab === 'payslip') loadPayslips()
+      else if (tab === 'leave') loadLeave()
+      else if (tab === 'tada') loadTada()
+      else if (tab === 'roster') { loadRoster(); loadSwapRequests() }
+    }
+    function onVisibility() { if (document.visibilityState === 'visible') refetchActiveTab() }
+    function onPageShow(e) { if (e.persisted) refetchActiveTab() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pageshow', onPageShow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pageshow', onPageShow)
+    }
+  }, [profile, tab, loadPayslips, loadLeave, loadTada, loadRoster, loadSwapRequests])
+
   function openSwapRequest(bsDay) {
     setSwapDay(bsDay); setSwapTargetEmpId(''); setSwapTargetDay(''); setSwapNote(''); setSwapMsg('')
     // Clear stale data and show a loading state — otherwise the picker briefly renders with only
