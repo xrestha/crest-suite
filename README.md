@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S427 — 2026-07-20 — S426's Escape fix was live-tested and didn't actually work; found the real bug
+
+S426 shipped `stopImmediatePropagation()` on the calculator's own document Escape listener, reasoning that React runs child effects before parent effects so the calculator's listener would register (and thus fire) first. Live-tested against the real Add Purchase Bill modal: Escape still closed both. The reasoning was wrong in a way worth writing down, because it's a real DOM-events gotcha, not a typo.
+
+**Why it actually failed:** `Modal.js`'s Escape listener attaches unconditionally the moment the modal itself mounts — i.e. the instant Add Purchase Bill opens, well before anyone has clicked the calculator's ⌗ button. The calculator's own listener only attaches later, when `calcOpen` flips to `true` — a separate, later effect run triggered by a state change, not part of the same mount pass. **Same-phase (bubble) listeners on one DOM target fire in registration order**, so Modal's earlier-registered listener always ran first and had already called its own `onClose()` before the calculator's listener got a chance to call `stopImmediatePropagation()` — by then it was too late, the event handler that mattered had already fired. "Children mount before parents" is true, but doesn't apply here because the two listeners aren't both registered during the same mount pass.
+
+**Actual fix:** register the calculator's Escape listener in the **capture phase** — `document.addEventListener('keydown', onKeyDown, true)`. Capture-phase listeners run before any bubble-phase listener on the same target, deterministically, regardless of which was added first. This is the one fix that doesn't depend on registration-order timing at all.
+
+**Also, per feedback:** a real mouse-clickable × button in the calculator's own header (matching `Modal.js`'s close-button pattern) — Escape is fixed, but a visible click target shouldn't depend on the user trusting a keyboard shortcut that had just visibly failed. And the whole calculator is now larger text throughout for readability: the live result 22px → 32px, the expression input 16px → 18px, keypad buttons 15px → 18px, tape rows 12px → 14px — all values pulled from the existing DESIGN.md type ramp (S424), no new sizes invented. Panel width 340px → 380px to give the bigger result number room.
+
+**Files:** `src/components/Calculator.js`, `src/pages/Help.js`
+
 ### S426 — 2026-07-20 — Quick Calculator button in Add Purchase Bill; a real Escape-key bug found and fixed along the way
 
 Follow-on to S423/S424: Add Purchase Bill was the obvious next spot for the Quick Calculator — working out a per-carton rate or a pack conversion mid-bill previously meant Alt+C anyway, so making it a visible, discoverable button in the modal itself was a small change. `Modal.js` gained an optional `headerExtra` slot (next to the × close button, backward compatible — all 13 existing `<Modal>` call sites pass nothing and render unchanged) and `PurchaseBillModal.jsx` now mounts its own `QuickCalculator` instance, toggled by a ⌗ button there.
