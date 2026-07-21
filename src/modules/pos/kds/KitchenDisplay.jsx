@@ -174,7 +174,11 @@ export default function KitchenDisplay() {
     <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--theme-bg)', display: 'flex', flexDirection: 'column', padding: '20px 28px', overflowY: 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <button onClick={() => navigate('/pos/orders')} className="btn btn-ghost" style={{ fontSize: 13 }}>
+          {/* '/pos/orders' was every POS staffer's home before kitchen/bar teams (S431) existed —
+              a locked-team account doesn't have Orders in its sidebar at all, so exiting there
+              would land on a page that isn't theirs. Dashboard is the one destination every team
+              always has. */}
+          <button onClick={() => navigate(isTeamLocked ? '/dashboard' : '/pos/orders')} className="btn btn-ghost" style={{ fontSize: 13 }}>
             ← Exit
           </button>
           <div>
