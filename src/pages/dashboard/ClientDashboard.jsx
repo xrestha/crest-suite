@@ -15,6 +15,7 @@ import ChartCard from '../../components/ChartCard'
 import { getBsToday, BS_MONTHS, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
+import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
 
 export default function ClientDashboard() {
@@ -26,6 +27,7 @@ export default function ClientDashboard() {
   const { colors, themeKey } = useTheme()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
+  const hrApprovals = useHrApprovalCounts() // shared with HrDashboard.jsx's own Approvals row
   const navigate = useNavigate()
   const location = useLocation()
   const [stats, setStats]               = useState(null)
@@ -1294,6 +1296,24 @@ export default function ClientDashboard() {
               <div style={kpiSubtextStyle}>Basic salary only</div>
             </div>
           </div>
+
+          {/* Approvals-lite — same counts HrDashboard.jsx's own Approvals row shows (shared via
+              useHrApprovalCounts), just compact for this narrower column. Always shown (even at
+              zero) so "nothing pending" is a visible, confirmed state, not an absent one. */}
+          {(() => {
+            const approvalsCardProps = kpiCard(() => navigate('/hr/dashboard'))
+            return (
+          <div {...approvalsCardProps} style={{ ...approvalsCardProps.style, marginTop: 10 }}>
+            <div style={kpiLabelStyle}>Pending Approvals</div>
+            <div style={{ ...kpiValueStyle(18, 800), color: hrApprovals.total > 0 ? 'var(--theme-amber)' : 'var(--theme-text1)' }}>
+              {hrApprovals.loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrApprovals.total}
+            </div>
+            <div style={kpiSubtextStyle}>
+              {hrApprovals.loading ? 'Loading…' : `${hrApprovals.leave} Leave · ${hrApprovals.ot} OT · ${hrApprovals.tada} TADA · ${hrApprovals.swap} Swap →`}
+            </div>
+          </div>
+            )
+          })()}
         </div>
       )}
 

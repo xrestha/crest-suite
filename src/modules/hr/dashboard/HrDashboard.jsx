@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { useHrApprovalCounts } from './useHrApprovalCounts'
 
 const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
 const fmtD = iso => iso ? new Date(iso).toLocaleDateString('en-NP', { day: 'numeric', month: 'short' }) : '—'
@@ -53,7 +54,7 @@ export default function HrDashboard() {
   const [advOutstanding, setAdvOutstanding] = useState(0)
   const [empMap,      setEmpMap]      = useState({})
   const [typeMap,     setTypeMap]     = useState({})
-  const [pendingCounts, setPendingCounts] = useState({ leave: 0, ot: 0, tada: 0, swap: 0 })
+  const pendingCounts = useHrApprovalCounts() // shared with ClientDashboard.jsx's HR column
   // Guards against a stale response overwriting the current view — load() had no cancellation
   // check, so switching "view as" client rapidly enough could let a slower response for the
   // PREVIOUS client land last and silently repaint this screen with the wrong tenant's approval
@@ -94,12 +95,6 @@ export default function HrDashboard() {
         .order('created_at', { ascending: false }).limit(1),
       scopedFrom('hr_advances', 'id, amount').eq('status', 'active'),
       scopedFrom('hr_advance_repayments', 'advance_id, amount'),
-      // True counts for the Approvals KPI row — the queries above are capped at 8 for the preview
-      // tables, so `.length` on them undercounts past 8. head:true skips fetching rows entirely.
-      scopedFrom('hr_leave_requests', 'id', { count: 'exact', head: true }).eq('status', 'pending'),
-      scopedFrom('hr_overtime_entries', 'id', { count: 'exact', head: true }).eq('status', 'pending'),
-      scopedFrom('hr_tada_claims', 'id', { count: 'exact', head: true }).eq('status', 'pending'),
-      scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true }).eq('status', 'pending_admin'),
     ])
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
@@ -113,10 +108,6 @@ export default function HrDashboard() {
       { data: runs },
       { data: advs },
       { data: reps },
-      { count: leaveCount },
-      { count: otCount },
-      { count: tadaCount },
-      { count: swapCount },
     ] = results
     let hadRealError = results.some(r => r.error)
 
@@ -156,7 +147,6 @@ export default function HrDashboard() {
     setOtList(otPending || [])
     setTadaList(tadaPending || [])
     setSwapList(swapPending || [])
-    setPendingCounts({ leave: leaveCount || 0, ot: otCount || 0, tada: tadaCount || 0, swap: swapCount || 0 })
 
     // ── Advances outstanding ───────────────────────────────────────────────────
     const repMap = {}
