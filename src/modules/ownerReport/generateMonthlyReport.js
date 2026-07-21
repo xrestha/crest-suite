@@ -3,7 +3,7 @@
 // Monthly Owner/Manager Report section for the freeze/regenerate design.
 import { supabase } from '../../supabaseClient'
 import { scopedInsert, scopedUpdate } from '../../shared/scopedDb'
-import { computeMonthlyReport } from './computeMonthlyReport'
+import { computeMonthlyReport, CURRENT_SCHEMA_VERSION } from './computeMonthlyReport'
 
 // Resolves modulesIncluded itself from `clients` directly — never trusts a caller-supplied
 // clientModules, since Periods.js's adminCloseAndAdvance loops over an arbitrary client id that
@@ -32,7 +32,7 @@ export async function saveGeneratedReport({ clientId, period, snapshot, modulesI
     bs_month: period.bs_month,
     modules_included: modulesIncluded,
     snapshot,
-    schema_version: 1,
+    schema_version: CURRENT_SCHEMA_VERSION,
     generation_source: source,
     generated_by: actorId || null,
   })
@@ -46,7 +46,7 @@ export async function regenerateReport({ clientId, periodId, snapshot, modulesIn
   return scopedUpdate('monthly_owner_reports', clientId, {
     snapshot,
     modules_included: modulesIncluded,
-    schema_version: 1,
+    schema_version: CURRENT_SCHEMA_VERSION,
     generation_source: 'manual_regenerate',
     generated_by: actorId || null,
     generated_at: new Date().toISOString(),

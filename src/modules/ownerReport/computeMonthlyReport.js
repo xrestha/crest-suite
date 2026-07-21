@@ -384,22 +384,103 @@ function computeCombinedMetrics({ ims, hr }) {
   return { revenueTotal, foodCostPct, laborCostPct, primeCostPct, netMarginPct }
 }
 
+// ── Trend section ────────────────────────────────────────────────────────────
+// Compares this period against its own already-frozen neighbors — reads prior
+// monthly_owner_reports rows directly rather than re-deriving figures live (cheaper, and
+// philosophically consistent: those numbers are already frozen facts for their own period).
+// Deliberately never generates a missing prior snapshot as a side effect of viewing this one —
+// that would be surprising, expensive, and inconsistent with "generate on close or on deliberate
+// view of THAT period." BS years always have exactly 12 months, so month rollover is plain
+// integer arithmetic — no bsToAd round-trip needed (this doesn't need day-level AD precision).
+async function lookupPriorSnapshot(clientId, bsYear, bsMonth) {
+  const { data: priorPeriod } = await scopedFrom('monthly_periods', clientId, 'id, status')
+    .eq('bs_year', bsYear).eq('bs_month', bsMonth).maybeSingle()
+  if (!priorPeriod) return { available: false, reason: 'no_period', period: null, snapshot: null }
+  if (priorPeriod.status !== 'closed') return { available: false, reason: 'not_closed', period: { bs_year: bsYear, bs_month: bsMonth }, snapshot: null }
+  const { data: report } = await scopedFrom('monthly_owner_reports', clientId, 'snapshot')
+    .eq('period_id', priorPeriod.id).maybeSingle()
+  if (!report) return { available: false, reason: 'no_report', period: { bs_year: bsYear, bs_month: bsMonth }, snapshot: null }
+  return { available: true, reason: null, period: { bs_year: bsYear, bs_month: bsMonth }, snapshot: report.snapshot }
+}
+
+function buildDeltas(current, prior) {
+  if (!prior) return null
+  const pctDelta = (curVal, priorVal) => (curVal == null || priorVal == null) ? null : curVal - priorVal // percentage-point delta
+  const moneyDelta = (curVal, priorVal) => {
+    if (curVal == null || priorVal == null) return null
+    const absoluteChange = curVal - priorVal
+    const pctChange = priorVal !== 0 ? (absoluteChange / Math.abs(priorVal)) * 100 : null
+    return { absoluteChange, pctChange }
+  }
+  return {
+    revenueTotal: moneyDelta(current.combined?.revenueTotal, prior.combined?.revenueTotal),
+    foodCostPct: pctDelta(current.combined?.foodCostPct, prior.combined?.foodCostPct),
+    laborCostPct: pctDelta(current.combined?.laborCostPct, prior.combined?.laborCostPct),
+    primeCostPct: pctDelta(current.combined?.primeCostPct, prior.combined?.primeCostPct),
+    netMarginPct: pctDelta(current.combined?.netMarginPct, prior.combined?.netMarginPct),
+    posNetSales: moneyDelta(current.pos?.totalNetSales, prior.pos?.totalNetSales),
+    otHours: moneyDelta(current.hr?.payroll?.ot?.hours, prior.hr?.payroll?.ot?.hours),
+    otAmount: moneyDelta(current.hr?.payroll?.ot?.amount, prior.hr?.payroll?.ot?.amount),
+  }
+}
+
+async function computeTrendSection(clientId, period, currentPartial) {
+  const lastMonth = period.bs_month === 1 ? { y: period.bs_year - 1, m: 12 } : { y: period.bs_year, m: period.bs_month - 1 }
+  const lastYear = { y: period.bs_year - 1, m: period.bs_month }
+
+  const [last, sameMonthLastYear] = await Promise.all([
+    lookupPriorSnapshot(clientId, lastMonth.y, lastMonth.m),
+    lookupPriorSnapshot(clientId, lastYear.y, lastYear.m),
+  ])
+
+  return {
+    vsLastPeriod: { ...last, deltas: buildDeltas(currentPartial, last.snapshot) },
+    vsSameMonthLastYear: { ...sameMonthLastYear, deltas: buildDeltas(currentPartial, sameMonthLastYear.snapshot) },
+  }
+}
+
 // Orchestrates the three section computations + combined metrics. `modulesIncluded` is resolved
 // by the caller (generateMonthlyReport.js) from the client's actual module subscription, not
 // guessed here.
+// Current shape version — bump whenever a new top-level snapshot field is added. Never branched
+// on anywhere (no migration/upgrade system exists) — reads just optional-chain defensively, same
+// as every existing render site already does for a module that was never enabled.
+export const CURRENT_SCHEMA_VERSION = 2
+
+// Runs one section's computation without letting its failure take down the rest of the report —
+// a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean
+// NO report gets written for the period (that used to be the failure mode: computeMonthlyReport
+// awaited a flat Promise.all, so any single section throwing rejected everything). Returns
+// `null` + records the error string on failure; the report page shows a "couldn't be generated"
+// note for that section instead of pretending the client just has zero data there.
+async function runSection(key, fn, errors) {
+  try {
+    return await fn()
+  } catch (e) {
+    console.error(`computeMonthlyReport: section "${key}" failed:`, e)
+    errors[key] = e.message || String(e)
+    return null
+  }
+}
+
 export async function computeMonthlyReport({ clientId, period, modulesIncluded }) {
   if (!period || period.status !== 'closed') {
     throw new Error('Monthly owner reports are only generated for closed periods')
   }
+  const sectionErrors = {}
   const [ims, hr, pos] = await Promise.all([
-    modulesIncluded.ims ? computeImsSection(clientId, period) : null,
-    modulesIncluded.hr  ? computeHrSection(clientId, period)  : null,
-    modulesIncluded.pos ? computePosSection(clientId, period) : null,
+    modulesIncluded.ims ? runSection('ims', () => computeImsSection(clientId, period), sectionErrors) : null,
+    modulesIncluded.hr  ? runSection('hr',  () => computeHrSection(clientId, period),  sectionErrors) : null,
+    modulesIncluded.pos ? runSection('pos', () => computePosSection(clientId, period), sectionErrors) : null,
   ])
+  const combined = computeCombinedMetrics({ ims, hr })
+  const trend = await runSection('trend', () => computeTrendSection(clientId, period, { ims, hr, pos, combined }), sectionErrors)
   return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     period: { id: period.id, bs_year: period.bs_year, bs_month: period.bs_month },
     modulesIncluded,
-    ims, hr, pos,
-    combined: computeCombinedMetrics({ ims, hr }),
+    ims, hr, pos, trend,
+    combined,
+    sectionErrors: Object.keys(sectionErrors).length > 0 ? sectionErrors : null,
   }
 }

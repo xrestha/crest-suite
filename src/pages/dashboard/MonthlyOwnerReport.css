@@ -11,10 +11,14 @@
   margin-bottom: 18px;
 }
 
+/* This is now a genuine multi-page document (Financial Summary + Menu Engineering + Labor +
+   Inventory + Vendor + Trend) — no longer trying to cram onto one A4 page, so the aggressive
+   font/padding shrink from the original 1-page pass is gone. What stays: no duplicate header, no
+   floating-card chrome, no dead hover affordance, plus real pagination control so a section
+   doesn't split awkwardly across a page boundary. */
 @media print {
   /* The letterhead inside the report already carries the title — the app-chrome page header
-     shown above it on every other page (title + subtitle) is pure duplication once this hits
-     paper, and costs real vertical space toward fitting one A4 page. */
+     shown above it on every other page (title + subtitle) is pure duplication once printed. */
   .owner-report-page-header {
     display: none !important;
   }
@@ -26,39 +30,6 @@
     border-radius: 0 !important;
     padding: 0 !important;
     max-width: 100% !important;
-    font-size: 11px !important;
-  }
-
-  .owner-report-letterhead {
-    margin-bottom: 10px !important;
-    padding-bottom: 8px !important;
-  }
-
-  .owner-report-doc h2 {
-    font-size: 15px !important;
-    margin-bottom: 2px !important;
-  }
-
-  .owner-report-doc h3 {
-    font-size: 10.5px !important;
-    margin: 8px 0 4px !important;
-    padding-bottom: 3px !important;
-  }
-
-  .owner-report-doc p {
-    font-size: 11px !important;
-    line-height: 1.35 !important;
-    margin: 4px 0 !important;
-  }
-
-  .owner-report-section {
-    margin-bottom: 8px !important;
-  }
-
-  .owner-report-table th,
-  .owner-report-table td {
-    padding: 3px 6px !important;
-    font-size: 10.5px !important;
   }
 
   /* Tip's dashed hover-underline is a screen-only affordance (nothing to hover on paper) —
@@ -66,5 +37,29 @@
   .owner-report-doc td span {
     border-bottom: none !important;
     cursor: default !important;
+  }
+}
+
+/* Pagination — applies whether printing to paper or to PDF via the browser's print dialog.
+   Keep a table (or a whole short section) from splitting mid-row across a page boundary; force
+   each major deep-dive section to start on a fresh page rather than leaving a half-empty gap or
+   letting a table header get orphaned from its rows. */
+.owner-report-table,
+.owner-report-section {
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.owner-report-page-break {
+  page-break-before: always;
+  break-before: page;
+}
+
+@media screen {
+  /* On screen a hard page-break is meaningless but still useful as a visual section divider for
+     a document this long. */
+  .owner-report-page-break {
+    padding-top: 18px;
+    border-top: 1px dashed var(--theme-border);
   }
 }

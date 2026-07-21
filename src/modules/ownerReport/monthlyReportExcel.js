@@ -86,5 +86,26 @@ export function exportMonthlyReportExcel(report, bizInfo) {
     if (payRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(payRows), 'POS - Payment Mix')
   }
 
+  if (snapshot.trend) {
+    const trendRows = []
+    ;['vsLastPeriod', 'vsSameMonthLastYear'].forEach(key => {
+      const t = snapshot.trend[key]
+      const label = key === 'vsLastPeriod' ? 'vs Last Period' : 'vs Same Month Last Year'
+      if (!t?.available) { trendRows.push({ Comparison: label, Metric: '—', 'This Period': '', Prior: '', Change: t?.reason || 'unavailable' }); return }
+      const priorLabel = `${BS_MONTHS[t.period.bs_month - 1]} ${t.period.bs_year}`
+      const row = (metric, cur, prior, delta, isPct) => trendRows.push({
+        Comparison: label, Metric: metric, 'This Period': isPct ? pct(cur) : round2(cur), Prior: `${priorLabel}: ${isPct ? pct(prior) : round2(prior)}`,
+        Change: delta == null ? '' : isPct ? `${delta.toFixed(1)}pp` : `${round2(delta.absoluteChange)} (${delta.pctChange != null ? delta.pctChange.toFixed(1) + '%' : ''})`,
+      })
+      row('Revenue (NPR)', snapshot.combined?.revenueTotal, t.snapshot?.combined?.revenueTotal, t.deltas?.revenueTotal, false)
+      if (snapshot.ims) row('Food Cost %', snapshot.combined?.foodCostPct, t.snapshot?.combined?.foodCostPct, t.deltas?.foodCostPct, true)
+      if (snapshot.hr) row('Labor Cost %', snapshot.combined?.laborCostPct, t.snapshot?.combined?.laborCostPct, t.deltas?.laborCostPct, true)
+      if (snapshot.ims && snapshot.hr) row('Prime Cost %', snapshot.combined?.primeCostPct, t.snapshot?.combined?.primeCostPct, t.deltas?.primeCostPct, true)
+      if (snapshot.ims && snapshot.hr) row('Net Margin %', snapshot.combined?.netMarginPct, t.snapshot?.combined?.netMarginPct, t.deltas?.netMarginPct, true)
+      if (snapshot.pos && t.snapshot?.pos) row('POS Net Sales (NPR)', snapshot.pos?.totalNetSales, t.snapshot?.pos?.totalNetSales, t.deltas?.posNetSales, false)
+    })
+    if (trendRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(trendRows), 'Trend')
+  }
+
   XLSX.writeFile(wb, `owner-report-${bs_year}-${String(bs_month).padStart(2, '0')}.xlsx`)
 }

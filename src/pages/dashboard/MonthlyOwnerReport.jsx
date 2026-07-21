@@ -34,6 +34,39 @@ function Row({ label, value, tip, color }) {
   )
 }
 
+// Trend row for a money-basis metric — `delta` is the {absoluteChange, pctChange} shape
+// computeMonthlyReport.js's buildDeltas() returns, or null if either side is missing.
+function TrendRow({ label, cur, prior, delta, fmtFn }) {
+  const color = delta == null ? undefined : delta.absoluteChange > 0 ? 'var(--theme-green)' : delta.absoluteChange < 0 ? 'var(--theme-red)' : undefined
+  return (
+    <tr>
+      <td style={{ color: 'var(--theme-text2)' }}>{label}</td>
+      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtFn(cur)}</td>
+      <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtFn(prior)}</td>
+      <td style={{ textAlign: 'right', fontWeight: 600, color }}>
+        {delta == null ? '—' : `${delta.absoluteChange >= 0 ? '+' : ''}${fmtFn(delta.absoluteChange)}${delta.pctChange != null ? ` (${delta.pctChange >= 0 ? '+' : ''}${delta.pctChange.toFixed(1)}%)` : ''}`}
+      </td>
+    </tr>
+  )
+}
+
+// Trend row for a percentage-point metric (Food Cost %, Labor Cost %, etc.) — `delta` here is a
+// plain number (percentage-POINT change), not the {absoluteChange,pctChange} money shape.
+// `higherIsBetter` flips the color logic for Net Margin % (up = good), vs the default (down =
+// good) for cost metrics like Food/Labor/Prime Cost %.
+function TrendPctRow({ label, cur, prior, delta, higherIsBetter = false }) {
+  const good = delta == null ? null : higherIsBetter ? delta > 0 : delta < 0
+  const color = good == null ? undefined : good ? 'var(--theme-green)' : delta === 0 ? undefined : 'var(--theme-red)'
+  return (
+    <tr>
+      <td style={{ color: 'var(--theme-text2)' }}>{label}</td>
+      <td style={{ textAlign: 'right', fontWeight: 600 }}>{cur == null ? '—' : `${cur.toFixed(1)}%`}</td>
+      <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{prior == null ? '—' : `${prior.toFixed(1)}%`}</td>
+      <td style={{ textAlign: 'right', fontWeight: 600, color }}>{delta == null ? '—' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}pp`}</td>
+    </tr>
+  )
+}
+
 // The frozen, exportable artifact version of Owner Dashboard's live KPIs — one snapshot per
 // closed period, generated at close time (see Periods.js) or lazily on first view for a
 // pre-existing closed period. Sections render per the SNAPSHOT's own recorded modules_included,
@@ -389,6 +422,52 @@ export default function MonthlyOwnerReport() {
                     </table>
                   </div>
                 )}
+              </div>
+            )}
+
+            {snapshot.trend && (
+              <div className="owner-report-section owner-report-page-break">
+                <h3 style={sectionTitleStyle}>Trend</h3>
+                {['vsLastPeriod', 'vsSameMonthLastYear'].map(key => {
+                  const t = snapshot.trend[key]
+                  const label = key === 'vsLastPeriod' ? 'vs Last Period' : 'vs Same Month Last Year'
+                  const priorLabel = t?.period ? `${BS_MONTHS[t.period.bs_month - 1]} ${t.period.bs_year}` : '—'
+                  const noDataReason = t?.reason === 'no_period' ? 'No period exists for this comparison.'
+                    : t?.reason === 'not_closed' ? 'That period is still open.'
+                    : 'No report was generated for that period.'
+                  return (
+                    <div key={key} style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text2)', marginBottom: 6 }}>{label}</div>
+                      {!t?.available ? (
+                        <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>{noDataReason}</p>
+                      ) : (
+                        <div className="table-wrap">
+                          <table className="data-table owner-report-table">
+                            <thead>
+                              <tr><th>Metric</th><th style={{ textAlign: 'right' }}>This Period</th><th style={{ textAlign: 'right' }}>{priorLabel}</th><th style={{ textAlign: 'right' }}>Change</th></tr>
+                            </thead>
+                            <tbody>
+                              <TrendRow label="Revenue" cur={snapshot.combined?.revenueTotal} prior={t.snapshot?.combined?.revenueTotal} delta={t.deltas?.revenueTotal} fmtFn={fmt} />
+                              {snapshot.ims && <TrendPctRow label="Food Cost %" cur={snapshot.combined?.foodCostPct} prior={t.snapshot?.combined?.foodCostPct} delta={t.deltas?.foodCostPct} />}
+                              {snapshot.hr && <TrendPctRow label="Labor Cost %" cur={snapshot.combined?.laborCostPct} prior={t.snapshot?.combined?.laborCostPct} delta={t.deltas?.laborCostPct} />}
+                              {snapshot.ims && snapshot.hr && <TrendPctRow label="Prime Cost %" cur={snapshot.combined?.primeCostPct} prior={t.snapshot?.combined?.primeCostPct} delta={t.deltas?.primeCostPct} />}
+                              {snapshot.ims && snapshot.hr && <TrendPctRow label="Net Margin %" cur={snapshot.combined?.netMarginPct} prior={t.snapshot?.combined?.netMarginPct} delta={t.deltas?.netMarginPct} higherIsBetter />}
+                              {snapshot.pos && t.snapshot?.pos && <TrendRow label="POS Net Sales" cur={snapshot.pos?.totalNetSales} prior={t.snapshot?.pos?.totalNetSales} delta={t.deltas?.posNetSales} fmtFn={fmt} />}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {snapshot.sectionErrors && (
+              <div className="no-print card" style={{ marginTop: 16, borderColor: 'color-mix(in srgb, var(--theme-amber) 25%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
+                <p style={{ color: 'var(--theme-amber)', margin: 0, fontSize: 12 }}>
+                  Some sections could not be generated: {Object.keys(snapshot.sectionErrors).join(', ')}. Try Regenerate Snapshot, or contact support if this keeps happening.
+                </p>
               </div>
             )}
           </div>
