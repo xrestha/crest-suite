@@ -293,6 +293,8 @@ export default function MonthlyOwnerReport() {
                 <h3 style={sectionTitleStyle}>Crest IMS</h3>
                 <div className="table-wrap">
                   <table className="data-table owner-report-table"><tbody>
+                    <Row label="Opening Stock" value={fmt(snapshot.ims.openingStockValueTotal)}
+                      tip="Value of stock on hand at the start of the period (qty × per-unit rate), carried forward from last period's closing count." />
                     <Row label="Purchases" value={fmt(snapshot.ims.purchaseTotal)} />
                     <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red)' : undefined} />
                     <Row label="Cash Purchases" value={fmt(snapshot.ims.cashNet)} />

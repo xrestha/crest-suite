@@ -41,6 +41,7 @@ export function exportMonthlyReportExcel(report, bizInfo) {
   if (snapshot.ims) {
     const ims = snapshot.ims
     const imsRows = [{
+      'Opening Stock (NPR)': round2(ims.openingStockValueTotal),
       'Revenue (NPR)': round2(ims.revenueTotal), 'Purchases (NPR)': round2(ims.purchaseTotal),
       'Overheads (NPR)': round2(ims.overheadTotal), 'Wastage Value (NPR)': round2(ims.wastageValueTotal),
       'Cash Purchases (NPR)': round2(ims.cashNet), 'Credit Purchases (NPR)': round2(ims.creditNet),

@@ -55,6 +55,10 @@ async function computeImsSection(clientId, period) {
 
   const itemRateMap = {}; (items || []).forEach(i => { itemRateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
   const wastageValueTotal = (wastagesData || []).reduce((s, w) => s + parseFloat(w.qty || 0) * (itemRateMap[w.item_id] || 0), 0)
+  // Same qty × per_uom_rate valuation MonthlySummary.js uses for its own Opening Stock figure —
+  // an owner reading this report needs to see what stock the period started with, same as any
+  // other IMS report already shows.
+  const openingStockValueTotal = (opening || []).reduce((s, o) => s + parseFloat(o.qty || 0) * (itemRateMap[o.item_id] || 0), 0)
 
   let cashNet = 0, creditNet = 0
   ;(purchases || []).forEach(p => {
@@ -105,7 +109,7 @@ async function computeImsSection(clientId, period) {
   const foodCostPct = revenueTotal > 0 ? (purchaseTotal / revenueTotal) * 100 : null
 
   return {
-    revenueTotal, purchaseTotal, overheadTotal, wastageValueTotal, cashNet, creditNet, foodCostPct,
+    revenueTotal, purchaseTotal, overheadTotal, wastageValueTotal, openingStockValueTotal, cashNet, creditNet, foodCostPct,
     reorder: { count: reorderCount, estValueTotal: reorderEstValueTotal },
     payables: { unpaidTotal: payablesUnpaidTotal, unpaidCount: payablesUnpaidCount },
   }
