@@ -44,6 +44,7 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       'Opening Stock (NPR)': round2(ims.openingStockValueTotal),
       'Revenue (NPR)': round2(ims.revenueTotal), 'Purchases (NPR)': round2(ims.purchaseTotal),
       'Overheads (NPR)': round2(ims.overheadTotal), 'Wastage Value (NPR)': round2(ims.wastageValueTotal),
+      'Closing Stock (NPR)': round2(ims.closingStockValueTotal),
       'Cash Purchases (NPR)': round2(ims.cashNet), 'Credit Purchases (NPR)': round2(ims.creditNet),
       'Items Below Par': ims.reorder?.count ?? 0, 'Reorder Est. Value (NPR)': round2(ims.reorder?.estValueTotal),
       'Unpaid Credit — This Period (NPR)': round2(ims.payables?.unpaidTotal), 'Unpaid Credit Bills': ims.payables?.unpaidCount ?? 0,

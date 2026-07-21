@@ -29,7 +29,14 @@ async function computeImsSection(clientId, period) {
     scopedFrom('recipes', clientId, 'id, selling_price'),
     supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead'),
     supabase.from('wastages').select('item_id, qty').eq('period_id', period.id),
-    scopedFrom('items', clientId, 'id, per_uom_rate, yield_pct, is_active, is_sub_recipe'),
+    // .eq('is_active', true) matches Stock.js's own Summary tab exactly (its `items` state is
+    // loaded with this same filter) — omitting it here previously let a leftover opening_stock
+    // row on a deactivated item inflate Opening Stock Value above what Stock Count itself shows
+    // for the same period (found live, S436: NPR 179,232 here vs NPR 179,189.95 on Stock Count).
+    // Sub-recipes are deliberately NOT excluded — Stock Count counts them too (its own "Sub-
+    // Recipes" category row), unlike the is_sub_recipe exclusion CLAUDE.md documents for
+    // Item Master/Purchases/POs/Requisitions/Reorder Report/Supplier Price Tracker.
+    scopedFrom('items', clientId, 'id, per_uom_rate, yield_pct, is_active, is_sub_recipe').eq('is_active', true),
     scopedFrom('par_levels', clientId, 'item_id, par_qty'),
     supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id),
     supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id),
@@ -55,10 +62,11 @@ async function computeImsSection(clientId, period) {
 
   const itemRateMap = {}; (items || []).forEach(i => { itemRateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
   const wastageValueTotal = (wastagesData || []).reduce((s, w) => s + parseFloat(w.qty || 0) * (itemRateMap[w.item_id] || 0), 0)
-  // Same qty × per_uom_rate valuation MonthlySummary.js uses for its own Opening Stock figure —
-  // an owner reading this report needs to see what stock the period started with, same as any
-  // other IMS report already shows.
+  // Same qty × per_uom_rate valuation MonthlySummary.js/Stock.js use for their own Opening/
+  // Closing Stock figures — an owner reading this report needs to see what stock the period
+  // started and ended with, same as every other IMS report already shows.
   const openingStockValueTotal = (opening || []).reduce((s, o) => s + parseFloat(o.qty || 0) * (itemRateMap[o.item_id] || 0), 0)
+  const closingStockValueTotal = (closing || []).reduce((s, c) => s + parseFloat(c.physical_qty || 0) * (itemRateMap[c.item_id] || 0), 0)
 
   let cashNet = 0, creditNet = 0
   ;(purchases || []).forEach(p => {
@@ -95,7 +103,7 @@ async function computeImsSection(clientId, period) {
 
   let reorderCount = 0, reorderEstValueTotal = 0
   ;(items || []).forEach(i => {
-    if (!i.is_active || i.is_sub_recipe) return
+    if (i.is_sub_recipe) return // items query is already filtered to is_active=true
     const par = parMap[i.id] || 0
     if (par <= 0) return
     const hasPhysical = closeMap[i.id] !== undefined
@@ -109,7 +117,7 @@ async function computeImsSection(clientId, period) {
   const foodCostPct = revenueTotal > 0 ? (purchaseTotal / revenueTotal) * 100 : null
 
   return {
-    revenueTotal, purchaseTotal, overheadTotal, wastageValueTotal, openingStockValueTotal, cashNet, creditNet, foodCostPct,
+    revenueTotal, purchaseTotal, overheadTotal, wastageValueTotal, openingStockValueTotal, closingStockValueTotal, cashNet, creditNet, foodCostPct,
     reorder: { count: reorderCount, estValueTotal: reorderEstValueTotal },
     payables: { unpaidTotal: payablesUnpaidTotal, unpaidCount: payablesUnpaidCount },
   }

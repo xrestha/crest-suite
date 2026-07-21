@@ -297,6 +297,8 @@ export default function MonthlyOwnerReport() {
                       tip="Value of stock on hand at the start of the period (qty × per-unit rate), carried forward from last period's closing count." />
                     <Row label="Purchases" value={fmt(snapshot.ims.purchaseTotal)} />
                     <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red)' : undefined} />
+                    <Row label="Closing Stock" value={fmt(snapshot.ims.closingStockValueTotal)}
+                      tip="Value of stock physically counted at period close (qty × per-unit rate) — becomes next period's Opening Stock." />
                     <Row label="Cash Purchases" value={fmt(snapshot.ims.cashNet)} />
                     <Row label="Credit Purchases" value={fmt(snapshot.ims.creditNet)} />
                     <Row label="Items Below Par (at close)" value={num(snapshot.ims.reorder?.count)}
