@@ -86,6 +86,28 @@ export function exportMonthlyReportExcel(report, bizInfo) {
     if (payRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(payRows), 'POS - Payment Mix')
   }
 
+  if (snapshot.menuEngineering) {
+    const me = snapshot.menuEngineering
+    const meRows = (me.items || []).map(i => ({
+      Recipe: i.name, Category: i.category, Quadrant: i.quadrant,
+      'Selling Price (NPR)': round2(i.sellingPrice), 'Ingredient Cost (NPR)': round2(i.ingredientCost),
+      'Food Cost %': pct(i.fcPct), 'Qty Sold': i.qtySold, 'Revenue (NPR)': round2(i.revenue),
+      'Contribution Margin (NPR)': round2(i.contributionMargin), 'Total Contribution (NPR)': round2(i.totalContribution),
+    }))
+    if (meRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(meRows), 'Menu Engineering')
+  }
+
+  if (snapshot.laborAnalytics) {
+    const la = snapshot.laborAnalytics
+    const laRows = [{
+      'Actual Hours Worked': round2(la.actualHoursWorked), 'Scheduled Hours': round2(la.scheduledHours),
+      'Schedule Variance (hrs)': round2(la.scheduleVarianceHours), 'Schedule Variance %': la.scheduleVariancePct != null ? pct(la.scheduleVariancePct) : 'N/A',
+      'Sales per Labor Hour (NPR)': la.salesPerLaborHour != null ? round2(la.salesPerLaborHour) : 'N/A',
+      'OT Hours': la.overtime ? round2(la.overtime.hours) : '', 'OT Amount (NPR)': la.overtime ? round2(la.overtime.amount) : '',
+    }]
+    XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - Labor Analytics', bizInfo, periodLabel, laRows), 'Labor Analytics')
+  }
+
   if (snapshot.trend) {
     const trendRows = []
     ;['vsLastPeriod', 'vsSameMonthLastYear'].forEach(key => {

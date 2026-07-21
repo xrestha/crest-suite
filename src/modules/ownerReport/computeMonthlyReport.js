@@ -9,6 +9,8 @@ import { calcAmount, hourlyRateOf, tallyAttendance } from '../hr/payroll/payroll
 import { SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
 import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipeCost'
 import { computeOrderAmounts, computeCategoryAmounts } from '../../utils/posBillingMath'
+import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
+import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
 
 // ── IMS section ──────────────────────────────────────────────────────────────
 // Same tables/formulas as OwnerDashboard.jsx's loadImsFigures/loadReorderStats. Revenue excludes
@@ -474,12 +476,18 @@ export async function computeMonthlyReport({ clientId, period, modulesIncluded }
     modulesIncluded.pos ? runSection('pos', () => computePosSection(clientId, period), sectionErrors) : null,
   ])
   const combined = computeCombinedMetrics({ ims, hr })
-  const trend = await runSection('trend', () => computeTrendSection(clientId, period, { ims, hr, pos, combined }), sectionErrors)
+
+  const [trend, menuEngineering, laborAnalytics] = await Promise.all([
+    runSection('trend', () => computeTrendSection(clientId, period, { ims, hr, pos, combined }), sectionErrors),
+    modulesIncluded.ims ? runSection('menuEngineering', () => computeMenuEngineeringSection(clientId, period), sectionErrors) : null,
+    modulesIncluded.hr  ? runSection('laborAnalytics', () => computeLaborAnalyticsSection(clientId, period, { hr, ims }), sectionErrors) : null,
+  ])
+
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     period: { id: period.id, bs_year: period.bs_year, bs_month: period.bs_month },
     modulesIncluded,
-    ims, hr, pos, trend,
+    ims, hr, pos, trend, menuEngineering, laborAnalytics,
     combined,
     sectionErrors: Object.keys(sectionErrors).length > 0 ? sectionErrors : null,
   }

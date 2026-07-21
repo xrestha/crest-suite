@@ -425,6 +425,62 @@ export default function MonthlyOwnerReport() {
               </div>
             )}
 
+            {snapshot.menuEngineering && (() => {
+              const me = snapshot.menuEngineering
+              const quadrantColor = { Star: 'var(--theme-green)', Plowhorse: 'var(--theme-accent)', Puzzle: 'var(--theme-amber)', Dog: 'var(--theme-red)' }
+              return (
+                <div className="owner-report-section owner-report-page-break">
+                  <h3 style={sectionTitleStyle}>Menu Engineering Matrix</h3>
+                  <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
+                    Classified by Food Cost % (≤{me.fcCutoffPct}% = high profit) × Qty Sold vs. the period's median ({num(me.medianQty)}).
+                  </p>
+                  <div className="table-wrap" style={{ marginBottom: 8 }}>
+                    <table className="data-table owner-report-table">
+                      <thead><tr><th>Quadrant</th><th style={{ textAlign: 'right' }}>Items</th><th>Meaning</th></tr></thead>
+                      <tbody>
+                        <tr><td style={{ color: quadrantColor.Star, fontWeight: 700 }}>Star</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Star}</td><td style={{ color: 'var(--theme-text3)' }}>High profit, high popularity — feature these</td></tr>
+                        <tr><td style={{ color: quadrantColor.Plowhorse, fontWeight: 700 }}>Plowhorse</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Plowhorse}</td><td style={{ color: 'var(--theme-text3)' }}>Popular, low profit — consider reprice/portion</td></tr>
+                        <tr><td style={{ color: quadrantColor.Puzzle, fontWeight: 700 }}>Puzzle</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Puzzle}</td><td style={{ color: 'var(--theme-text3)' }}>Profitable, underselling — promote/reposition</td></tr>
+                        <tr><td style={{ color: quadrantColor.Dog, fontWeight: 700 }}>Dog</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Dog}</td><td style={{ color: 'var(--theme-text3)' }}>Low profit, low popularity — consider cutting</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  {me.dogs?.length > 0 && (
+                    <div className="table-wrap">
+                      <table className="data-table owner-report-table">
+                        <thead><tr><th>Dogs (lowest contribution)</th><th style={{ textAlign: 'right' }}>Qty Sold</th><th style={{ textAlign: 'right' }}>Food Cost %</th><th style={{ textAlign: 'right' }}>Total Contribution</th></tr></thead>
+                        <tbody>
+                          {me.dogs.map(i => (
+                            <tr key={i.recipeId}><td>{i.name}</td><td style={{ textAlign: 'right' }}>{num(i.qtySold)}</td><td style={{ textAlign: 'right' }}>{pct(i.fcPct)}</td><td style={{ textAlign: 'right' }}>{fmt(i.totalContribution)}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
+            {snapshot.laborAnalytics && (
+              <div className="owner-report-section">
+                <h3 style={sectionTitleStyle}>Labor Analytics</h3>
+                <div className="table-wrap">
+                  <table className="data-table owner-report-table"><tbody>
+                    <Row label="Actual Hours Worked" value={`${num(snapshot.laborAnalytics.actualHoursWorked)} hrs`} />
+                    <Row label="Scheduled Hours (Roster)" value={`${num(snapshot.laborAnalytics.scheduledHours)} hrs`} />
+                    <Row label="Schedule Variance" value={`${snapshot.laborAnalytics.scheduleVarianceHours >= 0 ? '+' : ''}${num(snapshot.laborAnalytics.scheduleVarianceHours)} hrs${snapshot.laborAnalytics.scheduleVariancePct != null ? ` (${snapshot.laborAnalytics.scheduleVariancePct.toFixed(1)}%)` : ''}`}
+                      tip="Actual hours worked minus scheduled hours — positive means more was worked than rostered." />
+                    <Row label="Sales per Labor Hour" value={snapshot.laborAnalytics.salesPerLaborHour != null ? fmt(snapshot.laborAnalytics.salesPerLaborHour) : 'N/A'}
+                      tip="Revenue ÷ actual hours worked — a productivity benchmark." />
+                    {snapshot.laborAnalytics.overtime && (
+                      <Row label="Overtime (reference)" value={`${num(snapshot.laborAnalytics.overtime.hours)} hrs — ${fmt(snapshot.laborAnalytics.overtime.amount)}`}
+                        tip="Same figure shown in the Crest HR section above." />
+                    )}
+                  </tbody></table>
+                </div>
+              </div>
+            )}
+
             {snapshot.trend && (
               <div className="owner-report-section owner-report-page-break">
                 <h3 style={sectionTitleStyle}>Trend</h3>
