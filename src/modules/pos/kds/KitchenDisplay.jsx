@@ -32,11 +32,16 @@ const STATUS_COLOR = { new: 'var(--theme-red)', in_progress: 'var(--theme-amber)
 // gets its own row, matching how a second small paper ticket prints for just the new items), so
 // this maps 1:1 onto existing rows rather than a new ticket concept.
 export default function KitchenDisplay() {
-  const { profile, hasPosAccess } = useAuth()
+  const { profile, hasPosAccess, posTeam } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
 
-  const [station, setStation] = useState(() => localStorage.getItem('pos_kds_station') || 'KOT')
+  // A 'kitchen'/'bar' pos_team account (S431) is locked to its own queue — no toggle, so there's
+  // no tab left on the wrong station to forget about. 'foh' (and admin/owner, who always resolve
+  // to 'foh') keeps today's manual toggle, remembered per-browser via localStorage.
+  const isTeamLocked = posTeam === 'kitchen' || posTeam === 'bar'
+  const lockedStation = posTeam === 'bar' ? 'BOT' : 'KOT'
+  const [station, setStation] = useState(() => isTeamLocked ? lockedStation : (localStorage.getItem('pos_kds_station') || 'KOT'))
   const [tickets, setTickets] = useState([])
   const [loading, setLoading] = useState(true)
   const [now, setNow] = useState(() => Date.now()) // ticks every 30s to redraw elapsed-time labels/colors
@@ -173,19 +178,23 @@ export default function KitchenDisplay() {
             ← Exit
           </button>
           <div>
-            <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 26 }}>Kitchen Display</h2>
+            <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 26 }}>
+              {isTeamLocked ? (station === 'KOT' ? 'Kitchen Display' : 'Bar Display') : 'Kitchen Display'}
+            </h2>
             <p style={{ margin: '4px 0 0', fontSize: 14, color: 'var(--theme-text3)' }}>
               Live view of today's {station === 'KOT' ? 'kitchen' : 'bar'} tickets — printing still happens as normal, this just mirrors it on screen.
             </p>
           </div>
         </div>
-        <div className="tab-bar" style={{ fontSize: 15 }}>
-          {STATIONS.map(s => (
-            <button key={s} className={`tab-btn${station === s ? ' tab-btn--active' : ''}`} onClick={() => selectStation(s)}>
-              {s === 'KOT' ? 'Kitchen (KOT)' : 'Bar (BOT)'}
-            </button>
-          ))}
-        </div>
+        {!isTeamLocked && (
+          <div className="tab-bar" style={{ fontSize: 15 }}>
+            {STATIONS.map(s => (
+              <button key={s} className={`tab-btn${station === s ? ' tab-btn--active' : ''}`} onClick={() => selectStation(s)}>
+                {s === 'KOT' ? 'Kitchen (KOT)' : 'Bar (BOT)'}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {kdsError && (

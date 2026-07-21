@@ -103,7 +103,7 @@ const POS_GROUPS = [
     { to: '/pos/orders', label: 'Orders', icon: ClipboardList, minPosRole: 'staff' },
     { to: '/pos/kds', label: 'Kitchen Display', icon: Utensils, minPosRole: 'staff' },
     { to: '/pos/parking', label: 'Parking Slips', icon: ParkingSquare, minPosRole: 'staff' },
-    { to: '/pos/tables', label: 'Tables', icon: LayoutGrid, minPosRole: 'supervisor' },
+    { to: '/pos/tables', label: 'Tables', icon: LayoutGrid, minPosRole: 'manager' },
     { to: '/pos/customers', label: 'Customers', icon: Users, minPosRole: 'supervisor' },
     { to: '/pos/shifts', label: 'Shifts', icon: Clock, minPosRole: 'supervisor' },
   ]},
@@ -121,6 +121,12 @@ const POS_GROUPS = [
     { to: '/pos/staff', label: 'POS Staff', icon: Users2, minPosRole: 'manager' },
   ]},
 ]
+// A 'kitchen'/'bar' pos_team account (S431) has no use for anything front-of-house — Orders,
+// Parking Slips, Tables, Customers, Shifts, Menu Pricing, Reports, POS Staff admin — regardless
+// of its pos_role rank. Explicit allowlist rather than tagging every other item: fail-closed, so
+// a future new POS page is hidden from kitchen/bar by default until someone deliberately adds it
+// here, matching this codebase's established fail-closed convention elsewhere (scopedDb, RLS).
+const KITCHEN_TEAM_ALLOWED_PATHS = ['/pos/kds']
 
 const HR_GROUPS = [
   { key: 'hr-people', label: 'People', items: [
@@ -155,7 +161,7 @@ const HR_GROUPS = [
 export default function Layout() {
   const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient,
           isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
-          hasPosAccess, posRole, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner } = useAuth()
+          hasPosAccess, posRole, posTeam, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
   const clientName = profile?.clients?.name
@@ -245,6 +251,9 @@ export default function Layout() {
   function isItemVisible(item) {
     if (item.featureKey && !hasFeature(item.featureKey)) return false
     if (item.minPosRole && !hasPosAccess(item.minPosRole)) return false
+    // minPosRole is unique to POS nav items (IMS/HR use minImsRole/minHrRole), so this scopes
+    // cleanly to POS without touching the other two modules' items.
+    if (item.minPosRole && (posTeam === 'kitchen' || posTeam === 'bar') && !KITCHEN_TEAM_ALLOWED_PATHS.includes(item.to)) return false
     if (item.minImsRole && !hasImsAccess(item.minImsRole)) return false
     if (item.minHrRole && !hasHrAccess(item.minHrRole)) return false
     return true

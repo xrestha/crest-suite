@@ -134,13 +134,16 @@ Deno.serve(async (req) => {
       const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
       if (!targetClientId) return json({ error: 'client_id required' }, 400)
 
-      const { pin, pos_role, pos_job_title, employee_id } = params
+      const { pin, pos_role, pos_job_title, pos_team, employee_id } = params
       let { full_name } = params
       if (!pin) return json({ error: 'pin is required' }, 400)
       if (!/^\d{4,6}$/.test(pin)) return json({ error: 'PIN must be 4–6 digits' }, 400)
 
       const validRoles = ['staff', 'supervisor', 'manager']
       if (pos_role && !validRoles.includes(pos_role)) return json({ error: 'Invalid pos_role' }, 400)
+
+      const validTeams = ['foh', 'kitchen', 'bar']
+      if (pos_team && !validTeams.includes(pos_team)) return json({ error: 'Invalid pos_team' }, 400)
 
       if (employee_id) {
         const { data: employee } = await admin
@@ -180,6 +183,9 @@ Deno.serve(async (req) => {
         pos_job_title: pos_job_title || null,
         pos_email:     email,
         hr_employee_id: employee_id || null,
+        // Omitted (not `pos_team: pos_team || null`) so a brand-new row falls through to the
+        // column's own DEFAULT 'foh' rather than an explicit null clashing with the NOT NULL.
+        ...(pos_team ? { pos_team } : {}),
       }, { onConflict: 'id' })
 
       if (profileErr) {
@@ -242,11 +248,14 @@ Deno.serve(async (req) => {
 
     // ── Update a POS staff member's role ─────────────────────────────────────
     if (action === 'update_pos_role') {
-      const { userId, pos_role, pos_job_title } = params
+      const { userId, pos_role, pos_job_title, pos_team } = params
       if (!userId) return json({ error: 'userId is required' }, 400)
 
       const validRoles = ['staff', 'supervisor', 'manager']
       if (pos_role && !validRoles.includes(pos_role)) return json({ error: 'Invalid pos_role' }, 400)
+
+      const validTeams = ['foh', 'kitchen', 'bar']
+      if (pos_team && !validTeams.includes(pos_team)) return json({ error: 'Invalid pos_team' }, 400)
 
       if (!isCallerAdmin) {
         const { data: targetProfile } = await admin
@@ -254,8 +263,16 @@ Deno.serve(async (req) => {
         if (targetProfile?.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
       }
 
+      // pos_team is only written when the caller actually sent it — PosStaff.jsx's silent
+      // mismatched-role auto-fix loop (init()) calls this action with just { pos_role,
+      // pos_job_title } on every page load; if pos_team were unconditionally included as
+      // `pos_team || null`, that background sync would silently reset every kitchen/bar account
+      // back to null (and then the NOT NULL/CHECK constraint's own default 'foh') on next load.
+      const updatePayload = { pos_role: pos_role || null, pos_job_title: pos_job_title || null }
+      if (pos_team !== undefined) updatePayload.pos_team = pos_team || 'foh'
+
       const { error: updateErr } = await admin.from('profiles')
-        .update({ pos_role: pos_role || null, pos_job_title: pos_job_title || null })
+        .update(updatePayload)
         .eq('id', userId)
       if (updateErr) return json({ error: updateErr.message }, 400)
       return json({ success: true })

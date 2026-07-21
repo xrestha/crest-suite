@@ -113,7 +113,7 @@ export default function PosTableManagement() {
     else if (mainTab === 'delivery') loadDeliverySettings()
   }, [clientId]) // eslint-disable-line
 
-  if (!hasPosAccess('supervisor')) return <Navigate to="/pos" replace />
+  if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
 
   async function load() {
     setLoading(true)

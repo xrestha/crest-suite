@@ -70,7 +70,7 @@ export function AuthProvider({ children }) {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, role, client_id, pos_role, hr_employee_id, hr_self_service, ims_role, ims_job_title, hr_role, hr_job_title')
+        .select('id, full_name, role, client_id, pos_role, pos_team, hr_employee_id, hr_self_service, ims_role, ims_job_title, hr_role, hr_job_title')
         .eq('id', userId)
         .single()
 
@@ -144,6 +144,10 @@ export function AuthProvider({ children }) {
   const posRole = isAdmin || isOwner ? 'manager' : (profile?.pos_role || null)
   const imsRole = isAdmin || isOwner ? 'manager' : (profile?.ims_role || null)
   const hrRole  = isAdmin || isOwner ? 'manager' : (profile?.hr_role || null)
+  // Orthogonal to posRole (rank) — 'foh' | 'kitchen' | 'bar', which physical station this POS
+  // login works. Admin/owner always resolve to 'foh' (the unrestricted default), same shape as
+  // the rank fields above, so neither is ever narrowed by a kitchen/bar nav carve-out.
+  const posTeam = isAdmin || isOwner ? 'foh' : (profile?.pos_team || 'foh')
 
   const POS_RANK = { staff: 1, supervisor: 2, manager: 3 }
   function hasPosAccess(minLevel) {
@@ -278,6 +282,7 @@ export function AuthProvider({ children }) {
       hrEnabled,
       posEnabled,
       posRole,
+      posTeam,
       imsRole,
       hrRole,
       isOwner,

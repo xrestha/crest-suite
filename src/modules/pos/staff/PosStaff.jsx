@@ -17,7 +17,16 @@ const DEFAULT_ROLES = [
   { label: 'Manager',    level: 'manager' },
 ]
 const LEVEL_BADGE = { staff: 'badge-green', supervisor: 'badge-amber', manager: 'badge-gold' }
-const EMPTY_ADD   = { full_name: '', pin: '', job_title: '', employee_id: '' }
+// Orthogonal to the role/rank system above (S431) — which physical station this login works.
+// A 'kitchen'/'bar' team account keeps whatever pos_role rank it has (still governs voids/comps/
+// reports the same as always) but sees only the ticket display in its sidebar, locked to that
+// station's queue — see Layout.js's KITCHEN_TEAM_ALLOWED_PATHS and KitchenDisplay.jsx.
+const TEAM_OPTIONS = [
+  { value: 'foh',     label: 'Front of House' },
+  { value: 'kitchen', label: 'Kitchen' },
+  { value: 'bar',     label: 'Bar' },
+]
+const EMPTY_ADD   = { full_name: '', pin: '', job_title: '', employee_id: '', team: 'foh' }
 const EMPTY_ROLE  = { label: '', level: 'staff' }
 
 function pinValid(pin) { return /^\d{4,6}$/.test(pin) }
@@ -173,6 +182,7 @@ export default function PosStaff() {
         pin:           addForm.pin,
         pos_role:      role.level,
         pos_job_title: addForm.job_title,
+        pos_team:      addForm.team,
       },
     })
     if (error || data?.error) {
@@ -239,6 +249,22 @@ export default function PosStaff() {
     setSaving(s => ({ ...s, [profileId]: false }))
   }
 
+  // ── Team update ────────────────────────────────────────────────────────────
+  async function updateTeam(profileId, team) {
+    setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
+    const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+      body: { action: 'update_pos_role', userId: profileId, pos_team: team },
+    })
+    if (error || data?.error) {
+      let detail = data?.error || error?.message || 'Failed to update team'
+      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
+      setMsg('Error: ' + detail)
+    } else {
+      setStaff(prev => prev.map(p => p.id === profileId ? { ...p, pos_team: team } : p))
+    }
+    setSaving(s => ({ ...s, [profileId]: false }))
+  }
+
   if (!hasPosAccess('manager')) return <Navigate to="/pos/tables" replace />
 
   const inputStyle = {
@@ -295,6 +321,7 @@ export default function PosStaff() {
                 <th>Name</th>
                 <th><Tip text="Custom role name defined for this team (e.g. Cashier, Bartender).">Role</Tip></th>
                 <th><Tip text="Permission level this role maps to — controls which screens they can access.">Access Level</Tip></th>
+                <th><Tip text="Which station this login works. Kitchen/Bar accounts see only the ticket display, locked to their own queue — everything front-of-house (Orders, Tables, Customers, Shifts) is hidden regardless of Access Level.">Team</Tip></th>
                 <th><Tip text="Last time this user was active in the app">Last Seen</Tip></th>
                 <th style={{ width: 200 }}>Actions</th>
               </tr>
@@ -336,6 +363,19 @@ export default function PosStaff() {
                           </span>
                         : <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>—</span>
                       }
+                    </td>
+                    <td>
+                      <select
+                        className="form-select"
+                        style={{ minWidth: 140 }}
+                        value={p.pos_team || 'foh'}
+                        disabled={saving[p.id]}
+                        onChange={e => updateTeam(p.id, e.target.value)}
+                      >
+                        {TEAM_OPTIONS.map(t => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </select>
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
                       {p.last_seen_at
@@ -537,6 +577,22 @@ export default function PosStaff() {
                   <option key={r.label} value={r.label}>
                     {r.label} ({r.level.charAt(0).toUpperCase() + r.level.slice(1)})
                   </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={labelStyle}>
+                <Tip text="Which station this login works. Kitchen/Bar accounts see only the ticket display, locked to their own queue.">Team</Tip>
+              </label>
+              <select
+                className="form-select"
+                style={{ width: '100%' }}
+                value={addForm.team}
+                onChange={e => setAddForm(f => ({ ...f, team: e.target.value }))}
+              >
+                {TEAM_OPTIONS.map(t => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
               </select>
             </div>

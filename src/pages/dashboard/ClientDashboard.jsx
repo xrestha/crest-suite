@@ -18,7 +18,11 @@ import { explodeRecipeIngredients } from '../../utils/recipeCost'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
 
 export default function ClientDashboard() {
-  const { profile, clientId, isAdmin, clientModules, hasFeature, hasImsAccess, hasHrAccess, loading: authLoading, adminViewClientName } = useAuth()
+  const { profile, clientId, isAdmin, clientModules, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
+  // 'kitchen'/'bar' pos_team accounts (S431) get kitchen-ops KPIs (open/late tickets, prep time)
+  // instead of the front-of-house Revenue/Covers/Avg Check/Tables Occupied cards — they have no
+  // more use for revenue figures on their landing dashboard than a POS-only staffer has for IMS's.
+  const posIsStationTeam = posTeam === 'kitchen' || posTeam === 'bar'
   const { colors, themeKey } = useTheme()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
@@ -69,8 +73,8 @@ export default function ClientDashboard() {
     // AuthContext already resolves real-client vs admin "view as client").
     if (clientModules.ims) loadStats(myId); else setLoading(false)
     if (clientModules.hr) loadHrStats(myId); else setHrStats(null)
-    if (clientModules.pos) loadPosStats(myId); else setPosStats(null)
-  }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr, clientModules.pos, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (clientModules.pos) { posIsStationTeam ? loadKitchenPosStats(myId) : loadPosStats(myId) } else setPosStats(null)
+  }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr, clientModules.pos, posIsStationTeam, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const canSales    = hasFeature('sales_entry')
   const canVariance = hasFeature('variance_report')
@@ -458,6 +462,42 @@ export default function ClientDashboard() {
     setLoadErrors(prev => ({ ...prev, pos: hadRealError ? 'POS data failed to load — figures below may be incomplete or stale.' : '' }))
 
     setPosStats({ revenueTotal, coversTotal, billCount, avgCheck, tablesOccupied, tablesTotal })
+  }
+
+  // Kitchen/bar-team variant (S431) — today's pos_kot_log activity for just this team's own
+  // queue (KOT for kitchen, BOT for bar), never the other station's. Thresholds/formulas match
+  // KitchenDisplay.jsx exactly (LATE_MS=15min) so a card here and the live board never disagree.
+  async function loadKitchenPosStats(myId) {
+    const today = getBsToday()
+    const fromTs = bsDayBoundaryIso(today.year, today.month, today.day, false)
+    const toTs   = bsDayBoundaryIso(today.year, today.month, today.day, true)
+    const kdsStation = posTeam === 'bar' ? 'BOT' : 'KOT'
+
+    const { data, error } = await scopedFrom('pos_kot_log', 'status, sent_at, started_at, ready_at')
+      .eq('station', kdsStation)
+      .neq('status', 'cancelled')
+      .gte('sent_at', fromTs).lte('sent_at', toTs)
+    if (loadIdRef.current !== myId) return // superseded by a newer client switch
+
+    const rows = data || []
+    const nowMs = Date.now()
+    const LATE_MS = 15 * 60 * 1000 // matches KitchenDisplay.jsx's own convention
+    const READY_WAITING_MS = 20 * 60 * 1000 // "ready & still waiting for pickup", not all-day ready count
+
+    const openNow = rows.filter(r => r.status === 'new' || r.status === 'in_progress').length
+    const lateCount = rows.filter(r => r.status !== 'ready' && (nowMs - new Date(r.sent_at).getTime()) > LATE_MS).length
+    const readyRows = rows.filter(r => r.status === 'ready')
+    const readyWaiting = readyRows.filter(r => r.ready_at && (nowMs - new Date(r.ready_at).getTime()) < READY_WAITING_MS).length
+    const prepDurationsMin = readyRows
+      .filter(r => r.started_at && r.ready_at)
+      .map(r => (new Date(r.ready_at).getTime() - new Date(r.started_at).getTime()) / 60000)
+    const avgPrepMin = prepDurationsMin.length
+      ? Math.round(prepDurationsMin.reduce((s, v) => s + v, 0) / prepDurationsMin.length)
+      : null
+    const completedToday = readyRows.length
+
+    setLoadErrors(prev => ({ ...prev, pos: error ? `${kdsStation === 'BOT' ? 'Bar' : 'Kitchen'} data failed to load — figures below may be incomplete or stale.` : '' }))
+    setPosStats({ kitchen: true, station: kdsStation, openNow, lateCount, readyWaiting, avgPrepMin, completedToday })
   }
 
   async function closeAndAdvancePeriod() {
@@ -1236,42 +1276,92 @@ export default function ClientDashboard() {
       {/* ── POS KPIs ── */}
       {showPos && (
         <div style={{ marginBottom: 14, marginTop: (showIms || showHr) ? 6 : 0 }}>
-          {moduleHeader('Point of Sale')}
+          {moduleHeader(posTeam === 'bar' ? 'Bar' : posTeam === 'kitchen' ? 'Kitchen' : 'Point of Sale')}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
-            <div {...kpiCard(() => navigate('/pos/sales-report'))}>
-              <div style={kpiLabelStyle}>Revenue</div>
-              <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green)' }}>
-                {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-NP')}`}
-              </div>
-              <div style={kpiSubtextStyle}>{periodLabel} · billed →</div>
-            </div>
-            <div {...kpiCard(() => navigate('/pos/covers-report'))}>
-              <div style={kpiLabelStyle}>
-                <Tip text="Total covers (guests) served across all billed orders this period." width={220}>Covers Served</Tip>
-              </div>
-              <div style={kpiValueStyle(18)}>
-                {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.coversTotal}
-              </div>
-              <div style={kpiSubtextStyle}>
-                {!posStats
-                  ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
-                  : <>{posStats.billCount} bill{posStats.billCount === 1 ? '' : 's'} →</>}
-              </div>
-            </div>
-            <div {...kpiCard(null)}>
-              <div style={kpiLabelStyle}>Avg Check</div>
-              <div style={kpiValueStyle(18)}>
-                {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-NP')}`}
-              </div>
-              <div style={kpiSubtextStyle}>Revenue ÷ bills</div>
-            </div>
-            <div {...kpiCard(() => navigate('/pos/tables'))}>
-              <div style={kpiLabelStyle}>Tables Occupied</div>
-              <div style={{ ...kpiValueStyle(18), color: posStats?.tablesOccupied > 0 ? 'var(--theme-accent)' : 'var(--theme-text1)' }}>
-                {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${posStats.tablesOccupied} / ${posStats.tablesTotal}`}
-              </div>
-              <div style={kpiSubtextStyle}>Right now →</div>
-            </div>
+            {posIsStationTeam ? (
+              <>
+                <div {...kpiCard(() => navigate('/pos/kds'))}>
+                  <div style={kpiLabelStyle}>Open Tickets</div>
+                  <div style={kpiValueStyle(18)}>
+                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.openNow}
+                  </div>
+                  <div style={kpiSubtextStyle}>
+                    {!posStats
+                      ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+                      : <>New + In Progress →</>}
+                  </div>
+                </div>
+                <div {...kpiCard(() => navigate('/pos/kds'))}>
+                  <div style={kpiLabelStyle}>
+                    <Tip text="Open tickets sent more than 15 minutes ago — same threshold the ticket display itself flags." width={220}>Late</Tip>
+                  </div>
+                  <div style={{ ...kpiValueStyle(18), color: posStats?.lateCount > 0 ? 'var(--theme-red)' : 'var(--theme-text1)' }}>
+                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.lateCount}
+                  </div>
+                  <div style={kpiSubtextStyle}>&gt; 15 min →</div>
+                </div>
+                <div {...kpiCard(() => navigate('/pos/kds'))}>
+                  <div style={kpiLabelStyle}>Ready &amp; Waiting</div>
+                  <div style={kpiValueStyle(18)}>
+                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.readyWaiting}
+                  </div>
+                  <div style={kpiSubtextStyle}>Last 20 min →</div>
+                </div>
+                <div {...kpiCard(null)}>
+                  <div style={kpiLabelStyle}>Avg Prep Time</div>
+                  <div style={kpiValueStyle(18)}>
+                    {!posStats
+                      ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+                      : posStats.avgPrepMin != null ? `${posStats.avgPrepMin} min` : '—'}
+                  </div>
+                  <div style={kpiSubtextStyle}>
+                    {!posStats
+                      ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+                      : <>{posStats.completedToday} completed today</>}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div {...kpiCard(() => navigate('/pos/sales-report'))}>
+                  <div style={kpiLabelStyle}>Revenue</div>
+                  <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green)' }}>
+                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-NP')}`}
+                  </div>
+                  <div style={kpiSubtextStyle}>{periodLabel} · billed →</div>
+                </div>
+                <div {...kpiCard(() => navigate('/pos/covers-report'))}>
+                  <div style={kpiLabelStyle}>
+                    <Tip text="Total covers (guests) served across all billed orders this period." width={220}>Covers Served</Tip>
+                  </div>
+                  <div style={kpiValueStyle(18)}>
+                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.coversTotal}
+                  </div>
+                  <div style={kpiSubtextStyle}>
+                    {!posStats
+                      ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+                      : <>{posStats.billCount} bill{posStats.billCount === 1 ? '' : 's'} →</>}
+                  </div>
+                </div>
+                <div {...kpiCard(null)}>
+                  <div style={kpiLabelStyle}>Avg Check</div>
+                  <div style={kpiValueStyle(18)}>
+                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-NP')}`}
+                  </div>
+                  <div style={kpiSubtextStyle}>Revenue ÷ bills</div>
+                </div>
+                {/* Tables page became Manager-only (S430 follow-up) — a Staff/Supervisor viewer
+                    would just get redirected away, so only link through when they can actually
+                    open it; the card itself still shows the live count either way. */}
+                <div {...kpiCard(hasPosAccess('manager') ? () => navigate('/pos/tables') : null)}>
+                  <div style={kpiLabelStyle}>Tables Occupied</div>
+                  <div style={{ ...kpiValueStyle(18), color: posStats?.tablesOccupied > 0 ? 'var(--theme-accent)' : 'var(--theme-text1)' }}>
+                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${posStats.tablesOccupied} / ${posStats.tablesTotal}`}
+                  </div>
+                  <div style={kpiSubtextStyle}>{hasPosAccess('manager') ? 'Right now →' : 'Right now'}</div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

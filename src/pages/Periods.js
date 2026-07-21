@@ -197,8 +197,42 @@ export default function Periods() {
   }
 
   async function reopenPeriod(id) {
-    await scopedUpdate('monthly_periods', { status: 'open' }).eq('id', id)
+    // monthly_periods_one_open_per_client (a partial unique index on client_id WHERE status='open')
+    // blocks this whenever a later period is already open — which is virtually always true, since
+    // the only real reason to reopen a PAST period is to fix a mistake discovered after the client
+    // already moved on to the current one. Previously this error was silently swallowed, so the
+    // button looked broken with zero explanation. Surfaced here; "Resync Opening Stock" below is
+    // the actual fix for that scenario — it doesn't touch status at all, so it can never hit this.
+    const { error } = await scopedUpdate('monthly_periods', { status: 'open' }).eq('id', id)
+    if (error) {
+      window.alert(
+        error.code === '23505' || error.message?.includes('one_open_per_client')
+          ? 'Can\'t reopen — a more recent period is already open for this client (only one period can be open at a time). To correct a closed period\'s numbers instead, edit it directly as admin (Stock Count already allows this on a closed period) and use "Resync Opening Stock" to push the correction into whatever period comes next.'
+          : `Failed to reopen: ${error.message}`
+      )
+      return
+    }
     loadPeriods()
+  }
+
+  // Admin-only correction path that never touches status, so it can never collide with
+  // monthly_periods_one_open_per_client — admin can already edit a closed period's Closing Stock
+  // directly (Stock.js's isLocked is `!isAdmin && closed`), this just re-runs the same carry-
+  // forward a normal Close & Start Next would have done, into whichever period comes right after.
+  async function resyncOpeningStock(period) {
+    const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
+    const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
+    const { data: nextPeriod } = await scopedFrom('monthly_periods', 'id')
+      .eq('bs_year', nextYear).eq('bs_month', nextMonth).maybeSingle()
+    if (!nextPeriod) {
+      window.alert(`No ${BS_MONTHS[nextMonth - 1]} ${nextYear} period exists yet for this client — nothing to sync into.`)
+      return
+    }
+    if (!window.confirm(
+      `Copy ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}'s closing stock into ${BS_MONTHS[nextMonth - 1]} ${nextYear}'s opening stock?\n\nThis overwrites ${BS_MONTHS[nextMonth - 1]} ${nextYear}'s existing opening stock for any item that has a closing count in ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}.`
+    )) return
+    await carryForwardOpeningStock(period.id, nextPeriod.id)
+    window.alert(`Opening stock re-synced into ${BS_MONTHS[nextMonth - 1]} ${nextYear}.`)
   }
 
   function startEdit(p) {
@@ -634,7 +668,7 @@ export default function Periods() {
                                   ✏
                                 </button>
                               )}
-                              {/* Close / Reopen — admin only */}
+                              {/* Close / Reopen / Resync — admin only */}
                               {isAdmin && (p.status === 'open' ? (
                                 <button
                                   className="btn btn-ghost"
@@ -644,13 +678,26 @@ export default function Periods() {
                                   Close &amp; Start Next
                                 </button>
                               ) : (
-                                <button
-                                  className="btn btn-ghost"
-                                  style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-green)', borderColor: 'rgba(52,211,153,0.35)', background: 'rgba(52,211,153,0.07)' }}
-                                  onClick={() => reopenPeriod(p.id)}
-                                >
-                                  Reopen
-                                </button>
+                                <>
+                                  <Tip text="Fix a mistake in this closed period directly (Stock Count already lets admin edit a closed period), then use this to push the correction into the next period's opening stock — no reopening needed.">
+                                    <button
+                                      className="btn btn-ghost"
+                                      style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.35)', background: 'rgba(201,168,76,0.07)' }}
+                                      onClick={() => resyncOpeningStock(p)}
+                                    >
+                                      Resync Opening Stock →
+                                    </button>
+                                  </Tip>
+                                  <Tip text="Resumes full data entry for this month — blocked whenever a later period is already open (only one period can be open per client). Use Resync Opening Stock above for a one-off correction instead.">
+                                    <button
+                                      className="btn btn-ghost"
+                                      style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-green)', borderColor: 'rgba(52,211,153,0.35)', background: 'rgba(52,211,153,0.07)' }}
+                                      onClick={() => reopenPeriod(p.id)}
+                                    >
+                                      Reopen
+                                    </button>
+                                  </Tip>
+                                </>
                               ))}
                             </div>
                           </td>
