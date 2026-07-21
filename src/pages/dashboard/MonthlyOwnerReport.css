@@ -1,0 +1,70 @@
+/* Monthly Owner/Manager Report — document-style layout. Everything here is scoped under
+   .owner-report-doc / .owner-report-table / .owner-report-section so it never touches the
+   shared .card/.data-table styles used across 15+ other report pages elsewhere in the app. */
+
+.owner-report-table th,
+.owner-report-table td {
+  padding: 6px 8px;
+}
+
+.owner-report-section {
+  margin-bottom: 18px;
+}
+
+@media print {
+  /* The letterhead inside the report already carries the title — the app-chrome page header
+     shown above it on every other page (title + subtitle) is pure duplication once this hits
+     paper, and costs real vertical space toward fitting one A4 page. */
+  .owner-report-page-header {
+    display: none !important;
+  }
+
+  /* Read as a plain printed page, not a floating rounded UI card. */
+  .owner-report-doc {
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+    font-size: 11px !important;
+  }
+
+  .owner-report-letterhead {
+    margin-bottom: 10px !important;
+    padding-bottom: 8px !important;
+  }
+
+  .owner-report-doc h2 {
+    font-size: 15px !important;
+    margin-bottom: 2px !important;
+  }
+
+  .owner-report-doc h3 {
+    font-size: 10.5px !important;
+    margin: 8px 0 4px !important;
+    padding-bottom: 3px !important;
+  }
+
+  .owner-report-doc p {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    margin: 4px 0 !important;
+  }
+
+  .owner-report-section {
+    margin-bottom: 8px !important;
+  }
+
+  .owner-report-table th,
+  .owner-report-table td {
+    padding: 3px 6px !important;
+    font-size: 10.5px !important;
+  }
+
+  /* Tip's dashed hover-underline is a screen-only affordance (nothing to hover on paper) —
+     strip it so table labels don't look like broken/incomplete text once printed. */
+  .owner-report-doc td span {
+    border-bottom: none !important;
+    cursor: default !important;
+  }
+}

@@ -11,14 +11,15 @@ import { printWithTitle } from '../../utils/printTitle'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { exportMonthlyReportExcel } from '../../modules/ownerReport/monthlyReportExcel'
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
+import './MonthlyOwnerReport.css'
 
 const fmt = n => (n == null ? '—' : `NPR ${Math.round(n).toLocaleString('en-NP')}`)
 const pct = n => (n == null ? '—' : `${n.toFixed(1)}%`)
 const num = n => (n == null ? '—' : Math.round(n).toLocaleString('en-NP'))
 
 const sectionTitleStyle = {
-  fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
-  color: 'var(--theme-accent)', margin: '0 0 10px', paddingBottom: 6, borderBottom: '1px solid var(--theme-border-lt)',
+  fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+  color: 'var(--theme-accent)', margin: '0 0 8px', paddingBottom: 4, borderBottom: '1px solid var(--theme-border-lt)',
 }
 
 // A two-column "Label ... Value" line item — the document convention used throughout this
@@ -157,7 +158,7 @@ export default function MonthlyOwnerReport() {
 
   return (
     <div>
-      <div className="page-header">
+      <div className="page-header owner-report-page-header">
         <h1 className="page-title">Monthly Owner/Manager Report</h1>
         <p className="page-subtitle">Frozen figures generated when each period closes — Crest IMS, HR &amp; POS combined.</p>
       </div>
@@ -216,17 +217,17 @@ export default function MonthlyOwnerReport() {
         )}
 
         {!loading && !generating && report && snapshot && (
-          <div className="card" style={{ maxWidth: 760, margin: '0 auto', padding: '32px 40px' }}>
+          <div className="card owner-report-doc" style={{ maxWidth: 760, margin: '0 auto', padding: '22px 30px' }}>
             {/* Letterhead */}
-            <div style={{ textAlign: 'center', marginBottom: 24, paddingBottom: 18, borderBottom: '2px solid var(--theme-border)' }}>
-              <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 800, letterSpacing: '0.02em' }}>{bizInfo.name || '—'}</h2>
-              <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text2)' }}>
+            <div className="owner-report-letterhead" style={{ textAlign: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid var(--theme-border)' }}>
+              <h2 style={{ margin: '0 0 3px', fontSize: 17, fontWeight: 800, letterSpacing: '0.02em' }}>{bizInfo.name || '—'}</h2>
+              <p style={{ margin: '0 0 8px', fontSize: 11, color: 'var(--theme-text2)' }}>
                 {bizInfo.vatReg ? 'VAT No' : 'PAN No'}: {bizInfo.vat || '—'}{bizInfo.address ? ` · ${bizInfo.address}` : ''}
               </p>
-              <div style={{ fontSize: 15, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 6px' }}>
+              <div style={{ fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 4px' }}>
                 Monthly Owner/Manager Report
               </div>
-              <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text3)' }}>
+              <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text3)' }}>
                 Period: {periodLabel} &nbsp;|&nbsp; Generated: {new Date(report.generated_at).toLocaleString()} by {generatorName || '—'}
                 &nbsp;|&nbsp; Source: <span style={{ textTransform: 'capitalize' }}>{report.generation_source.replace(/_/g, ' ')}</span>
               </p>
@@ -235,18 +236,18 @@ export default function MonthlyOwnerReport() {
             {/* Executive Summary — the one narrative paragraph in the report; everything below
                 this point is pure data tables, per the hybrid format chosen for this report. */}
             {execSummary && (
-              <div style={{ marginBottom: 26 }}>
+              <div className="owner-report-section">
                 <h3 style={sectionTitleStyle}>Executive Summary</h3>
-                <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--theme-text1)', margin: 0 }}>{execSummary}</p>
+                <p style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--theme-text1)', margin: 0 }}>{execSummary}</p>
               </div>
             )}
 
             {/* Financial Summary — Metric / Actual / Target, matching the "KPI, target, actual"
                 shape a real restaurant management report uses, not a KPI-tile dashboard. */}
-            <div style={{ marginBottom: 26 }}>
+            <div className="owner-report-section">
               <h3 style={sectionTitleStyle}>Financial Summary</h3>
               <div className="table-wrap">
-                <table className="data-table">
+                <table className="data-table owner-report-table">
                   <thead><tr><th>Metric</th><th style={{ textAlign: 'right' }}>Actual</th><th style={{ textAlign: 'right' }}>Target</th></tr></thead>
                   <tbody>
                     <tr>
@@ -288,10 +289,10 @@ export default function MonthlyOwnerReport() {
             </div>
 
             {snapshot.ims && (
-              <div style={{ marginBottom: 26 }}>
+              <div className="owner-report-section">
                 <h3 style={sectionTitleStyle}>Crest IMS</h3>
                 <div className="table-wrap">
-                  <table className="data-table"><tbody>
+                  <table className="data-table owner-report-table"><tbody>
                     <Row label="Purchases" value={fmt(snapshot.ims.purchaseTotal)} />
                     <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red)' : undefined} />
                     <Row label="Cash Purchases" value={fmt(snapshot.ims.cashNet)} />
@@ -306,10 +307,10 @@ export default function MonthlyOwnerReport() {
             )}
 
             {snapshot.hr && (
-              <div style={{ marginBottom: 26 }}>
+              <div className="owner-report-section">
                 <h3 style={sectionTitleStyle}>Crest HR</h3>
-                <div className="table-wrap" style={{ marginBottom: snapshot.hr.leave?.length > 0 ? 12 : 0 }}>
-                  <table className="data-table"><tbody>
+                <div className="table-wrap" style={{ marginBottom: snapshot.hr.leave?.length > 0 ? 8 : 0 }}>
+                  <table className="data-table owner-report-table"><tbody>
                     <Row label="Gross Payroll" value={fmt(snapshot.hr.payroll?.gross)} />
                     <Row label="Overtime" value={`${num(snapshot.hr.payroll?.ot?.hours)} hrs — ${fmt(snapshot.hr.payroll?.ot?.amount)}`} />
                     <Row label="Employer SSF" value={fmt(snapshot.hr.payroll?.ssfEmployer)} />
@@ -322,7 +323,7 @@ export default function MonthlyOwnerReport() {
                 </div>
                 {snapshot.hr.leave?.length > 0 && (
                   <div className="table-wrap">
-                    <table className="data-table">
+                    <table className="data-table owner-report-table">
                       <thead><tr><th>Leave Type</th><th style={{ textAlign: 'right' }}>Requests</th><th style={{ textAlign: 'right' }}>Days Taken</th></tr></thead>
                       <tbody>
                         {snapshot.hr.leave.map((l, i) => (
@@ -338,8 +339,8 @@ export default function MonthlyOwnerReport() {
             {snapshot.pos && (
               <div>
                 <h3 style={sectionTitleStyle}>Crest POS</h3>
-                <div className="table-wrap" style={{ marginBottom: 12 }}>
-                  <table className="data-table"><tbody>
+                <div className="table-wrap" style={{ marginBottom: 8 }}>
+                  <table className="data-table owner-report-table"><tbody>
                     <Row label="Net Sales" value={fmt(snapshot.pos.totalNetSales)}
                       tip="Independently derived from the Bill Register — will not tie out to the penny with Revenue above, which comes from Sales Entries instead. Different discount/VAT rounding basis, same underlying bills." />
                     <Row label="Bills / Qty Sold" value={`${num(snapshot.pos.billCount)} / ${num(snapshot.pos.totalQty)}`} />
@@ -353,8 +354,8 @@ export default function MonthlyOwnerReport() {
                 </div>
 
                 {snapshot.pos.categoryBreakdown?.length > 0 && (
-                  <div className="table-wrap" style={{ marginBottom: 12 }}>
-                    <table className="data-table">
+                  <div className="table-wrap" style={{ marginBottom: 8 }}>
+                    <table className="data-table owner-report-table">
                       <thead><tr><th>Category</th><th style={{ textAlign: 'right' }}>Qty</th><th style={{ textAlign: 'right' }}>Net Sales</th></tr></thead>
                       <tbody>
                         {snapshot.pos.categoryBreakdown.map((c, i) => (
@@ -367,7 +368,7 @@ export default function MonthlyOwnerReport() {
 
                 {snapshot.pos.paymentMix?.length > 0 && (
                   <div className="table-wrap">
-                    <table className="data-table">
+                    <table className="data-table owner-report-table">
                       <thead><tr><th>Payment Method</th><th style={{ textAlign: 'right' }}>Net Sales</th><th style={{ textAlign: 'right' }}>% of Net</th></tr></thead>
                       <tbody>
                         {snapshot.pos.paymentMix.map((p, i) => (
