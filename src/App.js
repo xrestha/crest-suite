@@ -7,6 +7,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import OwnerDashboard from './pages/dashboard/OwnerDashboard'
+import MonthlyOwnerReport from './pages/dashboard/MonthlyOwnerReport'
 import Periods from './pages/Periods'
 import Items from './modules/ims/items/Items'
 import Vendors from './modules/ims/vendors/Vendors'
@@ -115,6 +116,7 @@ export default function App() {
               {/* Universal — all authenticated users regardless of module */}
               <Route path="/dashboard"        element={<Dashboard />} />
               <Route path="/owner-dashboard"  element={<OwnerDashboard />} />
+              <Route path="/owner-report"     element={<MonthlyOwnerReport />} />
               <Route path="/periods"          element={<Periods />} />
               <Route path="/help"       element={<Help />} />
 

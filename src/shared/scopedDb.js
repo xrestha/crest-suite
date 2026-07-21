@@ -32,6 +32,8 @@ export const CLIENT_SCOPED_TABLES = [
   'pos_orders', 'pos_order_items', 'pos_order_payments', 'pos_tables', 'pos_customers',
   'pos_credit_notes', 'pos_kot_log', 'pos_shifts', 'pos_payment_confirmations',
   'pos_guest_order_requests', 'pos_parking_slips',
+  // Cross-module
+  'monthly_owner_reports',
 ]
 
 // A UUID column can never equal this, so any scoped query built without a real

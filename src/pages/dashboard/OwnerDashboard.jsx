@@ -339,6 +339,14 @@ export default function OwnerDashboard() {
         <p className="page-subtitle">
           Cross-module month-to-date view — Crest IMS + Crest HR
           {activePeriod && ` · ${periodLabel} · Open`}
+          {' · '}
+          <span
+            role="link" tabIndex={0} onClick={() => navigate('/owner-report')}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/owner-report') } }}
+            style={{ color: 'var(--theme-accent)', cursor: 'pointer' }}
+          >
+            View Full Monthly Report →
+          </span>
         </p>
       </div>
 

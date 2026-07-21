@@ -308,12 +308,18 @@ export default function Layout() {
   // Dashboard" at readable size — the icon + position already disambiguate the two links.
   function renderDashboardRow() {
     const ownerItem = { to: '/owner-dashboard', label: 'Owner', icon: Crown }
+    const reportItem = { to: '/owner-report', label: 'Report', icon: ScrollText }
     const dashItem = { ...dashNavItem, label: 'Dashboard' }
     return (
       <div style={{ display: 'flex', gap: 4, margin: '1px 10px' }}>
         {(isAdmin || isOwner) && (
           <div style={{ flex: 1, minWidth: 0 }}>
             {renderNavItem(ownerItem, { pinnable: false, compact: true })}
+          </div>
+        )}
+        {(isAdmin || isOwner) && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {renderNavItem(reportItem, { pinnable: false, compact: true })}
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -397,6 +403,7 @@ export default function Layout() {
     const all = [
       dashNavItem,
       { to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown },
+      { to: '/owner-report', label: 'Monthly Owner/Manager Report', icon: ScrollText },
       ...NAV.slice(1),
       ...REPORTS,
       ...IMS_GROUPS.find(g => g.key === 'ims-admin').items,

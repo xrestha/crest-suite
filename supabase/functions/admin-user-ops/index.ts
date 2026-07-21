@@ -797,6 +797,8 @@ Deno.serve(async (req) => {
       await del(admin.from('par_levels').delete().eq('client_id', clientId), 'par_levels')
       await del(admin.from('demand_forecast_daily').delete().eq('client_id', clientId), 'demand_forecast_daily')
       await del(admin.from('demand_forecast_run_log').delete().eq('client_id', clientId), 'demand_forecast_run_log')
+      // No FK cascade from monthly_owner_reports.period_id -> monthly_periods.id — must go first.
+      await del(admin.from('monthly_owner_reports').delete().eq('client_id', clientId), 'monthly_owner_reports')
       await del(admin.from('monthly_periods').delete().eq('client_id', clientId), 'monthly_periods')
       await del(admin.from('recipes').delete().eq('client_id', clientId), 'recipes')
       await del(admin.from('items').delete().eq('client_id', clientId), 'items')

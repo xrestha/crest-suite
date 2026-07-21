@@ -20,6 +20,7 @@ const DEFAULT_FLAGS = {
   combo_builder: null,
   guest_ordering: null,
   owner_dashboard: null,
+  monthly_owner_report: null,
   stock_movement_log: null,
 }
 
@@ -313,49 +314,62 @@ export default function FeatureAccessModal({ client, onClose }) {
 
         {/* Crest Suite — a separate gating axis (client.suite_plan) from the module plan grids
             above; only meaningful once both IMS and HR are enabled. Not part of FEATURE_GROUPS
-            since it doesn't key off clientPlan/pos_plan's rank system. */}
+            since it doesn't key off clientPlan/pos_plan's rank system. Two features live on this
+            axis so far: Owner Dashboard (live KPIs) and its frozen-snapshot sibling, the Monthly
+            Owner/Manager Report (added alongside monthly_owner_reports table). */}
         {imsEnabled && hrEnabled && (() => {
           const SUITE_RANK = { starter: 0, growth: 1, pro: 2 }
           const locked = (SUITE_RANK[client.suite_plan] ?? -1) >= SUITE_RANK.growth
-          const isAdminGranted = !locked && flags.owner_dashboard === true
-          const isOn = locked || isAdminGranted
+          const suiteFeatures = [
+            { key: 'owner_dashboard', label: 'Owner Dashboard' },
+            { key: 'monthly_owner_report', label: 'Monthly Owner/Manager Report' },
+          ]
           return (
             <div style={{ padding: '0 24px 16px' }}>
               <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 8 }}>
                 Crest Suite
               </span>
-              <div
-                onClick={() => !locked && toggleFeat('owner_dashboard', isAdminGranted)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  background: 'var(--theme-bg)', borderRadius: 6, padding: '6px 8px', maxWidth: 260,
-                  border: `1px solid ${locked ? 'var(--theme-accent)22' : isAdminGranted ? 'var(--theme-accent)50' : 'var(--theme-border)'}`,
-                  cursor: locked ? 'default' : 'pointer', transition: 'border-color 0.15s',
-                }}>
-                <div style={{
-                  width: 16, height: 16, borderRadius: 3, flexShrink: 0,
-                  background: isOn ? 'var(--theme-accent)' : 'transparent',
-                  border: `2px solid ${isOn ? 'var(--theme-accent)' : 'var(--theme-text3)'}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s',
-                }}>
-                  {isOn && <span style={{ color: '#000', fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: 12, color: isOn ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>Owner Dashboard</span>
-                  {locked && (
-                    <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)', background: 'var(--theme-accent)18', border: '1px solid var(--theme-accent)35', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
-                      Suite {client.suite_plan}
-                    </span>
-                  )}
-                  {isAdminGranted && (
-                    <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)', background: 'var(--theme-accent)18', border: '1px solid var(--theme-accent)35', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
-                      Override
-                    </span>
-                  )}
-                  {!client.suite_plan && !isAdminGranted && (
-                    <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>Not subscribed to Suite</span>
-                  )}
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {suiteFeatures.map(({ key, label }) => {
+                  const isAdminGranted = !locked && flags[key] === true
+                  const isOn = locked || isAdminGranted
+                  return (
+                    <div
+                      key={key}
+                      onClick={() => !locked && toggleFeat(key, isAdminGranted)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        background: 'var(--theme-bg)', borderRadius: 6, padding: '6px 8px', maxWidth: 300,
+                        border: `1px solid ${locked ? 'var(--theme-accent)22' : isAdminGranted ? 'var(--theme-accent)50' : 'var(--theme-border)'}`,
+                        cursor: locked ? 'default' : 'pointer', transition: 'border-color 0.15s',
+                      }}>
+                      <div style={{
+                        width: 16, height: 16, borderRadius: 3, flexShrink: 0,
+                        background: isOn ? 'var(--theme-accent)' : 'transparent',
+                        border: `2px solid ${isOn ? 'var(--theme-accent)' : 'var(--theme-text3)'}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s',
+                      }}>
+                        {isOn && <span style={{ color: '#000', fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ fontSize: 12, color: isOn ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{label}</span>
+                        {locked && (
+                          <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)', background: 'var(--theme-accent)18', border: '1px solid var(--theme-accent)35', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
+                            Suite {client.suite_plan}
+                          </span>
+                        )}
+                        {isAdminGranted && (
+                          <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)', background: 'var(--theme-accent)18', border: '1px solid var(--theme-accent)35', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
+                            Override
+                          </span>
+                        )}
+                        {!client.suite_plan && !isAdminGranted && (
+                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>Not subscribed to Suite</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )

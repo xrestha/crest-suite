@@ -21,6 +21,11 @@ const IMS_FEATURE_TIERS = [
         tips: ['Labor Cost % is a prorated estimate (scaled to days elapsed this month) — it refines to the exact figure once Payroll Run is finalized for the month', 'Prime Cost % is the number most operators benchmark against directly — industry standard is roughly 60–65% of revenue', 'Items Below Par is a live inventory position, not a monthly total', 'A locked padlock means Crest Suite needs upgrading — contact your consultant']
       },
       {
+        icon: '▤', name: 'Monthly Owner/Manager Report',
+        guide: 'The frozen, exportable sibling of Owner Dashboard — a snapshot of every figure (IMS, HR, and POS combined) generated automatically the moment a period closes, so it never changes even if the underlying data is corrected later. Adapts to show only the modules your property actually has enabled. Pick any closed period from the dropdown to view its report, export it to Excel, or print/save it as a PDF. Requires the same Crest Suite Growth subscription as Owner Dashboard. Visible only to Owner and Admin logins.',
+        tips: ['A period from before this feature existed generates its report the first time you open it — this can take a few seconds', 'Revenue here comes from Sales Entries; the separate POS Net Sales figure is derived independently from the Bill Register and will not match to the penny — that is expected', 'Only Admin can Regenerate a snapshot, and it always asks for confirmation first since it overwrites the frozen figures', '"Print / Save as PDF" uses your browser\'s print dialog — choose "Save as PDF" as the destination']
+      },
+      {
         icon: '◷', name: 'Periods',
         guide: 'Create one period per BS month. A period must be open before you can enter purchases, stock, or sales. Close a period at month end to lock the data. Closing stock auto-carries to next month opening. Periods older than 12 months are archived by default.',
         tips: ['Always create a new period before the month starts', 'Close the period only after entering closing stock', 'Use "Show Archived" in Periods to access old months']

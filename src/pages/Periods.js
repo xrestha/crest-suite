@@ -6,6 +6,7 @@ import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { getBsToday } from '../utils/bsCalendar'
 import { useNavigate, Navigate } from 'react-router-dom'
 import Tip from '../components/Tip'
+import { generateMonthlyReport, saveGeneratedReport } from '../modules/ownerReport/generateMonthlyReport'
 
 const BS_MONTHS = [
   'Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin',
@@ -13,7 +14,7 @@ const BS_MONTHS = [
 ]
 
 export default function Periods() {
-  const { isAdmin, clientId, switchAdminClient, hasImsAccess, clientModules } = useAuth()
+  const { isAdmin, clientId, profile, switchAdminClient, hasImsAccess, clientModules } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
   const [periods, setPeriods] = useState([])
@@ -39,6 +40,11 @@ export default function Periods() {
   const [editAllForm, setEditAllForm] = useState({ bs_year: '', bs_month: 1 })
   const [editAllError, setEditAllError] = useState('')
   const [savingAll, setSavingAll] = useState(false)
+
+  // Set right after a client-view close — surfaces a "your report is ready" banner. Not used in
+  // the admin all-clients batch-close loop (a redirect/nudge per client there would be
+  // disruptive across many clients closed in a row).
+  const [justClosedReport, setJustClosedReport] = useState(null)
 
   const bsToday = getBsToday()
 
@@ -84,6 +90,18 @@ export default function Periods() {
     await supabase.from('opening_stock').upsert(rows, { onConflict: 'period_id,item_id' })
   }
 
+  // Best-effort, non-blocking — report generation touches ~10 tables across 3 modules and must
+  // never prevent the period itself from actually closing. Swallowed to console.error; the
+  // lazy-generate fallback on MonthlyOwnerReport.jsx covers a failed attempt on next view.
+  async function generateReportBestEffort(cid, closedPeriod) {
+    try {
+      const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId: cid, period: closedPeriod })
+      await saveGeneratedReport({ clientId: cid, period: closedPeriod, snapshot, modulesIncluded, actorId: profile?.id, source: 'period_close' })
+    } catch (e) {
+      console.error('Monthly owner report generation failed (non-blocking):', e)
+    }
+  }
+
   async function adminCloseAndAdvance(period, cid) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
@@ -92,6 +110,7 @@ export default function Periods() {
     await scopedUpdateRaw('monthly_periods', cid, { status: 'closed' }).eq('id', period.id)
     const { data: newPeriod } = await scopedInsertRaw('monthly_periods', cid, { bs_year: nextYear, bs_month: nextMonth, status: 'open' }, { single: true })
     if (newPeriod?.id) await carryForwardOpeningStock(period.id, newPeriod.id)
+    await generateReportBestEffort(cid, { ...period, status: 'closed' })
     await loadAllClientPeriods()
     setActionClientId(null)
   }
@@ -100,6 +119,7 @@ export default function Periods() {
     if (!window.confirm(`End ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} for this client without starting a new period?\n\nThe client will be blocked from recording data until a new period is created.`)) return
     setActionClientId(cid)
     await scopedUpdateRaw('monthly_periods', cid, { status: 'closed' }).eq('id', period.id)
+    await generateReportBestEffort(cid, { ...period, status: 'closed' })
     await loadAllClientPeriods()
     setActionClientId(null)
   }
@@ -193,6 +213,8 @@ export default function Periods() {
       }
     }
     if (nextPeriodId) await carryForwardOpeningStock(period.id, nextPeriodId)
+    await generateReportBestEffort(clientId, { ...period, status: 'closed' })
+    setJustClosedReport({ bsYear: period.bs_year, bsMonth: period.bs_month })
     loadPeriods()
   }
 
@@ -537,6 +559,22 @@ export default function Periods() {
             >
               End {BS_MONTHS[openPeriod.bs_month - 1]} & Start {BS_MONTHS[nextAdvMonth - 1]} →
             </button>
+          </div>
+        </div>
+      )}
+
+      {justClosedReport && (
+        <div className="card" style={{ marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+            <p style={{ color: 'var(--theme-text1)', margin: 0, fontSize: 13 }}>
+              Report for {BS_MONTHS[justClosedReport.bsMonth - 1]} {justClosedReport.bsYear} is ready.
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              <button className="btn btn-primary" style={{ fontSize: 12, padding: '6px 14px' }} onClick={() => navigate('/owner-report')}>
+                View Report →
+              </button>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={() => setJustClosedReport(null)} aria-label="Dismiss">×</button>
+            </div>
           </div>
         </div>
       )}
