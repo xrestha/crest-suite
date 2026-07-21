@@ -150,6 +150,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S436 — 2026-07-21 — Owner/Manager Report gets Opening/Closing Stock; a 5th real bug found by comparing against Stock Count
+
+Requested addition: Opening Stock in the Crest IMS section, "as it seems an important factor to consider for manager/owner." Added using the same qty × `per_uom_rate` valuation `MonthlySummary.js` already uses for its own Opening Stock figure.
+
+Immediately compared the new figure against Stock Count's own Summary tab for the same period (Ashadh 2083) — NPR 179,232 in the report vs NPR 179,189.95 on Stock Count, a ~NPR 42 mismatch. Root cause: `computeImsSection`'s `items` query had no `is_active` filter, so a leftover `opening_stock` row on a deactivated item inflated the total; `Stock.js`'s Summary tab (the actual source of truth for this figure) filters to `is_active=true` before valuing anything. Fixed by matching that filter exactly — deliberately did **not** also exclude sub-recipes, since Stock Count counts those too (its own "Sub-Recipes" category row), unlike the `is_sub_recipe` exclusion that applies to Item Master/Purchases/POs/Requisitions/Reorder Report/Supplier Price Tracker. Same shared item-rate map means Wastage Value is now also quietly more correct for the same reason.
+
+Also added Closing Stock (`closing_stock.physical_qty` × `per_uom_rate`) right alongside Opening Stock, since it's the natural other bookend of the period and was an obvious follow-up. Both fields added to the Excel export too.
+
 ### S435 — 2026-07-21 — Monthly Owner/Manager Report, live-tested end-to-end: 4 real issues found and fixed
 
 Continuation of S434 on the actual pilot client (Casa Acai Cafe, Ashadh 2083) — reviewing the live output surfaced four real problems, none of them caught by the build passing.
