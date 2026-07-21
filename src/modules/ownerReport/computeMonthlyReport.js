@@ -129,8 +129,10 @@ async function computeHrSection(clientId, period) {
       .eq('status', 'approved').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
     scopedFrom('hr_leave_requests', clientId, 'leave_type_id, status, start_date, end_date, days'),
     scopedFrom('hr_attendance', clientId, 'status, hours_worked, ot_hours').eq('period_id', period.id),
+    scopedFrom('hr_leave_types', clientId, 'id, name'),
   ])
-  const [{ data: employees }, { data: components }, { data: otEntries }, { data: leaveRequests }, { data: attendanceRows }] = results
+  const [{ data: employees }, { data: components }, { data: otEntries }, { data: leaveRequests }, { data: attendanceRows }, { data: leaveTypes }] = results
+  const leaveTypeNameMap = Object.fromEntries((leaveTypes || []).map(lt => [lt.id, lt.name]))
   const empMap = Object.fromEntries((employees || []).map(e => [e.id, e]))
 
   let accruedGross = 0, accruedSsfEmployer = 0
@@ -192,7 +194,13 @@ async function computeHrSection(clientId, period) {
     const start = new Date(lr.start_date), end = new Date(lr.end_date)
     if (end < periodStartAd || start > periodEndAd) return
     const key = lr.leave_type_id || 'unspecified'
-    if (!leaveByType[key]) leaveByType[key] = { leaveTypeId: lr.leave_type_id, days: 0, requestCount: 0 }
+    if (!leaveByType[key]) {
+      // Resolved to a name AT GENERATION TIME, same as everything else in a frozen snapshot —
+      // if the leave type is later renamed or deleted, this report must keep showing what was
+      // true when it was generated, not silently go blank or fall back to the raw id.
+      const name = lr.leave_type_id ? (leaveTypeNameMap[lr.leave_type_id] || 'Unknown Leave Type') : 'Unspecified'
+      leaveByType[key] = { leaveTypeName: name, days: 0, requestCount: 0 }
+    }
     leaveByType[key].days += parseFloat(lr.days) || 0
     leaveByType[key].requestCount += 1
   })

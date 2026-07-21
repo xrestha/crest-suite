@@ -61,7 +61,7 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       'Attendance Rate %': hr.attendance ? pct(hr.attendance.rate) : 'N/A',
     }]
     XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - HR', bizInfo, periodLabel, hrRows), 'HR')
-    const leaveRows = (hr.leave || []).map(l => ({ 'Leave Type ID': l.leaveTypeId || 'Unspecified', 'Days Taken': round2(l.days), Requests: l.requestCount }))
+    const leaveRows = (hr.leave || []).map(l => ({ 'Leave Type': l.leaveTypeName, 'Days Taken': round2(l.days), Requests: l.requestCount }))
     if (leaveRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leaveRows), 'HR - Leave')
   }
 

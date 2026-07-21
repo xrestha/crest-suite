@@ -326,7 +326,7 @@ export default function MonthlyOwnerReport() {
                       <thead><tr><th>Leave Type</th><th style={{ textAlign: 'right' }}>Requests</th><th style={{ textAlign: 'right' }}>Days Taken</th></tr></thead>
                       <tbody>
                         {snapshot.hr.leave.map((l, i) => (
-                          <tr key={i}><td>{l.leaveTypeId || 'Unspecified'}</td><td style={{ textAlign: 'right' }}>{l.requestCount}</td><td style={{ textAlign: 'right' }}>{l.days}</td></tr>
+                          <tr key={i}><td>{l.leaveTypeName}</td><td style={{ textAlign: 'right' }}>{l.requestCount}</td><td style={{ textAlign: 'right' }}>{l.days}</td></tr>
                         ))}
                       </tbody>
                     </table>
