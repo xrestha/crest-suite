@@ -712,6 +712,17 @@ export default function ClientDashboard() {
     ? <h2 style={{ fontSize: 11, fontWeight: 400, margin: '0 0 10px', color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{text}</h2>
     : null
 
+  // Weighted 3-column layout (IMS wider than HR/POS, not equal thirds — forced equal-weighting
+  // dilutes attention per dashboard-IA research; IMS stays widest as the most decision-dense
+  // module) — only kicks in at 2+ modules, matching showModuleHeaders. A 1-module client keeps
+  // today's full-width single-column render untouched. Named classes (not a computed inline
+  // gridTemplateColumns) specifically so Layout.css's mobile media-query collapse can win at
+  // narrow widths — an inline style would always beat a class's rule regardless of viewport.
+  const dashColsClass = !showModuleHeaders ? ''
+    : (showIms && showHr && showPos) ? 'dash-3col-all'
+    : (showHr && showPos) ? 'dash-3col-hr-pos'
+    : 'dash-3col-ims-plus' // IMS+HR or IMS+POS — both get the same 1.5fr/1fr split
+
   return (
     <div>
       {/* Screen-reader-only announcement — the visible loading state is a shimmering skeleton
@@ -814,8 +825,10 @@ export default function ClientDashboard() {
         </div>
       )}
 
+      <div className={dashColsClass}>
       {/* ── IMS KPIs ── */}
-      {showIms && moduleHeader('Inventory')}
+      {showIms && <div>
+      {moduleHeader('Inventory')}
       {showIms && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
 
         {/* Net Purchases */}
@@ -966,12 +979,19 @@ export default function ClientDashboard() {
       {/* ── Charts Row ── */}
       {!loading && activePeriod && (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
+          {/* Restacks to a single vertical column when the page is in the weighted 3-column
+              layout (IMS's own column is narrower than a full page width there) — the
+              3-across desktop spread only makes sense when IMS has the whole page to itself. */}
+          <div style={{ display: 'grid', gridTemplateColumns: showModuleHeaders ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
 
             {/* Pie — Category Spend */}
             <ChartCard
               title="Spend by Category"
-              smallHeight={140}
+              /* Bumped from 140 when the page is in the 3-column layout — these charts use
+                 height as their only signal for "full desktop spread vs squeezed" (h > 200 =
+                 big), so a stacked-but-still-short card needs to clear that threshold too, or
+                 it silently keeps the cramped small-width font/tick sizing forever. */
+              smallHeight={showModuleHeaders ? 220 : 140}
               footer={<p className="sr-only">{categorySpendSummary}</p>}
               renderChart={h => categorySpend.length === 0 ? (
                 <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1016,6 +1036,7 @@ export default function ClientDashboard() {
                 scroll div's large minWidth forces the track wide and squeezes the other cards. */}
             <ChartCard
               title="Daily Purchases vs Sales"
+              smallHeight={showModuleHeaders ? 220 : 160}
               cardStyle={{ minWidth: 0 }}
               legend={<>
                 <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-accent)' }}>●</span> Purchases</span>
@@ -1068,6 +1089,7 @@ export default function ClientDashboard() {
             {/* Bar — Top Items */}
             <ChartCard
               title="Top Items by Spend"
+              smallHeight={showModuleHeaders ? 220 : 160}
               footer={<p className="sr-only">{topItemSpendSummary}</p>}
               renderChart={h => {
                 const big = h > 200
@@ -1151,7 +1173,8 @@ export default function ClientDashboard() {
           )}
 
           {/* ── Bottom: Variance + Reorder side by side ── */}
-          {<div style={{ display: 'grid', gridTemplateColumns: canReorder ? 'repeat(auto-fit, minmax(320px, 1fr))' : '1fr', gap: 14, marginBottom: 20 }}>
+          {/* Same restack-when-columned rule as the charts row above. */}
+          {<div style={{ display: 'grid', gridTemplateColumns: (!showModuleHeaders && canReorder) ? 'repeat(auto-fit, minmax(320px, 1fr))' : '1fr', gap: 14, marginBottom: 20 }}>
 
             {/* Variance table */}
             {canVariance ? (
@@ -1232,6 +1255,7 @@ export default function ClientDashboard() {
         </>
       )}
       </>}
+      </div>}
 
       {/* ── HR KPIs (below Inventory) ── */}
       {/* Previously two entirely separate blocks — a full "Loading HR data…" text card while
@@ -1365,6 +1389,7 @@ export default function ClientDashboard() {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

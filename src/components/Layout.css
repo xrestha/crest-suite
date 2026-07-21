@@ -1130,6 +1130,25 @@ input[type="number"] {
   margin-bottom: 28px;
 }
 
+/* ClientDashboard.jsx's weighted 3-column layout (IMS/HR/POS) — IMS stays widest since it's the
+   most decision-dense module, not equal thirds. Named per active-module combination (computed in
+   JS as dashColsClass) rather than a CSS custom property, so the @media collapse below can
+   override the whole grid-template-columns declaration outright — an inline style would always
+   win over a class rule regardless of viewport, which would make the mobile collapse impossible. */
+.dash-3col-all, .dash-3col-ims-plus, .dash-3col-hr-pos {
+  display: grid;
+  gap: 16px;
+}
+.dash-3col-all      { grid-template-columns: 1.5fr 1fr 1fr; }
+.dash-3col-ims-plus { grid-template-columns: 1.5fr 1fr; } /* IMS+HR or IMS+POS */
+.dash-3col-hr-pos   { grid-template-columns: 1fr 1fr; }
+
+@media (max-width: 768px) {
+  .dash-3col-all, .dash-3col-ims-plus, .dash-3col-hr-pos {
+    grid-template-columns: 1fr;
+  }
+}
+
 .stat-card {
   background: var(--theme-card);
   border: 1px solid var(--theme-border);
