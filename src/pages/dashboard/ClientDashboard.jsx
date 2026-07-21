@@ -16,6 +16,7 @@ import { getBsToday, BS_MONTHS, daysInBsMonth, bsToAd } from '../../utils/bsCale
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
+import SalesPivot from '../../modules/dashboard/SalesPivot'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
 
 export default function ClientDashboard() {
@@ -1254,6 +1255,11 @@ export default function ClientDashboard() {
               </div>
             ) : null}
           </div>}
+
+          {/* Sales pivot lives here (manual sales_entries) only when POS isn't shown — a
+              POS-enabled client sees the POS-sourced version instead, in the POS column below,
+              rather than rendering two differently-sourced "sales" pivots on the same page. */}
+          {!showPos && canSales && <div style={{ marginTop: 14 }}><SalesPivot activePeriod={activePeriod} posEnabled={false} /></div>}
         </>
       )}
       </>}
@@ -1407,6 +1413,10 @@ export default function ClientDashboard() {
               </>
             )}
           </div>
+
+          {/* POS-sourced sales pivot — kitchen/bar station accounts have no use for a revenue
+              breakdown (they get kitchen-ops KPIs above instead), so this is front-of-house only. */}
+          {!posIsStationTeam && <div style={{ marginTop: 14 }}><SalesPivot activePeriod={activePeriod} posEnabled={true} /></div>}
         </div>
       )}
       </div>
