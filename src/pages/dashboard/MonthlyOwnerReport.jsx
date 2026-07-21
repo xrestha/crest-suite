@@ -308,7 +308,14 @@ export default function MonthlyOwnerReport() {
 
             {snapshot.hr && (
               <div className="owner-report-section">
-                <h3 style={sectionTitleStyle}>Crest HR</h3>
+                <h3 style={sectionTitleStyle}>
+                  Crest HR
+                  {snapshot.hr.payrollSource && (
+                    <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 'normal', color: 'var(--theme-text3)', marginLeft: 8 }}>
+                      {snapshot.hr.payrollSource === 'finalized' ? '· from finalized Payroll Run' : '· estimated — no payroll finalized for this period'}
+                    </span>
+                  )}
+                </h3>
                 <div className="table-wrap" style={{ marginBottom: snapshot.hr.leave?.length > 0 ? 8 : 0 }}>
                   <table className="data-table owner-report-table"><tbody>
                     <Row label="Gross Payroll" value={fmt(snapshot.hr.payroll?.gross)} />

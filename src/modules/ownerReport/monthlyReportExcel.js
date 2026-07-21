@@ -53,6 +53,7 @@ export function exportMonthlyReportExcel(report, bizInfo) {
   if (snapshot.hr) {
     const hr = snapshot.hr
     const hrRows = [{
+      'Payroll Source': hr.payrollSource === 'finalized' ? 'Finalized Payroll Run' : 'Estimated (no payroll finalized)',
       'Gross Payroll (NPR)': round2(hr.payroll?.gross), 'OT Hours': round2(hr.payroll?.ot?.hours),
       'OT Amount (NPR)': round2(hr.payroll?.ot?.amount), 'Employer SSF (NPR)': round2(hr.payroll?.ssfEmployer),
       'Total Payroll Cost (NPR)': round2(hr.payroll?.total),

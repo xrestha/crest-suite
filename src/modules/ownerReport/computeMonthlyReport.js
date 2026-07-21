@@ -130,60 +130,99 @@ async function computeHrSection(clientId, period) {
     scopedFrom('hr_leave_requests', clientId, 'leave_type_id, status, start_date, end_date, days'),
     scopedFrom('hr_attendance', clientId, 'status, hours_worked, ot_hours').eq('period_id', period.id),
     scopedFrom('hr_leave_types', clientId, 'id, name'),
+    scopedFrom('hr_payroll_runs', clientId, 'id').eq('period_id', period.id).eq('status', 'finalized').maybeSingle(),
   ])
-  const [{ data: employees }, { data: components }, { data: otEntries }, { data: leaveRequests }, { data: attendanceRows }, { data: leaveTypes }] = results
+  const [
+    { data: employees }, { data: components }, { data: otEntries }, { data: leaveRequests },
+    { data: attendanceRows }, { data: leaveTypes }, { data: finalizedRun },
+  ] = results
   const leaveTypeNameMap = Object.fromEntries((leaveTypes || []).map(lt => [lt.id, lt.name]))
   const empMap = Object.fromEntries((employees || []).map(e => [e.id, e]))
 
-  let accruedGross = 0, accruedSsfEmployer = 0
+  // Headcount is a lifecycle fact (who joined/left this period), independent of which payroll
+  // figures get used below — always computed from join_date/end_date regardless of source.
   let activeCount = 0, newHiresCount = 0, terminationsCount = 0
   ;(employees || []).forEach(emp => {
     const isActiveish = emp.status === 'active' || emp.status === 'probation'
     const endAd = emp.end_date ? new Date(emp.end_date) : null
     const terminatedThisPeriod = !isActiveish && endAd && endAd >= periodStartAd && endAd <= periodEndAd
     if (!isActiveish && !terminatedThisPeriod) return
-
     const joinAd = emp.join_date ? new Date(emp.join_date) : null
     if (joinAd && joinAd > periodEndAd) return
-
     if (isActiveish) activeCount += 1
     if (terminatedThisPeriod) terminationsCount += 1
     if (joinAd && joinAd >= periodStartAd && joinAd <= periodEndAd) newHiresCount += 1
-
-    const empStart = joinAd && joinAd > periodStartAd ? joinAd : periodStartAd
-    const empEnd    = endAd && endAd < periodEndAd ? endAd : periodEndAd
-    const daysWorked = Math.max(0, Math.floor((empEnd - empStart) / 86400000) + 1)
-    if (daysWorked <= 0) return
-
-    const basic = parseFloat(emp.basic_salary) || 0
-    const basis = emp.pay_basis || 'monthly'
-    const allowances = basis === 'monthly'
-      ? (components || []).filter(c => c.employee_id === emp.id && c.type === 'earning')
-          .reduce((s, c) => s + calcAmount(c, basic), 0)
-      : 0
-    const monthlyEquivGross =
-      basis === 'daily'  ? basic * monthDays :
-      basis === 'hourly' ? basic * STANDARD_HOURS_PER_DAY * monthDays :
-      basic + allowances
-    const perDay = monthDays > 0 ? monthlyEquivGross / monthDays : 0
-    accruedGross += perDay * daysWorked
-
-    if (emp.ssf_enrolled) {
-      const ssfBase = Math.min(monthlyEquivGross, SSF_CAP) * (monthDays > 0 ? daysWorked / monthDays : 0)
-      accruedSsfEmployer += ssfBase * SSF_EMPLOYER_PCT
-    }
   })
 
-  let otTotal = 0, otHoursTotal = 0
-  ;(otEntries || []).forEach(e => {
-    const emp = empMap[e.employee_id]
-    if (!emp) return
-    const hr = hourlyRateOf(emp.pay_basis || 'monthly', parseFloat(emp.basic_salary) || 0, monthDays)
-    const mult = e.ot_type === 'holiday' ? OT_HOLIDAY_MULTIPLIER : OT_MULTIPLIER
-    const hours = parseFloat(e.ot_hours) || 0
-    otTotal += hours * hr * mult
-    otHoursTotal += hours
-  })
+  // ── Payroll figures: prefer the actual finalized payroll run over a re-derived estimate ──
+  // A finalized hr_payroll_runs/hr_payslips is the exact, authoritative Nepal-payroll-engine
+  // computation (payrollCompute.js — real OT from BOTH attendance and approved claims, real
+  // TDS/absence-based deductions) — reusing it is both more accurate and simpler than
+  // re-deriving an approximation. Found live: the estimate path below only reads
+  // hr_overtime_entries (approved OT *claims*), completely missing attendance-based OT
+  // (hr_attendance.ot_hours, tallied inside computePayslip), so a client whose OT comes from
+  // daily attendance rather than separate claims saw NPR 0 overtime in the report despite a
+  // finalized payroll clearly showing otherwise. Only fall back to the estimate below when this
+  // period's payroll was genuinely never finalized (client doesn't use Payroll Run, or hasn't
+  // finalized yet) — matches Owner Dashboard's live MTD estimate for the still-open case.
+  let payroll, payrollSource
+  if (finalizedRun?.id) {
+    const { data: payslips } = await scopedFrom('hr_payslips', clientId, 'gross, ot_hours, ot_amount, ssf_employer')
+      .eq('run_id', finalizedRun.id)
+    const gross = (payslips || []).reduce((s, p) => s + (parseFloat(p.gross) || 0), 0)
+    const otHours = (payslips || []).reduce((s, p) => s + (parseFloat(p.ot_hours) || 0), 0)
+    const otAmount = (payslips || []).reduce((s, p) => s + (parseFloat(p.ot_amount) || 0), 0)
+    const ssfEmployer = (payslips || []).reduce((s, p) => s + (parseFloat(p.ssf_employer) || 0), 0)
+    payroll = { gross, ot: { hours: otHours, amount: otAmount }, ssfEmployer, total: gross + otAmount + ssfEmployer }
+    payrollSource = 'finalized'
+  } else {
+    let accruedGross = 0, accruedSsfEmployer = 0
+    ;(employees || []).forEach(emp => {
+      const isActiveish = emp.status === 'active' || emp.status === 'probation'
+      const endAd = emp.end_date ? new Date(emp.end_date) : null
+      const terminatedThisPeriod = !isActiveish && endAd && endAd >= periodStartAd && endAd <= periodEndAd
+      if (!isActiveish && !terminatedThisPeriod) return
+      const joinAd = emp.join_date ? new Date(emp.join_date) : null
+      if (joinAd && joinAd > periodEndAd) return
+
+      const empStart = joinAd && joinAd > periodStartAd ? joinAd : periodStartAd
+      const empEnd    = endAd && endAd < periodEndAd ? endAd : periodEndAd
+      const daysWorked = Math.max(0, Math.floor((empEnd - empStart) / 86400000) + 1)
+      if (daysWorked <= 0) return
+
+      const basic = parseFloat(emp.basic_salary) || 0
+      const basis = emp.pay_basis || 'monthly'
+      const allowances = basis === 'monthly'
+        ? (components || []).filter(c => c.employee_id === emp.id && c.type === 'earning')
+            .reduce((s, c) => s + calcAmount(c, basic), 0)
+        : 0
+      const monthlyEquivGross =
+        basis === 'daily'  ? basic * monthDays :
+        basis === 'hourly' ? basic * STANDARD_HOURS_PER_DAY * monthDays :
+        basic + allowances
+      const perDay = monthDays > 0 ? monthlyEquivGross / monthDays : 0
+      accruedGross += perDay * daysWorked
+
+      if (emp.ssf_enrolled) {
+        const ssfBase = Math.min(monthlyEquivGross, SSF_CAP) * (monthDays > 0 ? daysWorked / monthDays : 0)
+        accruedSsfEmployer += ssfBase * SSF_EMPLOYER_PCT
+      }
+    })
+
+    let otTotal = 0, otHoursTotal = 0
+    ;(otEntries || []).forEach(e => {
+      const emp = empMap[e.employee_id]
+      if (!emp) return
+      const hr = hourlyRateOf(emp.pay_basis || 'monthly', parseFloat(emp.basic_salary) || 0, monthDays)
+      const mult = e.ot_type === 'holiday' ? OT_HOLIDAY_MULTIPLIER : OT_MULTIPLIER
+      const hours = parseFloat(e.ot_hours) || 0
+      otTotal += hours * hr * mult
+      otHoursTotal += hours
+    })
+
+    payroll = { gross: accruedGross, ot: { hours: otHoursTotal, amount: otTotal }, ssfEmployer: accruedSsfEmployer, total: accruedGross + otTotal + accruedSsfEmployer }
+    payrollSource = 'estimated'
+  }
 
   // Leave taken — hr_leave_requests has no period_id, only AD start_date/end_date, so an approved
   // request counts toward this period if its date range overlaps the period at all (a leave
@@ -219,10 +258,7 @@ async function computeHrSection(clientId, period) {
   }
 
   return {
-    payroll: {
-      gross: accruedGross, ot: { hours: otHoursTotal, amount: otTotal }, ssfEmployer: accruedSsfEmployer,
-      total: accruedGross + otTotal + accruedSsfEmployer,
-    },
+    payroll, payrollSource,
     headcount: { active: activeCount, newHires: newHiresCount, terminations: terminationsCount },
     leave: Object.values(leaveByType),
     attendance,
