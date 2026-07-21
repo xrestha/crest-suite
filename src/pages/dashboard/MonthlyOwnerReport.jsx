@@ -10,10 +10,28 @@ import Tip from '../../components/Tip'
 import { printWithTitle } from '../../utils/printTitle'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { exportMonthlyReportExcel } from '../../modules/ownerReport/monthlyReportExcel'
+import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
 
 const fmt = n => (n == null ? '—' : `NPR ${Math.round(n).toLocaleString('en-NP')}`)
 const pct = n => (n == null ? '—' : `${n.toFixed(1)}%`)
 const num = n => (n == null ? '—' : Math.round(n).toLocaleString('en-NP'))
+
+const sectionTitleStyle = {
+  fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+  color: 'var(--theme-accent)', margin: '0 0 10px', paddingBottom: 6, borderBottom: '1px solid var(--theme-border-lt)',
+}
+
+// A two-column "Label ... Value" line item — the document convention used throughout this
+// report instead of dashboard-style KPI tiles (see CLAUDE.md's Monthly Owner/Manager Report
+// section for why: a frozen artifact meant to be read/printed as a report, not glanced at live).
+function Row({ label, value, tip, color }) {
+  return (
+    <tr>
+      <td style={{ color: 'var(--theme-text2)' }}>{tip ? <Tip text={tip} width={260}>{label}</Tip> : label}</td>
+      <td style={{ textAlign: 'right', fontWeight: 600, color: color || 'var(--theme-text1)' }}>{value}</td>
+    </tr>
+  )
+}
 
 // The frozen, exportable artifact version of Owner Dashboard's live KPIs — one snapshot per
 // closed period, generated at close time (see Periods.js) or lazily on first view for a
@@ -127,6 +145,15 @@ export default function MonthlyOwnerReport() {
 
   const selectedPeriod = periods.find(p => p.id === selectedPeriodId)
   const snapshot = report?.snapshot
+  const periodLabel = report ? `${BS_MONTHS[report.bs_month - 1]} ${report.bs_year}` : ''
+  const execSummary = snapshot ? buildExecutiveSummary(snapshot, periodLabel) : ''
+
+  // Color bands match Owner Dashboard's live KPI cards exactly, so the same rough magnitude
+  // never reads as a different "health" color depending on which page you're looking at.
+  const fcColor = v => (v == null ? undefined : v <= 35 ? 'var(--theme-green)' : v <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)')
+  const lcColor = v => (v == null ? undefined : v <= 37 ? 'var(--theme-green)' : v <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)')
+  const pcColor = v => (v == null ? undefined : v <= 60 ? 'var(--theme-green)' : v <= 65 ? 'var(--theme-accent)' : 'var(--theme-red)')
+  const nmColor = v => (!canOverheads || v == null ? undefined : v >= 20 ? 'var(--theme-green)' : v >= 10 ? 'var(--theme-accent)' : 'var(--theme-red)')
 
   return (
     <div>
@@ -153,7 +180,7 @@ export default function MonthlyOwnerReport() {
               <button className="btn btn-ghost" onClick={() => exportMonthlyReportExcel(report, bizInfo)}>Export Excel</button>
               <button
                 className="btn btn-ghost"
-                onClick={() => printWithTitle(`Owner Report — ${BS_MONTHS[report.bs_month - 1]} ${report.bs_year} — ${bizInfo.name}`)}
+                onClick={() => printWithTitle(`Owner Report — ${periodLabel} — ${bizInfo.name}`)}
               >
                 Print / Save as PDF
               </button>
@@ -189,134 +216,149 @@ export default function MonthlyOwnerReport() {
         )}
 
         {!loading && !generating && report && snapshot && (
-          <div>
-            <div className="card" style={{ marginBottom: 16 }}>
-              <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>{BS_MONTHS[report.bs_month - 1]} {report.bs_year}</h2>
+          <div className="card" style={{ maxWidth: 760, margin: '0 auto', padding: '32px 40px' }}>
+            {/* Letterhead */}
+            <div style={{ textAlign: 'center', marginBottom: 24, paddingBottom: 18, borderBottom: '2px solid var(--theme-border)' }}>
+              <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 800, letterSpacing: '0.02em' }}>{bizInfo.name || '—'}</h2>
+              <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text2)' }}>
+                {bizInfo.vatReg ? 'VAT No' : 'PAN No'}: {bizInfo.vat || '—'}{bizInfo.address ? ` · ${bizInfo.address}` : ''}
+              </p>
+              <div style={{ fontSize: 15, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 6px' }}>
+                Monthly Owner/Manager Report
+              </div>
               <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text3)' }}>
-                Generated {new Date(report.generated_at).toLocaleString()} by {generatorName || '—'}
-                {' · '}
-                <span style={{ textTransform: 'capitalize' }}>{report.generation_source.replace(/_/g, ' ')}</span>
+                Period: {periodLabel} &nbsp;|&nbsp; Generated: {new Date(report.generated_at).toLocaleString()} by {generatorName || '—'}
+                &nbsp;|&nbsp; Source: <span style={{ textTransform: 'capitalize' }}>{report.generation_source.replace(/_/g, ' ')}</span>
               </p>
             </div>
 
-            <h3 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-text2)', margin: '0 0 10px' }}>
-              Financial Summary
-            </h3>
-            <div className="stat-grid" style={{ marginBottom: 24 }}>
-              <div className="stat-card">
-                <div className="stat-label">Revenue</div>
-                <div className="stat-value" style={{ color: 'var(--theme-green)' }}>{fmt(snapshot.combined?.revenueTotal)}</div>
+            {/* Executive Summary — the one narrative paragraph in the report; everything below
+                this point is pure data tables, per the hybrid format chosen for this report. */}
+            {execSummary && (
+              <div style={{ marginBottom: 26 }}>
+                <h3 style={sectionTitleStyle}>Executive Summary</h3>
+                <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--theme-text1)', margin: 0 }}>{execSummary}</p>
               </div>
-              {snapshot.ims && (() => {
-                const v = snapshot.combined?.foodCostPct
-                const color = v == null ? undefined : v <= 35 ? 'var(--theme-green)' : v <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)'
-                return (
-                  <div className="stat-card">
-                    <div className="stat-label"><Tip text="Net purchases ÷ revenue × 100. Healthy range: 28–35% for Nepal F&B." width={240}>Food Cost %</Tip></div>
-                    <div className="stat-value" style={{ color }}>{pct(v)}</div>
-                    <div className="stat-sub">Target 28–35%</div>
-                  </div>
-                )
-              })()}
-              {snapshot.hr && (() => {
-                // Same 37/45 thresholds as Owner Dashboard's Labor Cost % card — kept identical
-                // deliberately, even though this figure is the actual final number (not a
-                // proration): a client flipping between the live dashboard and this report
-                // should never see the same rough magnitude read as a different color band.
-                const v = snapshot.combined?.laborCostPct
-                const color = v == null ? undefined : v <= 37 ? 'var(--theme-green)' : v <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)'
-                return (
-                  <div className="stat-card">
-                    <div className="stat-label"><Tip text="Gross + overtime + employer SSF, as a % of revenue. A closed period is fully elapsed, so this is the actual final figure, not a proration." width={280}>Labor Cost %</Tip></div>
-                    <div className="stat-value" style={{ color }}>{pct(v)}</div>
-                    <div className="stat-sub">Target 25–30%</div>
-                  </div>
-                )
-              })()}
-              {snapshot.ims && snapshot.hr && (() => {
-                const v = snapshot.combined?.primeCostPct
-                const color = v == null ? undefined : v <= 60 ? 'var(--theme-green)' : v <= 65 ? 'var(--theme-accent)' : 'var(--theme-red)'
-                return (
-                  <div className="stat-card">
-                    <div className="stat-label"><Tip text="Food Cost % + Labor Cost % — the number operators benchmark against. Industry standard: 60–65% of revenue." width={280}>Prime Cost %</Tip></div>
-                    <div className="stat-value" style={{ color }}>{pct(v)}</div>
-                    <div className="stat-sub">Target ≤60–65%</div>
-                  </div>
-                )
-              })()}
-              {snapshot.ims && snapshot.hr && (() => {
-                const v = snapshot.combined?.netMarginPct
-                const color = !canOverheads || v == null ? undefined : v >= 20 ? 'var(--theme-green)' : v >= 10 ? 'var(--theme-accent)' : 'var(--theme-red)'
-                return (
-                  <div className="stat-card">
-                    <div className="stat-label"><Tip text="Revenue minus food cost, labor cost, and overheads, as a % of revenue. This is what the business actually keeps." width={260}>Net Margin %</Tip></div>
-                    <div className="stat-value" style={{ color }}>{!canOverheads ? '—' : pct(v)}</div>
-                    <div className="stat-sub">{!canOverheads ? 'Requires Overheads (Pro)' : 'After food, labor & overhead'}</div>
-                  </div>
-                )
-              })()}
+            )}
+
+            {/* Financial Summary — Metric / Actual / Target, matching the "KPI, target, actual"
+                shape a real restaurant management report uses, not a KPI-tile dashboard. */}
+            <div style={{ marginBottom: 26 }}>
+              <h3 style={sectionTitleStyle}>Financial Summary</h3>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead><tr><th>Metric</th><th style={{ textAlign: 'right' }}>Actual</th><th style={{ textAlign: 'right' }}>Target</th></tr></thead>
+                  <tbody>
+                    <tr>
+                      <td>Revenue</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmt(snapshot.combined?.revenueTotal)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
+                    </tr>
+                    {snapshot.ims && (
+                      <tr>
+                        <td><Tip text="Net purchases ÷ revenue × 100." width={220}>Food Cost %</Tip></td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(snapshot.combined?.foodCostPct) }}>{pct(snapshot.combined?.foodCostPct)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>28–35%</td>
+                      </tr>
+                    )}
+                    {snapshot.hr && (
+                      <tr>
+                        <td><Tip text="Gross + overtime + employer SSF, as a % of revenue — the actual final figure for a closed period, not a proration." width={280}>Labor Cost %</Tip></td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: lcColor(snapshot.combined?.laborCostPct) }}>{pct(snapshot.combined?.laborCostPct)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>25–30%</td>
+                      </tr>
+                    )}
+                    {snapshot.ims && snapshot.hr && (
+                      <tr>
+                        <td><Tip text="Food Cost % + Labor Cost % — the number operators benchmark against." width={240}>Prime Cost %</Tip></td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: pcColor(snapshot.combined?.primeCostPct) }}>{pct(snapshot.combined?.primeCostPct)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≤60–65%</td>
+                      </tr>
+                    )}
+                    {snapshot.ims && snapshot.hr && (
+                      <tr>
+                        <td><Tip text="Revenue minus food cost, labor cost, and overheads, as a % of revenue." width={260}>Net Margin %</Tip></td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: nmColor(snapshot.combined?.netMarginPct) }}>{!canOverheads ? 'Requires Overheads (Pro)' : pct(snapshot.combined?.netMarginPct)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≥20%</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {snapshot.ims && (
-              <>
-                <h3 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-text2)', margin: '0 0 10px' }}>Crest IMS</h3>
-                <div className="stat-grid" style={{ marginBottom: 24 }}>
-                  <div className="stat-card"><div className="stat-label">Purchases</div><div className="stat-value">{fmt(snapshot.ims.purchaseTotal)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Wastage Value</div><div className="stat-value" style={{ color: snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red)' : undefined }}>{fmt(snapshot.ims.wastageValueTotal)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Cash / Credit Purchases</div><div className="stat-value" style={{ fontSize: 14 }}>{fmt(snapshot.ims.cashNet)} / {fmt(snapshot.ims.creditNet)}</div></div>
-                  <div className="stat-card"><div className="stat-label"><Tip text="Items whose stock at period close was at or below par level." width={240}>Items Below Par (at close)</Tip></div><div className="stat-value">{num(snapshot.ims.reorder?.count)}</div></div>
-                  <div className="stat-card"><div className="stat-label"><Tip text="This period's Credit purchases still unpaid as of generation — a period-bound figure, not a live 'days overdue' count." width={280}>Unpaid Credit (this period)</Tip></div><div className="stat-value">{fmt(snapshot.ims.payables?.unpaidTotal)}</div></div>
+              <div style={{ marginBottom: 26 }}>
+                <h3 style={sectionTitleStyle}>Crest IMS</h3>
+                <div className="table-wrap">
+                  <table className="data-table"><tbody>
+                    <Row label="Purchases" value={fmt(snapshot.ims.purchaseTotal)} />
+                    <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red)' : undefined} />
+                    <Row label="Cash Purchases" value={fmt(snapshot.ims.cashNet)} />
+                    <Row label="Credit Purchases" value={fmt(snapshot.ims.creditNet)} />
+                    <Row label="Items Below Par (at close)" value={num(snapshot.ims.reorder?.count)}
+                      tip="Items whose stock at period close was at or below par level." />
+                    <Row label="Unpaid Credit (this period)" value={fmt(snapshot.ims.payables?.unpaidTotal)}
+                      tip="This period's Credit purchases still unpaid as of generation — a period-bound figure, not a live 'days overdue' count." />
+                  </tbody></table>
                 </div>
-              </>
+              </div>
             )}
 
             {snapshot.hr && (
-              <>
-                <h3 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-text2)', margin: '0 0 10px' }}>Crest HR</h3>
-                <div className="stat-grid" style={{ marginBottom: 12 }}>
-                  <div className="stat-card"><div className="stat-label">Gross Payroll</div><div className="stat-value">{fmt(snapshot.hr.payroll?.gross)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Overtime</div><div className="stat-value" style={{ fontSize: 14 }}>{num(snapshot.hr.payroll?.ot?.hours)} hrs · {fmt(snapshot.hr.payroll?.ot?.amount)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Employer SSF</div><div className="stat-value">{fmt(snapshot.hr.payroll?.ssfEmployer)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Total Payroll Cost</div><div className="stat-value" style={{ color: 'var(--theme-accent)' }}>{fmt(snapshot.hr.payroll?.total)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Headcount</div><div className="stat-value" style={{ fontSize: 14 }}>{num(snapshot.hr.headcount?.active)} active</div></div>
-                  <div className="stat-card"><div className="stat-label">New Hires / Terminations</div><div className="stat-value" style={{ fontSize: 14 }}>{num(snapshot.hr.headcount?.newHires)} / {num(snapshot.hr.headcount?.terminations)}</div></div>
-                  <div className="stat-card"><div className="stat-label"><Tip text="Best-effort — only meaningful for clients using the daily Attendance Sheet." width={240}>Attendance Rate</Tip></div><div className="stat-value">{snapshot.hr.attendance ? pct(snapshot.hr.attendance.rate) : 'N/A'}</div></div>
+              <div style={{ marginBottom: 26 }}>
+                <h3 style={sectionTitleStyle}>Crest HR</h3>
+                <div className="table-wrap" style={{ marginBottom: snapshot.hr.leave?.length > 0 ? 12 : 0 }}>
+                  <table className="data-table"><tbody>
+                    <Row label="Gross Payroll" value={fmt(snapshot.hr.payroll?.gross)} />
+                    <Row label="Overtime" value={`${num(snapshot.hr.payroll?.ot?.hours)} hrs — ${fmt(snapshot.hr.payroll?.ot?.amount)}`} />
+                    <Row label="Employer SSF" value={fmt(snapshot.hr.payroll?.ssfEmployer)} />
+                    <Row label="Total Payroll Cost" value={fmt(snapshot.hr.payroll?.total)} color="var(--theme-accent)" />
+                    <Row label="Active Headcount" value={num(snapshot.hr.headcount?.active)} />
+                    <Row label="New Hires / Terminations" value={`${num(snapshot.hr.headcount?.newHires)} / ${num(snapshot.hr.headcount?.terminations)}`} />
+                    <Row label="Attendance Rate" value={snapshot.hr.attendance ? pct(snapshot.hr.attendance.rate) : 'N/A'}
+                      tip="Best-effort — only meaningful for clients using the daily Attendance Sheet." />
+                  </tbody></table>
                 </div>
                 {snapshot.hr.leave?.length > 0 && (
-                  <div className="table-wrap" style={{ marginBottom: 24 }}>
+                  <div className="table-wrap">
                     <table className="data-table">
-                      <thead><tr><th>Leave Type</th><th>Requests</th><th>Days Taken</th></tr></thead>
+                      <thead><tr><th>Leave Type</th><th style={{ textAlign: 'right' }}>Requests</th><th style={{ textAlign: 'right' }}>Days Taken</th></tr></thead>
                       <tbody>
                         {snapshot.hr.leave.map((l, i) => (
-                          <tr key={i}><td>{l.leaveTypeId || 'Unspecified'}</td><td>{l.requestCount}</td><td>{l.days}</td></tr>
+                          <tr key={i}><td>{l.leaveTypeId || 'Unspecified'}</td><td style={{ textAlign: 'right' }}>{l.requestCount}</td><td style={{ textAlign: 'right' }}>{l.days}</td></tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 )}
-              </>
+              </div>
             )}
 
             {snapshot.pos && (
-              <>
-                <h3 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--theme-text2)', margin: '0 0 10px' }}>Crest POS</h3>
-                <div className="stat-grid" style={{ marginBottom: 12 }}>
-                  <div className="stat-card"><div className="stat-label"><Tip text="Independently derived from the Bill Register — will not tie out to the penny with Revenue above, which comes from Sales Entries instead. Different discount/VAT rounding basis, same underlying bills." width={280}>POS Net Sales (Bill Register basis)</Tip></div><div className="stat-value">{fmt(snapshot.pos.totalNetSales)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Bills / Qty Sold</div><div className="stat-value" style={{ fontSize: 14 }}>{num(snapshot.pos.billCount)} / {num(snapshot.pos.totalQty)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Discount Given</div><div className="stat-value">{fmt(snapshot.pos.totalDiscount)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Comped Bills</div><div className="stat-value" style={{ fontSize: 14 }}>{num(snapshot.pos.compedBillsTotal?.count)} · {fmt(snapshot.pos.compedBillsTotal?.potentialValue)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Voids / Write-offs</div><div className="stat-value" style={{ fontSize: 14, color: snapshot.pos.voidsWriteoffsTotal?.count > 0 ? 'var(--theme-red)' : undefined }}>{num(snapshot.pos.voidsWriteoffsTotal?.count)} · {fmt(snapshot.pos.voidsWriteoffsTotal?.amount)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Avg Check / Cover</div><div className="stat-value">{fmt(snapshot.pos.covers?.avgCheckPerCover)}</div></div>
-                  <div className="stat-card"><div className="stat-label">Avg Bill Value</div><div className="stat-value">{fmt(snapshot.pos.covers?.avgBillValue)}</div></div>
+              <div>
+                <h3 style={sectionTitleStyle}>Crest POS</h3>
+                <div className="table-wrap" style={{ marginBottom: 12 }}>
+                  <table className="data-table"><tbody>
+                    <Row label="Net Sales" value={fmt(snapshot.pos.totalNetSales)}
+                      tip="Independently derived from the Bill Register — will not tie out to the penny with Revenue above, which comes from Sales Entries instead. Different discount/VAT rounding basis, same underlying bills." />
+                    <Row label="Bills / Qty Sold" value={`${num(snapshot.pos.billCount)} / ${num(snapshot.pos.totalQty)}`} />
+                    <Row label="Discount Given" value={fmt(snapshot.pos.totalDiscount)} />
+                    <Row label="Comped Bills" value={`${num(snapshot.pos.compedBillsTotal?.count)} — ${fmt(snapshot.pos.compedBillsTotal?.potentialValue)} potential value`} />
+                    <Row label="Voids / Write-offs" value={`${num(snapshot.pos.voidsWriteoffsTotal?.count)} — ${fmt(snapshot.pos.voidsWriteoffsTotal?.amount)}`}
+                      color={snapshot.pos.voidsWriteoffsTotal?.count > 0 ? 'var(--theme-red)' : undefined} />
+                    <Row label="Avg Check / Cover" value={fmt(snapshot.pos.covers?.avgCheckPerCover)} />
+                    <Row label="Avg Bill Value" value={fmt(snapshot.pos.covers?.avgBillValue)} />
+                  </tbody></table>
                 </div>
 
                 {snapshot.pos.categoryBreakdown?.length > 0 && (
-                  <div className="table-wrap" style={{ marginBottom: 20 }}>
+                  <div className="table-wrap" style={{ marginBottom: 12 }}>
                     <table className="data-table">
-                      <thead><tr><th>Category</th><th>Qty</th><th>Net Sales</th></tr></thead>
+                      <thead><tr><th>Category</th><th style={{ textAlign: 'right' }}>Qty</th><th style={{ textAlign: 'right' }}>Net Sales</th></tr></thead>
                       <tbody>
                         {snapshot.pos.categoryBreakdown.map((c, i) => (
-                          <tr key={i}><td>{c.category}</td><td>{num(c.qty)}</td><td>{fmt(c.net)}</td></tr>
+                          <tr key={i}><td>{c.category}</td><td style={{ textAlign: 'right' }}>{num(c.qty)}</td><td style={{ textAlign: 'right' }}>{fmt(c.net)}</td></tr>
                         ))}
                       </tbody>
                     </table>
@@ -324,18 +366,18 @@ export default function MonthlyOwnerReport() {
                 )}
 
                 {snapshot.pos.paymentMix?.length > 0 && (
-                  <div className="table-wrap" style={{ marginBottom: 24 }}>
+                  <div className="table-wrap">
                     <table className="data-table">
-                      <thead><tr><th>Payment Method</th><th>Net Sales</th><th>% of Net</th></tr></thead>
+                      <thead><tr><th>Payment Method</th><th style={{ textAlign: 'right' }}>Net Sales</th><th style={{ textAlign: 'right' }}>% of Net</th></tr></thead>
                       <tbody>
                         {snapshot.pos.paymentMix.map((p, i) => (
-                          <tr key={i}><td>{p.method}</td><td>{fmt(p.net)}</td><td>{pct(p.pctOfNet)}</td></tr>
+                          <tr key={i}><td>{p.method}</td><td style={{ textAlign: 'right' }}>{fmt(p.net)}</td><td style={{ textAlign: 'right' }}>{pct(p.pctOfNet)}</td></tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
         )}
