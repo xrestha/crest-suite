@@ -11,14 +11,14 @@ const fmtNpr = n => `NPR ${Math.round(n).toLocaleString('en-NP')}`
 // categories the way NPR does), and the "Bulk" (non-day-attributed manual entries) bucket folds
 // silently into row totals rather than getting its own column — that nuance belongs on the full
 // report linked at the bottom, not a glanceable tile.
-export default function SalesPivot({ activePeriod, posEnabled }) {
+export default function SalesPivot({ activePeriod, posEnabled, title = 'Sales by Category' }) {
   const navigate = useNavigate()
   const { rows, loading } = useSalesPivotData({ activePeriod, posEnabled })
 
   if (loading) {
     return (
       <div className="card" style={{ padding: '14px 16px' }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Sales by Category</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>{title}</div>
         <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
       </div>
     )
@@ -28,7 +28,7 @@ export default function SalesPivot({ activePeriod, posEnabled }) {
   if (dayRows.length === 0) {
     return (
       <div className="card" style={{ padding: '14px 16px' }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Sales by Category</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{title}</div>
         <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: 0 }}>No day-attributed sales yet this period.</p>
       </div>
     )
@@ -53,7 +53,7 @@ export default function SalesPivot({ activePeriod, posEnabled }) {
   return (
     <div className="card" style={{ padding: '14px 16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Sales by Category</h3>
+        <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{title}</h3>
         <button
           className="btn btn-ghost" style={{ fontSize: 10, padding: '9px 12px' }}
           onClick={() => navigate(posEnabled ? '/pos/sales-report' : '/sales')}

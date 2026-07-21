@@ -22,9 +22,12 @@ function bsDayBoundaryIso(bsYear, bsMonth, bsDay, endOfDay) {
   return endOfDay ? `${y}-${m}-${dd}T23:59:59.999+05:45` : `${y}-${m}-${dd}T00:00:00.000+05:45`
 }
 
-async function loadFromSalesEntries(period, scopedFrom) {
+export async function loadFromSalesEntries(period, scopedFrom) {
   const [{ data: sales }, { data: recipes }] = await Promise.all([
-    supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, unit_price').eq('period_id', period.id).neq('source', 'pos_comp'),
+    // Excludes both pos_comp (never billed) and pos (already counted by the POS-sourced pivot —
+    // PosOrders.jsx stamps a source:'pos' row per bill at close) so this "manual" pivot and the
+    // POS pivot can render side by side without double-counting the same revenue.
+    supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, unit_price').eq('period_id', period.id).neq('source', 'pos_comp').neq('source', 'pos'),
     scopedFrom('recipes', 'id, category, selling_price'),
   ])
   const priceMap = {}, catMap = {}
@@ -44,7 +47,7 @@ async function loadFromSalesEntries(period, scopedFrom) {
   })
 }
 
-async function loadFromPos(period, scopedFrom) {
+export async function loadFromPos(period, scopedFrom) {
   const fromTs = bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false)
   const lastDay = daysInBsMonth(period.bs_year, period.bs_month)
   const toTs = bsDayBoundaryIso(period.bs_year, period.bs_month, lastDay, true)

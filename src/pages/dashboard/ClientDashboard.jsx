@@ -17,6 +17,7 @@ import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
 import SalesPivot from '../../modules/dashboard/SalesPivot'
+import FoodBeverageSplit from '../../modules/dashboard/FoodBeverageSplit'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
 
 export default function ClientDashboard() {
@@ -715,16 +716,440 @@ export default function ClientDashboard() {
     ? <h2 style={{ fontSize: 11, fontWeight: 400, margin: '0 0 10px', color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{text}</h2>
     : null
 
-  // Weighted 3-column layout (IMS wider than HR/POS, not equal thirds — forced equal-weighting
-  // dilutes attention per dashboard-IA research; IMS stays widest as the most decision-dense
-  // module) — only kicks in at 2+ modules, matching showModuleHeaders. A 1-module client keeps
-  // today's full-width single-column render untouched. Named classes (not a computed inline
-  // gridTemplateColumns) specifically so Layout.css's mobile media-query collapse can win at
-  // narrow widths — an inline style would always beat a class's rule regardless of viewport.
+  // Equal-width 3-column layout — only kicks in at 2+ modules, matching showModuleHeaders. A
+  // 1-module client keeps today's full-width single-column render untouched. Named classes (not
+  // a computed inline gridTemplateColumns) specifically so Layout.css's mobile media-query
+  // collapse can win at narrow widths — an inline style would always beat a class's rule
+  // regardless of viewport.
   const dashColsClass = !showModuleHeaders ? ''
     : (showIms && showHr && showPos) ? 'dash-3col-all'
     : (showHr && showPos) ? 'dash-3col-hr-pos'
-    : 'dash-3col-ims-plus' // IMS+HR or IMS+POS — both get the same 1.5fr/1fr split
+    : 'dash-3col-ims-plus' // IMS+HR or IMS+POS
+
+  // ── IMS card content, extracted into variables so the same JSX composes into two different
+  // shapes below: the full single-page layout when IMS is the only module, or a trimmed top-pill
+  // row (card count matched to HR/POS) plus a full-width "details" section when 2+ modules share
+  // the page. Gating/upsell logic per card is unchanged from before this split.
+  const netPurchasesCard = (
+    <div {...kpiCard(() => navigate('/purchases'))}>
+      {kpiIcon(ArrowDown, 'blue')}
+      <div style={kpiLabelStyle}>Net Purchases</div>
+      <div style={{ ...kpiValueStyle(18), color: 'var(--theme-accent)' }}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
+      </div>
+      <div style={kpiSubtextStyle}>Gross − returns · {periodLabel} →</div>
+    </div>
+  )
+
+  const revenueCard = canSales ? (
+    <div {...kpiCard(() => navigate('/sales'))}>
+      {kpiIcon(ArrowUp, 'green')}
+      <div style={kpiLabelStyle}>Revenue</div>
+      <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green)' }}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
+      </div>
+      <div style={kpiSubtextStyle}>From sales entries →</div>
+    </div>
+  ) : null
+
+  const foodCostCard = canSales ? (
+    <div {...kpiCard(() => navigate(canVariance ? '/variance' : '/summary'))}>
+      {kpiIcon(Percent, 'amber')}
+      <div style={kpiLabelStyle}>
+        <Tip text="Net purchases ÷ revenue × 100. Shows what portion of sales goes to ingredient cost. Healthy range: 28–35% for Nepal F&B." width={240}>Food Cost %</Tip>
+      </div>
+      <div style={{
+        ...kpiValueStyle(22, 800),
+        color: fcPct == null ? 'var(--theme-text2)' : fcPct <= 35 ? 'var(--theme-green)' : fcPct <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)'
+      }}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
+      </div>
+      <div style={kpiSubtextStyle}>
+        <Tip text="Industry benchmark for Nepal cafes & restaurants. Green = healthy, yellow = watch, red = investigate immediately." width={240}>Target 28–35%</Tip> →
+      </div>
+    </div>
+  ) : null
+
+  const fixedCostsCard = canOverheads ? (
+    <div {...kpiCard(() => navigate('/overheads'))}>
+      {kpiIcon(Receipt, 'blue')}
+      <div style={kpiLabelStyle}>
+        <Tip text="All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Target: under 60% combined. See Overheads page for the full breakdown." width={250}>Fixed Costs % of Revenue</Tip>
+      </div>
+      <div style={{
+        ...kpiValueStyle(22, 800),
+        color: ohPct == null ? 'var(--theme-text2)' : ohPct <= 50 ? 'var(--theme-green)' : ohPct <= 65 ? 'var(--theme-accent)' : 'var(--theme-red)'
+      }}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : ohPct != null ? `${ohPct.toFixed(1)}%` : '—'}
+      </div>
+      <div style={kpiSubtextStyle}>
+        {stats?.overheadTotal ? `NPR ${stats.overheadTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })} total →` : 'No overhead data'}
+      </div>
+    </div>
+  ) : (
+    <UpsellCard label="Fixed Costs & Net Margin" tier="Pro" blurb="See true profit after rent, labor & tax" />
+  )
+
+  const netMarginCard = canOverheads ? (
+    <div {...kpiCard(null)}>
+      {kpiIcon(Target, 'green')}
+      <div style={kpiLabelStyle}>
+        <Tip text="Revenue minus food cost and overheads, as a % of revenue. This is what the business keeps after ingredient and fixed costs. Healthy Nepal F&B target: ≥20%." width={260}>Est. Net Margin %</Tip>
+      </div>
+      <div style={{
+        ...kpiValueStyle(22, 800),
+        color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green)' : netMarginPct >= 10 ? 'var(--theme-accent)' : 'var(--theme-red)'
+      }}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
+      </div>
+      <div style={kpiSubtextStyle}>After food & overheads · target ≥20%</div>
+    </div>
+  ) : null
+
+  const activePeriodCard = (
+    <div {...kpiCard(null)}>
+      <div style={kpiLabelStyle}>Active Period</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : periodLabel}</div>
+      <div style={{ ...kpiSubtextStyle, color: activePeriod ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+        {activePeriod ? '● Open' : '● No open period'}
+      </div>
+    </div>
+  )
+
+  const itemsCard = (
+    <div {...kpiCard(() => navigate('/items'))}>
+      <div style={kpiLabelStyle}>Items in Master</div>
+      <div style={kpiValueStyle(18)}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.itemCount}</div>
+      <div style={kpiSubtextStyle}>Active ingredients →</div>
+    </div>
+  )
+
+  const vendorsCard = (
+    <div {...kpiCard(() => navigate('/vendors'))}>
+      <div style={kpiLabelStyle}>Vendors</div>
+      <div style={kpiValueStyle(18)}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.vendorCount}</div>
+      <div style={kpiSubtextStyle}>Active suppliers →</div>
+    </div>
+  )
+
+  const recipesCard = canRecipes ? (
+    <div {...kpiCard(() => navigate('/recipes'))}>
+      <div style={kpiLabelStyle}>Costed Recipes</div>
+      <div style={kpiValueStyle(18)}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.recipeCount}</div>
+      <div style={kpiSubtextStyle}>
+        {stats?.subRecipeCount > 0 ? `+ ${stats.subRecipeCount} sub-recipes →` : 'Active menu items →'}
+      </div>
+    </div>
+  ) : (
+    <UpsellCard label="Costed Recipes" tier="Growth" blurb="Cost every dish & protect margins" />
+  )
+
+  const menuHealthCard = canMenuReprice ? (
+    <div {...kpiCard(() => navigate('/menu-repricing'))}>
+      <div style={kpiLabelStyle}>
+        <Tip text="Dishes whose current food-cost % is above their target — priced too low to hit the margin you set. Open the Menu Repricing report for the prices to charge." width={300}>Menu Health</Tip>
+      </div>
+      <div style={{ ...kpiValueStyle(18), color: stats?.underpricedCount > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${stats?.underpricedCount || 0} of ${stats?.costedPricedCount || 0}`}
+      </div>
+      <div style={{ ...kpiSubtextStyle, color: stats?.menuOpportunityTotal > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>
+        {loading ? 'under target →'
+          : stats?.menuOpportunityTotal > 0
+            ? `NPR ${Math.round(stats.menuOpportunityTotal).toLocaleString('en-NP')}/mo opportunity →`
+            : 'dishes under target →'}
+      </div>
+    </div>
+  ) : (
+    <UpsellCard label="Menu Health" tier="Growth" blurb="Spot underpriced dishes & lost margin" />
+  )
+
+  const wastageCard = (
+    <div {...kpiCard(() => navigate('/wastage-report'))}>
+      <div style={kpiLabelStyle}>
+        <Tip text="Total NPR value of wastage recorded this period — qty wasted × unit rate per item." width={220}>Wastage Value</Tip>
+      </div>
+      <div style={{ ...kpiValueStyle(18), color: stats?.wastageValueTotal > 0 ? 'var(--theme-red)' : 'var(--theme-text1)' }}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(stats?.wastageValueTotal || 0).toLocaleString('en-NP')}`}
+      </div>
+      <div style={kpiSubtextStyle}>This period →</div>
+    </div>
+  )
+
+  // Charts + FC trend + Variance/Reorder — identical regardless of module count. Pre-S438 this
+  // only ever rendered full-width; S438 added a showModuleHeaders-conditional squeeze (1-col
+  // stack, bumped smallHeight) to cope with living inside a narrow weighted column. Now that
+  // multi-module IMS content renders in its own full-width details section below the pill grid
+  // (never squeezed into a column), that conditional no longer applies — this is unconditionally
+  // full-width in both layouts.
+  const imsChartsAndTables = !loading && activePeriod && (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
+
+        {/* Pie — Category Spend */}
+        <ChartCard
+          title="Spend by Category"
+          smallHeight={140}
+          footer={<p className="sr-only">{categorySpendSummary}</p>}
+          renderChart={h => categorySpend.length === 0 ? (
+            <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
+            </div>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={h}>
+                <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                  <Pie
+                    data={categorySpend} dataKey="value" nameKey="name"
+                    cx="50%" cy="50%"
+                    innerRadius={h > 200 ? 80 : 38} outerRadius={h > 200 ? 140 : 60}
+                    paddingAngle={2}
+                  >
+                    {categorySpend.map((entry, i) => <Cell key={entry.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+                    formatter={v => [`NPR ${Number(v).toLocaleString()}`, '']}
+                    labelFormatter={name => name}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
+                {categorySpend.map((entry, i) => {
+                  return (
+                    <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
+                      <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{entry.name}</span>
+                      <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
+        />
+
+        {/* Line — Daily Purchases vs Sales */}
+        {/* minWidth:0 lets this grid column hold its 1/3 share — without it the inner
+            scroll div's large minWidth forces the track wide and squeezes the other cards. */}
+        <ChartCard
+          title="Daily Purchases vs Sales"
+          smallHeight={160}
+          cardStyle={{ minWidth: 0 }}
+          legend={<>
+            <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-accent)' }}>●</span> Purchases</span>
+            {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green)' }}>●</span> Sales</span>}
+            {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green)', letterSpacing: '-2px' }}>┄</span> Projection</span>}
+            {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
+          </>}
+          footer={<>
+            {salesProjection && (
+              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)' }}>
+                Projected month-end revenue: <strong style={{ color: 'var(--theme-green)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString()}</strong>
+                <span style={{ color: 'var(--theme-text3)' }}> · trend estimate</span>
+              </div>
+            )}
+            <p className="sr-only">{dailyTrendSummary}</p>
+          </>}
+          renderChart={h => {
+            if (dailyTrend.length === 0) return (
+              <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase or sales data</p>
+              </div>
+            )
+            const big = h > 200
+            const chart = (
+              <ResponsiveContainer width="100%" height={h}>
+                <LineChart data={dailyTrend} margin={{ top: big ? 8 : 4, right: big ? 16 : 8, bottom: big ? 4 : 0, left: big ? 8 : 0 }}>
+                  <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="day" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} interval={0} tickFormatter={v => v.replace('Day ', '')} />
+                  <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
+                  <Tooltip
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: big ? 12 : 11 }}
+                    labelStyle={{ color: colors.text1 }}
+                    formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
+                    labelFormatter={l => l}
+                  />
+                  <Line type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={big ? 2.5 : 2} connectNulls dot={{ r: big ? 3 : 2, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: big ? 5 : 4, fill: colors.accent }} />
+                  {hasDailySales && <Line type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={big ? 2.5 : 2} connectNulls dot={{ r: big ? 3 : 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: big ? 5 : 4, fill: colors.green }} />}
+                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Projection" stroke={colors.green} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.65} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.green }} />}
+                </LineChart>
+              </ResponsiveContainer>
+            )
+            return big ? chart : (
+              <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
+                <div style={{ minWidth: Math.max(0, dailyTrend.length * 44), height: h }}>{chart}</div>
+              </div>
+            )
+          }}
+        />
+
+        {/* Bar — Top Items */}
+        <ChartCard
+          title="Top Items by Spend"
+          smallHeight={160}
+          footer={<p className="sr-only">{topItemSpendSummary}</p>}
+          renderChart={h => {
+            const big = h > 200
+            const count = big ? topItemSpend.length : 6
+            return topItemSpend.length === 0 ? (
+              <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={h}>
+                <BarChart data={topItemSpend.slice(0, count)} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
+                  <Tooltip
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+                    formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}`, p.payload.fullName || n]}
+                    labelFormatter={() => ''}
+                  />
+                  <Bar dataKey="value" fill={colors.accent} radius={[0, 3, 3, 0]} barSize={big ? 18 : 10}>
+                    {topItemSpend.slice(0, count).map((entry, i) => (
+                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )
+          }}
+        />
+      </div>
+
+      {/* ── FC% Trend ── */}
+      {fcTrend.length >= 2 && canSales && (
+        <ChartCard
+          title="Food Cost % — Monthly Trend"
+          cardStyle={{ marginBottom: 14 }}
+          footer={<>
+            <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10 }}>
+              <span style={{ color: 'var(--theme-green)' }}>● ≤35% Good</span>
+              <span style={{ color: 'var(--theme-accent)' }}>● 35–45% Watch</span>
+              <span style={{ color: 'var(--theme-red)' }}>● &gt;45% High</span>
+              <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period</span>
+            </div>
+            <p className="sr-only">{fcTrendSummary}</p>
+          </>}
+          renderChart={h => (
+            <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
+              <div style={{ minWidth: Math.max(0, fcTrend.length * 64), height: h }}>
+                <ResponsiveContainer width="100%" height={h}>
+                  <LineChart data={fcTrend} margin={{ top: 8, right: 48, bottom: 0, left: 0 }}>
+                    <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
+                    <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
+                    <ReferenceLine y={35} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '35%', fill: colors.green, fontSize: 9, position: 'right' }} />
+                    <ReferenceLine y={45} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '45%', fill: colors.red, fontSize: 9, position: 'right' }} />
+                    <Tooltip
+                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
+                      labelStyle={{ color: 'var(--theme-text1)' }}
+                      itemStyle={{ color: 'var(--theme-text1)' }}
+                      formatter={(v, _n, props) => {
+                        const p = props.payload
+                        const lines = [`${v}%`]
+                        if (p.purchases != null) lines.push(`Purchases: NPR ${p.purchases.toLocaleString('en-NP')}`)
+                        if (p.revenue != null)   lines.push(`Revenue: NPR ${p.revenue.toLocaleString('en-NP')}`)
+                        return [lines.join(' · '), 'Food Cost %']
+                      }}
+                    />
+                    <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false}
+                      dot={(props) => {
+                        const { cx, cy, payload } = props
+                        const col = payload.fc <= 35 ? colors.green : payload.fc <= 45 ? colors.accent : colors.red
+                        return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
+                      }}
+                      activeDot={{ r: 5, fill: colors.accent }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        />
+      )}
+
+      {/* ── Bottom: Variance + Reorder side by side ── */}
+      {<div style={{ display: 'grid', gridTemplateColumns: canReorder ? 'repeat(auto-fit, minmax(320px, 1fr))' : '1fr', gap: 14, marginBottom: 20 }}>
+
+        {/* Variance table */}
+        {canVariance ? (
+          <div className="card" style={{ padding: '14px 16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Top Variance Items</h3>
+              <button className="btn btn-ghost" style={{ fontSize: 10, padding: '9px 12px' }} onClick={() => navigate('/variance')}>Full Report →</button>
+            </div>
+            {topVariance.length === 0 ? (
+              <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
+                Complete stock count + add sales to see variance.
+              </p>
+            ) : (
+              <div className="table-wrap">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'left', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>Item</th>
+                    <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>
+                      <Tip text="Qty used above what recipes predict — indicates waste, theft, or over-portioning.">Over-used</Tip>
+                    </th>
+                    <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>
+                      <Tip text="Over-used qty × item rate. The NPR cost of unaccounted usage this period." width={200}>Value at Risk</Tip>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topVariance.map((row, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--theme-bg)' }}>
+                      <td style={{ padding: '5px 0', fontWeight: 600, color: 'var(--theme-text1)' }}>{row.name}</td>
+                      <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--theme-red)' }}>+{Number(row.variance.toFixed(1)).toLocaleString()} {row.uom}</td>
+                      <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)' }}>NPR {Number(row.value.toFixed(0)).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            )}
+          </div>
+        ) : (
+          <UpsellCard label="Variance & Shrinkage" tier="Growth" blurb="Catch waste, theft & over-portioning" />
+        )}
+
+        {/* Reorder panel */}
+        {canReorder ? (
+          <div className="card" style={{ padding: '14px 16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Items to Reorder</h3>
+              <button className="btn btn-ghost" style={{ fontSize: 10, padding: '9px 12px' }} onClick={() => navigate('/reorder')}>Full Report →</button>
+            </div>
+            {reorderItems.length === 0 ? (
+              <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
+                No items below par.{' '}
+                <button
+                  onClick={() => navigate('/reorder')} className="interactive-card"
+                  style={{ background: 'none', border: 'none', padding: '4px 6px', margin: '-4px -6px', font: 'inherit', color: 'var(--theme-accent)', cursor: 'pointer' }}
+                >Set par levels →</button>
+              </p>
+            ) : (
+              <div>
+                {reorderItems.map((item, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: i < reorderItems.length - 1 ? '1px solid var(--theme-bg)' : 'none' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>Stock: {item.currentStock} · Par: {item.par} {item.uom}</div>
+                    </div>
+                    <div style={{ textAlign: 'right', marginLeft: 12, flexShrink: 0 }}>
+                      <div style={{ fontSize: 11, color: 'var(--theme-red)', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}><ArrowDown size={11} aria-hidden="true" /> {item.shortfall} {item.uom}</div>
+                      <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>NPR {item.estValue.toLocaleString()}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>}
+    </>
+  )
 
   return (
     <div>
@@ -832,437 +1257,25 @@ export default function ClientDashboard() {
       {/* ── IMS KPIs ── */}
       {showIms && <div>
       {moduleHeader('Inventory')}
-      {showIms && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
-
-        {/* Net Purchases */}
-        <div {...kpiCard(() => navigate('/purchases'))}>
-          {kpiIcon(ArrowDown, 'blue')}
-          <div style={kpiLabelStyle}>Net Purchases</div>
-          <div style={{ ...kpiValueStyle(18), color: 'var(--theme-accent)' }}>
-            {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
-          </div>
-          <div style={kpiSubtextStyle}>Gross − returns · {periodLabel} →</div>
+      {showModuleHeaders ? (
+        /* Trimmed top-pill row — card count matched to HR/POS (5, vs their 4) — the "money"
+           numbers. Everything else (reference cards, charts, tables) renders full-width below
+           the equal-width grid instead, in the imsDetails section further down. */
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+          {netPurchasesCard}{revenueCard}{foodCostCard}{netMarginCard}{wastageCard}
         </div>
-
-        {/* Revenue */}
-        {canSales ? (
-          <div {...kpiCard(() => navigate('/sales'))}>
-            {kpiIcon(ArrowUp, 'green')}
-            <div style={kpiLabelStyle}>Revenue</div>
-            <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green)' }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
-            </div>
-            <div style={kpiSubtextStyle}>From sales entries →</div>
-          </div>
-        ) : null}
-
-        {/* Food Cost % — computable from purchases ÷ revenue, so any sales client sees it */}
-        {canSales ? (
-          <div {...kpiCard(() => navigate(canVariance ? '/variance' : '/summary'))}>
-            {kpiIcon(Percent, 'amber')}
-            <div style={kpiLabelStyle}>
-              <Tip text="Net purchases ÷ revenue × 100. Shows what portion of sales goes to ingredient cost. Healthy range: 28–35% for Nepal F&B." width={240}>Food Cost %</Tip>
-            </div>
-            <div style={{
-              ...kpiValueStyle(22, 800),
-              color: fcPct == null ? 'var(--theme-text2)' : fcPct <= 35 ? 'var(--theme-green)' : fcPct <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)'
-            }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
-            </div>
-            <div style={kpiSubtextStyle}>
-              <Tip text="Industry benchmark for Nepal cafes & restaurants. Green = healthy, yellow = watch, red = investigate immediately." width={240}>Target 28–35%</Tip> →
-            </div>
-          </div>
-        ) : null}
-
-        {/* Fixed Costs % (Pro — needs overhead data) */}
-        {canOverheads ? (
-          <div {...kpiCard(() => navigate('/overheads'))}>
-            {kpiIcon(Receipt, 'blue')}
-            <div style={kpiLabelStyle}>
-              <Tip text="All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Target: under 60% combined. See Overheads page for the full breakdown." width={250}>Fixed Costs % of Revenue</Tip>
-            </div>
-            <div style={{
-              ...kpiValueStyle(22, 800),
-              color: ohPct == null ? 'var(--theme-text2)' : ohPct <= 50 ? 'var(--theme-green)' : ohPct <= 65 ? 'var(--theme-accent)' : 'var(--theme-red)'
-            }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : ohPct != null ? `${ohPct.toFixed(1)}%` : '—'}
-            </div>
-            <div style={kpiSubtextStyle}>
-              {stats?.overheadTotal ? `NPR ${stats.overheadTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })} total →` : 'No overhead data'}
-            </div>
-          </div>
-        ) : (
-          <UpsellCard label="Fixed Costs & Net Margin" tier="Pro" blurb="See true profit after rent, labor & tax" />
-        )}
-
-        {/* Est. Net Margin % (Pro — only meaningful with overhead data) */}
-        {canOverheads && (
-          <div {...kpiCard(null)}>
-            {kpiIcon(Target, 'green')}
-            <div style={kpiLabelStyle}>
-              <Tip text="Revenue minus food cost and overheads, as a % of revenue. This is what the business keeps after ingredient and fixed costs. Healthy Nepal F&B target: ≥20%." width={260}>Est. Net Margin %</Tip>
-            </div>
-            <div style={{
-              ...kpiValueStyle(22, 800),
-              color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green)' : netMarginPct >= 10 ? 'var(--theme-accent)' : 'var(--theme-red)'
-            }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
-            </div>
-            <div style={kpiSubtextStyle}>After food & overheads · target ≥20%</div>
-          </div>
-        )}
-      </div>}
-
-      {/* ── IMS Row 2 + Charts ── */}
-      {showIms && <><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
-
-        <div {...kpiCard(null)}>
-          <div style={kpiLabelStyle}>Active Period</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : periodLabel}</div>
-          <div style={{ ...kpiSubtextStyle, color: activePeriod ? 'var(--theme-green)' : 'var(--theme-red)' }}>
-            {activePeriod ? '● Open' : '● No open period'}
-          </div>
-        </div>
-
-        <div {...kpiCard(() => navigate('/items'))}>
-          <div style={kpiLabelStyle}>Items in Master</div>
-          <div style={kpiValueStyle(18)}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.itemCount}</div>
-          <div style={kpiSubtextStyle}>Active ingredients →</div>
-        </div>
-
-        <div {...kpiCard(() => navigate('/vendors'))}>
-          <div style={kpiLabelStyle}>Vendors</div>
-          <div style={kpiValueStyle(18)}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.vendorCount}</div>
-          <div style={kpiSubtextStyle}>Active suppliers →</div>
-        </div>
-
-        {canRecipes ? (
-          <div {...kpiCard(() => navigate('/recipes'))}>
-            <div style={kpiLabelStyle}>Costed Recipes</div>
-            <div style={kpiValueStyle(18)}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.recipeCount}</div>
-            <div style={kpiSubtextStyle}>
-              {stats?.subRecipeCount > 0 ? `+ ${stats.subRecipeCount} sub-recipes →` : 'Active menu items →'}
-            </div>
-          </div>
-        ) : (
-          <UpsellCard label="Costed Recipes" tier="Growth" blurb="Cost every dish & protect margins" />
-        )}
-
-        {canMenuReprice ? (
-          <div {...kpiCard(() => navigate('/menu-repricing'))}>
-            <div style={kpiLabelStyle}>
-              <Tip text="Dishes whose current food-cost % is above their target — priced too low to hit the margin you set. Open the Menu Repricing report for the prices to charge." width={300}>Menu Health</Tip>
-            </div>
-            <div style={{ ...kpiValueStyle(18), color: stats?.underpricedCount > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${stats?.underpricedCount || 0} of ${stats?.costedPricedCount || 0}`}
-            </div>
-            <div style={{ ...kpiSubtextStyle, color: stats?.menuOpportunityTotal > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>
-              {loading ? 'under target →'
-                : stats?.menuOpportunityTotal > 0
-                  ? `NPR ${Math.round(stats.menuOpportunityTotal).toLocaleString('en-NP')}/mo opportunity →`
-                  : 'dishes under target →'}
-            </div>
-          </div>
-        ) : (
-          <UpsellCard label="Menu Health" tier="Growth" blurb="Spot underpriced dishes & lost margin" />
-        )}
-
-        <div {...kpiCard(() => navigate('/wastage-report'))}>
-          <div style={kpiLabelStyle}>
-            <Tip text="Total NPR value of wastage recorded this period — qty wasted × unit rate per item." width={220}>Wastage Value</Tip>
-          </div>
-          <div style={{ ...kpiValueStyle(18), color: stats?.wastageValueTotal > 0 ? 'var(--theme-red)' : 'var(--theme-text1)' }}>
-            {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(stats?.wastageValueTotal || 0).toLocaleString('en-NP')}`}
-          </div>
-          <div style={kpiSubtextStyle}>This period →</div>
-        </div>
-      </div>
-
-      {/* ── Charts Row ── */}
-      {!loading && activePeriod && (
+      ) : (
         <>
-          {/* Restacks to a single vertical column when the page is in the weighted 3-column
-              layout (IMS's own column is narrower than a full page width there) — the
-              3-across desktop spread only makes sense when IMS has the whole page to itself. */}
-          <div style={{ display: 'grid', gridTemplateColumns: showModuleHeaders ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
-
-            {/* Pie — Category Spend */}
-            <ChartCard
-              title="Spend by Category"
-              /* Bumped from 140 when the page is in the 3-column layout — these charts use
-                 height as their only signal for "full desktop spread vs squeezed" (h > 200 =
-                 big), so a stacked-but-still-short card needs to clear that threshold too, or
-                 it silently keeps the cramped small-width font/tick sizing forever. */
-              smallHeight={showModuleHeaders ? 220 : 140}
-              footer={<p className="sr-only">{categorySpendSummary}</p>}
-              renderChart={h => categorySpend.length === 0 ? (
-                <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
-                </div>
-              ) : (
-                <>
-                  <ResponsiveContainer width="100%" height={h}>
-                    <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                      <Pie
-                        data={categorySpend} dataKey="value" nameKey="name"
-                        cx="50%" cy="50%"
-                        innerRadius={h > 200 ? 80 : 38} outerRadius={h > 200 ? 140 : 60}
-                        paddingAngle={2}
-                      >
-                        {categorySpend.map((entry, i) => <Cell key={entry.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
-                        formatter={v => [`NPR ${Number(v).toLocaleString()}`, '']}
-                        labelFormatter={name => name}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
-                    {categorySpend.map((entry, i) => {
-                      return (
-                        <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                          <div style={{ width: 8, height: 8, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
-                          <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{entry.name}</span>
-                          <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </>
-              )}
-            />
-
-            {/* Line — Daily Purchases vs Sales */}
-            {/* minWidth:0 lets this grid column hold its 1/3 share — without it the inner
-                scroll div's large minWidth forces the track wide and squeezes the other cards. */}
-            <ChartCard
-              title="Daily Purchases vs Sales"
-              smallHeight={showModuleHeaders ? 220 : 160}
-              cardStyle={{ minWidth: 0 }}
-              legend={<>
-                <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-accent)' }}>●</span> Purchases</span>
-                {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green)' }}>●</span> Sales</span>}
-                {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green)', letterSpacing: '-2px' }}>┄</span> Projection</span>}
-                {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
-              </>}
-              footer={<>
-                {salesProjection && (
-                  <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)' }}>
-                    Projected month-end revenue: <strong style={{ color: 'var(--theme-green)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString()}</strong>
-                    <span style={{ color: 'var(--theme-text3)' }}> · trend estimate</span>
-                  </div>
-                )}
-                <p className="sr-only">{dailyTrendSummary}</p>
-              </>}
-              renderChart={h => {
-                if (dailyTrend.length === 0) return (
-                  <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase or sales data</p>
-                  </div>
-                )
-                const big = h > 200
-                const chart = (
-                  <ResponsiveContainer width="100%" height={h}>
-                    <LineChart data={dailyTrend} margin={{ top: big ? 8 : 4, right: big ? 16 : 8, bottom: big ? 4 : 0, left: big ? 8 : 0 }}>
-                      <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="day" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} interval={0} tickFormatter={v => v.replace('Day ', '')} />
-                      <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
-                      <Tooltip
-                        contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: big ? 12 : 11 }}
-                        labelStyle={{ color: colors.text1 }}
-                        formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
-                        labelFormatter={l => l}
-                      />
-                      <Line type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={big ? 2.5 : 2} connectNulls dot={{ r: big ? 3 : 2, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: big ? 5 : 4, fill: colors.accent }} />
-                      {hasDailySales && <Line type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={big ? 2.5 : 2} connectNulls dot={{ r: big ? 3 : 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: big ? 5 : 4, fill: colors.green }} />}
-                      {salesProjection && <Line type="monotone" dataKey="salesProj" name="Projection" stroke={colors.green} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.65} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.green }} />}
-                    </LineChart>
-                  </ResponsiveContainer>
-                )
-                return big ? chart : (
-                  <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-                    <div style={{ minWidth: Math.max(0, dailyTrend.length * 44), height: h }}>{chart}</div>
-                  </div>
-                )
-              }}
-            />
-
-            {/* Bar — Top Items */}
-            <ChartCard
-              title="Top Items by Spend"
-              smallHeight={showModuleHeaders ? 220 : 160}
-              footer={<p className="sr-only">{topItemSpendSummary}</p>}
-              renderChart={h => {
-                const big = h > 200
-                const count = big ? topItemSpend.length : 6
-                return topItemSpend.length === 0 ? (
-                  <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={h}>
-                    <BarChart data={topItemSpend.slice(0, count)} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
-                      <XAxis type="number" hide />
-                      <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
-                      <Tooltip
-                        contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
-                        formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}`, p.payload.fullName || n]}
-                        labelFormatter={() => ''}
-                      />
-                      <Bar dataKey="value" fill={colors.accent} radius={[0, 3, 3, 0]} barSize={big ? 18 : 10}>
-                        {topItemSpend.slice(0, count).map((entry, i) => (
-                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                )
-              }}
-            />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
+            {netPurchasesCard}{revenueCard}{foodCostCard}{fixedCostsCard}{netMarginCard}
           </div>
-
-          {/* ── FC% Trend ── */}
-          {fcTrend.length >= 2 && canSales && (
-            <ChartCard
-              title="Food Cost % — Monthly Trend"
-              cardStyle={{ marginBottom: 14 }}
-              footer={<>
-                <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10 }}>
-                  <span style={{ color: 'var(--theme-green)' }}>● ≤35% Good</span>
-                  <span style={{ color: 'var(--theme-accent)' }}>● 35–45% Watch</span>
-                  <span style={{ color: 'var(--theme-red)' }}>● &gt;45% High</span>
-                  <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period</span>
-                </div>
-                <p className="sr-only">{fcTrendSummary}</p>
-              </>}
-              renderChart={h => (
-                <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-                  <div style={{ minWidth: Math.max(0, fcTrend.length * 64), height: h }}>
-                    <ResponsiveContainer width="100%" height={h}>
-                      <LineChart data={fcTrend} margin={{ top: 8, right: 48, bottom: 0, left: 0 }}>
-                        <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
-                        <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
-                        <ReferenceLine y={35} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '35%', fill: colors.green, fontSize: 9, position: 'right' }} />
-                        <ReferenceLine y={45} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '45%', fill: colors.red, fontSize: 9, position: 'right' }} />
-                        <Tooltip
-                          contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
-                          labelStyle={{ color: 'var(--theme-text1)' }}
-                          itemStyle={{ color: 'var(--theme-text1)' }}
-                          formatter={(v, _n, props) => {
-                            const p = props.payload
-                            const lines = [`${v}%`]
-                            if (p.purchases != null) lines.push(`Purchases: NPR ${p.purchases.toLocaleString('en-NP')}`)
-                            if (p.revenue != null)   lines.push(`Revenue: NPR ${p.revenue.toLocaleString('en-NP')}`)
-                            return [lines.join(' · '), 'Food Cost %']
-                          }}
-                        />
-                        <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false}
-                          dot={(props) => {
-                            const { cx, cy, payload } = props
-                            const col = payload.fc <= 35 ? colors.green : payload.fc <= 45 ? colors.accent : colors.red
-                            return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
-                          }}
-                          activeDot={{ r: 5, fill: colors.accent }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              )}
-            />
-          )}
-
-          {/* ── Bottom: Variance + Reorder side by side ── */}
-          {/* Same restack-when-columned rule as the charts row above. */}
-          {<div style={{ display: 'grid', gridTemplateColumns: (!showModuleHeaders && canReorder) ? 'repeat(auto-fit, minmax(320px, 1fr))' : '1fr', gap: 14, marginBottom: 20 }}>
-
-            {/* Variance table */}
-            {canVariance ? (
-              <div className="card" style={{ padding: '14px 16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Top Variance Items</h3>
-                  <button className="btn btn-ghost" style={{ fontSize: 10, padding: '9px 12px' }} onClick={() => navigate('/variance')}>Full Report →</button>
-                </div>
-                {topVariance.length === 0 ? (
-                  <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
-                    Complete stock count + add sales to see variance.
-                  </p>
-                ) : (
-                  <div className="table-wrap">
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                    <thead>
-                      <tr>
-                        <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'left', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>Item</th>
-                        <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>
-                          <Tip text="Qty used above what recipes predict — indicates waste, theft, or over-portioning.">Over-used</Tip>
-                        </th>
-                        <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>
-                          <Tip text="Over-used qty × item rate. The NPR cost of unaccounted usage this period." width={200}>Value at Risk</Tip>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topVariance.map((row, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--theme-bg)' }}>
-                          <td style={{ padding: '5px 0', fontWeight: 600, color: 'var(--theme-text1)' }}>{row.name}</td>
-                          <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--theme-red)' }}>+{Number(row.variance.toFixed(1)).toLocaleString()} {row.uom}</td>
-                          <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)' }}>NPR {Number(row.value.toFixed(0)).toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <UpsellCard label="Variance & Shrinkage" tier="Growth" blurb="Catch waste, theft & over-portioning" />
-            )}
-
-            {/* Reorder panel */}
-            {canReorder ? (
-              <div className="card" style={{ padding: '14px 16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Items to Reorder</h3>
-                  <button className="btn btn-ghost" style={{ fontSize: 10, padding: '9px 12px' }} onClick={() => navigate('/reorder')}>Full Report →</button>
-                </div>
-                {reorderItems.length === 0 ? (
-                  <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
-                    No items below par.{' '}
-                    <button
-                      onClick={() => navigate('/reorder')} className="interactive-card"
-                      style={{ background: 'none', border: 'none', padding: '4px 6px', margin: '-4px -6px', font: 'inherit', color: 'var(--theme-accent)', cursor: 'pointer' }}
-                    >Set par levels →</button>
-                  </p>
-                ) : (
-                  <div>
-                    {reorderItems.map((item, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: i < reorderItems.length - 1 ? '1px solid var(--theme-bg)' : 'none' }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</div>
-                          <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>Stock: {item.currentStock} · Par: {item.par} {item.uom}</div>
-                        </div>
-                        <div style={{ textAlign: 'right', marginLeft: 12, flexShrink: 0 }}>
-                          <div style={{ fontSize: 11, color: 'var(--theme-red)', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}><ArrowDown size={11} aria-hidden="true" /> {item.shortfall} {item.uom}</div>
-                          <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>NPR {item.estValue.toLocaleString()}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </div>}
-
-          {/* Sales pivot lives here (manual sales_entries) only when POS isn't shown — a
-              POS-enabled client sees the POS-sourced version instead, in the POS column below,
-              rather than rendering two differently-sourced "sales" pivots on the same page. */}
-          {!showPos && canSales && <div style={{ marginTop: 14 }}><SalesPivot activePeriod={activePeriod} posEnabled={false} /></div>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
+            {activePeriodCard}{itemsCard}{vendorsCard}{recipesCard}{menuHealthCard}{wastageCard}
+          </div>
+          {imsChartsAndTables}
+          {canSales && <div style={{ marginTop: 14 }}><SalesPivot activePeriod={activePeriod} posEnabled={false} /></div>}
         </>
       )}
-      </>}
       </div>}
 
       {/* ── HR KPIs (below Inventory) ── */}
@@ -1415,11 +1428,42 @@ export default function ClientDashboard() {
           </div>
 
           {/* POS-sourced sales pivot — kitchen/bar station accounts have no use for a revenue
-              breakdown (they get kitchen-ops KPIs above instead), so this is front-of-house only. */}
-          {!posIsStationTeam && <div style={{ marginTop: 14 }}><SalesPivot activePeriod={activePeriod} posEnabled={true} /></div>}
+              breakdown (they get kitchen-ops KPIs above instead), so this is front-of-house only.
+              Single-module (POS-only) clients keep it right here, unchanged; once 2+ modules
+              share the page it moves into the shared Sales Breakdown section below instead, so it
+              can sit next to the manual-sales pivot rather than fight IMS for column space. */}
+          {!showModuleHeaders && !posIsStationTeam && <div style={{ marginTop: 14 }}><SalesPivot activePeriod={activePeriod} posEnabled={true} /></div>}
         </div>
       )}
       </div>
+
+      {/* ── IMS details (2+ modules only) — reference cards + charts + tables, full-width below
+          the equal-width pill grid instead of squeezed into IMS's own narrower column. ── */}
+      {showIms && showModuleHeaders && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
+            {activePeriodCard}{itemsCard}{vendorsCard}{recipesCard}{menuHealthCard}{fixedCostsCard}
+          </div>
+          {imsChartsAndTables}
+        </div>
+      )}
+
+      {/* ── Sales Breakdown (2+ modules only) — manual + POS pivots side by side (never mutually
+          exclusive — a client can carry real revenue on both), plus the Food/Beverage split. ── */}
+      {showModuleHeaders && ((showIms && canSales) || (showPos && !posIsStationTeam)) && (
+        <div style={{ marginBottom: 20 }}>
+          {moduleHeader('Sales Breakdown')}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+            {showIms && canSales && <SalesPivot activePeriod={activePeriod} posEnabled={false} title="Manual Sales by Category" />}
+            {showPos && !posIsStationTeam && <SalesPivot activePeriod={activePeriod} posEnabled={true} title="POS Sales by Category" />}
+            <FoodBeverageSplit
+              activePeriod={activePeriod}
+              includeManual={showIms && canSales}
+              includePos={showPos && !posIsStationTeam}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
