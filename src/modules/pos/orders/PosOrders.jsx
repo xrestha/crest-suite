@@ -10,6 +10,7 @@ import QRCode from 'qrcode'
 import { adToBs, getBsToday, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { buildDynamicQr } from '../../../utils/emvQr'
+import { randomUUID } from '../../../utils/uuid'
 import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
 import {
   cachePosMenu, getCachedPosMenu, cachePosTables, getCachedPosTables,
@@ -1000,7 +1001,7 @@ export default function PosOrders() {
     if (!navigator.onLine) {
       let createdOffline = isNewOrder
       if (isNewOrder) {
-        oid = crypto.randomUUID()
+        oid = randomUUID()
         setOrderId(oid)
         // oNo stays null — the real order_no is assigned by the server-side trigger on sync
       } else {

@@ -118,6 +118,7 @@ export default function HrStaff() {
   }
 
   async function saveRoles(roles) {
+    if (!clientId) return false   // never write a client_id:null (global-defaults) settings row during the admin no-client window
     setRolesSaving(true); setRolesError('')
     const { data: existing } = await supabase
       .from('settings').select('id').eq('client_id', clientId).single()

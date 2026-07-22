@@ -1,10 +1,11 @@
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, Suspense } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { supabase } from '../supabaseClient'
 import { getSubStatus } from '../utils/subscription'
 import RailTip from './RailTip'
+import RouteFallback from './RouteFallback'
 import CommandPalette from './CommandPalette'
 // Aliased — `Calculator` is already taken in this file by the lucide icon used for the HR
 // Calculation nav entry.
@@ -913,7 +914,9 @@ export default function Layout() {
           </div>
         )}
 
-        <Outlet />
+        <Suspense fallback={<RouteFallback />}>
+          <Outlet />
+        </Suspense>
       </main>
 
       <CommandPalette

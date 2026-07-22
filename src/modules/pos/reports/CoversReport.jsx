@@ -112,6 +112,7 @@ export default function CoversReport() {
   useEffect(() => { loadRange() }, [loadRange])
 
   async function saveOperatingHours() {
+    if (!clientId) return
     setHoursSaving(true); setHoursMsg('')
     const payload = { pos_open_time: openTime || null, pos_close_time: closeTime || null }
     let error

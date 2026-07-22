@@ -1,96 +1,103 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { SettingsProvider } from './context/SettingsContext'
 import { ThemeProvider } from './context/ThemeContext'
+// Structural pieces stay eagerly imported — they render on every route (Layout, the guards,
+// ProtectedRoute) so lazy-loading them would only add a spinner with no payload win. Every page
+// component below is lazy-loaded (React.lazy) so each route ships as its own chunk instead of
+// one ~930 kB monolith; the <Suspense> boundaries (top-level here + around Layout's <Outlet />)
+// render RouteFallback while a chunk is fetched.
 import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
-import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
-import OwnerDashboard from './pages/dashboard/OwnerDashboard'
-import MonthlyOwnerReport from './pages/dashboard/MonthlyOwnerReport'
-import Periods from './pages/Periods'
-import Items from './modules/ims/items/Items'
-import Vendors from './modules/ims/vendors/Vendors'
-import GatePasses from './modules/ims/gatepasses/GatePasses'
-import Purchases from './modules/ims/purchases/Purchases'
-import PurchaseOrders from './modules/ims/purchases/PurchaseOrders'
-import Stock from './modules/ims/stockcount/Stock'
-import Recipes from './modules/ims/recipes/Recipes'
-import Sales from './modules/ims/sales/Sales'
-import Variance from './modules/ims/variance/Variance'
-import MonthlySummary from './modules/ims/reports/MonthlySummary'
-import FifoReport from './modules/ims/reports/FifoReport'
-import PaymentReport from './modules/ims/reports/PaymentReport'
-import Help from './pages/Help'
-import VendorReport from './modules/ims/reports/VendorReport'
-import ReorderReport from './modules/ims/stockcount/ReorderReport'
-import StockMovements from './modules/ims/stockcount/StockMovements'
-import SupplierPriceTracker from './modules/ims/purchases/SupplierPriceTracker'
-import MenuEngineering from './modules/ims/recipes/MenuEngineering'
-import AdminClients from './pages/AdminClients'
-import AuditLog from './pages/AuditLog'
-import AdminGuestMenu from './pages/AdminGuestMenu'
 import PremiumGate from './components/PremiumGate'
 import ModuleGate from './components/ModuleGate'
-import Overheads from './modules/ims/reports/Overheads'
-import BudgetVsActual from './modules/ims/reports/BudgetVsActual'
-import BestSellers from './modules/ims/reports/BestSellers'
-import VatReport from './modules/ims/reports/VatReport'
-import NonVatReport from './modules/ims/reports/NonVatReport'
-import Settings from './pages/Settings'
-import Pricing from './pages/Pricing'
-import TheoreticalVariance from './modules/ims/variance/TheoreticalVariance'
-import Requisitions from './modules/ims/sales/Requisitions'
-import WastageReport from './modules/ims/variance/WastageReport'
-import StockReport from './modules/ims/stockcount/StockReport'
-import DemandForecast from './modules/ims/stockcount/DemandForecast'
-import ComboBuilder from './modules/ims/recipes/ComboBuilder'
-import DeadStock from './modules/ims/stockcount/DeadStock'
-import RecipeMargin from './modules/ims/recipes/RecipeMargin'
-import MenuRepricing from './modules/ims/recipes/MenuRepricing'
-import MenuPricing from './modules/ims/recipes/MenuPricing'
-import PeriodComparison from './modules/ims/reports/PeriodComparison'
-import AnnualSummary from './modules/ims/reports/AnnualSummary'
-import OutstandingPayables from './modules/ims/reports/OutstandingPayables'
-import ShrinkageReport from './modules/ims/variance/ShrinkageReport'
-import ImsStaff from './modules/ims/staff/ImsStaff'
-import HrStaff from './modules/hr/staff/HrStaff'
-import EmployeeList from './modules/hr/employees/EmployeeList'
-import PaySetup from './modules/hr/pay/PaySetup'
-import AttendanceSheet from './modules/hr/attendance/AttendanceSheet'
-import PayrollRun from './modules/hr/payroll/PayrollRun'
-import PayrollCalculation from './modules/hr/payroll/PayrollCalculation'
-import HrReports from './modules/hr/reports/HrReports'
-import FestivalAllowance from './modules/hr/festival/FestivalAllowance'
-import LeaveManagement from './modules/hr/leave/LeaveManagement'
-import Advances from './modules/hr/advances/Advances'
-import GratuityTracker from './modules/hr/gratuity/GratuityTracker'
-import FinalSettlement from './modules/hr/settlement/FinalSettlement'
-import Roster from './modules/hr/roster/Roster'
-import HolidayCalendar from './modules/hr/holidays/HolidayCalendar'
-import Overtime from './modules/hr/overtime/Overtime'
-import TadaClaims from './modules/hr/tada/TadaClaims'
-import IncentiveRun from './modules/hr/incentives/IncentiveRun'
-import SelfServiceLogin from './modules/hr/selfservice/SelfServiceLogin'
-import SelfServiceHome from './modules/hr/selfservice/SelfServiceHome'
-import HrDashboard from './modules/hr/dashboard/HrDashboard'
-import Pos from './modules/pos/Pos'
-import PosOrders from './modules/pos/orders/PosOrders'
-import PosTableManagement from './modules/pos/tables/PosTableManagement'
-import PosStaff from './modules/pos/staff/PosStaff'
-import PosCustomers from './modules/pos/customers/PosCustomers'
-import PosParkingSlips from './modules/pos/parking/PosParkingSlips'
-import PosExceptionReport from './modules/pos/reports/PosExceptionReport'
-import PosShifts from './modules/pos/shifts/PosShifts'
-import CreditNotes from './modules/pos/creditnotes/CreditNotes'
-import SalesReport from './modules/pos/reports/SalesReport'
-import KotLog from './modules/pos/reports/KotLog'
-import CoversReport from './modules/pos/reports/CoversReport'
-import PurchaseOneLakhAboveReport from './modules/ims/reports/PurchaseOneLakhAboveReport'
-import PosLogin from './modules/pos/login/PosLogin'
-import GuestMenu from './modules/pos/guestmenu/GuestMenu'
-import KitchenDisplay from './modules/pos/kds/KitchenDisplay'
+import RouteFallback from './components/RouteFallback'
 import './components/Layout.css'
+const Login = lazy(() => import('./pages/Login'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const OwnerDashboard = lazy(() => import('./pages/dashboard/OwnerDashboard'))
+const MonthlyOwnerReport = lazy(() => import('./pages/dashboard/MonthlyOwnerReport'))
+const Periods = lazy(() => import('./pages/Periods'))
+const Items = lazy(() => import('./modules/ims/items/Items'))
+const Vendors = lazy(() => import('./modules/ims/vendors/Vendors'))
+const GatePasses = lazy(() => import('./modules/ims/gatepasses/GatePasses'))
+const Purchases = lazy(() => import('./modules/ims/purchases/Purchases'))
+const PurchaseOrders = lazy(() => import('./modules/ims/purchases/PurchaseOrders'))
+const Stock = lazy(() => import('./modules/ims/stockcount/Stock'))
+const Recipes = lazy(() => import('./modules/ims/recipes/Recipes'))
+const Sales = lazy(() => import('./modules/ims/sales/Sales'))
+const Variance = lazy(() => import('./modules/ims/variance/Variance'))
+const MonthlySummary = lazy(() => import('./modules/ims/reports/MonthlySummary'))
+const FifoReport = lazy(() => import('./modules/ims/reports/FifoReport'))
+const PaymentReport = lazy(() => import('./modules/ims/reports/PaymentReport'))
+const Help = lazy(() => import('./pages/Help'))
+const VendorReport = lazy(() => import('./modules/ims/reports/VendorReport'))
+const ReorderReport = lazy(() => import('./modules/ims/stockcount/ReorderReport'))
+const StockMovements = lazy(() => import('./modules/ims/stockcount/StockMovements'))
+const SupplierPriceTracker = lazy(() => import('./modules/ims/purchases/SupplierPriceTracker'))
+const MenuEngineering = lazy(() => import('./modules/ims/recipes/MenuEngineering'))
+const AdminClients = lazy(() => import('./pages/AdminClients'))
+const AuditLog = lazy(() => import('./pages/AuditLog'))
+const AdminGuestMenu = lazy(() => import('./pages/AdminGuestMenu'))
+const Overheads = lazy(() => import('./modules/ims/reports/Overheads'))
+const BudgetVsActual = lazy(() => import('./modules/ims/reports/BudgetVsActual'))
+const BestSellers = lazy(() => import('./modules/ims/reports/BestSellers'))
+const VatReport = lazy(() => import('./modules/ims/reports/VatReport'))
+const NonVatReport = lazy(() => import('./modules/ims/reports/NonVatReport'))
+const Settings = lazy(() => import('./pages/Settings'))
+const Pricing = lazy(() => import('./pages/Pricing'))
+const TheoreticalVariance = lazy(() => import('./modules/ims/variance/TheoreticalVariance'))
+const Requisitions = lazy(() => import('./modules/ims/sales/Requisitions'))
+const WastageReport = lazy(() => import('./modules/ims/variance/WastageReport'))
+const StockReport = lazy(() => import('./modules/ims/stockcount/StockReport'))
+const DemandForecast = lazy(() => import('./modules/ims/stockcount/DemandForecast'))
+const ComboBuilder = lazy(() => import('./modules/ims/recipes/ComboBuilder'))
+const DeadStock = lazy(() => import('./modules/ims/stockcount/DeadStock'))
+const RecipeMargin = lazy(() => import('./modules/ims/recipes/RecipeMargin'))
+const MenuRepricing = lazy(() => import('./modules/ims/recipes/MenuRepricing'))
+const MenuPricing = lazy(() => import('./modules/ims/recipes/MenuPricing'))
+const PeriodComparison = lazy(() => import('./modules/ims/reports/PeriodComparison'))
+const AnnualSummary = lazy(() => import('./modules/ims/reports/AnnualSummary'))
+const OutstandingPayables = lazy(() => import('./modules/ims/reports/OutstandingPayables'))
+const ShrinkageReport = lazy(() => import('./modules/ims/variance/ShrinkageReport'))
+const ImsStaff = lazy(() => import('./modules/ims/staff/ImsStaff'))
+const HrStaff = lazy(() => import('./modules/hr/staff/HrStaff'))
+const EmployeeList = lazy(() => import('./modules/hr/employees/EmployeeList'))
+const PaySetup = lazy(() => import('./modules/hr/pay/PaySetup'))
+const AttendanceSheet = lazy(() => import('./modules/hr/attendance/AttendanceSheet'))
+const PayrollRun = lazy(() => import('./modules/hr/payroll/PayrollRun'))
+const PayrollCalculation = lazy(() => import('./modules/hr/payroll/PayrollCalculation'))
+const HrReports = lazy(() => import('./modules/hr/reports/HrReports'))
+const FestivalAllowance = lazy(() => import('./modules/hr/festival/FestivalAllowance'))
+const LeaveManagement = lazy(() => import('./modules/hr/leave/LeaveManagement'))
+const Advances = lazy(() => import('./modules/hr/advances/Advances'))
+const GratuityTracker = lazy(() => import('./modules/hr/gratuity/GratuityTracker'))
+const FinalSettlement = lazy(() => import('./modules/hr/settlement/FinalSettlement'))
+const Roster = lazy(() => import('./modules/hr/roster/Roster'))
+const HolidayCalendar = lazy(() => import('./modules/hr/holidays/HolidayCalendar'))
+const Overtime = lazy(() => import('./modules/hr/overtime/Overtime'))
+const TadaClaims = lazy(() => import('./modules/hr/tada/TadaClaims'))
+const IncentiveRun = lazy(() => import('./modules/hr/incentives/IncentiveRun'))
+const SelfServiceLogin = lazy(() => import('./modules/hr/selfservice/SelfServiceLogin'))
+const SelfServiceHome = lazy(() => import('./modules/hr/selfservice/SelfServiceHome'))
+const HrDashboard = lazy(() => import('./modules/hr/dashboard/HrDashboard'))
+const Pos = lazy(() => import('./modules/pos/Pos'))
+const PosOrders = lazy(() => import('./modules/pos/orders/PosOrders'))
+const PosTableManagement = lazy(() => import('./modules/pos/tables/PosTableManagement'))
+const PosStaff = lazy(() => import('./modules/pos/staff/PosStaff'))
+const PosCustomers = lazy(() => import('./modules/pos/customers/PosCustomers'))
+const PosParkingSlips = lazy(() => import('./modules/pos/parking/PosParkingSlips'))
+const PosExceptionReport = lazy(() => import('./modules/pos/reports/PosExceptionReport'))
+const PosShifts = lazy(() => import('./modules/pos/shifts/PosShifts'))
+const CreditNotes = lazy(() => import('./modules/pos/creditnotes/CreditNotes'))
+const SalesReport = lazy(() => import('./modules/pos/reports/SalesReport'))
+const KotLog = lazy(() => import('./modules/pos/reports/KotLog'))
+const CoversReport = lazy(() => import('./modules/pos/reports/CoversReport'))
+const PurchaseOneLakhAboveReport = lazy(() => import('./modules/ims/reports/PurchaseOneLakhAboveReport'))
+const PosLogin = lazy(() => import('./modules/pos/login/PosLogin'))
+const GuestMenu = lazy(() => import('./modules/pos/guestmenu/GuestMenu'))
+const KitchenDisplay = lazy(() => import('./modules/pos/kds/KitchenDisplay'))
 
 function RootRedirect() {
   if (localStorage.getItem('pos_device_client_id')) return <Navigate to="/pos/login" replace />
@@ -103,6 +110,7 @@ export default function App() {
     <AuthProvider>
       <SettingsProvider>
         <BrowserRouter>
+          <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/login"     element={<Login />} />
             <Route path="/pricing"   element={<Pricing />} />
@@ -244,6 +252,7 @@ export default function App() {
                 element={<ProtectedRoute adminOnly><AdminGuestMenu /></ProtectedRoute>} />
             </Route>
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </SettingsProvider>
     </AuthProvider>

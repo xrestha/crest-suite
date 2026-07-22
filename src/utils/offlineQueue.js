@@ -151,16 +151,35 @@ export async function getCachedPosOrderForTable(tableId) {
 // ── POS: order queue — one row per order touched while offline, upsert-merged ──
 
 export async function enqueuePosOrder(orderId, patch) {
-  const existing = await idbGet('pos_order_queue', orderId)
-  const merged = {
-    ...(existing || {}),
-    ...patch,
-    order_id: orderId,
-    kot_sends: [...(existing?.kot_sends || []), ...(patch.kot_sends || [])],
-    updated_at: Date.now(),
-  }
-  await idbPut('pos_order_queue', merged)
-  return merged
+  // The read (get) and the write (put) MUST live in one readwrite transaction. IndexedDB
+  // serialises overlapping readwrite transactions on the same store, so a second enqueue for the
+  // same order can't start its get until this one commits — that's what makes the kot_sends append
+  // safe. Splitting this into a readonly get + a separate readwrite put (the old shape) let two
+  // concurrent callers both read the same pre-image and the second put clobber the first, silently
+  // dropping a queued KOT/BOT send. That race is real here: saveOrder() fires logKotSend('KOT') and
+  // logKotSend('BOT') un-awaited back-to-back, both routing through this function while offline.
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx    = db.transaction('pos_order_queue', 'readwrite')
+    const store = tx.objectStore('pos_order_queue')
+    const getReq = store.get(orderId)
+    let merged
+    getReq.onsuccess = () => {
+      const existing = getReq.result
+      merged = {
+        ...(existing || {}),
+        ...patch,
+        order_id: orderId,
+        kot_sends: [...(existing?.kot_sends || []), ...(patch.kot_sends || [])],
+        updated_at: Date.now(),
+      }
+      store.put(merged)
+    }
+    getReq.onerror = e => reject(e.target.error)
+    tx.oncomplete  = () => resolve(merged)
+    tx.onerror     = e => reject(e.target.error)
+    tx.onabort     = e => reject(e.target.error)
+  })
 }
 export async function getPosOrderQueue() {
   return await idbGetAll('pos_order_queue')

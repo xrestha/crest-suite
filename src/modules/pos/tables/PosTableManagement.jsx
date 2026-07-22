@@ -290,6 +290,7 @@ export default function PosTableManagement() {
   }
 
   async function saveRouting() {
+    if (!clientId) return   // guard the admin "no client selected" window: client_id:null would write the global-defaults row
     setRoutingSaving(true); setRoutingMsg('')
     const botArr = Array.from(botCats)
     const { data: existing } = await supabase
@@ -333,6 +334,7 @@ export default function PosTableManagement() {
   }
 
   async function saveNotePresets() {
+    if (!clientId) return
     setNotesSaving(true); setNotesMsg('')
     const { data: existing } = await supabase
       .from('settings').select('id').eq('client_id', clientId).maybeSingle()
@@ -401,6 +403,7 @@ export default function PosTableManagement() {
   }
 
   async function saveDiscReasons() {
+    if (!clientId) return
     setDiscSaving(true); setDiscMsg('')
     const { data: existing } = await supabase
       .from('settings').select('id').eq('client_id', clientId).maybeSingle()
@@ -458,6 +461,7 @@ export default function PosTableManagement() {
   }
 
   async function saveDeliverySettings() {
+    if (!clientId) return
     setDeliverySaving(true); setDeliveryMsg('')
     const cleaned = partners
       .map(p => ({
