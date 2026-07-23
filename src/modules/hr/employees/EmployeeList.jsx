@@ -245,7 +245,7 @@ export default function EmployeeList() {
           </p>
         </div>
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap table-wrap--fab-clear">
           <table className="data-table">
             <thead>
               <tr>

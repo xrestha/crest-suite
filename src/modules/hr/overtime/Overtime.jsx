@@ -283,7 +283,7 @@ export default function Overtime() {
         </div>
       ) : (
         <div className="card" style={{ padding: 0 }}>
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--fab-clear">
             <table className="data-table">
               <thead>
                 <tr>

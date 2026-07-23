@@ -214,7 +214,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
             <p className="empty-state-text">No returns recorded for this period. Click + Add Return to record a vendor return.</p>
           </div>
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--fab-clear">
             <table className="data-table">
               <thead>
                 <tr>

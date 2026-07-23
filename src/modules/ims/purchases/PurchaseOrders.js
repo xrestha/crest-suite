@@ -392,7 +392,7 @@ export default function PurchaseOrders() {
             </div>
           </div>
 
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--fab-clear">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
@@ -530,7 +530,7 @@ export default function PurchaseOrders() {
             <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }} onClick={addPoItemRow}>+ Add Row</button>
           </div>
 
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--fab-clear">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
@@ -758,7 +758,7 @@ export default function PurchaseOrders() {
           </p>
         </div>
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap table-wrap--fab-clear">
           <table className="data-table">
             <thead>
               <tr>

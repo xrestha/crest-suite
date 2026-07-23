@@ -90,7 +90,7 @@ export default function PosParkingSlips() {
           {filter === 'open' ? 'No vehicles currently parked.' : 'No parking slips issued yet.'}
         </div>
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap table-wrap--fab-clear">
           <table className="data-table">
             <thead>
               <tr>

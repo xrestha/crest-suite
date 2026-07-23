@@ -732,7 +732,7 @@ export default function Recipes() {
               </div>
             ) : activeTab === 'sub-recipes' ? (
               /* ── Sub-recipes tab ── */
-              <div className="table-wrap">
+              <div className="table-wrap table-wrap--fab-clear">
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -779,7 +779,7 @@ export default function Recipes() {
               </div>
             ) : (
               /* ── Regular recipes tab (All / per-category) ── */
-              <div className="table-wrap">
+              <div className="table-wrap table-wrap--fab-clear">
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -1067,7 +1067,7 @@ export default function Recipes() {
               </div>
             )}
 
-            <div className="table-wrap">
+            <div className="table-wrap table-wrap--fab-clear">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
@@ -1315,7 +1315,7 @@ export default function Recipes() {
             )}
 
             <div className="card">
-              <div className="table-wrap">
+              <div className="table-wrap table-wrap--fab-clear">
               <table className="data-table">
                 <thead>
                   <tr>

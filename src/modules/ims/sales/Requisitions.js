@@ -394,7 +394,7 @@ export default function Requisitions() {
 
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 14, marginBottom: 14 }}>Requested Items</div>
-            <div className="table-wrap">
+            <div className="table-wrap table-wrap--fab-clear">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -565,7 +565,7 @@ export default function Requisitions() {
               <div style={{ fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 14 }}>
                 Confirm Issue Quantities — adjust if issuing less than requested
               </div>
-              <div className="table-wrap">
+              <div className="table-wrap table-wrap--fab-clear">
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -618,7 +618,7 @@ export default function Requisitions() {
           ) : (
             /* Read-only line items */
             <div className="card">
-              <div className="table-wrap">
+              <div className="table-wrap table-wrap--fab-clear">
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -742,7 +742,7 @@ export default function Requisitions() {
             </div>
           ) : (
             <div className="card">
-              <div className="table-wrap">
+              <div className="table-wrap table-wrap--fab-clear">
                 <table className="data-table">
                   <thead>
                     <tr>

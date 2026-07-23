@@ -491,7 +491,7 @@ export default function Purchases() {
             ) : Object.keys(byDay).length === 0 ? (
               <div className="empty-state"><p className="empty-state-text">No entries match your filters.</p></div>
             ) : (
-              <div className="table-wrap">
+              <div className="table-wrap table-wrap--fab-clear">
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -698,7 +698,7 @@ export default function Purchases() {
                 <p className="empty-state-text">No purchases recorded this period.</p>
               </div>
             ) : (
-              <div className="table-wrap">
+              <div className="table-wrap table-wrap--fab-clear">
                 <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
                   <thead>
                     <tr>

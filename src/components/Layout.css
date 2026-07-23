@@ -779,6 +779,13 @@ tr.interactive-row:focus-visible {
   overflow-x: auto;
 }
 
+/* Reserves space at the bottom of a scrollable table so the fixed-position Fab
+   (bottom: 28px, ~40px tall) never overlaps the last row's action buttons.
+   Apply alongside .table-wrap only on pages that also render a <Fab>. */
+.table-wrap--fab-clear {
+  padding-bottom: 88px;
+}
+
 table.data-table {
   width: 100%;
   border-collapse: collapse;

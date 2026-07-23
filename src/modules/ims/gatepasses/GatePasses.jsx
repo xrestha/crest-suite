@@ -114,7 +114,7 @@ export default function GatePasses() {
           {filter === 'open' ? 'No vehicles currently on the premises.' : 'No gate passes issued yet.'}
         </div>
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap table-wrap--fab-clear">
           <table className="data-table">
             <thead>
               <tr>

@@ -239,7 +239,7 @@ export default function Vendors() {
             <p className="empty-state-text">No vendors yet. Add your suppliers to get started.</p>
           </div>
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--fab-clear">
             <table className="data-table">
               <thead>
                 <tr>
