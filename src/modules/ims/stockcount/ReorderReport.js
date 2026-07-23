@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { printWithTitle } from '../../../utils/printTitle'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -169,6 +170,18 @@ export default function ReorderReport() {
     return matchCat && matchStatus && matchSearch
   })
 
+  // Par-setting sheet ignores the Reorder/All status filter — a client setting par levels
+  // for the first time needs every item, not just the ones currently below par.
+  const printRows = rows
+    .filter(r => (filterCat === 'all' || r.category === filterCat) && r.item.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => a.item.name.localeCompare(b.item.name))
+  const printGroups = Object.values(
+    printRows.reduce((acc, r) => {
+      (acc[r.category] = acc[r.category] || { category: r.category, items: [] }).items.push(r)
+      return acc
+    }, {})
+  ).sort((a, b) => a.category.localeCompare(b.category))
+
   const reorderCount        = rows.filter(r => r.needsReorder).length
   const totalShortfallValue = rows.filter(r => r.needsReorder).reduce((s, r) => s + r.shortfallValue, 0)
   const noPar               = rows.filter(r => r.par === 0).length
@@ -216,12 +229,15 @@ export default function ReorderReport() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title">Reorder Report</h1>
           <p className="page-subtitle">Items below par level — auto purchase list — {periodLabel}</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <Tip text="Prints a blank par-level sheet (grouped by category, respecting the Category/Search filters above) for staff to fill in by hand — enter the values back into the Par Level column here afterward." width={260}>
+            <button className="btn btn-ghost" onClick={() => printWithTitle(`Par Level Sheet - ${periodLabel}`)} style={{ fontSize: 12 }}>🖨 Print Par Sheet</button>
+          </Tip>
           <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
           <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>)}
@@ -229,7 +245,7 @@ export default function ReorderReport() {
         </div>
       </div>
 
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
+      <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
         <div className="stat-card">
           <div className="stat-label">Items to Reorder</div>
           <div className="stat-value" style={{ color: reorderCount > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>{reorderCount}</div>
@@ -253,12 +269,12 @@ export default function ReorderReport() {
       </div>
 
       {noPar > 0 && (
-        <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
+        <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
           <strong style={{ color: 'var(--theme-accent)' }}>Tip:</strong> {noPar} item{noPar !== 1 ? 's have' : ' has'} no par level set. Click the par field in any row to set it inline — press Enter to save.
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="no-print" style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <input style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
           placeholder="Search items…" value={search} onChange={e => setSearch(e.target.value)} />
         <select className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
@@ -290,7 +306,7 @@ export default function ReorderReport() {
         )}
       </div>
 
-      <div className="card">
+      <div className="card no-print">
         {loading ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Building report…</p>
         ) : filtered.length === 0 ? (
@@ -403,6 +419,40 @@ export default function ReorderReport() {
             </table>
           </div>
         )}
+      </div>
+
+      <div className="card print-sheet print-only">
+        <div className="print-sheet-header">
+          <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>Par Level Sheet</h2>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
+            Period: {periodLabel} &nbsp;·&nbsp; Printed: {new Date().toLocaleDateString('en-GB')}
+          </p>
+        </div>
+        {printGroups.length === 0 ? (
+          <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No items match the current filters.</p>
+        ) : printGroups.map(({ category, items }) => (
+          <div key={category} className="print-sheet-section">
+            <h3 className="print-sheet-cat">{category}</h3>
+            <table className="data-table print-sheet-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>UOM</th>
+                  <th style={{ textAlign: 'right' }}>Set Par Level</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map(r => (
+                  <tr key={r.item.id}>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.item.name}</td>
+                    <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
+                    <td className="print-sheet-blank"></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
       </div>
     </div>
   )
