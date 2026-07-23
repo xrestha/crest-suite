@@ -350,8 +350,12 @@ export default function GuestMenu() {
             guest's own leisurely browsing moment, not an ops screen — so the outlet name gets the
             same Georgia serif signature the sidebar wordmark and login screen use, rather than
             reading identically to every staff tool in the app. */}
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <h1 style={{ margin: '0 0 6px', fontSize: 30, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.01em' }}>{outletName}</h1>
+        <div style={{ textAlign: 'center', marginBottom: 26 }}>
+          <h1 style={{ margin: '0 0 10px', fontSize: 30, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.01em' }}>{outletName}</h1>
+          {/* A short brass rule — the one restrained brand signature on this, the sole brand-facing
+              page (PRODUCT.md), giving a diner's menu a touch more identity than a staff tool without
+              breaking the One Accent Rule. */}
+          <div aria-hidden="true" style={{ width: 34, height: 2, borderRadius: 1, background: 'var(--theme-accent)', margin: '0 auto 10px' }} />
           <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>{tableName}</p>
         </div>
 
@@ -557,9 +561,9 @@ function Stepper({ qty, onChange }) {
   }
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <button type="button" style={btn} onClick={() => onChange(qty - 1)}>−</button>
-      <span style={{ minWidth: 20, textAlign: 'center', fontSize: 14 }}>{qty}</span>
-      <button type="button" style={btn} onClick={() => onChange(qty + 1)}>+</button>
+      <button type="button" style={btn} aria-label="Decrease quantity" onClick={() => onChange(qty - 1)}>−</button>
+      <span style={{ minWidth: 20, textAlign: 'center', fontSize: 14 }} aria-live="polite">{qty}</span>
+      <button type="button" style={btn} aria-label="Increase quantity" onClick={() => onChange(qty + 1)}>+</button>
     </div>
   )
 }
@@ -573,6 +577,7 @@ function MenuItemCard({ item, nutritionEnabled, orderingEnabled, qty, onQtyChang
       {item.image_url && !imgFailed && (
         <img
           src={item.image_url} alt={item.name} onError={() => setImgFailed(true)}
+          loading="lazy" decoding="async"
           style={{ width: 84, height: 84, borderRadius: 8, objectFit: 'cover', flexShrink: 0, background: 'var(--theme-input-bg)' }}
         />
       )}

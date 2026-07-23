@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Hexagon, Check, Mail, Calculator, Users, CalendarDays } from 'lucide-react'
 import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_BUNDLES } from '../data/pricingPlans'
 
 // ── Change this to the contact email when ready ──────────────────────────────
@@ -44,7 +45,7 @@ function FeatureList({ features, color }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
       {features.map((f, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
-          <span style={{ color, fontSize: 13, flexShrink: 0, marginTop: 1 }}>✓</span>
+          <Check size={14} strokeWidth={2.5} aria-hidden="true" style={{ color, flexShrink: 0, marginTop: 2 }} />
           <span style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.45 }}>{f}</span>
         </div>
       ))}
@@ -69,13 +70,22 @@ export default function Pricing() {
   const [showFaq, setShowFaq] = useState(false)
   const navigate = useNavigate()
 
+  // Escape closes the FAQ dialog — a hand-rolled fixed-overlay modal (not the shared Modal/native
+  // <dialog>), so keyboard dismissal isn't free; the backdrop-click already closes it for pointer users.
+  useEffect(() => {
+    if (!showFaq) return
+    const onKey = e => { if (e.key === 'Escape') setShowFaq(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showFaq])
+
   return (
     <div style={{ minHeight: '100vh', background: BG, color: 'var(--theme-text1)', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
 
       {/* Nav */}
       <nav style={{ background: CARD, borderBottom: `1px solid ${BORDER}`, padding: '0 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64, position: 'sticky', top: 0, zIndex: 100 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 24, color: GOLD }}>⬢</span>
+          <Hexagon size={22} strokeWidth={2.25} aria-hidden="true" style={{ color: GOLD, flexShrink: 0 }} />
           <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest Suite</span>
         </div>
         <button
@@ -94,19 +104,19 @@ export default function Pricing() {
           Simple, honest pricing
         </h1>
         <p style={{ fontSize: 16, color: 'var(--theme-text2)', margin: '0 auto 44px', maxWidth: 560, lineHeight: 1.7 }}>
-          Built for Nepal's restaurants and cafes. Works in BS calendar, NPR, and FonePay — no Western SaaS workarounds needed.
+          Built for Nepal's restaurants and cafes. Works in BS calendar, NPR, and FonePay, with no Western-SaaS workarounds needed.
           Buy Crest IMS, Crest HR, and Crest POS separately, or bundle all three as Crest Suite for a discount.
         </p>
 
         {/* Billing toggle */}
         <div style={{ display: 'inline-flex', background: CARD, border: `1px solid ${BORDER}`, borderRadius: 9, padding: 4, gap: 2 }}>
           <button
-            onClick={() => setAnnual(false)}
+            onClick={() => setAnnual(false)} aria-pressed={!annual}
             style={{ background: !annual ? 'rgba(201,168,76,0.15)' : 'none', border: !annual ? `1px solid rgba(201,168,76,0.3)` : '1px solid transparent', color: !annual ? GOLD : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
             Monthly
           </button>
           <button
-            onClick={() => setAnnual(true)}
+            onClick={() => setAnnual(true)} aria-pressed={annual}
             style={{ background: annual ? 'rgba(201,168,76,0.15)' : 'none', border: annual ? `1px solid rgba(201,168,76,0.3)` : '1px solid transparent', color: annual ? GOLD : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
             Annual
             <span style={{ background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.25)', color: GREEN, fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 700, letterSpacing: '0.04em' }}>
@@ -116,11 +126,29 @@ export default function Pricing() {
         </div>
       </div>
 
+      {/* ── Why Crest — value strip (this page is the single marketing surface per the tool-first
+             product charter; a typographic strip, not a hero-plus-three-cards, on purpose) ── */}
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 72px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 30, borderTop: `1px solid ${BORDER}`, paddingTop: 44 }}>
+          {[
+            { Icon: Calculator,   title: 'Cost intelligence, not just billing', body: 'True food cost, recipe margins, and variance. The numbers POS-only tools never surface.' },
+            { Icon: Users,        title: 'HR and payroll built in',             body: 'SSF, TDS, attendance, and roster in the same product. Nepal-compliant and deadline-ready every month.' },
+            { Icon: CalendarDays, title: 'Made for Nepal',                      body: 'Bikram Sambat, NPR, and FonePay native. No Western-SaaS workarounds to fight.' },
+          ].map(({ Icon, title, body }, i) => (
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              <Icon size={22} strokeWidth={2} aria-hidden="true" style={{ color: GOLD }} />
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', lineHeight: 1.3 }}>{title}</div>
+              <div style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{body}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* ── Crest IMS — 3 tiers ── */}
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
         <SectionHeading color={MODULE_COLORS.ims} title="Crest IMS" subtitle="Inventory, recipe costing & food-cost intelligence" />
       </div>
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20 }}>
         {IMS_TIERS.map(plan => {
           const highlight = plan.key === 'growth'
           const price = annual ? plan.annual : plan.monthly
@@ -191,7 +219,7 @@ export default function Pricing() {
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
         <SectionHeading color={MODULE_COLORS.hr} title="Crest HR & Crest POS" subtitle="Payroll and floor operations — buy either one on its own" />
       </div>
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20 }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
         {[
           { key: 'hr',  name: 'Crest HR',  color: MODULE_COLORS.hr,  tagline: 'Nepal-compliant payroll, attendance, and staff management.', pricing: HR_PRICING },
           { key: 'pos', name: 'Crest POS', color: MODULE_COLORS.pos, tagline: 'Tables, orders, billing, and shift reconciliation.',             pricing: POS_PRICING },
@@ -232,7 +260,7 @@ export default function Pricing() {
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
         <SectionHeading color={GOLD} title="Crest Suite" subtitle="IMS + HR + POS together, at a discount vs buying each separately" />
       </div>
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 80px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 80px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20 }}>
         {SUITE_BUNDLES.map((bundle, i) => {
           const imsTier = IMS_TIERS[i]
           const price = annual ? bundle.annual : bundle.monthly
@@ -251,7 +279,7 @@ export default function Pricing() {
               </div>
               <button
                 onClick={() => navigate('/login')}
-                style={{ background: i === 2 ? GOLD : `${GOLD}14`, border: `1px solid ${GOLD}`, color: i === 2 ? '#0b0b0b' : GOLD, padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, width: '100%' }}>
+                style={{ background: i === 2 ? GOLD : `${GOLD}14`, border: `1px solid ${GOLD}`, color: i === 2 ? 'var(--theme-accent-text)' : GOLD, padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, width: '100%' }}>
                 Get {bundle.label} →
               </button>
             </div>
@@ -274,11 +302,12 @@ export default function Pricing() {
           onClick={() => setShowFaq(false)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
           <div
+            role="dialog" aria-modal="true" aria-labelledby="faq-title"
             onClick={e => e.stopPropagation()}
             style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, width: '100%', maxWidth: 640, maxHeight: '80vh', overflow: 'auto', padding: '36px 32px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>
-              <h2 style={{ margin: 0, fontSize: 22, fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>Common Questions</h2>
-              <button onClick={() => setShowFaq(false)} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
+              <h2 id="faq-title" style={{ margin: 0, fontSize: 22, fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>Common Questions</h2>
+              <button onClick={() => setShowFaq(false)} aria-label="Close" style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
             {FAQS.map((faq, i) => (
               <div key={i} style={{ padding: '18px 0', borderBottom: `1px solid ${BORDER}` }}>
@@ -306,13 +335,13 @@ export default function Pricing() {
           </button>
           <button
             onClick={() => navigate('/login?trial=1')}
-            style={{ background: GOLD, border: 'none', color: 'var(--theme-bg)', padding: '13px 32px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
+            style={{ background: GOLD, border: 'none', color: 'var(--theme-accent-text)', padding: '13px 32px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
             Start Free Trial →
           </button>
           <a
             href={`mailto:${CONTACT_EMAIL}`}
-            style={{ background: 'none', border: `1px solid ${BORDER}`, color: 'var(--theme-text2)', padding: '13px 28px', borderRadius: 7, textDecoration: 'none', fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            ✉ Email us
+            style={{ background: 'none', border: `1px solid ${BORDER}`, color: 'var(--theme-text2)', padding: '13px 28px', borderRadius: 7, textDecoration: 'none', fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            <Mail size={15} strokeWidth={2} aria-hidden="true" /> Email us
           </a>
         </div>
         <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>© 2083 BS · Crest Hospitality · Kathmandu, Nepal</p>
