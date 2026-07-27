@@ -150,6 +150,20 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S456 — 2026-07-27 — Sales Entry save collapsed into one atomic RPC (closes the delete-without-insert data-loss window)
+
+Follow-up the S455 smoke test made urgent rather than theoretical. Saving a day was three sequential HTTP round trips — DELETE the day's rows, INSERT the replacements, DELETE the superseded cross-mode rows — so a stall between the first two left the day's rows deleted with nothing written back. That's data loss, not a failed save. The live smoke test measured one of these round trips at **12.4s** on the same connection that served its neighbours in under a second, and the S453/S454 guard gives up at 20s by design, so the window was reachable.
+
+New `save_sales_day(p_period_id, p_bs_day, p_rows)` (migration `20260727120000_save_sales_day_atomic.sql`) does all three inside one function, making them a single transaction: either the whole replacement lands or none of it does, and there's one stall point instead of three. It serves **both** save paths, since they're the same operation — Daily passes the day (1–32) and supersedes the Bulk row; Bulk passes 0 and supersedes the dated rows. Behaviour is otherwise identical to the JS it replaces.
+
+Deliberately **`SECURITY INVOKER`** (no `SECURITY DEFINER`): `sales_entries` carries RESTRICTIVE staff-isolation policies (`no_self_service_accounts` from S316, `no_hr_role_staff` from S430) on top of the permissive client-scoping ones, and INVOKER keeps all of them enforced with zero re-implementation. `SECURITY DEFINER` would have silently punched through that isolation — the one thing this function must not do, since nothing here needs to bypass RLS.
+
+Frontend goes through the new `src/modules/ims/sales/persistSalesDay.js`, which also unifies the two previously-duplicated save bodies. It keeps a legacy three-call fallback used **only** on `PGRST202`/`42883` (function not in the schema cache), because this project applies migrations by hand in the dashboard, so there's a genuine window where deployed code predates the migration. Verified against the live API that a missing function really does return `PGRST202` — so shipping this before the migration runs is safe and behaves exactly as today. It is explicitly *not* a retry-on-failure path: any other error is rethrown untouched, so nothing can be written twice.
+
+9 new unit tests (`persistSalesDay.test.js`) against a mock PostgREST builder cover the RPC params/abort signal, empty-day still going through the RPC, a real error NOT falling back, and the legacy path's exact call order and filters for both Daily and Bulk. Full suite 109/109, build clean. `CACHE_NAME` → `crest-v21`.
+
+**Not changed, but found while doing this and worth a decision:** the day-delete is `period_id + bs_day` with no `source` filter, so saving a manual Daily entry also deletes that day's `source='pos'` / `'pos_comp'` rows — POS rows get re-inserted as `manual` (losing attribution) and comp rows vanish entirely, since `loadDailySales` excludes them from what it reads back. The old `UNIQUE(period_id, recipe_id, bs_day)` that would have made manual/POS rows mutually exclusive was dropped in S286, so the two are meant to coexist. Left exactly as-is here because changing deletion semantics is a product decision, not part of making the existing behaviour atomic.
+
 ### S455 — 2026-07-27 — Fixed (the actual cause): a stalled token refresh permanently wedges the whole auth client
 
 S454's diagnostic did its job — the user clicked Save Day and got **"Your login session has stopped responding, so the save never left this browser"** instead of another silent freeze. That confirmed the hang is in `auth.getSession()`, not the network path to PostgREST, and pointed at the last remaining question: *why* does `getSession()` stall, and why does it keep stalling after a full tab close?

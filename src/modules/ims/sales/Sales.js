@@ -8,11 +8,9 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
 import { withTimeout } from '../../../utils/withTimeout'
+import { persistSalesDay, SAVE_TIMEOUT_MS } from './persistSalesDay'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
-// How long any single save request may hang before we give up and re-enable the button (S453/S454).
-const SAVE_TIMEOUT_MS = 20000
-
 // Every supabase-js call awaits auth.getSession() before it ever reaches fetch(), so a stuck
 // session hangs the save with no request ever leaving the browser — which looks identical to a
 // network problem but isn't, and no amount of retrying fixes it. Probing it first (cheaply, and
@@ -189,42 +187,24 @@ export default function Sales() {
         const typedDisc = rawDisc !== undefined ? (rawDisc === '' ? 0 : parseFloat(rawDisc)) : null
         mergedDiscount[r.id] = (typedDisc !== null && !isNaN(typedDisc)) ? typedDisc : savedDisc
       })
-      const { error: delErr } = await withTimeout(
-        supabase.from('sales_entries').delete().eq('period_id', selectedPeriod.id).eq('bs_day', selectedDay).abortSignal(abortCtl.signal),
-        SAVE_TIMEOUT_MS, 'Save'
-      )
-      if (delErr) throw new Error(delErr.message)
       // unit_price/vat_rate snapshot the recipe's price at entry time — manual entry has no other
       // price source, but capturing it now is still far more stable than every report joining the
       // recipe's CURRENT price at view time (which used to silently reprice past periods' revenue
       // whenever a menu price changed later). discount is the per-day/per-item NPR reduction (from
       // the vendor Excel import or typed manually) — kept as its own column rather than folded into
       // unit_price so it stays a separately editable, auditable figure.
-      const inserts = recipes
+      const rows = recipes
         .filter(r => (merged[r.id] || 0) > 0)
         .map(r => ({
-          period_id: selectedPeriod.id, recipe_id: r.id, bs_day: selectedDay, qty_sold: merged[r.id],
+          recipe_id: r.id, qty_sold: merged[r.id],
           unit_price: parseFloat(r.selling_price) || 0, vat_rate: r.vat_rate,
           discount: mergedDiscount[r.id] || 0,
         }))
-      if (inserts.length > 0) {
-        const { error } = await withTimeout(
-          supabase.from('sales_entries').insert(inserts).abortSignal(abortCtl.signal),
-          SAVE_TIMEOUT_MS, 'Save'
-        )
-        if (error) throw new Error(error.message)
-        // Bulk (bs_day=0) and Daily (bs_day>0) rows for the same recipe+period aren't mutually
-        // exclusive at the DB level (unique constraint is period_id+recipe_id+bs_day, which differs
-        // between them) — every downstream report/Variance sums ALL sales_entries rows for a period
-        // with no bs_day distinction, so having both silently double-counts. Switching a recipe to
-        // Daily mode here supersedes any bulk entry it had.
-        const { error: clearErr } = await withTimeout(
-          supabase.from('sales_entries').delete()
-            .eq('period_id', selectedPeriod.id).eq('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id)).abortSignal(abortCtl.signal),
-          SAVE_TIMEOUT_MS, 'Save'
-        )
-        if (clearErr) throw new Error(clearErr.message)
-      }
+      // One atomic RPC: delete + insert + cross-mode cleanup in a single transaction, so a stall
+      // can no longer leave this day deleted with nothing written back (S456).
+      await persistSalesDay(supabase, {
+        periodId: selectedPeriod.id, bsDay: selectedDay, rows, signal: abortCtl.signal,
+      })
       saveSucceeded = true
       setDailySaved(true)
       setTimeout(() => setDailySaved(false), 2500)
@@ -317,46 +297,23 @@ export default function Sales() {
         merged[r.id] = typed !== null ? typed : saved
       })
 
-      // Delete all existing bulk rows for this period, then re-insert
-      const { error: delErr } = await withTimeout(
-        supabase.from('sales_entries')
-          .delete()
-          .eq('period_id', selectedPeriod.id)
-          .eq('bs_day', 0)
-          .abortSignal(abortCtl.signal),
-        SAVE_TIMEOUT_MS, 'Save'
-      )
-      if (delErr) throw new Error(delErr.message)
-
       // unit_price/vat_rate snapshot the recipe's price at entry time — see saveDaily for why.
-      const inserts = recipes
+      // Bulk rows carry no discount column of their own (Daily Entry owns that field), so the
+      // RPC's COALESCE leaves it at the column default of 0 — same as the old insert did.
+      const rows = recipes
         .filter(r => (merged[r.id] || 0) > 0)
         .map(r => ({
-          period_id: selectedPeriod.id,
           recipe_id: r.id,
-          bs_day: 0,
           qty_sold: merged[r.id],
           unit_price: parseFloat(r.selling_price) || 0,
           vat_rate: r.vat_rate,
         }))
 
-      if (inserts.length > 0) {
-        const { error } = await withTimeout(
-          supabase.from('sales_entries').insert(inserts).abortSignal(abortCtl.signal),
-          SAVE_TIMEOUT_MS, 'Save'
-        )
-        if (error) throw new Error(error.message)
-        // Same exclusivity guard as saveDaily — Bulk and Daily rows for the same recipe+period
-        // aren't mutually exclusive at the DB level and every downstream report sums both with no
-        // distinction, silently double-counting. Switching a recipe to Bulk here supersedes any
-        // dated Daily entries it had.
-        const { error: clearErr } = await withTimeout(
-          supabase.from('sales_entries').delete()
-            .eq('period_id', selectedPeriod.id).gt('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id)).abortSignal(abortCtl.signal),
-          SAVE_TIMEOUT_MS, 'Save'
-        )
-        if (clearErr) throw new Error(clearErr.message)
-      }
+      // bsDay 0 = the Bulk row. Same atomic RPC as Daily; it flips the cross-mode cleanup to
+      // "supersede the dated rows" based on that 0. See persistSalesDay.js (S456).
+      await persistSalesDay(supabase, {
+        periodId: selectedPeriod.id, bsDay: 0, rows, signal: abortCtl.signal,
+      })
 
       saveSucceeded = true
       setBulkSaved(true)

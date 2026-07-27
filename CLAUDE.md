@@ -24,7 +24,7 @@ No custom linting scripts — ESLint runs via `react-scripts`. Build warnings ar
 - **React Router v7** — all routes in `src/App.js`
 - **Code splitting (S440)** — every page component in `App.js` is route-level `React.lazy(() => import(...))`; only structural pieces stay eager (contexts, `Layout`, `ProtectedRoute`, `ModuleGate`/`PremiumGate`). Keep new page routes lazy too. Two `Suspense` boundaries: one around `Layout.js`'s `<Outlet />` (so the sidebar persists during in-app navigation — only the content area shows `RouteFallback`) and a top-level one in `App.js` for the public routes. Any `import './x.css'` must stay **above** the lazy `const`s or ESLint's `import/first` fails the CI build. This cut initial JS from ~931 kB → ~165 kB gzipped (the rest lazy-loads as ~97 on-demand chunks)
 - **Vercel** for deployment — `vercel.json` sets `no-cache` on `index.html` to prevent CDN serving stale bundles
-- **PWA service worker** at `public/service-worker.js` — registered only in production (`src/index.js`). `CACHE_NAME` (`crest-v20` as of S455) must be bumped on **every** JS/CSS change you want existing users to actually receive, not just breaking ones — the fetch handler is cache-first for static assets, so a plain deploy (or even a hard refresh) leaves already-cached chunks serving the old code indefinitely until this constant changes and `activate` purges the old cache (S452 found a real fix silently never reached the browser because of this)
+- **PWA service worker** at `public/service-worker.js` — registered only in production (`src/index.js`). `CACHE_NAME` (`crest-v21` as of S456) must be bumped on **every** JS/CSS change you want existing users to actually receive, not just breaking ones — the fetch handler is cache-first for static assets, so a plain deploy (or even a hard refresh) leaves already-cached chunks serving the old code indefinitely until this constant changes and `activate` purges the old cache (S452 found a real fix silently never reached the browser because of this)
 
 ---
 
@@ -236,6 +236,14 @@ Without one, Chrome guesses from `type` + surrounding context — and any `type=
 - `stored_rate = entered_rate ÷ conversion_factor`
 
 All downstream calculations (Stock, Variance, FIFO, Reorder) read these base-unit values directly.
+
+### Sales Entry saves through one atomic RPC, not three round trips
+
+`save_sales_day(p_period_id, p_bs_day, p_rows)` (migration `20260727120000`) does delete + insert + cross-mode cleanup in a single transaction; `src/modules/ims/sales/persistSalesDay.js` is the only caller and serves **both** Daily (`bsDay` 1–32) and Bulk (`bsDay` 0) — they're the same operation, the 0 just flips which side the cross-mode cleanup supersedes. It was three separate HTTP requests until S456, which meant a stall between the delete and the insert left the day's rows deleted with nothing written back (a live smoke test measured one round trip at 12.4s against sub-second neighbours, so this was reachable, not theoretical).
+
+The function is deliberately **`SECURITY INVOKER`** (i.e. no `SECURITY DEFINER`). `sales_entries` carries RESTRICTIVE staff-isolation policies (`no_self_service_accounts`, `no_hr_role_staff`) on top of the permissive client-scoping ones, and INVOKER keeps every one of them enforced for free. Adding `SECURITY DEFINER` here would silently punch through that isolation and require hand-reimplementing all four checks — don't.
+
+`persistSalesDay` also carries a legacy three-call fallback, used **only** when the RPC returns `PGRST202`/`42883` (function not in the schema cache). That exists purely because this project applies migrations by hand in the dashboard, so there's a real window where deployed code predates the migration; it is not a retry-on-failure path, and every other error is rethrown untouched so nothing gets written twice. Once the migration is applied everywhere, the fallback and `isMissingFunctionError` can be deleted.
 
 ### `recipe_ingredients` has no `client_id` column
 
