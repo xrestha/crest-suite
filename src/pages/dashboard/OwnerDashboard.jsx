@@ -80,7 +80,7 @@ export default function OwnerDashboard() {
     const results = await Promise.all([
       period ? supabase.from('purchase_entries').select('item_id, qty, rate, payment_method').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id) : { data: [] },
-      period ? supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
+      period ? supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
       scopedFrom('recipes', 'id, selling_price'),
       period ? supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead') : { data: [] },
       period ? supabase.from('wastages').select('item_id, qty').eq('period_id', period.id) : { data: [] },
@@ -99,7 +99,7 @@ export default function OwnerDashboard() {
     const priceMap = {}; (recipes || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0 })
     const revenueTotal = (salesData || []).reduce((s, r) => {
       const price = r.unit_price != null ? parseFloat(r.unit_price) : (priceMap[r.recipe_id] || 0)
-      return s + parseFloat(r.qty_sold || 0) * price
+      return s + parseFloat(r.qty_sold || 0) * price - (parseFloat(r.discount) || 0)
     }, 0)
 
     const overheadTotal = (overheadsData || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)

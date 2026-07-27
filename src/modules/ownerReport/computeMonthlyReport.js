@@ -29,7 +29,7 @@ async function computeImsSection(clientId, period) {
   const results = await Promise.all([
     supabase.from('purchase_entries').select('id, item_id, qty, rate, payment_method').eq('period_id', period.id),
     supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id),
-    supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', period.id).neq('source', 'pos_comp'),
+    supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp'),
     scopedFrom('recipes', clientId, 'id, selling_price'),
     supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead'),
     supabase.from('wastages').select('item_id, qty').eq('period_id', period.id),
@@ -59,7 +59,7 @@ async function computeImsSection(clientId, period) {
   const priceMap = {}; (recipes || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0 })
   const revenueTotal = (salesData || []).reduce((s, r) => {
     const price = r.unit_price != null ? parseFloat(r.unit_price) : (priceMap[r.recipe_id] || 0)
-    return s + parseFloat(r.qty_sold || 0) * price
+    return s + parseFloat(r.qty_sold || 0) * price - (parseFloat(r.discount) || 0)
   }, 0)
 
   const overheadTotal = (overheadsData || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)

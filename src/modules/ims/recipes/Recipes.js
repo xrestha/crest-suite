@@ -97,7 +97,7 @@ export default function Recipes() {
         scopedFrom('overheads', 'amount').eq('period_id', openPeriodId).eq('bucket', 'overhead'),
         // Excludes comps (source='pos_comp') — never actually paid for, shouldn't earn a
         // revenue share of overhead. Matches the exclusion Overheads.js/OwnerDashboard.jsx use.
-        supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', openPeriodId).neq('source', 'pos_comp')
+        supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', openPeriodId).neq('source', 'pos_comp')
       ])
       const totalOverheads = (ohRows || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
 
@@ -113,7 +113,7 @@ export default function Recipes() {
       ;(salesRows || []).forEach(se => {
         const price = se.unit_price != null ? parseFloat(se.unit_price) : (priceMap[se.recipe_id] || 0)
         const qty = parseFloat(se.qty_sold || 0)
-        const rev = qty * price
+        const rev = qty * price - (parseFloat(se.discount) || 0)
         revenueByRecipe[se.recipe_id] = (revenueByRecipe[se.recipe_id] || 0) + rev
         coversByRecipe[se.recipe_id] = (coversByRecipe[se.recipe_id] || 0) + qty
         totalRevenue += rev

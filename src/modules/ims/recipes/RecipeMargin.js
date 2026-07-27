@@ -47,7 +47,7 @@ export default function RecipeMargin() {
     const [{ data: salesData }, { data: recipes }] = await Promise.all([
       // Margin is revenue-based — comps (source='pos_comp') never sold at menu price and would
       // understate the true margin percentage if counted as if they had.
-      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp'),
+      supabase.from('sales_entries').select('recipe_id, qty_sold, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, name, category, selling_price')
         .neq('category', 'Sub-Recipe')
         .eq('is_active', true),
@@ -60,9 +60,10 @@ export default function RecipeMargin() {
     const recipeIds = (recipes || []).map(r => r.id)
     const costMap = await computeRecipeCosts(supabase, recipeIds)
 
-    const qtyMap = {}
+    const qtyMap = {}, discMap = {}
     for (const s of (salesData || [])) {
       qtyMap[s.recipe_id] = (qtyMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0)
+      discMap[s.recipe_id] = (discMap[s.recipe_id] || 0) + (parseFloat(s.discount) || 0)
     }
 
     const built = (recipes || [])
@@ -72,13 +73,14 @@ export default function RecipeMargin() {
         const cost   = parseFloat(costMap[r.id] || 0)
         const margin = price - cost
         const qty    = parseFloat(qtyMap[r.id] || 0)
+        const discount = parseFloat(discMap[r.id] || 0)
         const fcPct  = price > 0 ? (cost / price) * 100 : 0
         return {
           id: r.id,
           name: r.name,
           category: r.category,
-          price, cost, margin, qty,
-          totalContribution: margin * qty,
+          price, cost, margin, qty, discount,
+          totalContribution: margin * qty - discount,
           fcPct,
         }
       })
@@ -90,7 +92,7 @@ export default function RecipeMargin() {
 
   const withSales       = rows.filter(r => r.qty > 0)
   const totalContrib    = withSales.reduce((s, r) => s + r.totalContribution, 0)
-  const totalRevenue    = withSales.reduce((s, r) => s + r.price * r.qty, 0)
+  const totalRevenue    = withSales.reduce((s, r) => s + r.price * r.qty - r.discount, 0)
   const totalCost       = withSales.reduce((s, r) => s + r.cost * r.qty, 0)
   const avgFcPct        = totalRevenue > 0 ? (totalCost / totalRevenue) * 100 : 0
   const topRecipe       = [...withSales].sort((a, b) => b.totalContribution - a.totalContribution)[0]

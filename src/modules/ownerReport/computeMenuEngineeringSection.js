@@ -32,7 +32,7 @@ export async function computeMenuEngineeringSection(clientId, period) {
   const [{ data: recipes }, { data: salesData }] = await Promise.all([
     scopedFrom('recipes', clientId, 'id, name, category, selling_price')
       .neq('is_active', false).neq('category', 'Sub-Recipe'),
-    supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', period.id).neq('source', 'pos_comp'),
+    supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp'),
   ])
 
   const recipeIds = (recipes || []).map(r => r.id)
@@ -42,7 +42,7 @@ export async function computeMenuEngineeringSection(clientId, period) {
   ;(salesData || []).forEach(s => {
     qtyMap[s.recipe_id] = (qtyMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0)
     const price = s.unit_price != null ? parseFloat(s.unit_price) : null
-    if (price != null) revenueMap[s.recipe_id] = (revenueMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0) * price
+    if (price != null) revenueMap[s.recipe_id] = (revenueMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0) * price - (parseFloat(s.discount) || 0)
   })
 
   const enriched = (recipes || []).map(r => {

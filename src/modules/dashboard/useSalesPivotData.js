@@ -27,7 +27,7 @@ export async function loadFromSalesEntries(period, scopedFrom) {
     // Excludes both pos_comp (never billed) and pos (already counted by the POS-sourced pivot —
     // PosOrders.jsx stamps a source:'pos' row per bill at close) so this "manual" pivot and the
     // POS pivot can render side by side without double-counting the same revenue.
-    supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, unit_price').eq('period_id', period.id).neq('source', 'pos_comp').neq('source', 'pos'),
+    supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').neq('source', 'pos'),
     scopedFrom('recipes', 'id, category, selling_price'),
   ])
   const priceMap = {}, catMap = {}
@@ -36,7 +36,7 @@ export async function loadFromSalesEntries(period, scopedFrom) {
   ;(sales || []).forEach(s => {
     const day = parseInt(s.bs_day) || 0
     const price = s.unit_price != null ? parseFloat(s.unit_price) : (priceMap[s.recipe_id] || 0)
-    const amount = (parseFloat(s.qty_sold) || 0) * price
+    const amount = (parseFloat(s.qty_sold) || 0) * price - (parseFloat(s.discount) || 0)
     const cat = catMap[s.recipe_id] || 'Uncategorized'
     const key = `${cat}|${day}`
     agg[key] = (agg[key] || 0) + amount

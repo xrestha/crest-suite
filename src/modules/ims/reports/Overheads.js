@@ -123,7 +123,7 @@ export default function Overheads() {
       supabase.from('purchase_entries').select('qty, rate').eq('period_id', periodId),
       scopedFrom('vendor_returns', 'qty, rate').eq('period_id', periodId),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', periodId).neq('source', 'pos_comp'),
+      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, selling_price')
     ])
 
@@ -141,7 +141,7 @@ export default function Overheads() {
       const qty = parseFloat(s.qty_sold || 0)
       const price = s.unit_price != null ? parseFloat(s.unit_price) : (recipeMap[s.recipe_id] || 0)
       soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + qty
-      revenueBySold[s.recipe_id] = (revenueBySold[s.recipe_id] || 0) + qty * price
+      revenueBySold[s.recipe_id] = (revenueBySold[s.recipe_id] || 0) + qty * price - (parseFloat(s.discount) || 0)
     })
     const revenue = Object.values(revenueBySold).reduce((s, v) => s + v, 0)
     const covers  = Object.values(soldMap).reduce((s, qty) => s + qty, 0)

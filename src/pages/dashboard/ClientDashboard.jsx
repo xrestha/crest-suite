@@ -110,7 +110,7 @@ export default function ClientDashboard() {
       period ? supabase.from('vendor_returns').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
       // Revenue (and the daily revenue trend below) excludes comps (source='pos_comp') — a
       // comped dish was never paid for.
-      period ? supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
+      period ? supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
       scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct'),
       period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id) : { data: [] },
@@ -170,7 +170,7 @@ export default function ClientDashboard() {
       const qty = parseFloat(s.qty_sold)
       const price = s.unit_price != null ? parseFloat(s.unit_price) : (currentPriceMap[s.recipe_id] || 0)
       soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + qty
-      revenueMap[s.recipe_id] = (revenueMap[s.recipe_id] || 0) + qty * price
+      revenueMap[s.recipe_id] = (revenueMap[s.recipe_id] || 0) + qty * price - (parseFloat(s.discount) || 0)
     })
     const revenueTotal = Object.values(revenueMap).reduce((s, v) => s + v, 0)
 
@@ -283,7 +283,7 @@ export default function ClientDashboard() {
       const d = parseInt(s.bs_day)
       if (!d || d <= 0) return
       const price = s.unit_price != null ? parseFloat(s.unit_price) : (currentPriceMap[s.recipe_id] || 0)
-      daySalesMap[d] = (daySalesMap[d] || 0) + parseFloat(s.qty_sold || 0) * price
+      daySalesMap[d] = (daySalesMap[d] || 0) + parseFloat(s.qty_sold || 0) * price - (parseFloat(s.discount) || 0)
     })
     Object.keys(daySalesMap).forEach(d => { daySalesMap[d] = Math.round(daySalesMap[d]) }) // whole NPR (no ugly decimals)
     const salesDayNums = Object.keys(daySalesMap).map(Number).sort((a, b) => a - b)
@@ -533,7 +533,7 @@ export default function ClientDashboard() {
       periodIds.length ? supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', periodIds) : { data: [] },
       periodIds.length ? supabase.from('vendor_returns').select('period_id, qty, rate').in('period_id', periodIds)   : { data: [] },
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      periodIds.length ? supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price').in('period_id', periodIds).neq('source', 'pos_comp') : { data: [] },
+      periodIds.length ? supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount').in('period_id', periodIds).neq('source', 'pos_comp') : { data: [] },
       scopedFrom('recipes', 'id, selling_price'),
     ])
     const [{ data: allPurch }, { data: allRet }, { data: allSales }, { data: recipeData }] = trendResults
@@ -557,7 +557,7 @@ export default function ClientDashboard() {
     // Cost % line on the chart.
     ;(allSales || []).forEach(e => {
       const price = e.unit_price != null ? parseFloat(e.unit_price) : (priceMap[e.recipe_id] || 0)
-      revMap[e.period_id] = (revMap[e.period_id] || 0) + parseFloat(e.qty_sold) * price
+      revMap[e.period_id] = (revMap[e.period_id] || 0) + parseFloat(e.qty_sold) * price - (parseFloat(e.discount) || 0)
     })
 
     const points = closed.map(p => {

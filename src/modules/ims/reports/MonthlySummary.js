@@ -61,7 +61,7 @@ export default function MonthlySummary() {
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for. See
       // migration 20260706170000 for why sales_entries now carries that source separately.
-      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', periodId).neq('source', 'pos_comp'),
+      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, selling_price')
     ])
 
@@ -96,7 +96,7 @@ export default function MonthlySummary() {
     ;(recipes || []).forEach(r => { currentPriceMap[r.id] = parseFloat(r.selling_price) || 0 })
     const totalRevenue = (salesData || []).reduce((s, row) => {
       const price = row.unit_price != null ? parseFloat(row.unit_price) : (currentPriceMap[row.recipe_id] || 0)
-      return s + parseFloat(row.qty_sold || 0) * price
+      return s + parseFloat(row.qty_sold || 0) * price - (parseFloat(row.discount) || 0)
     }, 0)
 
     // Per-category summary — COGS now uses net purchases (purchases − returns)

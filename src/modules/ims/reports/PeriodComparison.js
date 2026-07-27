@@ -56,7 +56,7 @@ export default function PeriodComparison() {
       supabase.from('opening_stock').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
       supabase.from('closing_stock').select('period_id, physical_qty, items(per_uom_rate)').in('period_id', ids),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      supabase.from('sales_entries').select('period_id, qty_sold, unit_price, recipes(selling_price)').in('period_id', ids).neq('source', 'pos_comp'),
+      supabase.from('sales_entries').select('period_id, qty_sold, unit_price, discount, recipes(selling_price)').in('period_id', ids).neq('source', 'pos_comp'),
     ])
 
     const result = {}
@@ -72,7 +72,7 @@ export default function PeriodComparison() {
       // against itself across periods, not what was actually charged in each one.
       const revenue  = (sales||[]).filter(r=>r.period_id===pid&&(r.unit_price!=null||r.recipes?.selling_price)).reduce((s,r)=>{
         const price = r.unit_price != null ? parseFloat(r.unit_price) : parseFloat(r.recipes?.selling_price||0)
-        return s + parseFloat(r.qty_sold||0) * price
+        return s + parseFloat(r.qty_sold||0) * price - (parseFloat(r.discount) || 0)
       },0)
       const netPurch = purchV - retV
       const cogs     = openV + netPurch - wasteV - closeV

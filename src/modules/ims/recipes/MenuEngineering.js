@@ -125,16 +125,17 @@ export default function MenuEngineering() {
     // given away.
     const { data: sales } = await supabase
       .from('sales_entries')
-      .select('recipe_id, qty_sold')
+      .select('recipe_id, qty_sold, discount')
       .eq('period_id', periodId)
       .neq('source', 'pos_comp')
 
     if (!recipes) { setLoading(false); return }
 
-    // Build sales map: recipe_id -> total qty sold
-    const salesMap = {}
+    // Build sales map: recipe_id -> total qty sold / total discount
+    const salesMap = {}, discMap = {}
     ;(sales || []).forEach(s => {
       salesMap[s.recipe_id] = (salesMap[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0)
+      discMap[s.recipe_id] = (discMap[s.recipe_id] || 0) + (parseFloat(s.discount) || 0)
     })
 
     // Enrich recipes
@@ -143,7 +144,7 @@ export default function MenuEngineering() {
       const sellingPrice   = parseFloat(r.selling_price) || 0
       const fcPct          = sellingPrice > 0 ? (ingredientCost / sellingPrice) * 100 : 0
       const qtySold        = salesMap[r.id] || 0
-      const revenue        = sellingPrice * qtySold
+      const revenue        = sellingPrice * qtySold - (discMap[r.id] || 0)
       return { ...r, ingredientCost, sellingPrice, fcPct, qtySold, revenue }
     })
 

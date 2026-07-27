@@ -50,7 +50,7 @@ export default function BestSellers() {
     const [{ data: entries }, { data: recipes }] = await Promise.all([
       // "Best seller" ranks by real demand — comps (source='pos_comp') never sold at menu
       // price and would misleadingly inflate a heavily-comped item's qty/revenue rank.
-      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price').eq('period_id', periodId).neq('source', 'pos_comp'),
+      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, name, category, selling_price').neq('category', 'Sub-Recipe'),
     ])
 
@@ -72,7 +72,7 @@ export default function BestSellers() {
       const qty = parseFloat(e.qty_sold || 0)
       const price = e.unit_price != null ? parseFloat(e.unit_price) : (currentPriceMap[e.recipe_id] || 0)
       qtyMap[e.recipe_id] = (qtyMap[e.recipe_id] || 0) + qty
-      revenueMap[e.recipe_id] = (revenueMap[e.recipe_id] || 0) + qty * price
+      revenueMap[e.recipe_id] = (revenueMap[e.recipe_id] || 0) + qty * price - (parseFloat(e.discount) || 0)
     }
 
     const built = (recipes || [])
