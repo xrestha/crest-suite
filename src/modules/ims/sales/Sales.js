@@ -132,7 +132,7 @@ export default function Sales() {
   }
 
   async function saveDaily() {
-    if (!selectedPeriod) return
+    if (!selectedPeriod || dailySaving) return
     setDailySaving(true)
     setDailySaveError('')
     // The actual save (delete/insert/cleanup-delete) is wrapped in its own try/finally so
@@ -142,7 +142,14 @@ export default function Sales() {
     // though the save had already succeeded — permanently disabling the Save Day button, since
     // nothing else ever sets dailySaving back to false. The post-save reload now runs in its own
     // separate try/catch, entirely outside what gates the button, so it can never block it again.
+    // S453: even with the above, the button could still freeze forever if the DELETE/INSERT
+    // request itself never settles — no error, no success, just a stalled connection (proxy,
+    // VPN, flaky wifi) that the browser never times out on its own. abortSignal + a 20s
+    // setTimeout guarantees the request always settles one way or the other, so `finally` below
+    // is always reached and the button can never be stuck longer than 20s.
     let saveSucceeded = false
+    const abortCtl = new AbortController()
+    const timeoutId = setTimeout(() => abortCtl.abort(), 20000)
     try {
       const merged = {}
       const mergedDiscount = {}
@@ -157,7 +164,7 @@ export default function Sales() {
         const typedDisc = rawDisc !== undefined ? (rawDisc === '' ? 0 : parseFloat(rawDisc)) : null
         mergedDiscount[r.id] = (typedDisc !== null && !isNaN(typedDisc)) ? typedDisc : savedDisc
       })
-      const { error: delErr } = await supabase.from('sales_entries').delete().eq('period_id', selectedPeriod.id).eq('bs_day', selectedDay)
+      const { error: delErr } = await supabase.from('sales_entries').delete().eq('period_id', selectedPeriod.id).eq('bs_day', selectedDay).abortSignal(abortCtl.signal)
       if (delErr) throw new Error(delErr.message)
       // unit_price/vat_rate snapshot the recipe's price at entry time — manual entry has no other
       // price source, but capturing it now is still far more stable than every report joining the
@@ -173,7 +180,7 @@ export default function Sales() {
           discount: mergedDiscount[r.id] || 0,
         }))
       if (inserts.length > 0) {
-        const { error } = await supabase.from('sales_entries').insert(inserts)
+        const { error } = await supabase.from('sales_entries').insert(inserts).abortSignal(abortCtl.signal)
         if (error) throw new Error(error.message)
         // Bulk (bs_day=0) and Daily (bs_day>0) rows for the same recipe+period aren't mutually
         // exclusive at the DB level (unique constraint is period_id+recipe_id+bs_day, which differs
@@ -181,7 +188,7 @@ export default function Sales() {
         // with no bs_day distinction, so having both silently double-counts. Switching a recipe to
         // Daily mode here supersedes any bulk entry it had.
         const { error: clearErr } = await supabase.from('sales_entries').delete()
-          .eq('period_id', selectedPeriod.id).eq('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id))
+          .eq('period_id', selectedPeriod.id).eq('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id)).abortSignal(abortCtl.signal)
         if (clearErr) throw new Error(clearErr.message)
       }
       saveSucceeded = true
@@ -189,8 +196,12 @@ export default function Sales() {
       setTimeout(() => setDailySaved(false), 2500)
     } catch (err) {
       console.error('Daily save error:', err)
-      setDailySaveError(err.message || 'Failed to save — please try again.')
+      // postgrest-js converts an aborted fetch into a returned {error} rather than a thrown
+      // AbortError — by the time it reaches here it's a plain Error whose .message we wrapped
+      // ourselves above, so detect by substring rather than err.name/err.code.
+      setDailySaveError(/abort/i.test(err.message || '') ? 'Save timed out — check your connection and try again.' : (err.message || 'Failed to save — please try again.'))
     } finally {
+      clearTimeout(timeoutId)
       setDailySaving(false)
     }
     if (!saveSucceeded) return
@@ -248,15 +259,18 @@ export default function Sales() {
   }
 
   async function saveBulk() {
-    if (!selectedPeriod) return
+    if (!selectedPeriod || bulkSaving) return
     setBulkSaving(true)
     setBulkSaveError('')
     // The actual save is wrapped in its own try/finally so bulkSaving always resets the moment
     // the SAVE itself finishes. The post-save reload runs in a separate try/catch entirely
     // outside that — if a reload query ever hangs, it can no longer leave the Save button
     // permanently disabled the way it did before, since nothing else resets bulkSaving. See
-    // saveDaily for the fuller writeup (S449 → follow-up).
+    // saveDaily for the fuller writeup (S449 → follow-up). S453: abortSignal + timeout so a
+    // stalled connection on the request itself (not the reload) can't freeze the button either.
     let saveSucceeded = false
+    const abortCtl = new AbortController()
+    const timeoutId = setTimeout(() => abortCtl.abort(), 20000)
     try {
       // Merge: saved DB values as base, typed bulkForm values as override
       const merged = {}
@@ -271,6 +285,7 @@ export default function Sales() {
         .delete()
         .eq('period_id', selectedPeriod.id)
         .eq('bs_day', 0)
+        .abortSignal(abortCtl.signal)
       if (delErr) throw new Error(delErr.message)
 
       // unit_price/vat_rate snapshot the recipe's price at entry time — see saveDaily for why.
@@ -286,14 +301,14 @@ export default function Sales() {
         }))
 
       if (inserts.length > 0) {
-        const { error } = await supabase.from('sales_entries').insert(inserts)
+        const { error } = await supabase.from('sales_entries').insert(inserts).abortSignal(abortCtl.signal)
         if (error) throw new Error(error.message)
         // Same exclusivity guard as saveDaily — Bulk and Daily rows for the same recipe+period
         // aren't mutually exclusive at the DB level and every downstream report sums both with no
         // distinction, silently double-counting. Switching a recipe to Bulk here supersedes any
         // dated Daily entries it had.
         const { error: clearErr } = await supabase.from('sales_entries').delete()
-          .eq('period_id', selectedPeriod.id).gt('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id))
+          .eq('period_id', selectedPeriod.id).gt('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id)).abortSignal(abortCtl.signal)
         if (clearErr) throw new Error(clearErr.message)
       }
 
@@ -302,8 +317,9 @@ export default function Sales() {
       setTimeout(() => setBulkSaved(false), 2500)
     } catch (err) {
       console.error('Bulk save error:', err)
-      setBulkSaveError(err.message || 'Failed to save — please try again.')
+      setBulkSaveError(/abort/i.test(err.message || '') ? 'Save timed out — check your connection and try again.' : (err.message || 'Failed to save — please try again.'))
     } finally {
+      clearTimeout(timeoutId)
       setBulkSaving(false)
     }
     if (!saveSucceeded) return
