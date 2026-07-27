@@ -26,6 +26,7 @@ export default function Sales() {
   const [viewMode, setViewMode]     = useState('bulk') // bulk | summary
   const [sortBy, setSortBy]         = useState('rev_desc')
   const [categoryFilter, setCategoryFilter] = useState('all')
+  const [menuSearch, setMenuSearch] = useState('') // Daily Entry / Daily Breakdown only
   const [selectedDay, setSelectedDay] = useState(1)
   const [dailySales, setDailySales] = useState({})
   const [dailyForm, setDailyForm]   = useState({})
@@ -289,6 +290,14 @@ export default function Sales() {
 
   const categories = [...new Set(recipes.map(r => r.category).filter(Boolean))].sort()
 
+  // Daily Entry / Daily Breakdown only — a quick way to find one item among 90+ recipes. Totals
+  // on those tabs still sum every recipe regardless of this filter; it only narrows which rows
+  // are drawn, so it never looks like data quietly went missing from the day/period total.
+  const menuSearchLc = menuSearch.trim().toLowerCase()
+  const matchesMenuFilter = r =>
+    (categoryFilter === 'all' || r.category === categoryFilter) &&
+    (!menuSearchLc || r.name.toLowerCase().includes(menuSearchLc))
+
   const periodLabel = selectedPeriod
     ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
     : '—'
@@ -362,8 +371,23 @@ export default function Sales() {
             }}>{label}</button>
           ))}
         </div>
-        {viewMode === 'summary' && (
+        {(viewMode === 'daily' || viewMode === 'breakdown' || viewMode === 'summary') && (
           <div style={{ display: 'flex', gap: 8 }}>
+            {(viewMode === 'daily' || viewMode === 'breakdown') && (
+              <div style={{ position: 'relative', marginBottom: 6 }}>
+                <input
+                  value={menuSearch}
+                  onChange={e => setMenuSearch(e.target.value)}
+                  placeholder="Search menu item…"
+                  style={{ background: 'var(--theme-card)', border: `1px solid ${menuSearch ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 6, padding: '6px 10px 6px 28px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: 170, display: 'block' }}
+                />
+                <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
+                {menuSearch && (
+                  <button onClick={() => setMenuSearch('')} title="Clear"
+                    style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 4px' }}>×</button>
+                )}
+              </div>
+            )}
             <select
               value={categoryFilter}
               onChange={e => setCategoryFilter(e.target.value)}
@@ -372,18 +396,20 @@ export default function Sales() {
               <option value="all">All Categories</option>
               {categories.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select
-              value={sortBy}
-              onChange={e => setSortBy(e.target.value)}
-              style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', marginBottom: 6 }}
-            >
-              <option value="rev_desc">Highest Revenue</option>
-              <option value="rev_asc">Lowest Revenue</option>
-              <option value="qty_desc">Highest Qty Sold</option>
-              <option value="qty_asc">Lowest Qty Sold</option>
-              <option value="price_desc">Highest Selling Price</option>
-              <option value="price_asc">Lowest Selling Price</option>
-            </select>
+            {viewMode === 'summary' && (
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value)}
+                style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', marginBottom: 6 }}
+              >
+                <option value="rev_desc">Highest Revenue</option>
+                <option value="rev_asc">Lowest Revenue</option>
+                <option value="qty_desc">Highest Qty Sold</option>
+                <option value="qty_asc">Lowest Qty Sold</option>
+                <option value="price_desc">Highest Selling Price</option>
+                <option value="price_asc">Lowest Selling Price</option>
+              </select>
+            )}
           </div>
         )}
       </div>
@@ -593,7 +619,10 @@ export default function Sales() {
                       </tr>
                     </thead>
                     <tbody>
-                      {recipes.map(recipe => {
+                      {recipes.filter(matchesMenuFilter).length === 0 && (
+                        <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>No menu items match this filter.</td></tr>
+                      )}
+                      {recipes.filter(matchesMenuFilter).map(recipe => {
                         const rawVal = dailyForm[recipe.id] !== undefined ? dailyForm[recipe.id] : (dailySales[recipe.id] > 0 ? String(dailySales[recipe.id]) : '')
                         const qty = parseFloat(rawVal) || 0
                         const discRaw = getDailyDiscount(recipe.id)
@@ -692,9 +721,11 @@ export default function Sales() {
             const activeDays = [...new Set(monthlyEntries.filter(e => e.bs_day > 0).map(e => e.bs_day))].sort((a, b) => a - b)
             const hasBulk = monthlyEntries.some(e => e.bs_day === 0)
 
-            // Recipes with any sales
+            // Recipes with any sales, narrowed by the Category/Search filter — totals below
+            // (colTotal/grandTotal) are computed from this same filtered list, so they always
+            // describe exactly what's on screen.
             const activeRecipeIds = new Set(monthlyEntries.map(e => e.recipe_id))
-            const activeRecipes = recipes.filter(r => activeRecipeIds.has(r.id))
+            const activeRecipes = recipes.filter(r => activeRecipeIds.has(r.id) && matchesMenuFilter(r))
 
             const today = getBsToday()
             const isCurrentMonth = selectedPeriod && today.year === selectedPeriod.bs_year && today.month === selectedPeriod.bs_month
@@ -723,6 +754,9 @@ export default function Sales() {
                       </tr>
                     </thead>
                     <tbody>
+                      {activeRecipes.length === 0 && (
+                        <tr><td colSpan={2 + activeDays.length + (hasBulk ? 1 : 0) + 1} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>No menu items match this filter.</td></tr>
+                      )}
                       {activeRecipes.map(recipe => {
                         const total = rowTotal(recipe.id)
                         return (
