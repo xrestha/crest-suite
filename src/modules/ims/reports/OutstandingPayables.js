@@ -388,6 +388,9 @@ export default function OutstandingPayables() {
             const sorted = activeTab === 'outstanding' ? [...vBills].sort((a, b) => b.daysOld - a.daysOld) : vBills
             const cols = activeTab === 'outstanding' ? 10 : 6
             const vKeys = sorted.map(b => b.key)
+            const vBillTotal = sorted.reduce((s, b) => s + b.total, 0)
+            const vPaidTotal = sorted.reduce((s, b) => s + b.paid, 0)
+            const vRemainingTotal = sorted.reduce((s, b) => s + b.remaining, 0)
             return (
               <div key={vName} className="card" style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--theme-border)' }}>
@@ -572,6 +575,19 @@ export default function OutstandingPayables() {
                           </Fragment>
                         )
                       })}
+                      <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
+                        {activeTab === 'outstanding' ? (<>
+                          <td colSpan={4} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)', paddingTop: 12 }}>{vPaidTotal > 0 ? fmt(vPaidTotal) : '—'}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', paddingTop: 12 }}>{fmt(vRemainingTotal)}</td>
+                          <td colSpan={3} style={{ paddingTop: 12 }}></td>
+                        </>) : (<>
+                          <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
+                          <td colSpan={2} style={{ paddingTop: 12 }}></td>
+                        </>)}
+                      </tr>
                     </tbody>
                   </table>
                 </div>
