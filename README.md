@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S457 — 2026-07-27 — Typed confirmation before a save wipes the other entry mode's rows
+
+Built after this hazard bit during the S456 smoke test and **destroyed two rows of live client data** (MINERAL WATER BTL, Shrawan 4 and 7). Bulk (`bs_day 0`) and Daily (`bs_day > 0`) supersede each other per recipe across the **whole period**, not just the day on screen — so typing one number into Bulk Entry and hitting Save silently deleted that item's entire month of daily entries. Intended behaviour (every downstream report sums all rows with no `bs_day` distinction, so leaving both double-counts), but it was unbounded, unannounced, irreversible, and `sales_entries` has no audit trail to recover from. The agent it happened to had read the source first — a café manager stands no chance.
+
+New `findSupersededRows()` (in `persistSalesDay.js`) runs before every save and reports exactly what the payload would delete on the other side. It reads the period's opposite-mode rows and intersects client-side rather than sending `.in('recipe_id', [...])` — a 92-recipe menu would put ~3.4 kB of UUIDs in the query string, and an over-long URL is its own failure mode. A failed precheck **throws** rather than reporting "nothing to delete", since failing open would skip the warning entirely.
+
+`SupersedeConfirmModal.jsx` names each affected item with its entry count, total qty and exact days, then gates the action behind **typing `DELETE`**. Deliberately a typing gate, not an OK/Cancel: a one-click confirm gets muscle-memoried away within a week, and retyping the word forces the count to actually be read. Case-insensitive and trimmed — the point is deliberate retyping of the whole word, not case pedantry.
+
+`saveDaily`/`saveBulk` were also split into shared `requestSave` (session check → build payload → precheck → branch) and `commitSave` (the write), which deletes the two duplicated save bodies while keeping the post-save reload outside what gates the button (the S451 rule).
+
+Verified live against the real client account: typing a bulk qty for ACAI CLASSIC BRAZILIAN BOWL (8 dated entries, days 2–9) produced "Delete 8 daily entries?" listing all 8 days, with **one GET and zero writes**; the confirm button stayed disabled for `delet`/`DELETE ME`/empty and armed only on the exact word; Cancel left all 130 rows untouched. A save with nothing to supersede still commits directly in 533 ms with no modal, so the warning never becomes noise. 6 new tests (15 in the file), suite 115/115, build clean. `CACHE_NAME` → `crest-v22`.
+
 ### S456 — 2026-07-27 — Sales Entry save collapsed into one atomic RPC (closes the delete-without-insert data-loss window)
 
 Follow-up the S455 smoke test made urgent rather than theoretical. Saving a day was three sequential HTTP round trips — DELETE the day's rows, INSERT the replacements, DELETE the superseded cross-mode rows — so a stall between the first two left the day's rows deleted with nothing written back. That's data loss, not a failed save. The live smoke test measured one of these round trips at **12.4s** on the same connection that served its neighbours in under a second, and the S453/S454 guard gives up at 20s by design, so the window was reachable.
