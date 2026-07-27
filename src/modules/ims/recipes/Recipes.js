@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
+import { withTimeout } from '../../../utils/withTimeout'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
@@ -16,6 +17,13 @@ import RecipeCostCardPrint from './RecipeCostCardPrint'
 import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
 import { Navigate } from 'react-router-dom'
+
+// How long any single save request may hang before the button gives up and re-enables itself.
+// Same class of bug as Sales Entry's S449-S455: `save()` below is several sequential network
+// round trips with nothing guaranteeing any one of them ever settles, so a stalled connection
+// left "Saving…" stuck forever with no error — the button looked dead with no way to recover
+// short of reloading the page. withTimeout() races every call against this wall clock instead.
+const SAVE_TIMEOUT_MS = 20000
 
 export default function Recipes() {
   const { clientId, hasFeature, isAdmin, hasImsAccess } = useAuth()
@@ -215,16 +223,27 @@ export default function Recipes() {
   async function saveFcPct() {
     if (!selectedRecipe?.id) return
     setFcPctSaving(true)
+    setError('')
     const newVal = parseFloat(recipeForm.target_fc_pct) || 30
-    const { error } = await scopedUpdate('recipes', { target_fc_pct: newVal })
-      .eq('id', selectedRecipe.id)
-    if (!error) {
+    try {
+      const { error } = await withTimeout(
+        scopedUpdate('recipes', { target_fc_pct: newVal }).eq('id', selectedRecipe.id),
+        SAVE_TIMEOUT_MS, 'Save'
+      )
+      if (error) throw new Error(error.message)
       const strVal = String(newVal)
       setFcPctSaved(strVal)
       setSelectedRecipe(r => ({ ...r, target_fc_pct: newVal }))
       setRecipes(rs => rs.map(r => r.id === selectedRecipe.id ? { ...r, target_fc_pct: newVal } : r))
+    } catch (err) {
+      // Previously silent on any failure — the ● dot next to Target FC% would stay amber
+      // ("unsaved") forever with zero indication why, indistinguishable from just not having
+      // clicked Save yet. Now surfaces through the same error banner the main Save Recipe uses.
+      console.error('Target FC% save error:', err)
+      setError(err.message || 'Failed to save target FC% — please try again.')
+    } finally {
+      setFcPctSaving(false)
     }
-    setFcPctSaving(false)
   }
 
   function addRow() {
@@ -409,118 +428,136 @@ export default function Recipes() {
     setSaving(true)
     setError('')
 
-    const isSubRecipe = recipeForm.category === 'Sub-Recipe'
-    const payload = {
-      name: recipeForm.name.trim(),
-      category: recipeForm.category,
-      selling_price: !isSubRecipe && recipeForm.selling_price ? parseFloat(recipeForm.selling_price) : null,
-      vat_rate: (recipeForm.vat_rate === '' || recipeForm.vat_rate == null) ? 0.13 : parseFloat(recipeForm.vat_rate),
-      yield_qty: parseFloat(recipeForm.yield_qty) || 1,
-      yield_uom: recipeForm.yield_uom || 'portion',
-      target_fc_pct: parseFloat(recipeForm.target_fc_pct) || 30,
-      is_active: true,
-      // Guest-facing QR menu fields — all optional, blank means "not shown" on that page.
-      description: recipeForm.description.trim() || null,
-      image_url: recipeForm.image_url.trim() || null,
-      is_veg: recipeForm.is_veg === 'veg' ? true : recipeForm.is_veg === 'non_veg' ? false : null
-    }
-
-    let recipeId
-    if (selectedRecipe) {
-      const { error } = await scopedUpdate('recipes', payload).eq('id', selectedRecipe.id)
-      if (error) { setError(error.message); setSaving(false); return }
-      recipeId = selectedRecipe.id
-    } else if (isSubRecipe) {
-      // getNextSubRecipeCode() computes from in-memory state, not a DB sequence — a genuine
-      // collision (two tabs, a fast double-click) is now caught by a per-client unique index on
-      // recipe_code instead of silently succeeding twice. Retry with a freshly recomputed code a
-      // few times before giving up, rather than surfacing a raw constraint-violation error.
-      let data, error
-      for (let attempt = 0; attempt < 3; attempt++) {
-        payload.recipe_code = getNextSubRecipeCode()
-        ;({ data, error } = await scopedInsert('recipes', payload, { single: true }))
-        if (!error || error.code !== '23505') break
-      }
-      if (error) { setError(error.message); setSaving(false); return }
-      recipeId = data.id
-    } else {
-      const { data, error } = await scopedInsert('recipes', payload, { single: true })
-      if (error) { setError(error.message); setSaving(false); return }
-      recipeId = data.id
-    }
-
-    const ingPayload = validIngs.map(ing => ({
-      recipe_id: recipeId,
-      item_id: ing.type === 'item' ? ing.item_id : null,
-      sub_recipe_id: ing.type === 'sub_recipe' ? ing.sub_recipe_id : null,
-      qty_per_portion: parseFloat(ing.qty_per_portion)
-    }))
-
-    // Insert the new ingredient rows BEFORE removing the old ones (not delete-then-insert) — if
-    // the insert fails partway (network blip, an ingredient's item/sub-recipe deleted mid-edit),
-    // the recipe keeps its previous, still-valid ingredient list instead of being left with zero.
-    // Upsert (not insert) — an ingredient row whose item_id is unchanged from before this save
-    // would otherwise collide with its own still-present old row on the recipe_id+item_id unique
-    // constraint, since the old row isn't deleted until after this call succeeds. sub_recipe_id
-    // rows (item_id null) never match the conflict target, so they always insert fresh as before.
-    const { data: insertedIngs, error: ingError } = await supabase.from('recipe_ingredients')
-      .upsert(ingPayload, { onConflict: 'recipe_id,item_id' }).select('id')
-    if (ingError) { setError(ingError.message); setSaving(false); return }
-    if (selectedRecipe) {
-      const newIds = (insertedIngs || []).map(r => r.id)
-      await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId).not('id', 'in', `(${newIds.join(',')})`)
-    }
-
-    if (isSubRecipe) {
-      const cpu = liveCost / (parseFloat(recipeForm.yield_qty) || 1)
-      const uom = recipeForm.yield_uom || 'portion'
-      // Ensure "Sub-Recipes" category exists
-      let srCategoryId = null
-      const { data: existingCat } = await scopedFrom('categories', 'id').eq('name', 'Sub-Recipes').maybeSingle()
-      if (existingCat) {
-        srCategoryId = existingCat.id
-      } else {
-        const { data: newCat, error: catErr } = await scopedInsert('categories', { name: 'Sub-Recipes', sort_order: 999 }, { single: true })
-        if (catErr) { setError('SR sync — category create failed: ' + catErr.message); setSaving(false); return }
-        srCategoryId = newCat?.id || null
-      }
-
-      const itemPayload = {
-        name: recipeForm.name.trim().toUpperCase(),
-        uom,
-        category_id: srCategoryId,
-        purchase_qty: 1,
-        rate: parseFloat(cpu.toFixed(4)),
+    // Every awaited call below is wrapped in withTimeout so this multi-step save can never
+    // freeze the button forever the way it used to (S459 — same root cause as Sales Entry's
+    // S449-S455: a stalled request that never resolves or rejects). Each `if (error) throw`
+    // is caught by the try/catch below, which is also the ONLY place setSaving(false) needs to
+    // run — one finally covers every early-exit path instead of repeating the reset at each one.
+    try {
+      const isSubRecipe = recipeForm.category === 'Sub-Recipe'
+      const payload = {
+        name: recipeForm.name.trim(),
+        category: recipeForm.category,
+        selling_price: !isSubRecipe && recipeForm.selling_price ? parseFloat(recipeForm.selling_price) : null,
+        vat_rate: (recipeForm.vat_rate === '' || recipeForm.vat_rate == null) ? 0.13 : parseFloat(recipeForm.vat_rate),
+        yield_qty: parseFloat(recipeForm.yield_qty) || 1,
+        yield_uom: recipeForm.yield_uom || 'portion',
+        target_fc_pct: parseFloat(recipeForm.target_fc_pct) || 30,
         is_active: true,
-        is_sub_recipe: true,
+        // Guest-facing QR menu fields — all optional, blank means "not shown" on that page.
+        description: recipeForm.description.trim() || null,
+        image_url: recipeForm.image_url.trim() || null,
+        is_veg: recipeForm.is_veg === 'veg' ? true : recipeForm.is_veg === 'non_veg' ? false : null
       }
 
-      const existingLinkedId = selectedRecipe?.linked_item_id
-      let linkedItemId = existingLinkedId
-      if (existingLinkedId) {
-        const { error: updateErr } = await scopedUpdate('items', itemPayload).eq('id', existingLinkedId)
-        if (updateErr) { setError('SR sync — item update failed: ' + updateErr.message); setSaving(false); return }
+      let recipeId
+      if (selectedRecipe) {
+        const { error } = await withTimeout(scopedUpdate('recipes', payload).eq('id', selectedRecipe.id), SAVE_TIMEOUT_MS, 'Save')
+        if (error) throw new Error(error.message)
+        recipeId = selectedRecipe.id
+      } else if (isSubRecipe) {
+        // getNextSubRecipeCode() computes from in-memory state, not a DB sequence — a genuine
+        // collision (two tabs, a fast double-click) is now caught by a per-client unique index on
+        // recipe_code instead of silently succeeding twice. Retry with a freshly recomputed code a
+        // few times before giving up, rather than surfacing a raw constraint-violation error.
+        let data, error
+        for (let attempt = 0; attempt < 3; attempt++) {
+          payload.recipe_code = getNextSubRecipeCode()
+          ;({ data, error } = await withTimeout(scopedInsert('recipes', payload, { single: true }), SAVE_TIMEOUT_MS, 'Save'))
+          if (!error || error.code !== '23505') break
+        }
+        if (error) throw new Error(error.message)
+        recipeId = data.id
       } else {
-        itemPayload.item_code = payload.recipe_code || selectedRecipe?.recipe_code || null
-        const { data: newItem, error: insertErr } = await scopedInsert('items', itemPayload, { single: true })
-        if (insertErr) { setError('SR sync — item insert failed: ' + insertErr.message); setSaving(false); return }
-        linkedItemId = newItem?.id
+        const { data, error } = await withTimeout(scopedInsert('recipes', payload, { single: true }), SAVE_TIMEOUT_MS, 'Save')
+        if (error) throw new Error(error.message)
+        recipeId = data.id
       }
-      if (linkedItemId) {
-        await scopedUpdate('recipes', { linked_item_id: linkedItemId }).eq('id', recipeId)
-      }
-    } else if (selectedRecipe?.linked_item_id) {
-      // This recipe WAS a sub-recipe (had a mirror item) but its category was just changed away
-      // from "Sub-Recipe" — the sync block above only ever runs `if (isSubRecipe)`, so without
-      // this the mirror row in `items` stayed is_active/is_sub_recipe=true forever, frozen at its
-      // last cost, orphaned from the recipe that used to own it.
-      await scopedUpdate('items', { is_active: false }).eq('id', selectedRecipe.linked_item_id)
-      await scopedUpdate('recipes', { linked_item_id: null }).eq('id', recipeId)
-    }
 
-    await init()
-    setSaving(false)
-    setView('list')
+      const ingPayload = validIngs.map(ing => ({
+        recipe_id: recipeId,
+        item_id: ing.type === 'item' ? ing.item_id : null,
+        sub_recipe_id: ing.type === 'sub_recipe' ? ing.sub_recipe_id : null,
+        qty_per_portion: parseFloat(ing.qty_per_portion)
+      }))
+
+      // Insert the new ingredient rows BEFORE removing the old ones (not delete-then-insert) — if
+      // the insert fails partway (network blip, an ingredient's item/sub-recipe deleted mid-edit),
+      // the recipe keeps its previous, still-valid ingredient list instead of being left with zero.
+      // Upsert (not insert) — an ingredient row whose item_id is unchanged from before this save
+      // would otherwise collide with its own still-present old row on the recipe_id+item_id unique
+      // constraint, since the old row isn't deleted until after this call succeeds. sub_recipe_id
+      // rows (item_id null) never match the conflict target, so they always insert fresh as before.
+      const { data: insertedIngs, error: ingError } = await withTimeout(
+        supabase.from('recipe_ingredients').upsert(ingPayload, { onConflict: 'recipe_id,item_id' }).select('id'),
+        SAVE_TIMEOUT_MS, 'Save'
+      )
+      if (ingError) throw new Error(ingError.message)
+      if (selectedRecipe) {
+        const newIds = (insertedIngs || []).map(r => r.id)
+        await withTimeout(
+          supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId).not('id', 'in', `(${newIds.join(',')})`),
+          SAVE_TIMEOUT_MS, 'Save'
+        )
+      }
+
+      if (isSubRecipe) {
+        const cpu = liveCost / (parseFloat(recipeForm.yield_qty) || 1)
+        const uom = recipeForm.yield_uom || 'portion'
+        // Ensure "Sub-Recipes" category exists
+        let srCategoryId = null
+        const { data: existingCat } = await withTimeout(scopedFrom('categories', 'id').eq('name', 'Sub-Recipes').maybeSingle(), SAVE_TIMEOUT_MS, 'Save')
+        if (existingCat) {
+          srCategoryId = existingCat.id
+        } else {
+          const { data: newCat, error: catErr } = await withTimeout(
+            scopedInsert('categories', { name: 'Sub-Recipes', sort_order: 999 }, { single: true }), SAVE_TIMEOUT_MS, 'Save'
+          )
+          if (catErr) throw new Error('SR sync — category create failed: ' + catErr.message)
+          srCategoryId = newCat?.id || null
+        }
+
+        const itemPayload = {
+          name: recipeForm.name.trim().toUpperCase(),
+          uom,
+          category_id: srCategoryId,
+          purchase_qty: 1,
+          rate: parseFloat(cpu.toFixed(4)),
+          is_active: true,
+          is_sub_recipe: true,
+        }
+
+        const existingLinkedId = selectedRecipe?.linked_item_id
+        let linkedItemId = existingLinkedId
+        if (existingLinkedId) {
+          const { error: updateErr } = await withTimeout(scopedUpdate('items', itemPayload).eq('id', existingLinkedId), SAVE_TIMEOUT_MS, 'Save')
+          if (updateErr) throw new Error('SR sync — item update failed: ' + updateErr.message)
+        } else {
+          itemPayload.item_code = payload.recipe_code || selectedRecipe?.recipe_code || null
+          const { data: newItem, error: insertErr } = await withTimeout(scopedInsert('items', itemPayload, { single: true }), SAVE_TIMEOUT_MS, 'Save')
+          if (insertErr) throw new Error('SR sync — item insert failed: ' + insertErr.message)
+          linkedItemId = newItem?.id
+        }
+        if (linkedItemId) {
+          await withTimeout(scopedUpdate('recipes', { linked_item_id: linkedItemId }).eq('id', recipeId), SAVE_TIMEOUT_MS, 'Save')
+        }
+      } else if (selectedRecipe?.linked_item_id) {
+        // This recipe WAS a sub-recipe (had a mirror item) but its category was just changed away
+        // from "Sub-Recipe" — the sync block above only ever runs `if (isSubRecipe)`, so without
+        // this the mirror row in `items` stayed is_active/is_sub_recipe=true forever, frozen at its
+        // last cost, orphaned from the recipe that used to own it.
+        await withTimeout(scopedUpdate('items', { is_active: false }).eq('id', selectedRecipe.linked_item_id), SAVE_TIMEOUT_MS, 'Save')
+        await withTimeout(scopedUpdate('recipes', { linked_item_id: null }).eq('id', recipeId), SAVE_TIMEOUT_MS, 'Save')
+      }
+
+      await init()
+      setView('list')
+    } catch (err) {
+      console.error('Recipe save error:', err)
+      setError(/timed out/i.test(err.message || '') ? err.message : (err.message || 'Failed to save — please try again.'))
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function deleteRecipe(recipe) {

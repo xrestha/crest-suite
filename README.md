@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S459 — 2026-07-27 — Recipe Costing hit the same frozen-Save bug as Sales Entry, for the same reason
+
+User reported the exact "Saving…" freeze on Recipe Costing's Save Recipe button. `Recipes.js`'s `save()` was never touched during the S449-S455 investigation (that was scoped to `Sales.js`), so it never got any of that work's protection — same root cause, unaddressed on a different page. It's a longer chain than Sales Entry ever was: up to 8 sequential round trips depending on branch (recipe upsert → ingredient upsert → cleanup delete → sub-recipe category lookup/create → mirror-item update/insert → linked_item_id update), any one of which hanging left `setSaving(true)` stuck forever with zero error, exactly like pre-S453 Sales Entry — and with more round trips than Sales Entry ever had, proportionally more exposed to a stall landing mid-sequence.
+
+Fixed the same way: every awaited call in `save()` now goes through `withTimeout()` (20s), and the function's dozen individual `if (error) { setError(...); setSaving(false); return }` early-returns were collapsed into `if (error) throw new Error(...)` inside one `try/catch/finally` — a single `finally { setSaving(false) }` now covers every exit path instead of repeating the reset at each one, which also means a future added step can't accidentally reintroduce this bug by forgetting the reset. `saveFcPct()` (the inline Target FC% save next to it) got the same treatment plus something it never had at all: **it previously swallowed every error silently** — a failed save left the unsaved-changes dot amber forever with no indication anything was wrong, indistinguishable from just not having clicked Save. It now surfaces through the same error banner `save()` uses.
+
+Recipe Costing already had the good "insert-before-delete" pattern for ingredient rows (matching Purchases' bill-edit approach) — that part didn't need fixing, only the missing timeout around each step.
+
+Not fixed here, flagged instead: `deleteRecipe()` (recipe_ingredients delete → item deactivate → recipe delete, 3 steps, no loading state at all) and `saveNutritionTargets()` have the identical unprotected-multi-step shape but weren't the reported symptom and have no visible "stuck" UI to freeze (no spinner tied to either). Same audit lens as S458's Stock Count/Purchases review — worth a pass, not bundled into this hotfix.
+
+Build clean. `CACHE_NAME` → `crest-v24`.
+
 ### S458 — 2026-07-27 — Session no longer expires out from under a long data-entry session
 
 The user reported still hitting "Your login session has stopped responding" while doing normal work, with the point that **data entry legitimately takes a human a long time** and a session limit that fights that is a product defect, not a user error. Correct on both counts, and the immediate cause was a fix from S454 rather than the original bug.
