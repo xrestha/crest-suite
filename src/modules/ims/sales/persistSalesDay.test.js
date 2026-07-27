@@ -1,18 +1,23 @@
-import { persistSalesDay, isMissingFunctionError } from './persistSalesDay'
+import { persistSalesDay, isMissingFunctionError, findSupersededRows } from './persistSalesDay'
 
 // Minimal stand-in for a PostgrestBuilder: chainable, records what was called on it, and is
 // thenable (the real builder is a thenable too, not a Promise — see withTimeout.js).
-function makeMockSupabase({ rpcResult = { error: null }, tableResult = { error: null } } = {}) {
+function makeMockSupabase({ rpcResult = { error: null }, tableResult = { error: null }, selectResult } = {}) {
   const calls = []
 
   const builder = (rec) => {
     calls.push(rec)
+    const result = () => {
+      if (rec.kind === 'rpc') return rpcResult
+      if (rec.kind === 'select') return selectResult ?? { data: [], error: null }
+      return tableResult
+    }
     const b = {
       eq: (c, v) => { rec.filters.push(['eq', c, v]); return b },
       gt: (c, v) => { rec.filters.push(['gt', c, v]); return b },
       in: (c, v) => { rec.filters.push(['in', c, v]); return b },
       abortSignal: (s) => { rec.signal = s; return b },
-      then: (res, rej) => Promise.resolve(rec.kind === 'rpc' ? rpcResult : tableResult).then(res, rej),
+      then: (res, rej) => Promise.resolve(result()).then(res, rej),
     }
     return b
   }
@@ -23,6 +28,7 @@ function makeMockSupabase({ rpcResult = { error: null }, tableResult = { error: 
     from: () => ({
       delete: () => builder({ kind: 'delete', filters: [] }),
       insert: (rows) => builder({ kind: 'insert', rows, filters: [] }),
+      select: (cols) => builder({ kind: 'select', cols, filters: [] }),
     }),
   }
 }
@@ -108,5 +114,68 @@ describe('persistSalesDay — legacy fallback (migration not yet applied)', () =
   test('surfaces a legacy delete error', async () => {
     const sb = makeMockSupabase({ rpcResult: MISSING_FN, tableResult: { error: { message: 'delete blocked' } } })
     await expect(persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })).rejects.toThrow('delete blocked')
+  })
+})
+
+describe('findSupersededRows — what a save will silently delete (S457)', () => {
+  test('Bulk save: finds the dated rows it would wipe, across the WHOLE period', async () => {
+    // This is the case that ate live data on 2026-07-27: one bulk figure for an item silently
+    // deleted that item's entries on days the user wasn't even looking at.
+    const sb = makeMockSupabase({
+      selectResult: { data: [
+        { recipe_id: 'r1', bs_day: 4, qty_sold: 2 },
+        { recipe_id: 'r1', bs_day: 7, qty_sold: 3 },
+        { recipe_id: 'other', bs_day: 5, qty_sold: 9 }, // not in the payload — must be ignored
+      ], error: null },
+    })
+
+    const res = await findSupersededRows(sb, { periodId: 'p1', bsDay: 0, recipeIds: ['r1'] })
+
+    expect(res.total).toBe(2)
+    expect(res.byRecipe).toEqual([{ recipeId: 'r1', count: 2, days: [4, 7], qty: 5 }])
+    expect(sb.calls[0].filters).toEqual([['eq', 'period_id', 'p1'], ['gt', 'bs_day', 0]])
+  })
+
+  test('Daily save: looks at the Bulk row instead', async () => {
+    const sb = makeMockSupabase({ selectResult: { data: [{ recipe_id: 'r1', bs_day: 0, qty_sold: 6 }], error: null } })
+    const res = await findSupersededRows(sb, { periodId: 'p1', bsDay: 11, recipeIds: ['r1'] })
+
+    expect(res.total).toBe(1)
+    expect(res.byRecipe[0].days).toEqual([]) // bs_day 0 isn't a "day" to list
+    expect(sb.calls[0].filters).toEqual([['eq', 'period_id', 'p1'], ['eq', 'bs_day', 0]])
+  })
+
+  test('nothing to supersede → total 0, so no confirmation is shown', async () => {
+    const sb = makeMockSupabase({ selectResult: { data: [], error: null } })
+    const res = await findSupersededRows(sb, { periodId: 'p1', bsDay: 0, recipeIds: ['r1'] })
+    expect(res).toEqual({ total: 0, byRecipe: [] })
+  })
+
+  test('empty payload short-circuits without querying at all', async () => {
+    const sb = makeMockSupabase()
+    const res = await findSupersededRows(sb, { periodId: 'p1', bsDay: 0, recipeIds: [] })
+    expect(res).toEqual({ total: 0, byRecipe: [] })
+    expect(sb.calls).toHaveLength(0)
+  })
+
+  test('sorts the biggest losses first, so the worst case is what the user reads', async () => {
+    const sb = makeMockSupabase({
+      selectResult: { data: [
+        { recipe_id: 'small', bs_day: 1, qty_sold: 1 },
+        { recipe_id: 'big', bs_day: 1, qty_sold: 1 },
+        { recipe_id: 'big', bs_day: 2, qty_sold: 1 },
+        { recipe_id: 'big', bs_day: 3, qty_sold: 1 },
+      ], error: null },
+    })
+    const res = await findSupersededRows(sb, { periodId: 'p1', bsDay: 0, recipeIds: ['small', 'big'] })
+    expect(res.byRecipe.map(e => e.recipeId)).toEqual(['big', 'small'])
+    expect(res.total).toBe(4)
+  })
+
+  test('a failed precheck throws rather than silently reporting "nothing to delete"', async () => {
+    // Failing open here would be the worst outcome: it would skip the warning entirely.
+    const sb = makeMockSupabase({ selectResult: { data: null, error: { message: 'permission denied' } } })
+    await expect(findSupersededRows(sb, { periodId: 'p1', bsDay: 0, recipeIds: ['r1'] }))
+      .rejects.toThrow('permission denied')
   })
 })

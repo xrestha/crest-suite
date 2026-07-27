@@ -8,7 +8,8 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
 import { withTimeout } from '../../../utils/withTimeout'
-import { persistSalesDay, SAVE_TIMEOUT_MS } from './persistSalesDay'
+import { persistSalesDay, findSupersededRows, SAVE_TIMEOUT_MS } from './persistSalesDay'
+import SupersedeConfirmModal from './SupersedeConfirmModal'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 // Every supabase-js call awaits auth.getSession() before it ever reaches fetch(), so a stuck
@@ -61,6 +62,9 @@ export default function Sales() {
   const [allDayDiscounts, setAllDayDiscounts] = useState({}) // recipe_id -> total discount across all days
   const [monthlyEntries, setMonthlyEntries] = useState([])
   const [monthlyLoading, setMonthlyLoading] = useState(false)
+  // Set when a save is staged behind the typed-confirmation modal because it would delete the
+  // opposite mode's rows: { mode, rows, superseded }. See findSupersededRows() (S457).
+  const [pendingSave, setPendingSave] = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -148,10 +152,117 @@ export default function Sales() {
     setMonthlyLoading(false)
   }
 
-  async function saveDaily() {
-    if (!selectedPeriod || dailySaving) return
-    setDailySaving(true)
-    setDailySaveError('')
+  // Build the payload each mode would write. Kept separate from the save itself so the
+  // "what will this delete?" precheck can run against the exact rows about to be sent.
+  function buildDailyRows() {
+    const merged = {}
+    const mergedDiscount = {}
+    recipes.forEach(r => {
+      const saved = dailySales[r.id] || 0
+      const raw = dailyForm[r.id]
+      const typed = raw !== undefined ? (raw === '' ? 0 : parseFloat(raw)) : null
+      merged[r.id] = (typed !== null && !isNaN(typed)) ? typed : saved
+
+      const savedDisc = dailyDiscounts[r.id] || 0
+      const rawDisc = discountForm[r.id]
+      const typedDisc = rawDisc !== undefined ? (rawDisc === '' ? 0 : parseFloat(rawDisc)) : null
+      mergedDiscount[r.id] = (typedDisc !== null && !isNaN(typedDisc)) ? typedDisc : savedDisc
+    })
+    // unit_price/vat_rate snapshot the recipe's price at entry time — manual entry has no other
+    // price source, but capturing it now is still far more stable than every report joining the
+    // recipe's CURRENT price at view time (which used to silently reprice past periods' revenue
+    // whenever a menu price changed later). discount is the per-day/per-item NPR reduction (from
+    // the vendor Excel import or typed manually) — kept as its own column rather than folded into
+    // unit_price so it stays a separately editable, auditable figure.
+    return recipes
+      .filter(r => (merged[r.id] || 0) > 0)
+      .map(r => ({
+        recipe_id: r.id, qty_sold: merged[r.id],
+        unit_price: parseFloat(r.selling_price) || 0, vat_rate: r.vat_rate,
+        discount: mergedDiscount[r.id] || 0,
+      }))
+  }
+
+  function buildBulkRows() {
+    // Merge: saved DB values as base, typed bulkForm values as override
+    const merged = {}
+    recipes.forEach(r => {
+      const saved = sales[r.id] || 0
+      const typed = bulkForm[r.id] !== undefined ? parseFloat(bulkForm[r.id]) : null
+      merged[r.id] = typed !== null ? typed : saved
+    })
+    // Bulk rows carry no discount of their own (Daily Entry owns that field), so the RPC's
+    // COALESCE leaves it at the column default of 0 — same as the old insert did.
+    return recipes
+      .filter(r => (merged[r.id] || 0) > 0)
+      .map(r => ({
+        recipe_id: r.id, qty_sold: merged[r.id],
+        unit_price: parseFloat(r.selling_price) || 0, vat_rate: r.vat_rate,
+      }))
+  }
+
+  function saveErrorMessage(err) {
+    // withTimeout's own message is already user-facing. postgrest-js converts an aborted fetch
+    // into a returned {error} rather than a thrown AbortError, so that path arrives here as a
+    // plain Error whose message we wrapped above — detect it by substring, not err.name.
+    if (/abort/i.test(err.message || '')) return 'Save timed out — check your connection and try again.'
+    return err.message || 'Failed to save — please try again.'
+  }
+
+  // Step 1 of a save: verify the session, build the payload, and find out what this save would
+  // silently delete on the other side (Bulk vs Daily supersede each other per recipe, across the
+  // whole period). Anything to delete → hand off to the typed-confirmation modal; otherwise commit
+  // straight away. See findSupersededRows() for why this warning exists (S457).
+  async function requestSave(mode) {
+    if (!selectedPeriod) return
+    const isBulk = mode === 'bulk'
+    if (isBulk ? bulkSaving : dailySaving) return
+    const setSaving = isBulk ? setBulkSaving : setDailySaving
+    const setErr = isBulk ? setBulkSaveError : setDailySaveError
+
+    setSaving(true)
+    setErr('')
+    const abortCtl = new AbortController()
+    const timeoutId = setTimeout(() => abortCtl.abort(), SAVE_TIMEOUT_MS)
+    let prepared = null
+    try {
+      await assertSessionHealthy()
+      const rows = isBulk ? buildBulkRows() : buildDailyRows()
+      const superseded = rows.length
+        ? await findSupersededRows(supabase, {
+            periodId: selectedPeriod.id,
+            bsDay: isBulk ? 0 : selectedDay,
+            recipeIds: rows.map(r => r.recipe_id),
+            signal: abortCtl.signal,
+          })
+        : { total: 0, byRecipe: [] }
+      prepared = { rows, superseded }
+    } catch (err) {
+      console.error(`${mode} save precheck error:`, err)
+      setErr(saveErrorMessage(err))
+    } finally {
+      clearTimeout(timeoutId)
+      setSaving(false)
+    }
+    if (!prepared) return
+
+    if (prepared.superseded.total > 0) {
+      setPendingSave({ mode, rows: prepared.rows, superseded: prepared.superseded })
+      return
+    }
+    await commitSave(mode, prepared.rows)
+  }
+
+  // Step 2: the write itself. Reached either directly (nothing to supersede) or from the modal.
+  async function commitSave(mode, rows) {
+    if (!selectedPeriod) return
+    const isBulk = mode === 'bulk'
+    const setSaving = isBulk ? setBulkSaving : setDailySaving
+    const setErr = isBulk ? setBulkSaveError : setDailySaveError
+    const setSaved = isBulk ? setBulkSaved : setDailySaved
+
+    setSaving(true)
+    setErr('')
     // The actual save (delete/insert/cleanup-delete) is wrapped in its own try/finally so
     // dailySaving always resets the moment the SAVE itself finishes — regardless of success or
     // thrown error. Found live (S449): with the reload below inside the same try/finally, a
@@ -173,62 +284,42 @@ export default function Sales() {
     const abortCtl = new AbortController()
     const timeoutId = setTimeout(() => abortCtl.abort(), SAVE_TIMEOUT_MS)
     try {
-      await assertSessionHealthy()
-      const merged = {}
-      const mergedDiscount = {}
-      recipes.forEach(r => {
-        const saved = dailySales[r.id] || 0
-        const raw = dailyForm[r.id]
-        const typed = raw !== undefined ? (raw === '' ? 0 : parseFloat(raw)) : null
-        merged[r.id] = (typed !== null && !isNaN(typed)) ? typed : saved
-
-        const savedDisc = dailyDiscounts[r.id] || 0
-        const rawDisc = discountForm[r.id]
-        const typedDisc = rawDisc !== undefined ? (rawDisc === '' ? 0 : parseFloat(rawDisc)) : null
-        mergedDiscount[r.id] = (typedDisc !== null && !isNaN(typedDisc)) ? typedDisc : savedDisc
-      })
-      // unit_price/vat_rate snapshot the recipe's price at entry time — manual entry has no other
-      // price source, but capturing it now is still far more stable than every report joining the
-      // recipe's CURRENT price at view time (which used to silently reprice past periods' revenue
-      // whenever a menu price changed later). discount is the per-day/per-item NPR reduction (from
-      // the vendor Excel import or typed manually) — kept as its own column rather than folded into
-      // unit_price so it stays a separately editable, auditable figure.
-      const rows = recipes
-        .filter(r => (merged[r.id] || 0) > 0)
-        .map(r => ({
-          recipe_id: r.id, qty_sold: merged[r.id],
-          unit_price: parseFloat(r.selling_price) || 0, vat_rate: r.vat_rate,
-          discount: mergedDiscount[r.id] || 0,
-        }))
       // One atomic RPC: delete + insert + cross-mode cleanup in a single transaction, so a stall
       // can no longer leave this day deleted with nothing written back (S456).
       await persistSalesDay(supabase, {
-        periodId: selectedPeriod.id, bsDay: selectedDay, rows, signal: abortCtl.signal,
+        periodId: selectedPeriod.id, bsDay: isBulk ? 0 : selectedDay, rows, signal: abortCtl.signal,
       })
       saveSucceeded = true
-      setDailySaved(true)
-      setTimeout(() => setDailySaved(false), 2500)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
     } catch (err) {
-      console.error('Daily save error:', err)
-      // withTimeout's own message is already user-facing. postgrest-js converts an aborted fetch
-      // into a returned {error} rather than a thrown AbortError, so that path arrives here as a
-      // plain Error whose message we wrapped above — detect it by substring, not err.name.
-      setDailySaveError(/abort/i.test(err.message || '') ? 'Save timed out — check your connection and try again.' : (err.message || 'Failed to save — please try again.'))
+      console.error(`${mode} save error:`, err)
+      setErr(saveErrorMessage(err))
     } finally {
       clearTimeout(timeoutId)
-      setDailySaving(false)
+      setSaving(false)
     }
     if (!saveSucceeded) return
-    // Refresh the displayed data — best-effort. loadSales too, since a bulk row may have just
-    // been cleared by the cross-mode delete above and the Bulk tab's `sales` map would otherwise
-    // stay stale until the next period switch. If this hangs or fails, the save itself already
-    // succeeded; the table just won't reflect it until the next reload/page refresh.
+    // Refresh the displayed data — best-effort. Both modes reload both maps, since a save in
+    // either one may have just superseded rows belonging to the other. If this hangs or fails,
+    // the save itself already succeeded; the table just won't reflect it until the next reload.
     try {
-      await Promise.all([loadDailySales(selectedPeriod.id, selectedDay), loadAllDaySums(selectedPeriod.id), loadSales(selectedPeriod.id)])
+      const reloads = [loadAllDaySums(selectedPeriod.id), loadSales(selectedPeriod.id)]
+      if (!isBulk) reloads.push(loadDailySales(selectedPeriod.id, selectedDay))
+      await Promise.all(reloads)
     } catch (err) {
-      console.error('Daily post-save reload error:', err)
+      console.error(`${mode} post-save reload error:`, err)
     }
   }
+
+  async function confirmPendingSave() {
+    const pending = pendingSave
+    setPendingSave(null)
+    if (pending) await commitSave(pending.mode, pending.rows)
+  }
+
+  // recipe_id → name, so the confirmation modal can name what it's about to delete.
+  const recipeNames = recipes.reduce((m, r) => { m[r.id] = r.name; return m }, {})
 
   // From SalesImportButton — writes only into dailyForm/discountForm, the same local state the
   // manual qty/discount inputs below already use. Nothing is persisted until Save Day is clicked.
@@ -272,66 +363,6 @@ export default function Sales() {
     return saved > 0 ? String(saved) : ''
   }
 
-  async function saveBulk() {
-    if (!selectedPeriod || bulkSaving) return
-    setBulkSaving(true)
-    setBulkSaveError('')
-    // The actual save is wrapped in its own try/finally so bulkSaving always resets the moment
-    // the SAVE itself finishes. The post-save reload runs in a separate try/catch entirely
-    // outside that — if a reload query ever hangs, it can no longer leave the Save button
-    // permanently disabled the way it did before, since nothing else resets bulkSaving. See
-    // saveDaily for the fuller writeup (S449 → follow-up). S453: abortSignal + timeout so a
-    // stalled connection on the request itself (not the reload) can't freeze the button either.
-    // S454: plus withTimeout(), because abortSignal can't rescue a hang that happens before
-    // supabase-js ever reaches fetch() — see src/utils/withTimeout.js.
-    let saveSucceeded = false
-    const abortCtl = new AbortController()
-    const timeoutId = setTimeout(() => abortCtl.abort(), SAVE_TIMEOUT_MS)
-    try {
-      await assertSessionHealthy()
-      // Merge: saved DB values as base, typed bulkForm values as override
-      const merged = {}
-      recipes.forEach(r => {
-        const saved = sales[r.id] || 0
-        const typed = bulkForm[r.id] !== undefined ? parseFloat(bulkForm[r.id]) : null
-        merged[r.id] = typed !== null ? typed : saved
-      })
-
-      // unit_price/vat_rate snapshot the recipe's price at entry time — see saveDaily for why.
-      // Bulk rows carry no discount column of their own (Daily Entry owns that field), so the
-      // RPC's COALESCE leaves it at the column default of 0 — same as the old insert did.
-      const rows = recipes
-        .filter(r => (merged[r.id] || 0) > 0)
-        .map(r => ({
-          recipe_id: r.id,
-          qty_sold: merged[r.id],
-          unit_price: parseFloat(r.selling_price) || 0,
-          vat_rate: r.vat_rate,
-        }))
-
-      // bsDay 0 = the Bulk row. Same atomic RPC as Daily; it flips the cross-mode cleanup to
-      // "supersede the dated rows" based on that 0. See persistSalesDay.js (S456).
-      await persistSalesDay(supabase, {
-        periodId: selectedPeriod.id, bsDay: 0, rows, signal: abortCtl.signal,
-      })
-
-      saveSucceeded = true
-      setBulkSaved(true)
-      setTimeout(() => setBulkSaved(false), 2500)
-    } catch (err) {
-      console.error('Bulk save error:', err)
-      setBulkSaveError(/abort/i.test(err.message || '') ? 'Save timed out — check your connection and try again.' : (err.message || 'Failed to save — please try again.'))
-    } finally {
-      clearTimeout(timeoutId)
-      setBulkSaving(false)
-    }
-    if (!saveSucceeded) return
-    try {
-      await Promise.all([loadSales(selectedPeriod.id), loadAllDaySums(selectedPeriod.id)])
-    } catch (err) {
-      console.error('Bulk post-save reload error:', err)
-    }
-  }
 
   // Totals
   function getQtyNum(recipeId) {
@@ -522,7 +553,7 @@ export default function Sales() {
                     </button>
                     <button
                       className="btn btn-primary"
-                      onClick={saveBulk}
+                      onClick={() => requestSave('bulk')}
                       disabled={bulkSaving || isLocked}
                     >
                       {bulkSaving ? 'Saving…' : bulkSaved ? '✓ Saved' : 'Save'}
@@ -660,7 +691,7 @@ export default function Sales() {
                     >Clear</button>
                     <button
                       className="btn btn-primary"
-                      onClick={saveDaily}
+                      onClick={() => requestSave('daily')}
                       disabled={dailySaving || isLocked}
                     >{dailySaving ? 'Saving…' : dailySaved ? '✓ Saved' : 'Save Day'}</button>
                   </div>
@@ -777,7 +808,7 @@ export default function Sales() {
                     >Clear</button>
                     <button
                       className="btn btn-primary"
-                      onClick={saveDaily}
+                      onClick={() => requestSave('daily')}
                       disabled={dailySaving || isLocked}
                     >{dailySaving ? 'Saving…' : dailySaved ? '✓ Saved' : 'Save Day'}</button>
                   </div>
@@ -985,6 +1016,16 @@ export default function Sales() {
             )
           })()}
         </>
+      )}
+
+      {pendingSave && (
+        <SupersedeConfirmModal
+          mode={pendingSave.mode}
+          superseded={pendingSave.superseded}
+          recipeNames={recipeNames}
+          onCancel={() => setPendingSave(null)}
+          onConfirm={confirmPendingSave}
+        />
       )}
     </div>
   )

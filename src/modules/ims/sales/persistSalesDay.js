@@ -16,6 +16,45 @@ export function isMissingFunctionError(error) {
 
 const signalled = (builder, signal) => (signal ? builder.abortSignal(signal) : builder)
 
+// Which existing rows a save is about to SILENTLY delete, so the user can be warned first (S457).
+//
+// Bulk (bs_day 0) and Daily (bs_day > 0) are mutually exclusive per recipe — saving one supersedes
+// the other for every recipe in the payload, across the WHOLE period, not just the day on screen.
+// That's intended (every downstream report sums all rows with no bs_day distinction, so leaving
+// both double-counts), but it is destructive, unbounded and was completely unannounced: typing one
+// number into Bulk Entry and hitting Save deletes that item's entire month of daily entries.
+// Real incident, 2026-07-27 — it ate two rows of live client data during a smoke test, and the
+// person it happened to had read the source.
+//
+// Reads the whole period's opposite-mode rows and intersects client-side rather than sending
+// `.in('recipe_id', [...])` — a 92-recipe menu would put ~3.4kB of UUIDs in the query string, and
+// an over-long URL is its own failure mode (postgrest-js warns about exactly this).
+export async function findSupersededRows(supabase, { periodId, bsDay, recipeIds, signal, timeoutMs = SAVE_TIMEOUT_MS }) {
+  if (!recipeIds.length) return { total: 0, byRecipe: [] }
+
+  const base = supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold').eq('period_id', periodId)
+  const scoped = bsDay === 0 ? base.gt('bs_day', 0) : base.eq('bs_day', 0)
+
+  const { data, error } = await withTimeout(signalled(scoped, signal), timeoutMs, 'Check')
+  if (error) throw new Error(error.message)
+
+  const wanted = new Set(recipeIds)
+  const byId = new Map()
+  for (const row of data || []) {
+    if (!wanted.has(row.recipe_id)) continue
+    const entry = byId.get(row.recipe_id) || { recipeId: row.recipe_id, count: 0, days: [], qty: 0 }
+    entry.count += 1
+    entry.qty += Number(row.qty_sold) || 0
+    if (row.bs_day > 0) entry.days.push(row.bs_day)
+    byId.set(row.recipe_id, entry)
+  }
+
+  const byRecipe = [...byId.values()]
+  byRecipe.forEach(e => e.days.sort((a, b) => a - b))
+  byRecipe.sort((a, b) => b.count - a.count)
+  return { total: byRecipe.reduce((s, e) => s + e.count, 0), byRecipe }
+}
+
 // Save one "day" of sales — bs_day 0 is the Bulk (whole-period) row, 1..32 a dated Daily row.
 //
 // Preferred path is the single `save_sales_day` RPC (migration 20260727120000), which does
