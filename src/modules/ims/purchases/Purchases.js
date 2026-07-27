@@ -11,6 +11,7 @@ import PurchaseBillModal from './PurchaseBillModal'
 import PurchaseBillPrint from './PurchaseBillPrint'
 import ReturnsTab from './ReturnsTab'
 import { printWithTitle } from '../../../utils/printTitle'
+import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -19,16 +20,30 @@ export default function Purchases() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedDelete } = useScopedDb()
 
-  // Shared
-  const [periods, setPeriods]               = useState([])
-  const [selectedPeriod, setSelectedPeriod] = useState(null)
-  const [items, setItems]                   = useState([])
-  const [vendors, setVendors]               = useState([])
-  const [loading, setLoading]               = useState(true)
+  // Shared — seeded from a short-lived per-tab cache (sessionDataCache.js) so revisiting this
+  // page shows the last-known data instantly instead of a blank "Loading…" while it re-fetches.
+  // setAndCache below (defined after effectiveClientId) writes to the same cache alongside every
+  // existing setter, at the same call sites, with no change to any value being computed.
+  const [cachedPeriods] = useState(() => readPageCache('purchases', 'periods', effectiveClientId))
+  const cachedOpenPeriod = (cachedPeriods || []).find(x => x.status === 'open') || null
+  const [periods, setPeriods]               = useState(cachedPeriods ?? [])
+  const [selectedPeriod, setSelectedPeriod] = useState(cachedOpenPeriod)
+  const [items, setItems]                   = useState(() => readPageCache('purchases', 'items', effectiveClientId) ?? [])
+  const [vendors, setVendors]               = useState(() => readPageCache('purchases', 'vendors', effectiveClientId) ?? [])
+  const [loading, setLoading]               = useState(!cachedPeriods)
   const [activeTab, setActiveTab]           = useState('purchases')
 
+  // Wraps a normal setState call to also persist the same value to the shared session cache —
+  // see the equivalent helper + comment in ClientDashboard.jsx for the tenant-isolation reasoning
+  // (safe because this is only ever called after a load already resolved for the current client).
+  function setAndCache(setter, section, value) {
+    setter(value)
+    writePageCache('purchases', section, effectiveClientId, value)
+  }
+
   // Purchases tab
-  const [purchases, setPurchases]           = useState([])
+  const [purchases, setPurchases]           = useState(() =>
+    (cachedOpenPeriod ? readPageCache('purchases', `purchases_${cachedOpenPeriod.id}`, effectiveClientId) : null) ?? [])
   const [showForm, setShowForm]             = useState(false)
   const [filterDay, setFilterDay]           = useState('all')
   const [filterItem, setFilterItem]         = useState('all')
@@ -41,7 +56,8 @@ export default function Purchases() {
   const [bizInfo, setBizInfo]               = useState({ name: '', address: '', vatNumber: '' })
 
   // Returns tab
-  const [returns, setReturns]               = useState([])
+  const [returns, setReturns]               = useState(() =>
+    (cachedOpenPeriod ? readPageCache('purchases', `returns_${cachedOpenPeriod.id}`, effectiveClientId) : null) ?? [])
 
   // Daily Register tab
   const [collapsedRegisterCats, setCollapsedRegisterCats] = useState(new Set())
@@ -64,15 +80,17 @@ export default function Purchases() {
   }, [effectiveClientId])
 
   async function init() {
-    setLoading(true)
+    // Only show "Loading…" when there's nothing cached to display yet — a revisit within the
+    // cache window keeps showing last-known data while this reloads quietly underneath.
+    if (periods.length === 0) setLoading(true)
     const [{ data: p }, { data: i }, { data: v }] = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       scopedFrom('vendors').eq('is_active', true).order('name')
     ])
-    setPeriods(p || [])
-    setItems(i || [])
-    setVendors(v || [])
+    setAndCache(setPeriods, 'periods', p || [])
+    setAndCache(setItems, 'items', i || [])
+    setAndCache(setVendors, 'vendors', v || [])
     const open = (p || []).find(x => x.status === 'open')
     if (open) {
       setSelectedPeriod(open)
@@ -88,14 +106,14 @@ export default function Purchases() {
       .eq('period_id', periodId)
       .order('bs_day')
       .order('created_at')
-    setPurchases(data || [])
+    setAndCache(setPurchases, `purchases_${periodId}`, data || [])
   }
 
   async function loadReturns(periodId) {
     const { data } = await scopedFrom('vendor_returns', '*, items(name, uom, purchase_unit, conversion_factor), vendors(name), purchase_entries(bs_day, qty, rate)')
       .eq('period_id', periodId)
       .order('created_at')
-    setReturns(data || [])
+    setAndCache(setReturns, `returns_${periodId}`, data || [])
   }
 
   async function handlePeriodChange(periodId) {
@@ -158,10 +176,14 @@ export default function Purchases() {
   async function applyRateUpdates() {
     const toUpdate = rateUpdateItems.filter(i => rateUpdateSelected.has(i.itemId))
     await Promise.all(toUpdate.map(i => supabase.from('items').update({ rate: i.newRate }).eq('id', i.itemId)))
-    setItems(prev => prev.map(i => {
-      const upd = toUpdate.find(r => r.itemId === i.id)
-      return upd ? { ...i, rate: upd.newRate } : i
-    }))
+    setItems(prev => {
+      const next = prev.map(i => {
+        const upd = toUpdate.find(r => r.itemId === i.id)
+        return upd ? { ...i, rate: upd.newRate } : i
+      })
+      writePageCache('purchases', 'items', effectiveClientId, next)
+      return next
+    })
     setRateUpdateItems([])
     setRateUpdateSelected(new Set())
   }

@@ -9,6 +9,7 @@ import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
 import { persistSalesDay, findSupersededRows, SAVE_TIMEOUT_MS } from './persistSalesDay'
 import SupersedeConfirmModal from './SupersedeConfirmModal'
+import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 // S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
@@ -29,9 +30,14 @@ export default function Sales() {
   const { clientId, profile, loading: authLoading, isAdmin } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
-  const [periods, setPeriods]       = useState([])
+  // periods/recipes only (the menu + period list) are cached for an instant revisit — deliberately
+  // NOT the entered-quantity maps (sales/dailySales/etc. below), which a Save reads as the
+  // "current" baseline to merge edits into. For a POS-enabled client, sales_entries keeps changing
+  // in the background all day as bills close, so those must always reload fresh rather than risk
+  // a stale cached number silently reaching a save. See conversation with Aashish (2026-07-27).
+  const [periods, setPeriods]       = useState(() => readPageCache('sales', 'periods', effectiveClientId) ?? [])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
-  const [recipes, setRecipes]       = useState([])
+  const [recipes, setRecipes]       = useState(() => readPageCache('sales', 'recipes', effectiveClientId) ?? [])
   const [sales, setSales]           = useState({}) // { recipe_id: qty } — bulk only, bs_day=0
   const [loading, setLoading]       = useState(true)
   const [bulkForm, setBulkForm]     = useState({})
@@ -62,6 +68,13 @@ export default function Sales() {
   // opposite mode's rows: { mode, rows, superseded }. See findSupersededRows() (S457).
   const [pendingSave, setPendingSave] = useState(null)
 
+  // Only wraps setPeriods/setRecipes below — deliberately not used for anything a save merges
+  // against (see comment above the periods/recipes useState calls).
+  function setAndCache(setter, section, value) {
+    setter(value)
+    writePageCache('sales', section, effectiveClientId, value)
+  }
+
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -88,8 +101,8 @@ export default function Sales() {
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('recipes').eq('is_active', true).neq('category', 'Sub-Recipe').order('name')
     ])
-    setPeriods(p || [])
-    setRecipes(r || [])
+    setAndCache(setPeriods, 'periods', p || [])
+    setAndCache(setRecipes, 'recipes', r || [])
     const open = (p || []).find(x => x.status === 'open')
     if (open) { setSelectedPeriod(open); await Promise.all([loadSales(open.id), loadAllDaySums(open.id)]) }
     setLoading(false)

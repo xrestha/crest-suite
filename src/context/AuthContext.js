@@ -84,19 +84,24 @@ export function AuthProvider({ children }) {
       if (error) { console.error('Profile fetch error:', error); return }
 
       if (data?.client_id) {
-        const { data: client } = await supabase
-          .from('clients')
-          .select('id, name, location, is_premium, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, ims_enabled, hr_enabled, hr_plan, pos_enabled, pos_plan, suite_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
-          .eq('id', data.client_id)
-          .single()
-        if (mounted) data.clients = client
-
-        const { data: flags } = await supabase
-          .from('feature_flags')
-          .select('*')
-          .eq('client_id', data.client_id)
-          .maybeSingle()
-        if (mounted) setFeatureFlags(flags || {})
+        // clients + feature_flags depend only on client_id, not on each other — run them
+        // concurrently instead of waterfalling two more round trips after the profile fetch.
+        const [{ data: client }, { data: flags }] = await Promise.all([
+          supabase
+            .from('clients')
+            .select('id, name, location, is_premium, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, ims_enabled, hr_enabled, hr_plan, pos_enabled, pos_plan, suite_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
+            .eq('id', data.client_id)
+            .single(),
+          supabase
+            .from('feature_flags')
+            .select('*')
+            .eq('client_id', data.client_id)
+            .maybeSingle(),
+        ])
+        if (mounted) {
+          data.clients = client
+          setFeatureFlags(flags || {})
+        }
       }
 
       if (mounted) {

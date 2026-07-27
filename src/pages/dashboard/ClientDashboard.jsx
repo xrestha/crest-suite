@@ -18,6 +18,7 @@ import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
 import SalesPivot from '../../modules/dashboard/SalesPivot'
 import FoodBeverageSplit from '../../modules/dashboard/FoodBeverageSplit'
+import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
 
 export default function ClientDashboard() {
@@ -32,19 +33,35 @@ export default function ClientDashboard() {
   const hrApprovals = useHrApprovalCounts() // shared with HrDashboard.jsx's own Approvals row
   const navigate = useNavigate()
   const location = useLocation()
-  const [stats, setStats]               = useState(null)
-  const [activePeriod, setActivePeriod] = useState(null)
-  const [loading, setLoading]           = useState(true)
-  const [topVariance, setTopVariance]   = useState([])
-  const [categorySpend, setCategorySpend] = useState([])
-  const [dailyTrend, setDailyTrend]     = useState([])
-  const [hasDailySales, setHasDailySales] = useState(false)
-  const [salesProjection, setSalesProjection] = useState(null) // { projectedMonthEnd } | null
-  const [topItemSpend, setTopItemSpend] = useState([])
-  const [reorderItems, setReorderItems]   = useState([])
-  const [fcTrend, setFcTrend]             = useState([])
-  const [hrStats, setHrStats]             = useState(null)
-  const [posStats, setPosStats]           = useState(null)
+  // Seed initial state from a short-lived per-tab cache (dashboardCache.js) so navigating back to
+  // this page shows the last-known figures instantly instead of a blank skeleton while it
+  // re-fetches — the cache holds nothing this component doesn't already compute itself; it's
+  // pure storage, no new calculation. setAndCache below writes to it alongside every existing
+  // setter, at the same call sites, with no change to any of the values being computed.
+  const [cachedStats] = useState(() => readDashboardCache('stats', effectiveClientId))
+  const [stats, setStats]               = useState(cachedStats ?? null)
+  const [activePeriod, setActivePeriod] = useState(() => readDashboardCache('activePeriod', effectiveClientId))
+  const [loading, setLoading]           = useState(!cachedStats)
+  const [topVariance, setTopVariance]   = useState(() => readDashboardCache('topVariance', effectiveClientId) ?? [])
+  const [categorySpend, setCategorySpend] = useState(() => readDashboardCache('categorySpend', effectiveClientId) ?? [])
+  const [dailyTrend, setDailyTrend]     = useState(() => readDashboardCache('dailyTrend', effectiveClientId) ?? [])
+  const [hasDailySales, setHasDailySales] = useState(() => readDashboardCache('hasDailySales', effectiveClientId) ?? false)
+  const [salesProjection, setSalesProjection] = useState(() => readDashboardCache('salesProjection', effectiveClientId)) // { projectedMonthEnd } | null
+  const [topItemSpend, setTopItemSpend] = useState(() => readDashboardCache('topItemSpend', effectiveClientId) ?? [])
+  const [reorderItems, setReorderItems]   = useState(() => readDashboardCache('reorderItems', effectiveClientId) ?? [])
+  const [fcTrend, setFcTrend]             = useState(() => readDashboardCache('fcTrend', effectiveClientId) ?? [])
+  const [hrStats, setHrStats]             = useState(() => readDashboardCache('hrStats', effectiveClientId) ?? null)
+  const [posStats, setPosStats]           = useState(() => readDashboardCache('posStats', effectiveClientId) ?? null)
+  // Wraps a normal setState call to also persist the same value to the cache above, under the
+  // given section key. Only ever called from inside loadStats/loadHrStats/loadPosStats/
+  // loadKitchenPosStats/loadFcTrend, all of which already check `loadIdRef.current !== myId`
+  // before reaching their setState calls — so by the time this runs, effectiveClientId in this
+  // closure is guaranteed to match the load that's actually completing, and a client switch
+  // (admin "view as") can never write one client's numbers under another client's cache key.
+  function setAndCache(setter, section, value) {
+    setter(value)
+    writeDashboardCache(section, effectiveClientId, value)
+  }
   // Guards against a stale response overwriting the current view — none of loadStats/loadHrStats/
   // loadPosStats/loadFcTrend had a cancellation check, so switching "view as" client (or the
   // module flags changing) while a slower request for the PREVIOUS client was still in flight
@@ -88,7 +105,9 @@ export default function ClientDashboard() {
   const canOverheads = hasFeature('overheads')
 
   async function loadStats(myId) {
-    setLoading(true)
+    // Only show the skeleton when there's nothing cached to display yet — a revisit within the
+    // cache window keeps showing last-known figures while this reloads quietly underneath.
+    if (stats === null) setLoading(true)
 
     // .single() reports error.code 'PGRST116' when the result set isn't exactly one row — for
     // this query that just means "no open period right now," a normal, common state, not a
@@ -99,7 +118,7 @@ export default function ClientDashboard() {
       .limit(1).single()
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
-    setActivePeriod(period)
+    setAndCache(setActivePeriod, 'activePeriod', period)
 
     const results = await Promise.all([
       scopedFrom('items', '*', { count: 'exact', head: true }).eq('is_active', true).eq('is_sub_recipe', false),
@@ -243,9 +262,9 @@ export default function ClientDashboard() {
         const value = variance * parseFloat(item.per_uom_rate || 0)
         return { name: item.name, variance, value, uom: item.uom, category: item.categories?.name }
       }).filter(r => r.value > 0).sort((a, b) => b.value - a.value).slice(0, 5)
-      setTopVariance(varRows)
+      setAndCache(setTopVariance, 'topVariance', varRows)
     } else {
-      setTopVariance([])
+      setAndCache(setTopVariance, 'topVariance', [])
     }
 
     // Category spend (net)
@@ -256,7 +275,7 @@ export default function ClientDashboard() {
       const cat = itemMap[itemId]?.categories?.name || 'Uncategorized'
       catSpendMap[cat] = (catSpendMap[cat] || 0) + val
     })
-    setCategorySpend(
+    setAndCache(setCategorySpend, 'categorySpend',
       Object.entries(catSpendMap)
         .map(([name, value]) => ({ name, value: Math.round(value) }))
         .filter(r => r.value > 0)
@@ -288,7 +307,7 @@ export default function ClientDashboard() {
     Object.keys(daySalesMap).forEach(d => { daySalesMap[d] = Math.round(daySalesMap[d]) }) // whole NPR (no ugly decimals)
     const salesDayNums = Object.keys(daySalesMap).map(Number).sort((a, b) => a - b)
     const dailySalesOn = salesDayNums.length > 0
-    setHasDailySales(dailySalesOn)
+    setAndCache(setHasDailySales, 'hasDailySales', dailySalesOn)
 
     // Projection: current open month + ≥5 sales days only. Least-squares trend on daily revenue,
     // extended to the last day of the BS month — but DAMPENED so a steep slope fitted to a few
@@ -316,7 +335,7 @@ export default function ClientDashboard() {
       }
       projectedMonthEnd = Math.round(sumY + projSum)
     }
-    setSalesProjection(projectedMonthEnd != null ? { projectedMonthEnd } : null)
+    setAndCache(setSalesProjection, 'salesProjection', projectedMonthEnd != null ? { projectedMonthEnd } : null)
 
     // Build the unified day axis. Current month: 6 days back → 3 days ahead (10-day window).
     // Past months: show full actuals only.
@@ -338,7 +357,7 @@ export default function ClientDashboard() {
           : (d === lastActualSalesDay && hasProj ? daySalesMap[d] : null),
       })
     }
-    setDailyTrend(trend)
+    setAndCache(setDailyTrend, 'dailyTrend', trend)
 
     // Top items by net spend — built from allItems (unfiltered by is_active), not the
     // active-only `items` list, so an item deactivated mid-period after being purchased still
@@ -353,7 +372,7 @@ export default function ClientDashboard() {
       }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 10)
-    setTopItemSpend(itemSpendRows)
+    setAndCache(setTopItemSpend, 'topItemSpend', itemSpendRows)
 
     // Reorder — use net purchMap for theoretical stock. Gated on canReorder (Growth+); see Menu
     // Health comment above for why this needs a data gate, not just a render gate.
@@ -382,9 +401,9 @@ export default function ClientDashboard() {
         .filter(r => r.needsReorder)
         .sort((a, b) => b.estValue - a.estValue)
         .slice(0, 8)
-      setReorderItems(reorderRows)
+      setAndCache(setReorderItems, 'reorderItems', reorderRows)
     } else {
-      setReorderItems([])
+      setAndCache(setReorderItems, 'reorderItems', [])
     }
 
     const overheadTotal = (overheadsData || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
@@ -392,7 +411,7 @@ export default function ClientDashboard() {
     // itemRateMap already built above (for recipeCostMap) — same items(id, per_uom_rate) shape.
     const wastageValueTotal = (wastagesData || []).reduce((s, w) => s + parseFloat(w.qty || 0) * (itemRateMap[w.item_id] || 0), 0)
 
-    setStats({ itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
+    setAndCache(setStats, 'stats', { itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
     setLoading(false)
     const fcPctNow = revenueTotal > 0 ? (purchaseTotal / revenueTotal) * 100 : null
     loadFcTrend(period, fcPctNow, myId)
@@ -408,7 +427,7 @@ export default function ClientDashboard() {
     const payroll   = (employees || [])
       .filter(e => e.status === 'active' || e.status === 'probation')
       .reduce((s, e) => s + parseFloat(e.basic_salary || 0), 0)
-    setHrStats({ total, active, probation, payroll })
+    setAndCache(setHrStats, 'hrStats', { total, active, probation, payroll })
   }
 
   // POS figures — Revenue/Covers/Avg Check for the current open BS period (matching the IMS
@@ -465,7 +484,7 @@ export default function ClientDashboard() {
     const hadRealError = (periodErr && periodErr.code !== 'PGRST116') || ordersErr || tablesErr
     setLoadErrors(prev => ({ ...prev, pos: hadRealError ? 'POS data failed to load — figures below may be incomplete or stale.' : '' }))
 
-    setPosStats({ revenueTotal, coversTotal, billCount, avgCheck, tablesOccupied, tablesTotal })
+    setAndCache(setPosStats, 'posStats', { revenueTotal, coversTotal, billCount, avgCheck, tablesOccupied, tablesTotal })
   }
 
   // Kitchen/bar-team variant (S431) — today's pos_kot_log activity for just this team's own
@@ -501,7 +520,7 @@ export default function ClientDashboard() {
     const completedToday = readyRows.length
 
     setLoadErrors(prev => ({ ...prev, pos: error ? `${kdsStation === 'BOT' ? 'Bar' : 'Kitchen'} data failed to load — figures below may be incomplete or stale.` : '' }))
-    setPosStats({ kitchen: true, station: kdsStation, openNow, lateCount, readyWaiting, avgPrepMin, completedToday })
+    setAndCache(setPosStats, 'posStats', { kitchen: true, station: kdsStation, openNow, lateCount, readyWaiting, avgPrepMin, completedToday })
   }
 
   async function closeAndAdvancePeriod() {
@@ -575,7 +594,7 @@ export default function ClientDashboard() {
       })
     }
 
-    setFcTrend(points.filter(p => p.fc !== null))
+    setAndCache(setFcTrend, 'fcTrend', points.filter(p => p.fc !== null))
   }
 
   const bsToday      = getBsToday()

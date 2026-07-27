@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -17,6 +17,7 @@ import RecipeCostCardPrint from './RecipeCostCardPrint'
 import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
 import { Navigate } from 'react-router-dom'
+import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 
 // How long any single save request may hang before the button gives up and re-enables itself.
 // Same class of bug as Sales Entry's S449-S455: `save()` below is several sequential network
@@ -30,10 +31,31 @@ export default function Recipes() {
   const showNutrition = hasFeature('nutrition_facts')
   const { settings, recipeCategories } = useSettings()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
-  const [recipes, setRecipes] = useState([])
-  const [overheadData, setOverheadData] = useState(null) // { totalOverheads, totalRevenue, revenueByRecipe, coversByRecipe, openPeriodId } | null
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
+  // Seeded from a short-lived per-tab cache (sessionDataCache.js) so revisiting this page shows
+  // the last-known recipes/items/overhead figures instantly instead of a blank skeleton. Safe
+  // here (unlike Sales Entry/Stock Count) because saving a recipe only ever writes that one
+  // recipe's own data — there's no "save every visible row" batch action that could trust a
+  // stale cached value for something else.
+  const [cachedRecipes] = useState(() => readPageCache('recipes', 'recipes', clientId))
+  const [recipes, setRecipes] = useState(cachedRecipes ?? [])
+  // init() below is a useCallback that doesn't (and can't safely) depend on `recipes` — reading
+  // `recipes.length` directly inside it would be a stale closure on every call after the first
+  // (init() is also called again after save/delete, not just at mount). A ref always reads the
+  // current value without that trap, and without forcing init() to be recreated (which would
+  // retrigger the effect that calls it, looping).
+  const hasLoadedOnceRef = useRef(!!cachedRecipes)
+  const [overheadData, setOverheadData] = useState(() => readPageCache('recipes', 'overheadData', clientId)) // { totalOverheads, totalRevenue, revenueByRecipe, coversByRecipe, openPeriodId } | null
+  const [items, setItems] = useState(() => readPageCache('recipes', 'items', clientId) ?? [])
+  const [loading, setLoading] = useState(!cachedRecipes)
+  // Wraps a normal setState call to also persist the same value to the shared session cache —
+  // see the equivalent helper in ClientDashboard.jsx/Purchases.js for the tenant-isolation
+  // reasoning (safe because this is only called after a load already resolved for this client).
+  // useCallback'd (stable identity unless clientId changes) so init() below can list it as a
+  // dependency without being recreated — and thus re-triggered by its own effect — every render.
+  const setAndCache = useCallback((setter, section, value) => {
+    setter(value)
+    writePageCache('recipes', section, clientId, value)
+  }, [clientId])
   const [view, setView] = useState('list') // list | edit | detail
   const [selectedRecipe, setSelectedRecipe] = useState(null)
   // Breadcrumb trail of recipes drilled through via a sub-recipe ingredient row (detail view
@@ -63,7 +85,10 @@ export default function Recipes() {
 
   const init = useCallback(async () => {
     if (!clientId) return
-    setLoading(true)
+    // Only show the skeleton when nothing has ever loaded yet this session — a revisit within
+    // the cache window (or a reload after save/delete) keeps showing the current list while this
+    // reloads quietly underneath.
+    if (!hasLoadedOnceRef.current) setLoading(true)
     const [{ data: r }, { data: i }] = await Promise.all([
       scopedFrom('recipes').order('name'),
       scopedFrom('items').eq('is_active', true).eq('is_sub_recipe', false).order('name')
@@ -91,8 +116,9 @@ export default function Recipes() {
       })
     })
 
-    setRecipes(allRecipes)
-    setItems(i || [])
+    setAndCache(setRecipes, 'recipes', allRecipes)
+    setAndCache(setItems, 'items', i || [])
+    hasLoadedOnceRef.current = true
 
     // Fetch overhead + sales data for open period to power overhead panel
     const { data: periods } = await scopedFrom('monthly_periods', 'id')
@@ -128,16 +154,16 @@ export default function Recipes() {
       })
 
       if (totalOverheads > 0 && totalRevenue > 0) {
-        setOverheadData({ totalOverheads, totalRevenue, revenueByRecipe, coversByRecipe, openPeriodId })
+        setAndCache(setOverheadData, 'overheadData', { totalOverheads, totalRevenue, revenueByRecipe, coversByRecipe, openPeriodId })
       } else {
-        setOverheadData(null)
+        setAndCache(setOverheadData, 'overheadData', null)
       }
     } else {
-      setOverheadData(null)
+      setAndCache(setOverheadData, 'overheadData', null)
     }
 
     setLoading(false)
-  }, [clientId, scopedFrom])
+  }, [clientId, scopedFrom, setAndCache])
 
   useEffect(() => { if (clientId) init() }, [clientId, init])
 
