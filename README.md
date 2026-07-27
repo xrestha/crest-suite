@@ -150,6 +150,16 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S461 — 2026-07-27 — Recipe Costing gets an Active/Inactive toggle
+
+User asked for a way to deactivate a recipe without deleting it, and what deactivating would actually affect — `recipes.is_active` already existed as a column (default `true`, part of the original baseline schema) and was already respected as a filter in Sales Entry, POS ordering, the Guest QR Menu (enforced server-side in the order-submission RPCs too, not just hidden client-side), and every menu-analysis tool (Menu Engineering/Pricing/Repricing/Recipe Margin/Combo Builder) — it just had no UI anywhere to actually set it to `false`. The only existing path to `is_active` on a recipe was an indirect side-effect: `deleteRecipe()` deactivating a sub-recipe's mirror `items` row, never the recipe itself.
+
+Added `toggleActive()` (mirrors the existing Hide/Show + Active/Inactive-badge convention from Item Master and Vendors) to both tables in `Recipes.js` (regular recipes and the Sub-Recipes tab) — a `badge-green`/`badge-gray` Status column plus a ghost button next to Edit/Del that flips `is_active` via `scopedUpdate` and reloads through the same cache-aware `init()` from S460. Confirmed live: toggling Hide/Show round-trips correctly against a real client's data with no console errors, and an inactive recipe correctly stays visible in the list (nothing in `tabFiltered`/`regularRecipes`/`subRecipeList` filters by `is_active`) so there's always a way back via Show.
+
+Deliberately **not** touched: `explodeRecipeIngredients()` and `recipeCostCalc.js` never filter by `is_active` on sub-recipe lookups, so deactivating a sub-recipe has no effect on any parent recipe's cost calculation — it stays fully selectable as an ingredient in the picker either way. This was flagged to the user as a known gap rather than silently fixed, since making a sub-recipe's `is_active` actually mean something there is a separate, undiscussed scope decision (should it also hide from the ingredient picker? Should existing recipes using it keep working? etc.) — worth a real decision, not a drive-by change bundled into a toggle-button request.
+
+Help page updated with the Hide vs Del distinction. No new migration — the column already existed.
+
 ### S460 — 2026-07-27 — Sign-in/page-switch speed pass: parallelized auth, 46 missing indexes, per-page revisit caching
 
 User reported the app "taking longer to load data when signing in, changing from one page to another." Four separate causes, tackled in order of confidence/risk.

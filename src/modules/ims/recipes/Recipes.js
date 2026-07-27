@@ -612,6 +612,20 @@ export default function Recipes() {
     init()
   }
 
+  // Soft, reversible alternative to Delete — matches the Active/Hide-Show pattern already used
+  // on Item Master and Vendors. Deactivating hides the recipe from Sales Entry, POS ordering, the
+  // Guest QR Menu, and the menu-analysis tools (Menu Engineering/Pricing/Repricing/Recipe Margin/
+  // Combo Builder), but never touches past sales history, revenue, or food-cost figures — those
+  // read historical sales_entries rows directly, not the recipe's current is_active state. Unlike
+  // deleteRecipe(), no reference check is needed: an inactive sub-recipe stays fully usable as an
+  // ingredient in other recipes (recipeCostCalc.js/explodeRecipeIngredients never filter by
+  // is_active), so toggling it off can never break another recipe's cost calculation.
+  async function toggleActive(recipe) {
+    const { error } = await scopedUpdate('recipes', { is_active: !recipe.is_active }).eq('id', recipe.id)
+    if (error) { setError('Failed to update status — ' + error.message); return }
+    init()
+  }
+
   // ── Derived values for edit form ──────────────────────────────
   const isSubRecipeForm = recipeForm.category === 'Sub-Recipe'
   const liveCost = calcLiveCost(ingredients, items, recipes)
@@ -826,6 +840,7 @@ export default function Recipes() {
                       <th style={{ textAlign: 'right' }}>Total Cost</th>
                       <th style={{ textAlign: 'right' }}>Yield</th>
                       <th style={{ textAlign: 'right' }}>Cost per Unit</th>
+                      <th><Tip text="Inactive hides this sub-recipe from view, but it stays fully usable as an ingredient in other recipes — deactivating it never affects another recipe's cost calculation." width={280}>Status</Tip></th>
                       <th className="no-print"></th>
                     </tr>
                   </thead>
@@ -848,10 +863,16 @@ export default function Recipes() {
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
                             NPR {costPerUnit.toFixed(2)} / {recipe.yield_uom}
                           </td>
+                          <td>
+                            <span className={`badge ${recipe.is_active ? 'badge-green' : 'badge-gray'}`}>
+                              {recipe.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
                           <td className="no-print" style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => setPrintRecipe(recipe)}>🖶</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)}>Edit</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)}>{recipe.is_active ? 'Hide' : 'Show'}</button>
                               <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)}>Del</button>
                             </div>
                           </td>
@@ -873,6 +894,7 @@ export default function Recipes() {
                       <th style={{ textAlign: 'right' }}>Food Cost</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Menu price ex-VAT (stored without VAT). VAT-inclusive price = selling price × (1 + VAT rate)." width={240}>Selling Price</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Food Cost % = ingredient cost ÷ selling price. ≤30% excellent, 31–38% acceptable, >38% too high. Nepal F&B target: 28–35%." width={280}>FC %</Tip></th>
+                      <th><Tip text="Inactive hides this recipe from Sales Entry, POS ordering, the Guest Menu, and the menu-analysis tools — past sales history and revenue are unaffected." width={280}>Status</Tip></th>
                       <th className="no-print"></th>
                     </tr>
                   </thead>
@@ -905,10 +927,16 @@ export default function Recipes() {
                           <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor }}>
                             {fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
                           </td>
+                          <td>
+                            <span className={`badge ${recipe.is_active ? 'badge-green' : 'badge-gray'}`}>
+                              {recipe.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
                           <td className="no-print" style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => setPrintRecipe(recipe)}>🖶</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)}>Edit</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)}>{recipe.is_active ? 'Hide' : 'Show'}</button>
                               <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)}>Del</button>
                             </div>
                           </td>
