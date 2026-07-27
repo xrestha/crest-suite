@@ -135,10 +135,14 @@ export default function Sales() {
     if (!selectedPeriod) return
     setDailySaving(true)
     setDailySaveError('')
-    // Wrapped in try/finally — without it, any thrown error (a rejected fetch, a network drop
-    // mid-request) left dailySaving stuck at true forever with no feedback, since nothing after
-    // the throw point ever ran to reset it. Found live (S449): the button froze on "Saving…"
-    // indefinitely after entering a discount, with no visible error.
+    // The actual save (delete/insert/cleanup-delete) is wrapped in its own try/finally so
+    // dailySaving always resets the moment the SAVE itself finishes — regardless of success or
+    // thrown error. Found live (S449): with the reload below inside the same try/finally, a
+    // hung reload query (e.g. a flaky connection) kept dailySaving stuck at true forever even
+    // though the save had already succeeded — permanently disabling the Save Day button, since
+    // nothing else ever sets dailySaving back to false. The post-save reload now runs in its own
+    // separate try/catch, entirely outside what gates the button, so it can never block it again.
+    let saveSucceeded = false
     try {
       const merged = {}
       const mergedDiscount = {}
@@ -180,16 +184,24 @@ export default function Sales() {
           .eq('period_id', selectedPeriod.id).eq('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id))
         if (clearErr) throw new Error(clearErr.message)
       }
+      saveSucceeded = true
       setDailySaved(true)
       setTimeout(() => setDailySaved(false), 2500)
-      // loadSales too — a bulk row may have just been cleared by the cross-mode delete above, and
-      // the Bulk tab's `sales` map would otherwise stay stale until the next period switch.
-      await Promise.all([loadDailySales(selectedPeriod.id, selectedDay), loadAllDaySums(selectedPeriod.id), loadSales(selectedPeriod.id)])
     } catch (err) {
       console.error('Daily save error:', err)
       setDailySaveError(err.message || 'Failed to save — please try again.')
     } finally {
       setDailySaving(false)
+    }
+    if (!saveSucceeded) return
+    // Refresh the displayed data — best-effort. loadSales too, since a bulk row may have just
+    // been cleared by the cross-mode delete above and the Bulk tab's `sales` map would otherwise
+    // stay stale until the next period switch. If this hangs or fails, the save itself already
+    // succeeded; the table just won't reflect it until the next reload/page refresh.
+    try {
+      await Promise.all([loadDailySales(selectedPeriod.id, selectedDay), loadAllDaySums(selectedPeriod.id), loadSales(selectedPeriod.id)])
+    } catch (err) {
+      console.error('Daily post-save reload error:', err)
     }
   }
 
@@ -239,8 +251,12 @@ export default function Sales() {
     if (!selectedPeriod) return
     setBulkSaving(true)
     setBulkSaveError('')
-    // try/finally so a thrown error (rejected fetch, network drop mid-request) can never leave
-    // bulkSaving stuck at true forever with no feedback — see saveDaily for the same fix (S449).
+    // The actual save is wrapped in its own try/finally so bulkSaving always resets the moment
+    // the SAVE itself finishes. The post-save reload runs in a separate try/catch entirely
+    // outside that — if a reload query ever hangs, it can no longer leave the Save button
+    // permanently disabled the way it did before, since nothing else resets bulkSaving. See
+    // saveDaily for the fuller writeup (S449 → follow-up).
+    let saveSucceeded = false
     try {
       // Merge: saved DB values as base, typed bulkForm values as override
       const merged = {}
@@ -281,14 +297,20 @@ export default function Sales() {
         if (clearErr) throw new Error(clearErr.message)
       }
 
+      saveSucceeded = true
       setBulkSaved(true)
       setTimeout(() => setBulkSaved(false), 2500)
-      await Promise.all([loadSales(selectedPeriod.id), loadAllDaySums(selectedPeriod.id)])
     } catch (err) {
       console.error('Bulk save error:', err)
       setBulkSaveError(err.message || 'Failed to save — please try again.')
     } finally {
       setBulkSaving(false)
+    }
+    if (!saveSucceeded) return
+    try {
+      await Promise.all([loadSales(selectedPeriod.id), loadAllDaySums(selectedPeriod.id)])
+    } catch (err) {
+      console.error('Bulk post-save reload error:', err)
     }
   }
 
