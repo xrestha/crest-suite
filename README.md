@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S446 — 2026-07-27 — Outstanding Payables: bulk-select and pay multiple bills at once
+
+User feedback: a vendor with many outstanding bills made a monthly credit payment a "hassle" — each invoice had to be expanded and paid individually. Added a checkbox per bill (`OutstandingPayables.js`), a per-vendor header checkbox to select that vendor's whole visible list, and a "Select All Filtered" button; selected bills show a running count/total and can be paid in full together with one shared date/note via a new `paySelectedBills()` — same per-entry oldest-first allocation `payBill()` already used, just batched across bills into one insert. Also added a Month (BS period) filter alongside the existing Vendor/Aging ones, so a run can be narrowed to "this month's bills for this vendor" before selecting. Bulk-pay always pays each selected bill in full — a partial amount on one specific bill still goes through the existing expand-and-pay flow, unchanged.
+
+### S445 — 2026-07-27 — Recipe Costing: drill down into a sub-recipe ingredient's own cost breakdown
+
+User request: clicking a sub-recipe row (e.g. "⚙ Acai Puree - SR") inside a recipe's cost breakdown now navigates into that sub-recipe's own ingredient list/cost card in place, instead of requiring a trip back to the Sub-Recipes list. `Recipes.js` gained a `detailStack` breadcrumb (drilling in pushes the current recipe, "Back" pops one level instead of always exiting to the list) — works for nested sub-recipes too, since `ri.sub_recipe` is already the full recipe object with its own `recipe_ingredients` attached recursively at load time, no new query needed.
+
+### S444 — 2026-07-27 — Fixed: sign-in could hang forever on "Signing in…" until a manual refresh
+
+User-reported bug: opening a fresh browser tab and signing in would sometimes freeze on the "Signing in…" button state indefinitely; a page refresh then let the next attempt succeed. Root cause: `supabase-js`'s `GoTrueClient` serializes every auth call (`getSession`, `signInWithPassword`, `onAuthStateChange`) through the browser's `navigator.locks` API by default, to coordinate token refresh across tabs — and a known upstream bug (`supabase/supabase-js` #2111, #1594, #2013, #1517) can orphan that lock (e.g. a backgrounded/suspended tab aborting mid-request), after which every later auth call queues behind the dead lock and never resolves. A refresh tears down the tab — and the stuck lock with it — which is why the very next attempt always worked. Fixed in `supabaseClient.js` by passing a no-op `lock` function to `createClient`, bypassing `navigator.locks` entirely; Crest is a single-page client app with no cross-tab session state worth protecting, so there's no downside to skipping it.
+
 ### S443 — 2026-07-23 — Reorder Report: printable blank par-level sheet for staff
 
 Added a "🖨 Print Par Sheet" button to Reorder Report, for clients rolling out par levels for the first time. Prints a category-grouped sheet (mirrors Stock Count's existing physical-count print pattern in `Stock.js`) listing every item with a blank fill-in cell instead of a value, respecting the page's current Category/Search filters — floor staff who don't have IMS access can fill it in by hand, and it gets typed back into the Par Level column afterward. Deliberately ignores the Reorder/All status filter (unlike the on-screen table) since a first-time rollout needs every item, not just ones currently below par. Uses the existing `printWithTitle`/`.print-only`/`.print-sheet-*` conventions — no new CSS needed.

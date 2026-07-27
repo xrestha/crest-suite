@@ -162,8 +162,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '₿', name: 'Outstanding Payables',
-        guide: 'Tracks all credit purchases that have not been paid. Groups payables by vendor with aging buckets: Current / 31–60 / 61–90 / 90+ days. Mark individual entries as paid directly from this report.',
-        tips: ['Anything in the 61–90 day bucket needs immediate follow-up with finance', 'Mark Paid once the vendor is settled — it removes the entry from the outstanding list']
+        guide: 'Tracks all credit purchases that have not been paid, grouped by vendor and by bill (invoice). Aging buckets: Current / 31–60 / 61–90 / 90+ days. Click a bill to expand it and record a payment against the whole invoice at once. For a monthly credit run across several bills, use the checkboxes (or the header checkbox to select a whole vendor, or "Select All Filtered") to pick multiple bills and pay them all in full together with one shared date/note. A Month filter narrows the list to one BS period before selecting.',
+        tips: ['Anything in the 61–90 day bucket needs immediate follow-up with finance', 'Filter by Vendor + Month, then "Select All Filtered" to clear an entire month\'s bills for one vendor in one action', 'Partial payments are still per-bill only — expand a single bill to pay less than the full remaining amount']
       },
       {
         icon: '◑', name: 'Budget vs Actual',
