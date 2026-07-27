@@ -2,13 +2,15 @@ import { persistSalesDay, isMissingFunctionError, findSupersededRows } from './p
 
 // Minimal stand-in for a PostgrestBuilder: chainable, records what was called on it, and is
 // thenable (the real builder is a thenable too, not a Promise — see withTimeout.js).
-function makeMockSupabase({ rpcResult = { error: null }, tableResult = { error: null }, selectResult } = {}) {
+function makeMockSupabase({ rpcResult = { error: null }, rpcResults, tableResult = { error: null }, selectResult, refreshResult = { error: null } } = {}) {
   const calls = []
+  // rpcResults lets a test script a sequence (e.g. expired token, then success after refresh).
+  const rpcQueue = rpcResults ? [...rpcResults] : null
 
   const builder = (rec) => {
     calls.push(rec)
     const result = () => {
-      if (rec.kind === 'rpc') return rpcResult
+      if (rec.kind === 'rpc') return rpcQueue ? (rpcQueue.shift() ?? { error: null }) : rpcResult
       if (rec.kind === 'select') return selectResult ?? { data: [], error: null }
       return tableResult
     }
@@ -24,6 +26,7 @@ function makeMockSupabase({ rpcResult = { error: null }, tableResult = { error: 
 
   return {
     calls,
+    auth: { refreshSession: async () => { calls.push({ kind: 'refreshSession', filters: [] }); return refreshResult } },
     rpc: (fn, params) => builder({ kind: 'rpc', fn, params, filters: [] }),
     from: () => ({
       delete: () => builder({ kind: 'delete', filters: [] }),
@@ -76,6 +79,38 @@ describe('persistSalesDay — atomic RPC path', () => {
     const sb = makeMockSupabase({ rpcResult: { error: { code: '23503', message: 'fk violation' } } })
     await expect(persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })).rejects.toThrow('fk violation')
     expect(sb.calls).toHaveLength(1) // no legacy fallback attempted
+  })
+})
+
+describe('persistSalesDay — expired token recovery (S458)', () => {
+  const EXPIRED = { error: { code: 'PGRST301', message: 'JWT expired' } }
+
+  test('renews and retries silently when the token died while the user was typing', async () => {
+    // The whole point: an hour of data entry must not be lost to a token that aged out.
+    const sb = makeMockSupabase({ rpcResults: [EXPIRED, { error: null }] })
+    const res = await persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })
+
+    expect(res).toEqual({ atomic: true })
+    expect(sb.calls.map(c => c.kind)).toEqual(['rpc', 'refreshSession', 'rpc'])
+  })
+
+  test('retries at most once — no infinite renew loop', async () => {
+    const sb = makeMockSupabase({ rpcResults: [EXPIRED, EXPIRED] })
+    await expect(persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })).rejects.toThrow('JWT expired')
+    expect(sb.calls.filter(c => c.kind === 'rpc')).toHaveLength(2)
+    expect(sb.calls.filter(c => c.kind === 'refreshSession')).toHaveLength(1)
+  })
+
+  test('an unrenewable session gets a plain message that does not blame the user', async () => {
+    const sb = makeMockSupabase({ rpcResults: [EXPIRED], refreshResult: { error: { message: 'refresh_token_not_found' } } })
+    await expect(persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS }))
+      .rejects.toThrow(/expired and could not be renewed.*still on screen/s)
+  })
+
+  test('a non-auth error is never retried', async () => {
+    const sb = makeMockSupabase({ rpcResults: [{ error: { code: '23503', message: 'fk violation' } }] })
+    await expect(persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })).rejects.toThrow('fk violation')
+    expect(sb.calls.filter(c => c.kind === 'refreshSession')).toHaveLength(0)
   })
 })
 

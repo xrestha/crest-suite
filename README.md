@@ -150,6 +150,24 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S458 — 2026-07-27 — Session no longer expires out from under a long data-entry session
+
+The user reported still hitting "Your login session has stopped responding" while doing normal work, with the point that **data entry legitimately takes a human a long time** and a session limit that fights that is a product defect, not a user error. Correct on both counts, and the immediate cause was a fix from S454 rather than the original bug.
+
+Measured live before changing anything: access token lifetime **3600s** (the Supabase project default), auth round trip **442ms**, status 200 — auth was healthy and fast. So nothing was "not responding". What was happening: S454's pre-save `getSession()` probe ran on an **8s** clock, which is *tighter* than the **15s** cap `authFetchTimeout` puts on the auth request underneath it (S455). A slow-but-perfectly-successful token refresh — and 12.4s was measured on this same connection during the S455 smoke test — tripped the 8s probe and blocked the save with a message telling the user to sign out, when signing out was exactly the wrong advice. A diagnostic that fails the operation it was meant to explain is worse than no diagnostic; it is deleted, not loosened.
+
+The underlying product problem is real and separate: tokens live 1 hour, auth-js's refresh ticker **only runs while the tab is awake**, and Sales Entry / Stock Count / Purchases are screens where someone types for 30–60+ minutes before pressing Save once. Background the tab, lock the laptop, or break for lunch and you return to an already-dead token, with the next request forced to refresh synchronously before it can do anything.
+
+Three changes, none of which put a check in front of the user:
+
+1. **`src/utils/sessionKeepAlive.js`** — `startSessionKeepAlive()` refreshes the token whenever the tab wakes (`visibilitychange`, `focus`, `online`), if it expires within 5 minutes. Mounted once in `AuthContext`, so every page benefits, not just Sales. Overlapping wake events coalesce into one refresh (all three fire together when a laptop is reopened), it no-ops while the tab is still hidden, and a failure is logged and swallowed — it is a background top-up, never something that can surface as an error on an action the user didn't take.
+2. **Transparent retry** — `persistSalesDay()` detects an expired-token response (`401` / `PGRST301` / "JWT expired"), renews once, and retries silently. Safe to repeat precisely because S456 made the save an atomic replace-the-day RPC: running it twice with the same payload lands on exactly the same state as running it once. Capped at one retry, and a non-auth error is never retried.
+3. `autoRefreshToken` / `persistSession` stated explicitly in `supabaseClient.js` rather than relied on as defaults, since this app's shape depends on them.
+
+`sessionKeepAlive.js` takes the supabase client as a parameter instead of importing the singleton — importing it at module load would require `REACT_APP_SUPABASE_URL` just to run a unit test (which is exactly how it failed first time). 10 new tests covering wake-up refresh, hidden-tab no-op, event coalescing, swallowed failures, listener cleanup, the retry-once path, the unrenewable-session message, and never retrying a non-auth error. Suite 126/126, build clean. `CACHE_NAME` → `crest-v23`.
+
+**Optional server-side follow-up, not applied:** the JWT expiry is a Supabase dashboard setting (Auth → Sessions), default 3600s. Raising it to 8 hours would cut refresh traffic during a working day. The client now handles expiry properly either way, so this is a tuning choice with a security trade-off (a leaked token stays valid longer), not a fix that is needed.
+
 ### S457 — 2026-07-27 — Typed confirmation before a save wipes the other entry mode's rows
 
 Built after this hazard bit during the S456 smoke test and **destroyed two rows of live client data** (MINERAL WATER BTL, Shrawan 4 and 7). Bulk (`bs_day 0`) and Daily (`bs_day > 0`) supersede each other per recipe across the **whole period**, not just the day on screen — so typing one number into Bulk Entry and hitting Save silently deleted that item's entire month of daily entries. Intended behaviour (every downstream report sums all rows with no `bs_day` distinction, so leaving both double-counts), but it was unbounded, unannounced, irreversible, and `sales_entries` has no audit trail to recover from. The agent it happened to had read the source first — a café manager stands no chance.

@@ -7,26 +7,22 @@ import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
-import { withTimeout } from '../../../utils/withTimeout'
 import { persistSalesDay, findSupersededRows, SAVE_TIMEOUT_MS } from './persistSalesDay'
 import SupersedeConfirmModal from './SupersedeConfirmModal'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
-// Every supabase-js call awaits auth.getSession() before it ever reaches fetch(), so a stuck
-// session hangs the save with no request ever leaving the browser — which looks identical to a
-// network problem but isn't, and no amount of retrying fixes it. Probing it first (cheaply, and
-// on its own short clock) turns that into a specific, actionable message instead of a generic
-// timeout 20s later. See src/utils/withTimeout.js.
-async function assertSessionHealthy() {
-  let session
-  try {
-    const { data } = await withTimeout(supabase.auth.getSession(), 8000, 'Session check')
-    session = data?.session
-  } catch (err) {
-    throw new Error('Your login session has stopped responding, so the save never left this browser. Please sign out and sign back in, then re-enter this day.')
-  }
-  if (!session) throw new Error('Your login session has expired. Please sign in again, then re-enter this day.')
-}
+// S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
+// purpose and is deliberately GONE (S458): an 8s gate is *tighter* than the 15s cap that
+// authFetchTimeout puts on the auth request underneath it, so a slow-but-perfectly-fine token
+// refresh — 12.4s was measured on this very connection — tripped the probe and blocked the save
+// with "your login session has stopped responding" when nothing was wrong with the session.
+// A diagnostic that fails the operation it was meant to explain is worse than no diagnostic.
+//
+// What replaces it is not another check at save time but two things that remove the failure:
+// startSessionKeepAlive() (AuthContext) tops the token up whenever the tab wakes, so a long
+// data-entry session doesn't arrive at Save with an hour-old token; and persistSalesDay() renews
+// and retries once if the token turns out to be expired anyway. The save itself can no longer
+// hang regardless — withTimeout bounds it.
 const TAB_LABELS = { bulk: 'Bulk Entry', daily: 'Daily Entry', breakdown: 'Daily Breakdown', summary: 'Period Summary' }
 
 export default function Sales() {
@@ -226,7 +222,6 @@ export default function Sales() {
     const timeoutId = setTimeout(() => abortCtl.abort(), SAVE_TIMEOUT_MS)
     let prepared = null
     try {
-      await assertSessionHealthy()
       const rows = isBulk ? buildBulkRows() : buildDailyRows()
       const superseded = rows.length
         ? await findSupersededRows(supabase, {

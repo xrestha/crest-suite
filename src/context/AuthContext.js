@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
+import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
 
 const AuthContext = createContext({})
 
@@ -63,7 +64,12 @@ export function AuthProvider({ children }) {
       }
     })
 
-    return () => { mounted = false; subscription.unsubscribe() }
+    // Top the access token up whenever the tab wakes (S458). auth-js's own refresh ticker only
+    // runs while the tab is awake, so screens where a human types for an hour before pressing
+    // Save — Sales Entry, Stock Count, Purchases — otherwise reach Save with a dead 1-hour token.
+    const stopKeepAlive = startSessionKeepAlive(supabase)
+
+    return () => { mounted = false; subscription.unsubscribe(); stopKeepAlive() }
   }, [])
 
   async function fetchProfile(userId, mounted = true) {

@@ -1,4 +1,5 @@
 import { withTimeout } from '../../../utils/withTimeout'
+import { isAuthExpiredError } from '../../../utils/sessionKeepAlive'
 
 // How long any single save request may hang before we give up and re-enable the button (S453/S454).
 export const SAVE_TIMEOUT_MS = 20000
@@ -69,7 +70,7 @@ export async function findSupersededRows(supabase, { periodId, bsDay, recipeIds,
 // retry-on-failure path: anything other than "the function isn't there" is rethrown untouched.
 // Once the migration is applied everywhere, this fallback and `isMissingFunctionError` can go.
 export async function persistSalesDay(supabase, { periodId, bsDay, rows, signal, timeoutMs = SAVE_TIMEOUT_MS }) {
-  const { error } = await withTimeout(
+  const callRpc = () => withTimeout(
     signalled(
       supabase.rpc('save_sales_day', { p_period_id: periodId, p_bs_day: bsDay, p_rows: rows }),
       signal
@@ -77,6 +78,19 @@ export async function persistSalesDay(supabase, { periodId, bsDay, rows, signal,
     timeoutMs,
     'Save'
   )
+
+  let { error } = await callRpc()
+
+  // An access token that expired while the user was typing must not cost them the save (S458).
+  // Renew once and retry silently — safe to repeat because the RPC replaces the day wholesale, so
+  // running it twice with the same payload lands on exactly the same state as running it once.
+  if (error && isAuthExpiredError(error)) {
+    const { error: refreshErr } = await withTimeout(supabase.auth.refreshSession(), timeoutMs, 'Session refresh')
+    if (refreshErr) {
+      throw new Error('Your session expired and could not be renewed. Please reload the page and sign in again — your figures are still on screen.')
+    }
+    ;({ error } = await callRpc())
+  }
 
   if (!error) return { atomic: true }
   if (!isMissingFunctionError(error)) throw new Error(error.message)
