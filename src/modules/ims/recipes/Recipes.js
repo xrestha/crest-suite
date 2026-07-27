@@ -28,6 +28,9 @@ export default function Recipes() {
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('list') // list | edit | detail
   const [selectedRecipe, setSelectedRecipe] = useState(null)
+  // Breadcrumb trail of recipes drilled through via a sub-recipe ingredient row (detail view
+  // only) — "Back" pops one level instead of always returning to the list.
+  const [detailStack, setDetailStack] = useState([])
   const [recipeForm, setRecipeForm] = useState(EMPTY_RECIPE)
   const [ingredients, setIngredients] = useState([{ _key: Date.now(), item_id: '', sub_recipe_id: '', qty_per_portion: '', type: 'item' }])
   const [saving, setSaving] = useState(false)
@@ -188,7 +191,25 @@ export default function Recipes() {
 
   function openDetail(recipe) {
     setSelectedRecipe(recipe)
+    setDetailStack([])
     setView('detail')
+  }
+
+  // Drill into a sub-recipe ingredient row's own cost breakdown, keeping the parent on a
+  // breadcrumb stack so "Back" steps out one level at a time instead of exiting to the list.
+  function drillIntoSubRecipe(subRecipe) {
+    if (!subRecipe) return
+    setDetailStack(stack => [...stack, selectedRecipe])
+    setSelectedRecipe(subRecipe)
+  }
+
+  function detailBack() {
+    if (detailStack.length === 0) {
+      setView('list')
+      return
+    }
+    setSelectedRecipe(detailStack[detailStack.length - 1])
+    setDetailStack(stack => stack.slice(0, -1))
   }
 
   async function saveFcPct() {
@@ -1202,6 +1223,21 @@ export default function Recipes() {
           <>
           <div className="no-print">
           <div>
+            {detailStack.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, fontSize: 12.5, color: 'var(--theme-text2)', marginBottom: 12 }}>
+                {detailStack.map((r, i) => (
+                  <span key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      onClick={() => { setSelectedRecipe(r); setDetailStack(detailStack.slice(0, i)) }}
+                      style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'var(--theme-text2)', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 2 }}>
+                      {r.name}
+                    </button>
+                    <span aria-hidden="true">›</span>
+                  </span>
+                ))}
+                <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{selectedRecipe.name}</span>
+              </div>
+            )}
             {isSubRec && (
               <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent)' }}>
                 ⚙ Sub-Recipe — Yield: {selectedRecipe.yield_qty} {selectedRecipe.yield_uom} · Cost per {selectedRecipe.yield_uom}: NPR {costPerUnit.toFixed(2)}
@@ -1348,9 +1384,13 @@ export default function Recipes() {
                       yieldPct = null
                     } else return null
                     const pctOfDish = cost > 0 ? (itemCost / cost) * 100 : 0
+                    const isDrillable = !!(ri.sub_recipe_id && ri.sub_recipe)
                     return (
                       <tr key={ri.id}>
-                        <td style={{ fontWeight: 600, color: ri.sub_recipe_id ? 'var(--theme-accent)' : 'var(--theme-text1)' }}>
+                        <td
+                          title={isDrillable ? `View ${ri.sub_recipe.name}'s own cost breakdown` : undefined}
+                          onClick={isDrillable ? () => drillIntoSubRecipe(ri.sub_recipe) : undefined}
+                          style={{ fontWeight: 600, color: ri.sub_recipe_id ? 'var(--theme-accent)' : 'var(--theme-text1)', cursor: isDrillable ? 'pointer' : 'default' }}>
                           {ri.items?.item_code && (
                             <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--theme-accent)', marginRight: 7, fontWeight: 400 }}>{ri.items.item_code}</span>
                           )}
@@ -1358,6 +1398,7 @@ export default function Recipes() {
                             <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--theme-accent)', marginRight: 7, fontWeight: 400 }}>{ri.sub_recipe.recipe_code}</span>
                           )}
                           {name}
+                          {isDrillable && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text2)' }}>↳</span>}
                         </td>
                         <td><span className={`badge ${ri.sub_recipe_id ? 'badge-yellow' : 'badge-gray'}`}>{ri.sub_recipe_id ? 'Sub-Recipe' : 'Item'}</span></td>
                         <td style={{ textAlign: 'right' }}>{ri.qty_per_portion}</td>
@@ -1388,7 +1429,7 @@ export default function Recipes() {
               </div>
             </div>
             <div style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost" onClick={() => setView('list')}>← Back</button>
+              <button className="btn btn-ghost" onClick={detailBack}>← Back{detailStack.length > 0 ? ` to ${detailStack[detailStack.length - 1].name}` : ''}</button>
               <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => printWithTitle(`Recipe Cost Card - ${selectedRecipe.name}`)}>🖶 Print Cost Card</button>
               <button className="btn btn-ghost" onClick={() => openEdit(selectedRecipe)}>Edit Recipe</button>
             </div>
