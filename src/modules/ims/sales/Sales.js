@@ -23,6 +23,7 @@ export default function Sales() {
   const [bulkForm, setBulkForm]     = useState({})
   const [bulkSaving, setBulkSaving] = useState(false)
   const [bulkSaved, setBulkSaved]   = useState(false)
+  const [bulkSaveError, setBulkSaveError] = useState('')
   const [viewMode, setViewMode]     = useState('bulk') // bulk | summary
   const [sortBy, setSortBy]         = useState('rev_desc')
   const [categoryFilter, setCategoryFilter] = useState('all')
@@ -38,6 +39,7 @@ export default function Sales() {
   const [discountForm, setDiscountForm]     = useState({})
   const [dailySaving, setDailySaving] = useState(false)
   const [dailySaved, setDailySaved]   = useState(false)
+  const [dailySaveError, setDailySaveError] = useState('')
   const [allDaySums, setAllDaySums]   = useState({}) // recipe_id -> total qty across all days
   const [allDayDiscounts, setAllDayDiscounts] = useState({}) // recipe_id -> total discount across all days
   const [monthlyEntries, setMonthlyEntries] = useState([])
@@ -132,50 +134,63 @@ export default function Sales() {
   async function saveDaily() {
     if (!selectedPeriod) return
     setDailySaving(true)
-    const merged = {}
-    const mergedDiscount = {}
-    recipes.forEach(r => {
-      const saved = dailySales[r.id] || 0
-      const raw = dailyForm[r.id]
-      const typed = raw !== undefined ? (raw === '' ? 0 : parseFloat(raw)) : null
-      merged[r.id] = (typed !== null && !isNaN(typed)) ? typed : saved
+    setDailySaveError('')
+    // Wrapped in try/finally — without it, any thrown error (a rejected fetch, a network drop
+    // mid-request) left dailySaving stuck at true forever with no feedback, since nothing after
+    // the throw point ever ran to reset it. Found live (S449): the button froze on "Saving…"
+    // indefinitely after entering a discount, with no visible error.
+    try {
+      const merged = {}
+      const mergedDiscount = {}
+      recipes.forEach(r => {
+        const saved = dailySales[r.id] || 0
+        const raw = dailyForm[r.id]
+        const typed = raw !== undefined ? (raw === '' ? 0 : parseFloat(raw)) : null
+        merged[r.id] = (typed !== null && !isNaN(typed)) ? typed : saved
 
-      const savedDisc = dailyDiscounts[r.id] || 0
-      const rawDisc = discountForm[r.id]
-      const typedDisc = rawDisc !== undefined ? (rawDisc === '' ? 0 : parseFloat(rawDisc)) : null
-      mergedDiscount[r.id] = (typedDisc !== null && !isNaN(typedDisc)) ? typedDisc : savedDisc
-    })
-    await supabase.from('sales_entries').delete().eq('period_id', selectedPeriod.id).eq('bs_day', selectedDay)
-    // unit_price/vat_rate snapshot the recipe's price at entry time — manual entry has no other
-    // price source, but capturing it now is still far more stable than every report joining the
-    // recipe's CURRENT price at view time (which used to silently reprice past periods' revenue
-    // whenever a menu price changed later). discount is the per-day/per-item NPR reduction (from
-    // the vendor Excel import or typed manually) — kept as its own column rather than folded into
-    // unit_price so it stays a separately editable, auditable figure.
-    const inserts = recipes
-      .filter(r => (merged[r.id] || 0) > 0)
-      .map(r => ({
-        period_id: selectedPeriod.id, recipe_id: r.id, bs_day: selectedDay, qty_sold: merged[r.id],
-        unit_price: parseFloat(r.selling_price) || 0, vat_rate: r.vat_rate,
-        discount: mergedDiscount[r.id] || 0,
-      }))
-    if (inserts.length > 0) {
-      const { error } = await supabase.from('sales_entries').insert(inserts)
-      if (error) { console.error('Daily save error:', error.message); setDailySaving(false); return }
-      // Bulk (bs_day=0) and Daily (bs_day>0) rows for the same recipe+period aren't mutually
-      // exclusive at the DB level (unique constraint is period_id+recipe_id+bs_day, which differs
-      // between them) — every downstream report/Variance sums ALL sales_entries rows for a period
-      // with no bs_day distinction, so having both silently double-counts. Switching a recipe to
-      // Daily mode here supersedes any bulk entry it had.
-      await supabase.from('sales_entries').delete()
-        .eq('period_id', selectedPeriod.id).eq('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id))
+        const savedDisc = dailyDiscounts[r.id] || 0
+        const rawDisc = discountForm[r.id]
+        const typedDisc = rawDisc !== undefined ? (rawDisc === '' ? 0 : parseFloat(rawDisc)) : null
+        mergedDiscount[r.id] = (typedDisc !== null && !isNaN(typedDisc)) ? typedDisc : savedDisc
+      })
+      const { error: delErr } = await supabase.from('sales_entries').delete().eq('period_id', selectedPeriod.id).eq('bs_day', selectedDay)
+      if (delErr) throw new Error(delErr.message)
+      // unit_price/vat_rate snapshot the recipe's price at entry time — manual entry has no other
+      // price source, but capturing it now is still far more stable than every report joining the
+      // recipe's CURRENT price at view time (which used to silently reprice past periods' revenue
+      // whenever a menu price changed later). discount is the per-day/per-item NPR reduction (from
+      // the vendor Excel import or typed manually) — kept as its own column rather than folded into
+      // unit_price so it stays a separately editable, auditable figure.
+      const inserts = recipes
+        .filter(r => (merged[r.id] || 0) > 0)
+        .map(r => ({
+          period_id: selectedPeriod.id, recipe_id: r.id, bs_day: selectedDay, qty_sold: merged[r.id],
+          unit_price: parseFloat(r.selling_price) || 0, vat_rate: r.vat_rate,
+          discount: mergedDiscount[r.id] || 0,
+        }))
+      if (inserts.length > 0) {
+        const { error } = await supabase.from('sales_entries').insert(inserts)
+        if (error) throw new Error(error.message)
+        // Bulk (bs_day=0) and Daily (bs_day>0) rows for the same recipe+period aren't mutually
+        // exclusive at the DB level (unique constraint is period_id+recipe_id+bs_day, which differs
+        // between them) — every downstream report/Variance sums ALL sales_entries rows for a period
+        // with no bs_day distinction, so having both silently double-counts. Switching a recipe to
+        // Daily mode here supersedes any bulk entry it had.
+        const { error: clearErr } = await supabase.from('sales_entries').delete()
+          .eq('period_id', selectedPeriod.id).eq('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id))
+        if (clearErr) throw new Error(clearErr.message)
+      }
+      setDailySaved(true)
+      setTimeout(() => setDailySaved(false), 2500)
+      // loadSales too — a bulk row may have just been cleared by the cross-mode delete above, and
+      // the Bulk tab's `sales` map would otherwise stay stale until the next period switch.
+      await Promise.all([loadDailySales(selectedPeriod.id, selectedDay), loadAllDaySums(selectedPeriod.id), loadSales(selectedPeriod.id)])
+    } catch (err) {
+      console.error('Daily save error:', err)
+      setDailySaveError(err.message || 'Failed to save — please try again.')
+    } finally {
+      setDailySaving(false)
     }
-    setDailySaving(false)
-    setDailySaved(true)
-    setTimeout(() => setDailySaved(false), 2500)
-    // loadSales too — a bulk row may have just been cleared by the cross-mode delete above, and
-    // the Bulk tab's `sales` map would otherwise stay stale until the next period switch.
-    await Promise.all([loadDailySales(selectedPeriod.id, selectedDay), loadAllDaySums(selectedPeriod.id), loadSales(selectedPeriod.id)])
   }
 
   // From SalesImportButton — writes only into dailyForm/discountForm, the same local state the
@@ -223,52 +238,58 @@ export default function Sales() {
   async function saveBulk() {
     if (!selectedPeriod) return
     setBulkSaving(true)
+    setBulkSaveError('')
+    // try/finally so a thrown error (rejected fetch, network drop mid-request) can never leave
+    // bulkSaving stuck at true forever with no feedback — see saveDaily for the same fix (S449).
+    try {
+      // Merge: saved DB values as base, typed bulkForm values as override
+      const merged = {}
+      recipes.forEach(r => {
+        const saved = sales[r.id] || 0
+        const typed = bulkForm[r.id] !== undefined ? parseFloat(bulkForm[r.id]) : null
+        merged[r.id] = typed !== null ? typed : saved
+      })
 
-    // Merge: saved DB values as base, typed bulkForm values as override
-    const merged = {}
-    recipes.forEach(r => {
-      const saved = sales[r.id] || 0
-      const typed = bulkForm[r.id] !== undefined ? parseFloat(bulkForm[r.id]) : null
-      merged[r.id] = typed !== null ? typed : saved
-    })
+      // Delete all existing bulk rows for this period, then re-insert
+      const { error: delErr } = await supabase.from('sales_entries')
+        .delete()
+        .eq('period_id', selectedPeriod.id)
+        .eq('bs_day', 0)
+      if (delErr) throw new Error(delErr.message)
 
-    // Delete all existing bulk rows for this period, then re-insert
-    await supabase.from('sales_entries')
-      .delete()
-      .eq('period_id', selectedPeriod.id)
-      .eq('bs_day', 0)
+      // unit_price/vat_rate snapshot the recipe's price at entry time — see saveDaily for why.
+      const inserts = recipes
+        .filter(r => (merged[r.id] || 0) > 0)
+        .map(r => ({
+          period_id: selectedPeriod.id,
+          recipe_id: r.id,
+          bs_day: 0,
+          qty_sold: merged[r.id],
+          unit_price: parseFloat(r.selling_price) || 0,
+          vat_rate: r.vat_rate,
+        }))
 
-    // unit_price/vat_rate snapshot the recipe's price at entry time — see saveDaily for why.
-    const inserts = recipes
-      .filter(r => (merged[r.id] || 0) > 0)
-      .map(r => ({
-        period_id: selectedPeriod.id,
-        recipe_id: r.id,
-        bs_day: 0,
-        qty_sold: merged[r.id],
-        unit_price: parseFloat(r.selling_price) || 0,
-        vat_rate: r.vat_rate,
-      }))
-
-    if (inserts.length > 0) {
-      const { error } = await supabase.from('sales_entries').insert(inserts)
-      if (error) {
-        console.error('Bulk save error:', error.message)
-        setBulkSaving(false)
-        return
+      if (inserts.length > 0) {
+        const { error } = await supabase.from('sales_entries').insert(inserts)
+        if (error) throw new Error(error.message)
+        // Same exclusivity guard as saveDaily — Bulk and Daily rows for the same recipe+period
+        // aren't mutually exclusive at the DB level and every downstream report sums both with no
+        // distinction, silently double-counting. Switching a recipe to Bulk here supersedes any
+        // dated Daily entries it had.
+        const { error: clearErr } = await supabase.from('sales_entries').delete()
+          .eq('period_id', selectedPeriod.id).gt('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id))
+        if (clearErr) throw new Error(clearErr.message)
       }
-      // Same exclusivity guard as saveDaily — Bulk and Daily rows for the same recipe+period
-      // aren't mutually exclusive at the DB level and every downstream report sums both with no
-      // distinction, silently double-counting. Switching a recipe to Bulk here supersedes any
-      // dated Daily entries it had.
-      await supabase.from('sales_entries').delete()
-        .eq('period_id', selectedPeriod.id).gt('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id))
-    }
 
-    setBulkSaving(false)
-    setBulkSaved(true)
-    setTimeout(() => setBulkSaved(false), 2500)
-    await Promise.all([loadSales(selectedPeriod.id), loadAllDaySums(selectedPeriod.id)])
+      setBulkSaved(true)
+      setTimeout(() => setBulkSaved(false), 2500)
+      await Promise.all([loadSales(selectedPeriod.id), loadAllDaySums(selectedPeriod.id)])
+    } catch (err) {
+      console.error('Bulk save error:', err)
+      setBulkSaveError(err.message || 'Failed to save — please try again.')
+    } finally {
+      setBulkSaving(false)
+    }
   }
 
   // Totals
@@ -467,6 +488,11 @@ export default function Sales() {
                     </button>
                   </div>
                 </div>
+                {bulkSaveError && (
+                  <div className="no-print" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 6, padding: '8px 12px', marginBottom: 16, fontSize: 12.5, color: 'var(--theme-red)' }}>
+                    ⚠ {bulkSaveError}
+                  </div>
+                )}
                 {recipes.length === 0 ? (
                   <div className="empty-state">
                     <p className="empty-state-text">No active recipes. Add recipes in Recipe Costing first.</p>
@@ -598,6 +624,11 @@ export default function Sales() {
                     >{dailySaving ? 'Saving…' : dailySaved ? '✓ Saved' : 'Save Day'}</button>
                   </div>
                 </div>
+                {dailySaveError && (
+                  <div className="no-print" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 6, padding: '8px 12px', marginBottom: 16, fontSize: 12.5, color: 'var(--theme-red)' }}>
+                    ⚠ {dailySaveError}
+                  </div>
+                )}
                 {recipes.length === 0 ? (
                   <div className="empty-state">
                     <p className="empty-state-text">No active recipes. Add recipes in Recipe Costing first.</p>
