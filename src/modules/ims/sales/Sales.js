@@ -600,9 +600,9 @@ export default function Sales() {
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, marginBottom: 12, fontSize: 13, flexWrap: 'wrap' }}>
                         <span style={{ color: 'var(--theme-text2)' }}>Total qty sold (Day {selectedDay}): <strong style={{ color: 'var(--theme-text1)' }}>{totQty.toLocaleString()}</strong></span>
                         {totDiscount > 0 && (
-                          <span style={{ color: 'var(--theme-text2)' }}>Total discount: <strong style={{ color: 'var(--theme-red)' }}>NPR {totDiscount.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</strong></span>
+                          <span style={{ color: 'var(--theme-text2)' }}>Total discount: <strong style={{ color: 'var(--theme-red)' }}>NPR {totDiscount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
                         )}
-                        <span style={{ color: 'var(--theme-text2)' }}>Day revenue: <strong style={{ color: 'var(--theme-accent)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}</strong></span>
+                        <span style={{ color: 'var(--theme-text2)' }}>Day revenue: <strong style={{ color: 'var(--theme-accent)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
                       </div>
                     )
                   })()}
@@ -666,7 +666,7 @@ export default function Sales() {
                               />
                             </td>
                             <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
-                              {qty > 0 || disc > 0 ? `NPR ${rev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+                              {qty > 0 || disc > 0 ? `NPR ${rev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
                           </tr>
                         )
@@ -859,10 +859,10 @@ export default function Sales() {
                               {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString()}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-red)' : 'var(--theme-text3)' }}>
-                              {disc > 0 ? `NPR ${disc.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+                              {disc > 0 ? `NPR ${disc.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)', fontWeight: 600 }}>
-                              {rev > 0 ? `NPR ${rev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+                              {rev > 0 ? `NPR ${rev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
                               {revPct > 0 ? (
@@ -882,10 +882,10 @@ export default function Sales() {
                         <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{sumTotalQty.toLocaleString()}</td>
                         <td></td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', paddingTop: 12 }}>
-                          {sumTotalDiscount > 0 ? `NPR ${sumTotalDiscount.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+                          {sumTotalDiscount > 0 ? `NPR ${sumTotalDiscount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 15, paddingTop: 12 }}>
-                          NPR {sumTotalRev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                          NPR {sumTotalRev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td></td>
                       </tr>
