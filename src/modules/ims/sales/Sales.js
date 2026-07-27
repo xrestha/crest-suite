@@ -27,6 +27,7 @@ export default function Sales() {
   const [sortBy, setSortBy]         = useState('rev_desc')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [menuSearch, setMenuSearch] = useState('') // Daily Entry / Daily Breakdown only
+  const [onlyWithSales, setOnlyWithSales] = useState(false) // Bulk Entry / Daily Entry only
   const [selectedDay, setSelectedDay] = useState(1)
   const [dailySales, setDailySales] = useState({})
   const [dailyForm, setDailyForm]   = useState({})
@@ -213,6 +214,12 @@ export default function Sales() {
     return saved > 0 ? String(saved) : ''
   }
 
+  function getDailyQty(recipeId) {
+    if (dailyForm[recipeId] !== undefined) return dailyForm[recipeId]
+    const saved = dailySales[recipeId]
+    return saved > 0 ? String(saved) : ''
+  }
+
   async function saveBulk() {
     if (!selectedPeriod) return
     setBulkSaving(true)
@@ -371,8 +378,14 @@ export default function Sales() {
             }}>{label}</button>
           ))}
         </div>
-        {(viewMode === 'daily' || viewMode === 'breakdown' || viewMode === 'summary') && (
-          <div style={{ display: 'flex', gap: 8 }}>
+        {(viewMode === 'bulk' || viewMode === 'daily' || viewMode === 'breakdown' || viewMode === 'summary') && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {(viewMode === 'bulk' || viewMode === 'daily') && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--theme-text2)', cursor: 'pointer', marginBottom: 6, whiteSpace: 'nowrap' }}>
+                <input type="checkbox" checked={onlyWithSales} onChange={e => setOnlyWithSales(e.target.checked)} />
+                Only items with sales
+              </label>
+            )}
             {(viewMode === 'daily' || viewMode === 'breakdown') && (
               <div style={{ position: 'relative', marginBottom: 6 }}>
                 <input
@@ -388,14 +401,16 @@ export default function Sales() {
                 )}
               </div>
             )}
-            <select
-              value={categoryFilter}
-              onChange={e => setCategoryFilter(e.target.value)}
-              style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', marginBottom: 6 }}
-            >
-              <option value="all">All Categories</option>
-              {categories.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+            {(viewMode === 'daily' || viewMode === 'breakdown' || viewMode === 'summary') && (
+              <select
+                value={categoryFilter}
+                onChange={e => setCategoryFilter(e.target.value)}
+                style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', marginBottom: 6 }}
+              >
+                <option value="all">All Categories</option>
+                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            )}
             {viewMode === 'summary' && (
               <select
                 value={sortBy}
@@ -469,7 +484,10 @@ export default function Sales() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedRecipes.map(recipe => {
+                      {sortedRecipes.filter(r => !onlyWithSales || getQtyNum(r.id) > 0).length === 0 && (
+                        <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>No items with sales entered yet.</td></tr>
+                      )}
+                      {sortedRecipes.filter(r => !onlyWithSales || getQtyNum(r.id) > 0).map(recipe => {
                         const qty = getQty(recipe.id)
                         const rev = (parseFloat(qty) || 0) * (parseFloat(recipe.selling_price) || 0)
                         return (
@@ -589,8 +607,7 @@ export default function Sales() {
                   {(() => {
                     let totQty = 0, totGross = 0, totDiscount = 0
                     recipes.forEach(r => {
-                      const raw = dailyForm[r.id] !== undefined ? dailyForm[r.id] : (dailySales[r.id] > 0 ? String(dailySales[r.id]) : '')
-                      const q = parseFloat(raw) || 0
+                      const q = parseFloat(getDailyQty(r.id)) || 0
                       totQty += q
                       totGross += q * (parseFloat(r.selling_price) || 0)
                       totDiscount += parseFloat(getDailyDiscount(r.id)) || 0
@@ -619,11 +636,11 @@ export default function Sales() {
                       </tr>
                     </thead>
                     <tbody>
-                      {recipes.filter(matchesMenuFilter).length === 0 && (
+                      {recipes.filter(r => matchesMenuFilter(r) && (!onlyWithSales || parseFloat(getDailyQty(r.id)) > 0)).length === 0 && (
                         <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>No menu items match this filter.</td></tr>
                       )}
-                      {recipes.filter(matchesMenuFilter).map(recipe => {
-                        const rawVal = dailyForm[recipe.id] !== undefined ? dailyForm[recipe.id] : (dailySales[recipe.id] > 0 ? String(dailySales[recipe.id]) : '')
+                      {recipes.filter(r => matchesMenuFilter(r) && (!onlyWithSales || parseFloat(getDailyQty(r.id)) > 0)).map(recipe => {
+                        const rawVal = getDailyQty(recipe.id)
                         const qty = parseFloat(rawVal) || 0
                         const discRaw = getDailyDiscount(recipe.id)
                         const disc = parseFloat(discRaw) || 0
