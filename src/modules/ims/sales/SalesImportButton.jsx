@@ -19,7 +19,7 @@ const toNum = v => {
 // whitespace character sits between the two words.
 function parseSalesReport(aoa) {
   let headerRow = -1
-  let nameCol = -1, saleCol = -1, returnCol = -1, netQtyCol = -1
+  let nameCol = -1, saleCol = -1, returnCol = -1, netQtyCol = -1, discountCol = -1
   for (let r = 0; r < aoa.length; r++) {
     const row = aoa[r] || []
     const cells = row.map(lc)
@@ -35,6 +35,10 @@ function parseSalesReport(aoa) {
     returnCol = rc
     const boundary = Math.max(sc, rc)
     netQtyCol = cells.findIndex((c, i) => c.startsWith('net') && i > boundary)
+    // "Discount" sits in the report's Amount group (Gross / Discount), to the right of the
+    // Quantity group (Sale / Return / Net) — search past that boundary the same way Net Qty
+    // does, so an unrelated "net qty" column never gets mistaken for it.
+    discountCol = cells.findIndex((c, i) => c.includes('discount') && i > boundary)
     break
   }
   if (headerRow === -1) return { headerFound: false, rows: [] }
@@ -51,16 +55,17 @@ function parseSalesReport(aoa) {
     const sale = saleCol !== -1 ? (toNum(row[saleCol]) || 0) : 0
     const ret = returnCol !== -1 ? (toNum(row[returnCol]) || 0) : 0
     const qty = netFromFile != null ? netFromFile : (sale - ret)
-    rows.push({ productName, qty: qty || 0 })
+    const discount = discountCol !== -1 ? (toNum(row[discountCol]) || 0) : 0
+    rows.push({ productName, qty: qty || 0, discount })
   }
   return { headerFound: true, rows }
 }
 
 // Reads a vendor "Sales Report Item Wise" .xlsx, matches Product Name against this client's active
 // recipes (exact case-insensitive match, same idiom as RecipeImportButton.jsx), and hands the
-// matched { recipeId: qty } map back to the parent via onMatched — which merges it into the same
-// local qty state the Daily Entry inputs already write to. No Supabase calls happen here; nothing
-// is persisted until the parent's existing Save Day button is clicked.
+// matched qty + discount maps back to the parent via onMatched(qtyMap, discountMap) — which merges
+// them into the same local qty/discount state the Daily Entry inputs already write to. No Supabase
+// calls happen here; nothing is persisted until the parent's existing Save Day button is clicked.
 export default function SalesImportButton({ recipes, onMatched, disabled }) {
   const [importSummary, setImportSummary] = useState(null)
   const [importError, setImportError] = useState('')
@@ -94,18 +99,20 @@ export default function SalesImportButton({ recipes, onMatched, disabled }) {
 
         const byName = new Map(recipes.map(r => [lc(r.name), r]))
         const qtyMap = new Map()
+        const discountMap = new Map()
         const unmatchedNames = []
         rows.forEach(row => {
           const recipe = byName.get(lc(row.productName))
           if (!recipe) { unmatchedNames.push(row.productName); return }
           qtyMap.set(recipe.id, (qtyMap.get(recipe.id) || 0) + row.qty)
+          if (row.discount) discountMap.set(recipe.id, (discountMap.get(recipe.id) || 0) + row.discount)
         })
 
         const matched = rows.length - unmatchedNames.length
-        if (!window.confirm(`This will fill in qty for ${matched} matched menu item${matched !== 1 ? 's' : ''} on the currently selected day, overwriting any value already entered for those items. Continue?`)) {
+        if (!window.confirm(`This will fill in qty${discountMap.size > 0 ? ' and discount' : ''} for ${matched} matched menu item${matched !== 1 ? 's' : ''} on the currently selected day, overwriting any value already entered for those items. Continue?`)) {
           return
         }
-        onMatched(qtyMap)
+        onMatched(qtyMap, discountMap)
         setImportSummary({ matched, total: rows.length, unmatchedNames: [...new Set(unmatchedNames)] })
       } catch (err) {
         setImportError('Could not read the file — make sure it is a valid .xlsx. (' + err.message + ')')
@@ -116,7 +123,7 @@ export default function SalesImportButton({ recipes, onMatched, disabled }) {
 
   return (
     <>
-      <Tip text="Upload a vendor/POS 'Sales Report Item Wise' Excel export to auto-fill qty sold for this day. Matches by Product Name against your active menu items and reads the Net quantity column; unmatched names are listed below. Review the filled table, then click Save Day as usual." width={300}>
+      <Tip text="Upload a vendor/POS 'Sales Report Item Wise' Excel export to auto-fill qty sold and discount for this day. Matches by Product Name against your active menu items and reads the Net quantity and Discount columns; unmatched names are listed below. Review the filled table, then click Save Day as usual." width={300}>
         <label className="btn btn-ghost" style={{ fontSize: 13, cursor: disabled ? 'not-allowed' : 'pointer', margin: 0, opacity: disabled ? 0.5 : 1 }}>
           ↑ Import Excel
           <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportFile} disabled={disabled} />

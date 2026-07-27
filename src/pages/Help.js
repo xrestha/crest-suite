@@ -82,8 +82,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '↑', name: 'Sales Entry',
-        guide: 'Record total qty sold per menu item for the period. Only items with a recipe appear here. Revenue is calculated automatically from selling price × qty sold. Use Bulk Entry for monthly POS totals.',
-        tips: ['Sales data is required for the Variance Report to calculate theoretical usage', 'Sub-recipes are excluded — only top-level recipes appear here', 'You can update sales entries any time while the period is open', 'Daily Entry: click ↑ Import Excel to auto-fill qty from a vendor/POS "Sales Report Item Wise" export (.xlsx) for the currently selected day — it matches by Product Name and reads the Net qty sold column; unmatched product names are listed in a small banner so you can fix names or enter them manually. Review the filled table, then click Save Day as usual']
+        guide: 'Record total qty sold per menu item for the period. Only items with a recipe appear here. Revenue is calculated automatically from selling price × qty sold, minus any per-item Discount entered on Daily Entry. Use Bulk Entry for monthly POS totals.',
+        tips: ['Sales data is required for the Variance Report to calculate theoretical usage', 'Sub-recipes are excluded — only top-level recipes appear here', 'You can update sales entries any time while the period is open', 'Daily Entry: click ↑ Import Excel to auto-fill qty AND discount from a vendor/POS "Sales Report Item Wise" export (.xlsx) for the currently selected day — it matches by Product Name and reads the Net qty sold and Discount columns; unmatched product names are listed in a small banner so you can fix names or enter them manually. Review the filled table, then click Save Day as usual', 'Discount (Daily Entry only) is a per-item NPR reduction for that day — e.g. staff discount or a promo — subtracted from Day Revenue and rolled up into Period Summary\'s Total Revenue. It has no effect on Bulk Entry, which has no per-day/discount concept']
       },
       {
         icon: '◎', name: 'Payment Summary',

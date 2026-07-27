@@ -29,9 +29,15 @@ export default function Sales() {
   const [selectedDay, setSelectedDay] = useState(1)
   const [dailySales, setDailySales] = useState({})
   const [dailyForm, setDailyForm]   = useState({})
+  // Per-item discount (NPR) for this day — imported from the vendor Excel's Discount column, or
+  // typed manually. Kept separate from unit_price (which stays a plain recipe-price snapshot) so
+  // it's independently editable/auditable rather than silently baked into a price.
+  const [dailyDiscounts, setDailyDiscounts] = useState({})
+  const [discountForm, setDiscountForm]     = useState({})
   const [dailySaving, setDailySaving] = useState(false)
   const [dailySaved, setDailySaved]   = useState(false)
   const [allDaySums, setAllDaySums]   = useState({}) // recipe_id -> total qty across all days
+  const [allDayDiscounts, setAllDayDiscounts] = useState({}) // recipe_id -> total discount across all days
   const [monthlyEntries, setMonthlyEntries] = useState([])
   const [monthlyLoading, setMonthlyLoading] = useState(false)
 
@@ -89,17 +95,28 @@ export default function Sales() {
       .from('sales_entries').select('*')
       .eq('period_id', periodId).eq('bs_day', day).neq('source', 'pos_comp')
     const map = {}
-    ;(data || []).forEach(s => { map[s.recipe_id] = parseFloat(s.qty_sold) || 0 })
+    const discMap = {}
+    ;(data || []).forEach(s => {
+      map[s.recipe_id] = parseFloat(s.qty_sold) || 0
+      discMap[s.recipe_id] = parseFloat(s.discount) || 0
+    })
     setDailySales(map)
     setDailyForm({})
+    setDailyDiscounts(discMap)
+    setDiscountForm({})
   }
 
   async function loadAllDaySums(periodId) {
     const { data } = await supabase
-      .from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp')
+      .from('sales_entries').select('recipe_id, qty_sold, discount').eq('period_id', periodId).neq('source', 'pos_comp')
     const agg = {}
-    ;(data || []).forEach(e => { agg[e.recipe_id] = (agg[e.recipe_id] || 0) + (parseFloat(e.qty_sold) || 0) })
+    const discAgg = {}
+    ;(data || []).forEach(e => {
+      agg[e.recipe_id] = (agg[e.recipe_id] || 0) + (parseFloat(e.qty_sold) || 0)
+      discAgg[e.recipe_id] = (discAgg[e.recipe_id] || 0) + (parseFloat(e.discount) || 0)
+    })
     setAllDaySums(agg)
+    setAllDayDiscounts(discAgg)
   }
 
   async function loadMonthlyEntries(periodId) {
@@ -114,22 +131,31 @@ export default function Sales() {
     if (!selectedPeriod) return
     setDailySaving(true)
     const merged = {}
+    const mergedDiscount = {}
     recipes.forEach(r => {
       const saved = dailySales[r.id] || 0
       const raw = dailyForm[r.id]
       const typed = raw !== undefined ? (raw === '' ? 0 : parseFloat(raw)) : null
       merged[r.id] = (typed !== null && !isNaN(typed)) ? typed : saved
+
+      const savedDisc = dailyDiscounts[r.id] || 0
+      const rawDisc = discountForm[r.id]
+      const typedDisc = rawDisc !== undefined ? (rawDisc === '' ? 0 : parseFloat(rawDisc)) : null
+      mergedDiscount[r.id] = (typedDisc !== null && !isNaN(typedDisc)) ? typedDisc : savedDisc
     })
     await supabase.from('sales_entries').delete().eq('period_id', selectedPeriod.id).eq('bs_day', selectedDay)
     // unit_price/vat_rate snapshot the recipe's price at entry time — manual entry has no other
     // price source, but capturing it now is still far more stable than every report joining the
     // recipe's CURRENT price at view time (which used to silently reprice past periods' revenue
-    // whenever a menu price changed later).
+    // whenever a menu price changed later). discount is the per-day/per-item NPR reduction (from
+    // the vendor Excel import or typed manually) — kept as its own column rather than folded into
+    // unit_price so it stays a separately editable, auditable figure.
     const inserts = recipes
       .filter(r => (merged[r.id] || 0) > 0)
       .map(r => ({
         period_id: selectedPeriod.id, recipe_id: r.id, bs_day: selectedDay, qty_sold: merged[r.id],
         unit_price: parseFloat(r.selling_price) || 0, vat_rate: r.vat_rate,
+        discount: mergedDiscount[r.id] || 0,
       }))
     if (inserts.length > 0) {
       const { error } = await supabase.from('sales_entries').insert(inserts)
@@ -150,14 +176,21 @@ export default function Sales() {
     await Promise.all([loadDailySales(selectedPeriod.id, selectedDay), loadAllDaySums(selectedPeriod.id), loadSales(selectedPeriod.id)])
   }
 
-  // From SalesImportButton — writes only into dailyForm, the same local state the manual qty
-  // inputs below already use. Nothing is persisted until the user clicks Save Day.
-  function handleImportMatched(qtyMap) {
+  // From SalesImportButton — writes only into dailyForm/discountForm, the same local state the
+  // manual qty/discount inputs below already use. Nothing is persisted until Save Day is clicked.
+  function handleImportMatched(qtyMap, discountMap) {
     setDailyForm(f => {
       const next = { ...f }
       for (const [recipeId, qty] of qtyMap.entries()) next[recipeId] = String(qty)
       return next
     })
+    if (discountMap && discountMap.size > 0) {
+      setDiscountForm(f => {
+        const next = { ...f }
+        for (const [recipeId, discount] of discountMap.entries()) next[recipeId] = String(discount)
+        return next
+      })
+    }
   }
 
   async function handlePeriodChange(periodId) {
@@ -169,6 +202,13 @@ export default function Sales() {
   function getQty(recipeId) {
     if (bulkForm[recipeId] !== undefined) return bulkForm[recipeId]
     const saved = sales[recipeId]
+    return saved > 0 ? String(saved) : ''
+  }
+
+  // Daily Entry only — mirrors the dailyForm/dailySales fallback pattern used inline for qty.
+  function getDailyDiscount(recipeId) {
+    if (discountForm[recipeId] !== undefined) return discountForm[recipeId]
+    const saved = dailyDiscounts[recipeId]
     return saved > 0 ? String(saved) : ''
   }
 
@@ -499,11 +539,12 @@ export default function Sales() {
                     <button
                       className="btn btn-ghost"
                       disabled={isLocked}
-                      onClick={() => setDailyForm(f => {
+                      onClick={() => {
                         const cleared = {}
                         recipes.forEach(r => { cleared[r.id] = '' })
-                        return cleared
-                      })}
+                        setDailyForm(cleared)
+                        setDiscountForm(cleared)
+                      }}
                       style={{ fontSize: 13, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
                     >Clear</button>
                     <button
@@ -520,16 +561,21 @@ export default function Sales() {
                 ) : (
                   <>
                   {(() => {
-                    let totQty = 0, totRev = 0
+                    let totQty = 0, totGross = 0, totDiscount = 0
                     recipes.forEach(r => {
                       const raw = dailyForm[r.id] !== undefined ? dailyForm[r.id] : (dailySales[r.id] > 0 ? String(dailySales[r.id]) : '')
                       const q = parseFloat(raw) || 0
                       totQty += q
-                      totRev += q * (parseFloat(r.selling_price) || 0)
+                      totGross += q * (parseFloat(r.selling_price) || 0)
+                      totDiscount += parseFloat(getDailyDiscount(r.id)) || 0
                     })
+                    const totRev = totGross - totDiscount
                     return (
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, marginBottom: 12, fontSize: 13, flexWrap: 'wrap' }}>
                         <span style={{ color: 'var(--theme-text2)' }}>Total qty sold (Day {selectedDay}): <strong style={{ color: 'var(--theme-text1)' }}>{totQty.toLocaleString()}</strong></span>
+                        {totDiscount > 0 && (
+                          <span style={{ color: 'var(--theme-text2)' }}>Total discount: <strong style={{ color: 'var(--theme-red)' }}>NPR {totDiscount.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</strong></span>
+                        )}
                         <span style={{ color: 'var(--theme-text2)' }}>Day revenue: <strong style={{ color: 'var(--theme-accent)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}</strong></span>
                       </div>
                     )
@@ -542,14 +588,17 @@ export default function Sales() {
                         <th><Tip text="Recipe category — Food, Beverage, Dessert, etc." width={210}>Category</Tip></th>
                         <th style={{ textAlign: 'right' }}><Tip text="Ex-VAT selling price per portion as set in Recipe Costing." width={230}>Selling Price</Tip></th>
                         <th style={{ textAlign: 'right', width: 160 }}><Tip text="Portions sold on this specific day. Saved separately from the monthly bulk total." width={250}>Qty Sold (Day {selectedDay})</Tip></th>
-                        <th style={{ textAlign: 'right' }}><Tip text="Revenue for this item on this day = Qty × Selling Price (ex-VAT)." width={240}>Day Revenue</Tip></th>
+                        <th style={{ textAlign: 'right', width: 130 }}><Tip text="NPR discount applied to this item on this day — e.g. staff discount, promo, or complimentary reduction. Subtracted from Day Revenue. Auto-filled by ↑ Import Excel from the report's Discount column, or type it in directly." width={280}>Discount</Tip></th>
+                        <th style={{ textAlign: 'right' }}><Tip text="Revenue for this item on this day = (Qty × Selling Price) − Discount, ex-VAT." width={260}>Day Revenue</Tip></th>
                       </tr>
                     </thead>
                     <tbody>
                       {recipes.map(recipe => {
                         const rawVal = dailyForm[recipe.id] !== undefined ? dailyForm[recipe.id] : (dailySales[recipe.id] > 0 ? String(dailySales[recipe.id]) : '')
                         const qty = parseFloat(rawVal) || 0
-                        const rev = qty * (parseFloat(recipe.selling_price) || 0)
+                        const discRaw = getDailyDiscount(recipe.id)
+                        const disc = parseFloat(discRaw) || 0
+                        const rev = qty * (parseFloat(recipe.selling_price) || 0) - disc
                         return (
                           <tr key={recipe.id}>
                             <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}</td>
@@ -572,8 +621,23 @@ export default function Sales() {
                                 }}
                               />
                             </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <input
+                                type="number" min="0"
+                                value={discRaw}
+                                onChange={e => setDiscountForm(f => ({ ...f, [recipe.id]: e.target.value }))}
+                                placeholder="0"
+                                disabled={isLocked}
+                                style={{
+                                  background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
+                                  borderRadius: 5, padding: '6px 10px', fontSize: 13,
+                                  color: 'var(--theme-text1)', outline: 'none', width: 100, textAlign: 'right',
+                                  borderColor: disc > 0 ? 'rgba(248,113,113,0.4)' : 'var(--theme-border)'
+                                }}
+                              />
+                            </td>
                             <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
-                              {rev > 0 ? `NPR ${rev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+                              {qty > 0 || disc > 0 ? `NPR ${rev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
                             </td>
                           </tr>
                         )
@@ -585,11 +649,12 @@ export default function Sales() {
                     <button
                       className="btn btn-ghost"
                       disabled={isLocked}
-                      onClick={() => setDailyForm(f => {
+                      onClick={() => {
                         const cleared = {}
                         recipes.forEach(r => { cleared[r.id] = '' })
-                        return cleared
-                      })}
+                        setDailyForm(cleared)
+                        setDiscountForm(cleared)
+                      }}
                       style={{ fontSize: 13, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
                     >Clear</button>
                     <button
@@ -713,8 +778,8 @@ export default function Sales() {
               .sort((a, b) => {
                 const aqty = allDaySums[a.id] || 0
                 const bqty = allDaySums[b.id] || 0
-                const arev = aqty * (parseFloat(a.selling_price) || 0)
-                const brev = bqty * (parseFloat(b.selling_price) || 0)
+                const arev = aqty * (parseFloat(a.selling_price) || 0) - (allDayDiscounts[a.id] || 0)
+                const brev = bqty * (parseFloat(b.selling_price) || 0) - (allDayDiscounts[b.id] || 0)
                 switch (sortBy) {
                   case 'rev_desc':   return brev - arev
                   case 'rev_asc':    return arev - brev
@@ -726,7 +791,8 @@ export default function Sales() {
                 }
               })
             const sumTotalQty = summaryRecipes.reduce((s, r) => s + (allDaySums[r.id] || 0), 0)
-            const sumTotalRev = summaryRecipes.reduce((s, r) => s + (allDaySums[r.id] || 0) * (parseFloat(r.selling_price) || 0), 0)
+            const sumTotalDiscount = summaryRecipes.reduce((s, r) => s + (allDayDiscounts[r.id] || 0), 0)
+            const sumTotalRev = summaryRecipes.reduce((s, r) => s + (allDaySums[r.id] || 0) * (parseFloat(r.selling_price) || 0) - (allDayDiscounts[r.id] || 0), 0)
             return (
               <div className="card">
                 <div className="table-wrap">
@@ -737,14 +803,16 @@ export default function Sales() {
                         <th>Category</th>
                         <th style={{ textAlign: 'right' }}>Total Sold</th>
                         <th style={{ textAlign: 'right' }}>Selling Price</th>
-                        <th style={{ textAlign: 'right' }}><Tip text="Total revenue for this item = qty sold × selling price (ex-VAT). Used for variance and cost analysis.">Total Revenue</Tip></th>
+                        <th style={{ textAlign: 'right' }}><Tip text="Total discount applied across the period for this item (from Daily Entry, including any imported from the vendor Excel's Discount column)." width={260}>Discount</Tip></th>
+                        <th style={{ textAlign: 'right' }}><Tip text="Total revenue for this item = (qty sold × selling price) − discount, ex-VAT. Used for variance and cost analysis.">Total Revenue</Tip></th>
                         <th style={{ textAlign: 'right' }}><Tip text="This item's share of total period revenue — highlights your top revenue contributors." width={240}>% of Revenue</Tip></th>
                       </tr>
                     </thead>
                     <tbody>
                       {summaryRecipes.map(recipe => {
                         const sold = allDaySums[recipe.id] || 0
-                        const rev  = sold * (parseFloat(recipe.selling_price) || 0)
+                        const disc = allDayDiscounts[recipe.id] || 0
+                        const rev  = sold * (parseFloat(recipe.selling_price) || 0) - disc
                         const revPct = sumTotalRev > 0 ? (rev / sumTotalRev) * 100 : 0
                         return (
                           <tr key={recipe.id} style={{ opacity: sold === 0 ? 0.4 : 1 }}>
@@ -755,6 +823,9 @@ export default function Sales() {
                             </td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString()}` : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-red)' : 'var(--theme-text3)' }}>
+                              {disc > 0 ? `NPR ${disc.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)', fontWeight: 600 }}>
                               {rev > 0 ? `NPR ${rev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
@@ -776,6 +847,9 @@ export default function Sales() {
                         <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{sumTotalQty.toLocaleString()}</td>
                         <td></td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', paddingTop: 12 }}>
+                          {sumTotalDiscount > 0 ? `NPR ${sumTotalDiscount.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+                        </td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 15, paddingTop: 12 }}>
                           NPR {sumTotalRev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
                         </td>
