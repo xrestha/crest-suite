@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { makeAuthTimeoutFetch } from './utils/authFetchTimeout'
 
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY
@@ -13,6 +14,10 @@ const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY
 // navigator.locks entirely with a no-op lock rather than eat the deadlock risk.
 const noOpLock = async (_name, _acquireTimeout, fn) => fn()
 
+// `global.fetch` is handed straight through to the auth client by supabase-js
+// (SupabaseClient.ts:340-344), which is what lets us bound auth requests without touching
+// PostgREST/Storage traffic. See src/utils/authFetchTimeout.js for why this is load-bearing.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { lock: noOpLock },
+  global: { fetch: makeAuthTimeoutFetch((...args) => fetch(...args)) },
 })
