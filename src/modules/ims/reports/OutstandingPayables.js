@@ -36,11 +36,18 @@ export default function OutstandingPayables() {
   const [setupNeeded, setSetupNeeded]   = useState(false)
   const [filterVendor, setFilterVendor] = useState('all')
   const [filterAging, setFilterAging]   = useState('all')
+  const [filterPeriod, setFilterPeriod] = useState('all')
   const [activeTab, setActiveTab]       = useState('outstanding')
   const [expandedBill, setExpandedBill] = useState(null)
   const [payForm, setPayForm]           = useState({ amount: '', paid_at: TODAY, note: '' })
   const [savingPayment, setSavingPayment] = useState(false)
   const [payError, setPayError]           = useState('')
+
+  // Bulk "pay several bills at once" — for a monthly credit run across many invoices.
+  const [selectedBills, setSelectedBills] = useState(new Set())
+  const [bulkForm, setBulkForm]           = useState({ paid_at: TODAY, note: '' })
+  const [bulkSaving, setBulkSaving]       = useState(false)
+  const [bulkError, setBulkError]         = useState('')
 
   useEffect(() => { if (!authLoading && effectiveClientId) load(activeTab) }, [effectiveClientId]) // eslint-disable-line
 
@@ -48,7 +55,9 @@ export default function OutstandingPayables() {
     setLoading(true)
     setFilterVendor('all')
     setFilterAging('all')
+    setFilterPeriod('all')
     setExpandedBill(null)
+    setSelectedBills(new Set())
 
     let query = supabase
       .from('purchase_entries')
@@ -139,6 +148,60 @@ export default function OutstandingPayables() {
     load(activeTab)
   }
 
+  function toggleSelectBill(key) {
+    setSelectedBills(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function toggleSelectKeys(keys) {
+    setSelectedBills(prev => {
+      const allSelected = keys.every(k => prev.has(k))
+      const next = new Set(prev)
+      keys.forEach(k => allSelected ? next.delete(k) : next.add(k))
+      return next
+    })
+  }
+
+  // Pay every selected bill in full with one shared date/note — same per-entry allocation
+  // payBill uses, just batched across bills so a monthly credit run doesn't need opening
+  // and saving each invoice one at a time.
+  async function paySelectedBills(targets) {
+    if (targets.length === 0) return
+    if (!effectiveClientId) { setBulkError('No client selected. Pick a client in the top-left switcher before saving.'); return }
+    setBulkSaving(true)
+    setBulkError('')
+    const date = bulkForm.paid_at || TODAY
+    const note = bulkForm.note || null
+
+    const rows = []
+    const settleIds = []
+    targets.forEach(bill => {
+      let left = bill.remaining
+      for (const e of bill.entries) {
+        if (left <= EPS) break
+        if (e.remaining <= EPS) continue
+        const alloc = Math.min(e.remaining, left)
+        rows.push({ purchase_entry_id: e.id, amount: alloc, paid_at: date, note })
+        left -= alloc
+        if (e.paidTotal + alloc >= e.value - EPS) settleIds.push(e.id)
+      }
+    })
+    if (rows.length === 0) { setBulkSaving(false); return }
+
+    const { error: insErr } = await scopedInsert('payable_payments', rows)
+    if (insErr) { setBulkError(insErr.message || 'Failed to save payments.'); setBulkSaving(false); return }
+    if (settleIds.length > 0) {
+      await supabase.from('purchase_entries').update({ paid_at: date }).in('id', settleIds)
+    }
+    setBulkSaving(false)
+    setBulkForm({ paid_at: TODAY, note: '' })
+    load(activeTab)
+  }
+
   function fmt(v) { return `NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })}` }
 
   // ── Group line entries into BILLS (vendor + invoice + period + day) ──
@@ -162,10 +225,18 @@ export default function OutstandingPayables() {
     return { ...b, total, paid, remaining, daysOld, aging: aging(daysOld), isPartial: paid > EPS && remaining > EPS, payments, settledOn }
   })
 
+  // Period (BS month) options — lets a monthly credit run be narrowed to "this month's bills"
+  // before selecting/bulk-paying, on top of the existing Vendor/Aging filters.
+  const periodKey = b => `${b.period.bs_year}-${b.period.bs_month}`
+  const periodOptions = [...new Map(bills.map(b => [periodKey(b), b.period])).entries()]
+    .map(([key, p]) => ({ key, label: `${BS_MONTHS[(p.bs_month || 1) - 1]} ${p.bs_year}`, y: p.bs_year, m: p.bs_month }))
+    .sort((a, b) => (b.y - a.y) || (b.m - a.m))
+
   const filteredBills = bills.filter(b => {
     const matchV = filterVendor === 'all' || b.vendorName === filterVendor
     const matchA = filterAging  === 'all' || b.aging.label === filterAging
-    return matchV && matchA
+    const matchP = filterPeriod === 'all' || periodKey(b) === filterPeriod
+    return matchV && matchA && matchP
   })
 
   const byVendor = {}
@@ -174,6 +245,9 @@ export default function OutstandingPayables() {
   const totalRemaining = filteredBills.reduce((s, b) => s + (activeTab === 'outstanding' ? b.remaining : b.total), 0)
   const overdueBills   = filteredBills.filter(b => b.daysOld > 60).length
   const urgentValue    = filteredBills.filter(b => b.daysOld > 90).reduce((s, b) => s + b.remaining, 0)
+
+  const selectedBillObjs = bills.filter(b => selectedBills.has(b.key) && b.remaining > EPS)
+  const selectedTotal    = selectedBillObjs.reduce((s, b) => s + b.remaining, 0)
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
@@ -250,8 +324,49 @@ export default function OutstandingPayables() {
             {AGING_LABELS.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
         )}
+        <select className="form-select" value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+          <option value="all">All Months</option>
+          {periodOptions.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+        </select>
         <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => load(activeTab)}>↻ Refresh</button>
+        {activeTab === 'outstanding' && filteredBills.length > 0 && (
+          <button className="btn btn-ghost" style={{ fontSize: 13 }}
+            onClick={() => toggleSelectKeys(filteredBills.map(b => b.key))}>
+            {filteredBills.every(b => selectedBills.has(b.key)) ? 'Deselect All Filtered' : `Select All Filtered (${filteredBills.length})`}
+          </button>
+        )}
       </div>
+
+      {activeTab === 'outstanding' && selectedBills.size > 0 && (
+        <div className="card" style={{
+          marginBottom: 20, padding: '14px 20px', display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap',
+          border: '1px solid color-mix(in srgb, var(--theme-accent) 40%, transparent)',
+          background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)',
+        }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>
+              {selectedBillObjs.length} bill{selectedBillObjs.length !== 1 ? 's' : ''} selected
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 700 }}>{fmt(selectedTotal)} total</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Payment Date</div>
+            <BsCalendarPicker value={bulkForm.paid_at} onChange={v => setBulkForm(f => ({ ...f, paid_at: v }))} placeholder="Pick date" />
+          </div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Note (optional)</div>
+            <input type="text" style={{ ...INPUT, width: '100%' }} placeholder="e.g. Monthly batch payment"
+              value={bulkForm.note} onChange={ev => setBulkForm(f => ({ ...f, note: ev.target.value }))} />
+          </div>
+          <button className="btn btn-ghost" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => setSelectedBills(new Set())}>Clear</button>
+          <button className="btn btn-primary" style={{ padding: '8px 18px', fontSize: 13 }}
+            disabled={bulkSaving || selectedBillObjs.length === 0}
+            onClick={() => paySelectedBills(selectedBillObjs)}>
+            {bulkSaving ? '…' : `Pay ${selectedBillObjs.length} Bill${selectedBillObjs.length !== 1 ? 's' : ''} in Full`}
+          </button>
+          {bulkError && <div style={{ width: '100%', fontSize: 12, color: 'var(--theme-red)' }}>⚠ {bulkError}</div>}
+        </div>
+      )}
 
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading payables…</p></div>
@@ -271,7 +386,8 @@ export default function OutstandingPayables() {
           .map(([vName, vBills]) => {
             const vendorTotal = vBills.reduce((s, b) => s + (activeTab === 'outstanding' ? b.remaining : b.total), 0)
             const sorted = activeTab === 'outstanding' ? [...vBills].sort((a, b) => b.daysOld - a.daysOld) : vBills
-            const cols = activeTab === 'outstanding' ? 9 : 6
+            const cols = activeTab === 'outstanding' ? 10 : 6
+            const vKeys = sorted.map(b => b.key)
             return (
               <div key={vName} className="card" style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--theme-border)' }}>
@@ -282,6 +398,14 @@ export default function OutstandingPayables() {
                   <table className="data-table">
                     <thead>
                       <tr>
+                        {activeTab === 'outstanding' && (
+                          <th style={{ width: 28 }}>
+                            <input type="checkbox"
+                              checked={vKeys.length > 0 && vKeys.every(k => selectedBills.has(k))}
+                              onChange={() => toggleSelectKeys(vKeys)}
+                              aria-label={`Select all bills for ${vName}`} />
+                          </th>
+                        )}
                         <th>Invoice</th>
                         <th>Period</th>
                         <th style={{ textAlign: 'right' }}>Items</th>
@@ -317,6 +441,12 @@ export default function OutstandingPayables() {
                                 }
                               }}
                             >
+                              {activeTab === 'outstanding' && (
+                                <td onClick={ev => ev.stopPropagation()}>
+                                  <input type="checkbox" checked={selectedBills.has(b.key)} onChange={() => toggleSelectBill(b.key)}
+                                    aria-label={`Select bill ${b.invoice_ref || ''}`} />
+                                </td>
+                              )}
                               <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{b.invoice_ref || '—'}</td>
                               <td style={{ color: 'var(--theme-text2)' }}>{BS_MONTHS[(b.period.bs_month || 1) - 1]} {b.period.bs_year}</td>
                               <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.entries.length}</td>
