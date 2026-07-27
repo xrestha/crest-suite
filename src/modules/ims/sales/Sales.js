@@ -7,8 +7,27 @@ import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
+import { withTimeout } from '../../../utils/withTimeout'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
+// How long any single save request may hang before we give up and re-enable the button (S453/S454).
+const SAVE_TIMEOUT_MS = 20000
+
+// Every supabase-js call awaits auth.getSession() before it ever reaches fetch(), so a stuck
+// session hangs the save with no request ever leaving the browser — which looks identical to a
+// network problem but isn't, and no amount of retrying fixes it. Probing it first (cheaply, and
+// on its own short clock) turns that into a specific, actionable message instead of a generic
+// timeout 20s later. See src/utils/withTimeout.js.
+async function assertSessionHealthy() {
+  let session
+  try {
+    const { data } = await withTimeout(supabase.auth.getSession(), 8000, 'Session check')
+    session = data?.session
+  } catch (err) {
+    throw new Error('Your login session has stopped responding, so the save never left this browser. Please sign out and sign back in, then re-enter this day.')
+  }
+  if (!session) throw new Error('Your login session has expired. Please sign in again, then re-enter this day.')
+}
 const TAB_LABELS = { bulk: 'Bulk Entry', daily: 'Daily Entry', breakdown: 'Daily Breakdown', summary: 'Period Summary' }
 
 export default function Sales() {
@@ -147,10 +166,16 @@ export default function Sales() {
     // VPN, flaky wifi) that the browser never times out on its own. abortSignal + a 20s
     // setTimeout guarantees the request always settles one way or the other, so `finally` below
     // is always reached and the button can never be stuck longer than 20s.
+    // S454: abortSignal alone turned out NOT to be enough — supabase-js awaits auth.getSession()
+    // BEFORE it ever calls fetch (fetchWithAuth, line 43 vs 70), so a hang in there means the
+    // abort signal is attached to nothing and firing it does nothing at all. Every call is now
+    // additionally raced against a wall clock via withTimeout(), which can't be defeated by a
+    // promise that simply never settles. See src/utils/withTimeout.js for the full writeup.
     let saveSucceeded = false
     const abortCtl = new AbortController()
-    const timeoutId = setTimeout(() => abortCtl.abort(), 20000)
+    const timeoutId = setTimeout(() => abortCtl.abort(), SAVE_TIMEOUT_MS)
     try {
+      await assertSessionHealthy()
       const merged = {}
       const mergedDiscount = {}
       recipes.forEach(r => {
@@ -164,7 +189,10 @@ export default function Sales() {
         const typedDisc = rawDisc !== undefined ? (rawDisc === '' ? 0 : parseFloat(rawDisc)) : null
         mergedDiscount[r.id] = (typedDisc !== null && !isNaN(typedDisc)) ? typedDisc : savedDisc
       })
-      const { error: delErr } = await supabase.from('sales_entries').delete().eq('period_id', selectedPeriod.id).eq('bs_day', selectedDay).abortSignal(abortCtl.signal)
+      const { error: delErr } = await withTimeout(
+        supabase.from('sales_entries').delete().eq('period_id', selectedPeriod.id).eq('bs_day', selectedDay).abortSignal(abortCtl.signal),
+        SAVE_TIMEOUT_MS, 'Save'
+      )
       if (delErr) throw new Error(delErr.message)
       // unit_price/vat_rate snapshot the recipe's price at entry time — manual entry has no other
       // price source, but capturing it now is still far more stable than every report joining the
@@ -180,15 +208,21 @@ export default function Sales() {
           discount: mergedDiscount[r.id] || 0,
         }))
       if (inserts.length > 0) {
-        const { error } = await supabase.from('sales_entries').insert(inserts).abortSignal(abortCtl.signal)
+        const { error } = await withTimeout(
+          supabase.from('sales_entries').insert(inserts).abortSignal(abortCtl.signal),
+          SAVE_TIMEOUT_MS, 'Save'
+        )
         if (error) throw new Error(error.message)
         // Bulk (bs_day=0) and Daily (bs_day>0) rows for the same recipe+period aren't mutually
         // exclusive at the DB level (unique constraint is period_id+recipe_id+bs_day, which differs
         // between them) — every downstream report/Variance sums ALL sales_entries rows for a period
         // with no bs_day distinction, so having both silently double-counts. Switching a recipe to
         // Daily mode here supersedes any bulk entry it had.
-        const { error: clearErr } = await supabase.from('sales_entries').delete()
-          .eq('period_id', selectedPeriod.id).eq('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id)).abortSignal(abortCtl.signal)
+        const { error: clearErr } = await withTimeout(
+          supabase.from('sales_entries').delete()
+            .eq('period_id', selectedPeriod.id).eq('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id)).abortSignal(abortCtl.signal),
+          SAVE_TIMEOUT_MS, 'Save'
+        )
         if (clearErr) throw new Error(clearErr.message)
       }
       saveSucceeded = true
@@ -196,9 +230,9 @@ export default function Sales() {
       setTimeout(() => setDailySaved(false), 2500)
     } catch (err) {
       console.error('Daily save error:', err)
-      // postgrest-js converts an aborted fetch into a returned {error} rather than a thrown
-      // AbortError — by the time it reaches here it's a plain Error whose .message we wrapped
-      // ourselves above, so detect by substring rather than err.name/err.code.
+      // withTimeout's own message is already user-facing. postgrest-js converts an aborted fetch
+      // into a returned {error} rather than a thrown AbortError, so that path arrives here as a
+      // plain Error whose message we wrapped above — detect it by substring, not err.name.
       setDailySaveError(/abort/i.test(err.message || '') ? 'Save timed out — check your connection and try again.' : (err.message || 'Failed to save — please try again.'))
     } finally {
       clearTimeout(timeoutId)
@@ -268,10 +302,13 @@ export default function Sales() {
     // permanently disabled the way it did before, since nothing else resets bulkSaving. See
     // saveDaily for the fuller writeup (S449 → follow-up). S453: abortSignal + timeout so a
     // stalled connection on the request itself (not the reload) can't freeze the button either.
+    // S454: plus withTimeout(), because abortSignal can't rescue a hang that happens before
+    // supabase-js ever reaches fetch() — see src/utils/withTimeout.js.
     let saveSucceeded = false
     const abortCtl = new AbortController()
-    const timeoutId = setTimeout(() => abortCtl.abort(), 20000)
+    const timeoutId = setTimeout(() => abortCtl.abort(), SAVE_TIMEOUT_MS)
     try {
+      await assertSessionHealthy()
       // Merge: saved DB values as base, typed bulkForm values as override
       const merged = {}
       recipes.forEach(r => {
@@ -281,11 +318,14 @@ export default function Sales() {
       })
 
       // Delete all existing bulk rows for this period, then re-insert
-      const { error: delErr } = await supabase.from('sales_entries')
-        .delete()
-        .eq('period_id', selectedPeriod.id)
-        .eq('bs_day', 0)
-        .abortSignal(abortCtl.signal)
+      const { error: delErr } = await withTimeout(
+        supabase.from('sales_entries')
+          .delete()
+          .eq('period_id', selectedPeriod.id)
+          .eq('bs_day', 0)
+          .abortSignal(abortCtl.signal),
+        SAVE_TIMEOUT_MS, 'Save'
+      )
       if (delErr) throw new Error(delErr.message)
 
       // unit_price/vat_rate snapshot the recipe's price at entry time — see saveDaily for why.
@@ -301,14 +341,20 @@ export default function Sales() {
         }))
 
       if (inserts.length > 0) {
-        const { error } = await supabase.from('sales_entries').insert(inserts).abortSignal(abortCtl.signal)
+        const { error } = await withTimeout(
+          supabase.from('sales_entries').insert(inserts).abortSignal(abortCtl.signal),
+          SAVE_TIMEOUT_MS, 'Save'
+        )
         if (error) throw new Error(error.message)
         // Same exclusivity guard as saveDaily — Bulk and Daily rows for the same recipe+period
         // aren't mutually exclusive at the DB level and every downstream report sums both with no
         // distinction, silently double-counting. Switching a recipe to Bulk here supersedes any
         // dated Daily entries it had.
-        const { error: clearErr } = await supabase.from('sales_entries').delete()
-          .eq('period_id', selectedPeriod.id).gt('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id)).abortSignal(abortCtl.signal)
+        const { error: clearErr } = await withTimeout(
+          supabase.from('sales_entries').delete()
+            .eq('period_id', selectedPeriod.id).gt('bs_day', 0).in('recipe_id', inserts.map(i => i.recipe_id)).abortSignal(abortCtl.signal),
+          SAVE_TIMEOUT_MS, 'Save'
+        )
         if (clearErr) throw new Error(clearErr.message)
       }
 
