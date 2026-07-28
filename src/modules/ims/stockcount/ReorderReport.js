@@ -27,6 +27,10 @@ export default function ReorderReport() {
   const [filterCat, setFilterCat] = useState('all')
   const [filterStatus, setFilterStatus] = useState('reorder')
   const [search, setSearch] = useState('')
+  // Which `.print-only` block is live for the next window.print() — 'par' (blank sheet) and
+  // 'reorder' (the actual purchase list) both render into the DOM, so without this gate both
+  // would print together no matter which button was clicked.
+  const [printMode, setPrintMode] = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -186,6 +190,49 @@ export default function ReorderReport() {
   const totalShortfallValue = rows.filter(r => r.needsReorder).reduce((s, r) => s + r.shortfallValue, 0)
   const noPar               = rows.filter(r => r.par === 0).length
 
+  // Purchase list (print + WhatsApp) — always reorder-needed items only, regardless of the
+  // on-screen status filter (a list handed to staff to go buy is never useful with "OK" items
+  // mixed in), but still respects Category/search so a client can scope it (e.g. "just Meats &
+  // Poultry today"). Sorted by category then name for a predictable, groupable printout.
+  const reorderPrintRows = rows
+    .filter(r => r.needsReorder && (filterCat === 'all' || r.category === filterCat) && r.item.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => a.category.localeCompare(b.category) || a.item.name.localeCompare(b.item.name))
+  const reorderPrintGroups = Object.values(
+    reorderPrintRows.reduce((acc, r) => {
+      (acc[r.category] = acc[r.category] || { category: r.category, items: [] }).items.push(r)
+      return acc
+    }, {})
+  ).sort((a, b) => a.category.localeCompare(b.category))
+  const reorderPrintTotal = reorderPrintRows.reduce((s, r) => s + r.shortfallValue, 0)
+
+  function printReorderList() {
+    setPrintMode('reorder')
+    setTimeout(() => { printWithTitle(`Reorder List - ${periodLabel}`); setPrintMode(null) }, 80)
+  }
+
+  // Plain text, WhatsApp's own markdown (*bold*) — no HTML, since wa.me only ever prefills a
+  // text box. Qty is base UOM as shown on screen (grams/ml etc.), not converted to a purchase
+  // unit — matches what every other figure on this page already shows.
+  function buildWhatsAppText() {
+    const lines = [
+      `*Reorder List — ${periodLabel}*`,
+      `${reorderPrintRows.length} item${reorderPrintRows.length !== 1 ? 's' : ''} · Est. total NPR ${Math.round(reorderPrintTotal).toLocaleString('en-NP')}`,
+      '',
+    ]
+    reorderPrintGroups.forEach(g => {
+      lines.push(`*${g.category}*`)
+      g.items.forEach(r => { lines.push(`• ${r.item.name} — ${r.shortfall.toFixed(2)} ${r.item.uom} (Par ${r.par})`) })
+      lines.push('')
+    })
+    return lines.join('\n').trim()
+  }
+
+  // No phone number in the wa.me URL — this is a general "share to whoever" action (WhatsApp
+  // opens its own contact/group picker), not tied to one staff member's number.
+  function shareReorderListWhatsApp() {
+    window.open(`https://wa.me/?text=${encodeURIComponent(buildWhatsAppText())}`, '_blank', 'noopener,noreferrer')
+  }
+
   function exportExcel() {
     const data = filtered.map(r => ({
       'Item': r.item.name,
@@ -234,9 +281,15 @@ export default function ReorderReport() {
           <h1 className="page-title">Reorder Report</h1>
           <p className="page-subtitle">Items below par level — auto purchase list — {periodLabel}</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Tip text="Prints the actual purchase list — items at/below par, grouped by category, with qty to order and estimated value (respects the Category/Search filters above, always Reorder-only regardless of the Status filter)." width={270}>
+            <button className="btn btn-ghost" onClick={printReorderList} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>🖨 Print Reorder List</button>
+          </Tip>
+          <Tip text="Opens WhatsApp with the same purchase list pre-filled as a text message — pick a contact or group to send it to." width={250}>
+            <button className="btn btn-ghost" onClick={shareReorderListWhatsApp} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>📱 Share via WhatsApp</button>
+          </Tip>
           <Tip text="Prints a blank par-level sheet (grouped by category, respecting the Category/Search filters above) for staff to fill in by hand — enter the values back into the Par Level column here afterward." width={260}>
-            <button className="btn btn-ghost" onClick={() => printWithTitle(`Par Level Sheet - ${periodLabel}`)} style={{ fontSize: 12 }}>🖨 Print Par Sheet</button>
+            <button className="btn btn-ghost" onClick={() => { setPrintMode('par'); setTimeout(() => { printWithTitle(`Par Level Sheet - ${periodLabel}`); setPrintMode(null) }, 80) }} style={{ fontSize: 12 }}>🖨 Print Par Sheet</button>
           </Tip>
           <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
           <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
@@ -421,39 +474,88 @@ export default function ReorderReport() {
         )}
       </div>
 
-      <div className="card print-sheet print-only">
-        <div className="print-sheet-header">
-          <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>Par Level Sheet</h2>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
-            Period: {periodLabel} &nbsp;·&nbsp; Printed: {new Date().toLocaleDateString('en-GB')}
-          </p>
-        </div>
-        {printGroups.length === 0 ? (
-          <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No items match the current filters.</p>
-        ) : printGroups.map(({ category, items }) => (
-          <div key={category} className="print-sheet-section">
-            <h3 className="print-sheet-cat">{category}</h3>
-            <table className="data-table print-sheet-table">
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>UOM</th>
-                  <th style={{ textAlign: 'right' }}>Set Par Level</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map(r => (
-                  <tr key={r.item.id}>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.item.name}</td>
-                    <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
-                    <td className="print-sheet-blank"></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {printMode === 'par' && (
+        <div className="card print-sheet print-only">
+          <div className="print-sheet-header">
+            <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>Par Level Sheet</h2>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
+              Period: {periodLabel} &nbsp;·&nbsp; Printed: {new Date().toLocaleDateString('en-GB')}
+            </p>
           </div>
-        ))}
-      </div>
+          {printGroups.length === 0 ? (
+            <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No items match the current filters.</p>
+          ) : printGroups.map(({ category, items }) => (
+            <div key={category} className="print-sheet-section">
+              <h3 className="print-sheet-cat">{category}</h3>
+              <table className="data-table print-sheet-table">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>UOM</th>
+                    <th style={{ textAlign: 'right' }}>Set Par Level</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map(r => (
+                    <tr key={r.item.id}>
+                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.item.name}</td>
+                      <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
+                      <td className="print-sheet-blank"></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {printMode === 'reorder' && (
+        <div className="card print-sheet print-only">
+          <div className="print-sheet-header">
+            <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>Reorder List</h2>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
+              Period: {periodLabel} &nbsp;·&nbsp; Printed: {new Date().toLocaleDateString('en-GB')} &nbsp;·&nbsp; {reorderPrintRows.length} item{reorderPrintRows.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+          {reorderPrintGroups.length === 0 ? (
+            <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No items need reordering under the current filters.</p>
+          ) : reorderPrintGroups.map(({ category, items }) => (
+            <div key={category} className="print-sheet-section">
+              <h3 className="print-sheet-cat">{category}</h3>
+              <table className="data-table print-sheet-table">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>UOM</th>
+                    <th style={{ textAlign: 'right' }}>Par</th>
+                    <th style={{ textAlign: 'right' }}>Current Stock</th>
+                    <th style={{ textAlign: 'right' }}>Qty to Order</th>
+                    <th style={{ textAlign: 'right' }}>Est. Value (NPR)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map(r => (
+                    <tr key={r.item.id}>
+                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.item.name}</td>
+                      <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
+                      <td style={{ textAlign: 'right' }}>{r.par.toLocaleString()}</td>
+                      <td style={{ textAlign: 'right' }}>{r.currentStock.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700 }}>{r.shortfall.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right' }}>{r.shortfallValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+          {reorderPrintRows.length > 0 && (
+            <p style={{ textAlign: 'right', fontWeight: 700, fontSize: 14, color: 'var(--theme-text1)', marginTop: 8 }}>
+              Total estimated purchase needed: NPR {reorderPrintTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

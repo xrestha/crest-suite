@@ -661,6 +661,7 @@ export default function ClientDashboard() {
       ? [{ name: 'Net Margin', value: Math.max(0, (stats.revenueTotal || 0) - (stats.purchaseTotal || 0) - (stats.overheadTotal || 0) - costBreakdownLabor) }]
       : []),
   ].filter(r => r.value > 0)
+  const costBreakdownTotal = costBreakdown.reduce((s, r) => s + r.value, 0)
   const costBreakdownSummary = costBreakdown.length === 0
     ? 'No cost data for this period.'
     : `Revenue breakdown this period: ${costBreakdown.map(r => `${r.name} NPR ${r.value.toLocaleString('en-NP')}`).join(', ')}. Net margin: ${netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}.`
@@ -1149,21 +1150,30 @@ export default function ClientDashboard() {
                         cx="50%" cy="50%"
                         innerRadius={h > 200 ? 80 : 38} outerRadius={h > 200 ? 140 : 60}
                         paddingAngle={2}
+                        // Percent-on-slice labels only in the expanded view — at dashboard-tile
+                        // size (h ≤ 200) the label lines would overlap the small donut, so the
+                        // legend below (which carries NPR + %) is the only detail there.
+                        {...(h > 200 ? {
+                          label: ({ percent }) => `${(percent * 100).toFixed(0)}%`,
+                          labelLine: { stroke: colors.text3, strokeWidth: 1 },
+                        } : {})}
                       >
                         {costBreakdown.map(entry => <Cell key={entry.name} fill={COST_BREAKDOWN_COLORS[entry.name] || colors.text3} />)}
                       </Pie>
                       <Tooltip
                         contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
-                        formatter={v => [`NPR ${Number(v).toLocaleString()}`, '']}
-                        labelFormatter={name => name}
+                        formatter={(v, name) => [`NPR ${Number(v).toLocaleString()} (${(v / costBreakdownTotal * 100).toFixed(1)}%)`, name]}
                       />
                     </PieChart>
                   </ResponsiveContainer>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 6 }}>
                     {costBreakdown.map(entry => (
                       <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                         <div style={{ width: 8, height: 8, borderRadius: 2, background: COST_BREAKDOWN_COLORS[entry.name] || colors.text3, flexShrink: 0 }} />
-                        <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{entry.name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
+                          {entry.name} <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</span>
+                          {' '}<span style={{ color: 'var(--theme-text3)' }}>({(entry.value / costBreakdownTotal * 100).toFixed(1)}%)</span>
+                        </span>
                       </div>
                     ))}
                   </div>

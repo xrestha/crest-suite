@@ -150,6 +150,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S476 — 2026-07-28 — Reorder Report: Print Reorder List + Share via WhatsApp; Revenue vs Cost Breakdown pie gets value/% detail
+
+Two follow-ups from the S474/S475 work. First, added the print + WhatsApp feature originally asked for once the underlying stock numbers (S475) were trustworthy — decided the open design questions with the user rather than guessing: qty stays base UOM (matches every other figure already on screen, no new per-item purchase-unit conversion logic), the list groups by category, and it's always reorder-needed items only (regardless of the on-screen Status filter — a purchase list with "OK" items mixed in isn't useful to hand to staff) while still respecting the Category/Search filters, so a client can scope it (e.g. just Meats & Poultry for the kitchen). "🖨 Print Reorder List" reuses the existing `.print-sheet` CSS classes and `printWithTitle()` mechanism the page's "Print Par Sheet" button already used, gated behind a new `printMode` state so the two `.print-only` blocks (blank par sheet vs. the real purchase list) never both print at once. "📱 Share via WhatsApp" builds the same list as plain text (WhatsApp's own `*bold*` markdown, no HTML) and opens `wa.me/?text=...` with no phone number baked in — WhatsApp's own contact/group picker handles who it goes to, so this isn't tied to one staff member's number. Added Help.js coverage for both buttons.
+
+Second, the S474 pie's expanded (modal) view was too sparse — just colored slices and a bare legend with no values. Added `NPR value (%)` to the Tooltip formatter and the legend text itself, plus on-slice `%` labels (expanded view only — at the small dashboard-tile size the label lines would overlap the donut, so the legend remains the only detail source there).
+
+**Files:** `src/modules/ims/stockcount/ReorderReport.js`, `src/pages/Help.js`, `src/pages/dashboard/ClientDashboard.jsx`
+
 ### S475 — 2026-07-28 — Items to Reorder / Top Variance Items understated usage for any item with real comp volume
 
 Reported live as "the dashboard does not update" — a purchase entered for Chicken-Breast still showed Stock: 0 on the Items to Reorder widget after multiple hard refreshes, while the standalone Reorder Report showed a correct, positive Current Stock (1260.78) for the exact same item/period. Ruled out the obvious suspects first: no stale `sessionDataCache` (both formulas re-fetch fresh on every mount and the PWA service worker explicitly excludes all `supabase.co` calls from caching), no duplicate "Chicken-Breast"/"Acai Powder" item records (checked Item Master directly), no period mismatch (Reorder Report's period dropdown confirmed on the same open period, Shrawan 2083), and — the most telling test — refreshing both pages back-to-back within seconds still reproduced the exact same mismatched numbers, ruling out a live-data timing artifact.
