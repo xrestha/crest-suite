@@ -633,6 +633,28 @@ export default function ClientDashboard() {
     ? 'No food cost history yet.'
     : `Food cost percentage over the last ${fcTrend.length} month${fcTrend.length === 1 ? '' : 's'}: ${fcTrend.map(p => `${p.label} ${p.fc}%`).join(', ')}.`
 
+  // Revenue vs Cost Breakdown pie — a "P&L at a glance" composition of the same figures behind
+  // the Est. Net Margin % card (revenue minus food cost and overheads). Labor is basic payroll
+  // only (hrStats.payroll), not a full labor-cost estimate — Owner Dashboard's payroll-vs-revenue
+  // figure is the authoritative one for that; this is a lighter at-a-glance view. Pro-gated same
+  // as netMarginCard since overheads (the biggest lever here) are a Pro-only figure.
+  // Net Margin only joins the slices when positive — a negative-value pie slice renders as a
+  // misleading sliver rather than "costs exceeded revenue," so a negative margin is surfaced via
+  // the footer callout below instead of forced into the chart.
+  const COST_BREAKDOWN_COLORS = { 'Food Cost': colors.accent, 'Overheads': colors.red, 'Labor (basic)': colors.purple, 'Net Margin': colors.green }
+  const costBreakdownLabor = clientModules.hr && hrStats?.payroll > 0 ? hrStats.payroll : 0
+  const costBreakdown = [
+    { name: 'Food Cost', value: Math.max(0, stats?.purchaseTotal || 0) },
+    { name: 'Overheads', value: Math.max(0, stats?.overheadTotal || 0) },
+    ...(costBreakdownLabor > 0 ? [{ name: 'Labor (basic)', value: costBreakdownLabor }] : []),
+    ...(netMarginPct != null && netMarginPct > 0
+      ? [{ name: 'Net Margin', value: Math.max(0, (stats.revenueTotal || 0) - (stats.purchaseTotal || 0) - (stats.overheadTotal || 0) - costBreakdownLabor) }]
+      : []),
+  ].filter(r => r.value > 0)
+  const costBreakdownSummary = costBreakdown.length === 0
+    ? 'No cost data for this period.'
+    : `Revenue breakdown this period: ${costBreakdown.map(r => `${r.name} NPR ${r.value.toLocaleString('en-NP')}`).join(', ')}. Net margin: ${netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}.`
+
   // Shared mini card style + a11y — returns a spreadable props object so every KPI card gets
   // keyboard support (role/tabIndex/onKeyDown) and a visible focus ring for free, instead of each
   // clickable div being mouse-only. Non-interactive cards (onClick == null) get style only.
@@ -1036,56 +1058,110 @@ export default function ClientDashboard() {
         />
       </div>
 
-      {/* ── FC% Trend ── */}
-      {fcTrend.length >= 2 && canSales && (
-        <ChartCard
-          title="Food Cost % — Monthly Trend"
-          cardStyle={{ marginBottom: 14 }}
-          footer={<>
-            <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10 }}>
-              <span style={{ color: 'var(--theme-green)' }}>● ≤35% Good</span>
-              <span style={{ color: 'var(--theme-accent)' }}>● 35–45% Watch</span>
-              <span style={{ color: 'var(--theme-red)' }}>● &gt;45% High</span>
-              <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period</span>
-            </div>
-            <p className="sr-only">{fcTrendSummary}</p>
-          </>}
-          renderChart={h => (
-            <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-              <div style={{ minWidth: Math.max(0, fcTrend.length * 64), height: h }}>
-                <ResponsiveContainer width="100%" height={h}>
-                  <LineChart data={fcTrend} margin={{ top: 8, right: 48, bottom: 0, left: 0 }}>
-                    <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
-                    <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
-                    <ReferenceLine y={35} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '35%', fill: colors.green, fontSize: 9, position: 'right' }} />
-                    <ReferenceLine y={45} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '45%', fill: colors.red, fontSize: 9, position: 'right' }} />
-                    <Tooltip
-                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
-                      labelStyle={{ color: 'var(--theme-text1)' }}
-                      itemStyle={{ color: 'var(--theme-text1)' }}
-                      formatter={(v, _n, props) => {
-                        const p = props.payload
-                        const lines = [`${v}%`]
-                        if (p.purchases != null) lines.push(`Purchases: NPR ${p.purchases.toLocaleString('en-NP')}`)
-                        if (p.revenue != null)   lines.push(`Revenue: NPR ${p.revenue.toLocaleString('en-NP')}`)
-                        return [lines.join(' · '), 'Food Cost %']
-                      }}
-                    />
-                    <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false}
-                      dot={(props) => {
-                        const { cx, cy, payload } = props
-                        const col = payload.fc <= 35 ? colors.green : payload.fc <= 45 ? colors.accent : colors.red
-                        return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
-                      }}
-                      activeDot={{ r: 5, fill: colors.accent }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+      {/* ── FC% Trend + Cost Breakdown, side by side ── */}
+      {((fcTrend.length >= 2 && canSales) || (canOverheads && costBreakdown.length > 0)) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
+
+          {fcTrend.length >= 2 && canSales && (
+            <ChartCard
+              title="Food Cost % — Monthly Trend"
+              footer={<>
+                <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10, flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--theme-green)' }}>● ≤35% Good</span>
+                  <span style={{ color: 'var(--theme-accent)' }}>● 35–45% Watch</span>
+                  <span style={{ color: 'var(--theme-red)' }}>● &gt;45% High</span>
+                  <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period</span>
+                </div>
+                <p className="sr-only">{fcTrendSummary}</p>
+              </>}
+              renderChart={h => (
+                <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
+                  <div style={{ minWidth: Math.max(0, fcTrend.length * 64), height: h }}>
+                    <ResponsiveContainer width="100%" height={h}>
+                      <LineChart data={fcTrend} margin={{ top: 8, right: 48, bottom: 0, left: 0 }}>
+                        <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
+                        <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
+                        <ReferenceLine y={35} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '35%', fill: colors.green, fontSize: 9, position: 'right' }} />
+                        <ReferenceLine y={45} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '45%', fill: colors.red, fontSize: 9, position: 'right' }} />
+                        <Tooltip
+                          contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
+                          labelStyle={{ color: 'var(--theme-text1)' }}
+                          itemStyle={{ color: 'var(--theme-text1)' }}
+                          formatter={(v, _n, props) => {
+                            const p = props.payload
+                            const lines = [`${v}%`]
+                            if (p.purchases != null) lines.push(`Purchases: NPR ${p.purchases.toLocaleString('en-NP')}`)
+                            if (p.revenue != null)   lines.push(`Revenue: NPR ${p.revenue.toLocaleString('en-NP')}`)
+                            return [lines.join(' · '), 'Food Cost %']
+                          }}
+                        />
+                        <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false}
+                          dot={(props) => {
+                            const { cx, cy, payload } = props
+                            const col = payload.fc <= 35 ? colors.green : payload.fc <= 45 ? colors.accent : colors.red
+                            return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
+                          }}
+                          activeDot={{ r: 5, fill: colors.accent }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+            />
           )}
-        />
+
+          {/* Pie — Revenue vs Cost Breakdown. Pro-gated (canOverheads) since overheads, the
+              biggest lever in the split, are a Pro-only figure — same gate as the Est. Net
+              Margin % KPI card this chart is a composition view of. */}
+          {canOverheads && (
+            <ChartCard
+              title="Revenue vs Cost Breakdown"
+              smallHeight={140}
+              footer={<>
+                <div style={{ fontSize: 11, marginTop: 6, color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                  Net margin: {netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
+                  {netMarginPct != null && netMarginPct < 0 && ' — costs exceeded revenue this period'}
+                </div>
+                <p className="sr-only">{costBreakdownSummary}</p>
+              </>}
+              renderChart={h => costBreakdown.length === 0 ? (
+                <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No cost data</p>
+                </div>
+              ) : (
+                <>
+                  <ResponsiveContainer width="100%" height={h}>
+                    <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                      <Pie
+                        data={costBreakdown} dataKey="value" nameKey="name"
+                        cx="50%" cy="50%"
+                        innerRadius={h > 200 ? 80 : 38} outerRadius={h > 200 ? 140 : 60}
+                        paddingAngle={2}
+                      >
+                        {costBreakdown.map(entry => <Cell key={entry.name} fill={COST_BREAKDOWN_COLORS[entry.name] || colors.text3} />)}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+                        formatter={v => [`NPR ${Number(v).toLocaleString()}`, '']}
+                        labelFormatter={name => name}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
+                    {costBreakdown.map(entry => (
+                      <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: COST_BREAKDOWN_COLORS[entry.name] || colors.text3, flexShrink: 0 }} />
+                        <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{entry.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            />
+          )}
+        </div>
       )}
 
       {/* ── Bottom: Variance + Reorder side by side ── */}
