@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -12,6 +12,9 @@ export default function TheoreticalVariance() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  // item_id -> yield_pct for EVERY item, unfiltered. A ref rather than state because init() must
+  // populate it and then call computeVariance() in the same tick, before a state update lands.
+  const yieldMapRef = useRef({})
 
   const [periods,         setPeriods]         = useState([])
   const [selectedPeriod,  setSelectedPeriod]  = useState(null)
@@ -37,9 +40,18 @@ export default function TheoreticalVariance() {
     ])
 
     const tvRecipeIds = (r || []).map(x => x.id)
-    const { data: ri } = tvRecipeIds.length > 0
-      ? await supabase.from('recipe_ingredients').select('recipe_id, item_id, sub_recipe_id, qty_per_portion').in('recipe_id', tvRecipeIds)
-      : { data: [] }
+    const [{ data: ri }, { data: allItems }] = await Promise.all([
+      tvRecipeIds.length > 0
+        ? supabase.from('recipe_ingredients').select('recipe_id, item_id, sub_recipe_id, qty_per_portion').in('recipe_id', tvRecipeIds)
+        : Promise.resolve({ data: [] }),
+      // Deliberately UNFILTERED, unlike the `items` fetch above that backs the display table: a
+      // recipe can legitimately reference an inactive item or a sub-recipe mirror row, and its
+      // trim loss is still real. Filtering here is what made yield_pct silently default to 100%.
+      scopedFrom('items', 'id, yield_pct'),
+    ])
+    const ym = {}
+    ;(allItems || []).forEach(x => { ym[x.id] = x.yield_pct })
+    yieldMapRef.current = ym
 
     setPeriods(p || [])
     setItems(i || [])
@@ -77,19 +89,28 @@ export default function TheoreticalVariance() {
   // Recursively expand a recipe's ingredients into raw { item_id, qty } pairs.
   // scale accounts for sub-recipe yield (qty used ÷ yield_qty of sub-recipe).
   // qty is as-purchased (gross), accounting for item yield_pct trim loss.
-  function expandIngredients(recipe, allRecipes, itemList, scale = 1) {
+  // `depth` mirrors the shared explodeRecipeIngredients util's own cyclic guard. Recipes.js blocks
+  // cycles at save time (wouldCreateCycle), so this is a backstop for legacy or imported data that
+  // predates that check — without it a cyclic sub-recipe reference recurses until the stack blows
+  // and takes the whole page down rather than degrading to a wrong number.
+  function expandIngredients(recipe, allRecipes, itemList, scale = 1, depth = 0) {
+    if (depth > 10) return []
     const result = []
     ;(recipe.recipe_ingredients || []).forEach(ri => {
       const qty = parseFloat(ri.qty_per_portion || 0) * scale
       if (ri.item_id) {
-        const item = itemList.find(x => x.id === ri.item_id)
-        const yieldFactor = (parseFloat(item?.yield_pct) || 100) / 100
+        // yieldMap, not itemList: `items` is loaded filtered to is_active=true + is_sub_recipe=false
+        // for the DISPLAY table, so looking yield_pct up in it silently fell back to 100% (no trim
+        // loss) for any ingredient that happens to be inactive or a sub-recipe mirror row —
+        // understating theoretical usage. The shared util joins items(yield_pct) unfiltered and so
+        // never had this hole; this page reimplements the recursion locally and did.
+        const yieldFactor = (parseFloat(yieldMapRef.current[ri.item_id]) || 100) / 100
         result.push({ item_id: ri.item_id, qty: qty / yieldFactor })
       } else if (ri.sub_recipe_id) {
         const sr = ri.sub_recipe || allRecipes.find(x => x.id === ri.sub_recipe_id)
         if (sr) {
           const yieldQty = parseFloat(sr.yield_qty) || 1
-          result.push(...expandIngredients(sr, allRecipes, itemList, qty / yieldQty))
+          result.push(...expandIngredients(sr, allRecipes, itemList, qty / yieldQty, depth + 1))
         }
       }
     })

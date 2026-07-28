@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
+import { Navigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -25,7 +26,7 @@ function dispPurch(baseQty, item) {
 }
 
 export default function Stock() {
-  const { clientId, profile, loading: authLoading, isAdmin, hasFeature } = useAuth()
+  const { clientId, profile, loading: authLoading, isAdmin, hasFeature, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods] = useState([])
@@ -519,6 +520,10 @@ export default function Stock() {
     { id: 'summary',    label: 'Summary',       desc: 'Full picture per item' },
     { id: 'print',      label: 'Print Sheet',   desc: 'Physical count sheet for the floor' },
   ]
+
+  // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
+  // the route was reachable by any account at an ims_enabled client regardless of ims_role.
+  if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

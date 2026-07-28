@@ -30,18 +30,23 @@ import './Layout.css'
 // minPlan: 'growth' | 'pro' — used for lock icon and tier badge
 // minHrRole: 'staff' | 'supervisor' | 'manager' — HR staff-role gate (S430), same shape as IMS's
 // minImsRole: 'staff' | 'supervisor' | 'manager' — IMS staff-role gate (S417), same shape as POS's
-// minPosRole. Absent = floor tier (Staff), reachable by everyone with any IMS access.
+// minPosRole. Every IMS item now carries one EXPLICITLY, including the floor-tier ones. Leaving it
+// absent used to mean "floor tier", but absent and 'staff' are not the same test: isItemVisible()
+// skips the check entirely when the tag is missing, so an untagged item passed for an account with
+// no ims_role at all. That was survivable here only because imsVisible already requires an
+// imsRole to render the IMS section — but the five untagged items also had no route guard, which
+// is what actually left them reachable by URL. Tag new items; don't rely on the default.
 const NAV = [
   { to: '/dashboard',        label: 'Dashboard',        icon: LayoutDashboard },
   { to: '/periods',          label: 'Periods',           icon: CalendarRange, minImsRole: 'supervisor' },
   { to: '/items',            label: 'Item Master',       icon: Package, minImsRole: 'supervisor' },
   { to: '/vendors',          label: 'Vendors',           icon: Truck, minImsRole: 'supervisor' },
-  { to: '/purchases',        label: 'Purchases',         icon: ShoppingCart },
-  { to: '/gate-passes',      label: 'Gate Passes',       icon: IdCardLanyard },
-  { to: '/sales',            label: 'Sales Entry',       icon: TrendingUp, featureKey: 'sales_entry',     minPlan: 'starter' },
+  { to: '/purchases',        label: 'Purchases',         icon: ShoppingCart, minImsRole: 'staff' },
+  { to: '/gate-passes',      label: 'Gate Passes',       icon: IdCardLanyard, minImsRole: 'staff' },
+  { to: '/sales',            label: 'Sales Entry',       icon: TrendingUp, featureKey: 'sales_entry',     minPlan: 'starter', minImsRole: 'staff' },
   { to: '/purchase-orders',  label: 'Purchase Orders',   icon: ClipboardList, featureKey: 'purchase_orders', minPlan: 'growth', minImsRole: 'supervisor' },
-  { to: '/stock',            label: 'Stock Count',       icon: ClipboardCheck },
-  { to: '/requisitions',     label: 'Requisitions',      icon: ArrowRightLeft, featureKey: 'requisitions',    minPlan: 'growth' },
+  { to: '/stock',            label: 'Stock Count',       icon: ClipboardCheck, minImsRole: 'staff' },
+  { to: '/requisitions',     label: 'Requisitions',      icon: ArrowRightLeft, featureKey: 'requisitions',    minPlan: 'growth', minImsRole: 'staff' },
   { to: '/recipes',          label: 'Recipe Costing',    icon: ChefHat, featureKey: 'recipe_costing',  minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/menu-pricing',     label: 'Menu Pricing',      icon: Tag, featureKey: 'menu_pricing',    minPlan: 'starter', minImsRole: 'manager' },
   { to: '/menu-engineering', label: 'Menu Engineering',  icon: PieChart, featureKey: 'menu_engineering',minPlan: 'pro', minImsRole: 'manager' },

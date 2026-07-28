@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -25,10 +26,25 @@ const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kart
 // and retries once if the token turns out to be expired anyway. The save itself can no longer
 // hang regardless — withTimeout bounds it.
 const TAB_LABELS = { bulk: 'Bulk Entry', daily: 'Daily Entry', breakdown: 'Daily Breakdown', summary: 'Period Summary' }
+// The two tabs that WRITE. Disabled whenever POS is running (see posOwnsSales below); the other
+// two are read-only views of whatever POS has already posted, so they stay available.
+const ENTRY_TABS = ['bulk', 'daily']
+const READ_ONLY_TAB = 'summary'
 
 export default function Sales() {
-  const { clientId, profile, loading: authLoading, isAdmin } = useAuth()
+  const { clientId, profile, loading: authLoading, isAdmin, clientModules, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
+  // Manual Sales Entry exists for IMS clients who do NOT run POS. Where both modules are on, POS
+  // is the source of truth and supersedes manual entry entirely — a bill closed at the till
+  // already posts its own sales_entries row (source='pos'), so anything typed here is at best a
+  // duplicate and at worst a contradiction of the till. Rather than let the two compete, the
+  // writing tabs are closed off and the page becomes a read-only view of what POS posted.
+  //
+  // Admin is exempt, matching isLocked's own !isAdmin carve-out below — an admin correcting a
+  // client's pre-POS manual history still needs the entry grids, and save_sales_day (migration
+  // 20260727180000) now scopes every one of its deletes to source='manual', so an admin save can
+  // no longer damage POS rows even on a client running both.
+  const posOwnsSales = !isAdmin && !!clientModules?.pos
   const { scopedFrom } = useScopedDb()
   // periods/recipes only (the menu + period list) are cached for an instant revisit — deliberately
   // NOT the entered-quantity maps (sales/dailySales/etc. below), which a Save reads as the
@@ -62,6 +78,11 @@ export default function Sales() {
   const [dailySaveError, setDailySaveError] = useState('')
   const [allDaySums, setAllDaySums]   = useState({}) // recipe_id -> total qty across all days
   const [allDayDiscounts, setAllDayDiscounts] = useState({}) // recipe_id -> total discount across all days
+  // Revenue is split into the part already priced by the row's own unit_price snapshot and the
+  // qty on rows that have none (pre-S375 rows), so the recipe's CURRENT price is only ever used
+  // as a fallback for the latter. See recipeRevenue() below.
+  const [allDayPricedRev, setAllDayPricedRev] = useState({})   // recipe_id -> Sum(qty x unit_price)
+  const [allDayUnpricedQty, setAllDayUnpricedQty] = useState({}) // recipe_id -> qty with no snapshot
   const [monthlyEntries, setMonthlyEntries] = useState([])
   const [monthlyLoading, setMonthlyLoading] = useState(false)
   // Set when a save is staged behind the typed-confirmation modal because it would delete the
@@ -94,6 +115,13 @@ export default function Sales() {
   useEffect(() => {
     if (viewMode === 'breakdown' && selectedPeriod) loadMonthlyEntries(selectedPeriod.id)
   }, [viewMode, selectedPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // viewMode starts at 'bulk' and clientModules only resolves once the profile has loaded, so a
+  // POS client's first render can legitimately land on a tab that is about to become disabled.
+  // Move them off it rather than leaving a disabled tab rendered as the active one.
+  useEffect(() => {
+    if (posOwnsSales && ENTRY_TABS.includes(viewMode)) setViewMode(READ_ONLY_TAB)
+  }, [posOwnsSales, viewMode])
 
   async function init() {
     setLoading(true)
@@ -130,9 +158,12 @@ export default function Sales() {
       .eq('period_id', periodId).eq('bs_day', day).neq('source', 'pos_comp')
     const map = {}
     const discMap = {}
+    // Accumulate, don't overwrite — loadAllDaySums below has always summed, and this must agree
+    // with it. A day can legitimately hold more than one row per recipe: POS writes one row PER
+    // BILL, so a day with five bills of the same item was showing only the last bill's qty here.
     ;(data || []).forEach(s => {
-      map[s.recipe_id] = parseFloat(s.qty_sold) || 0
-      discMap[s.recipe_id] = parseFloat(s.discount) || 0
+      map[s.recipe_id] = (map[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0)
+      discMap[s.recipe_id] = (discMap[s.recipe_id] || 0) + (parseFloat(s.discount) || 0)
     })
     setDailySales(map)
     setDailyForm({})
@@ -142,15 +173,25 @@ export default function Sales() {
 
   async function loadAllDaySums(periodId) {
     const { data } = await supabase
-      .from('sales_entries').select('recipe_id, qty_sold, discount').eq('period_id', periodId).neq('source', 'pos_comp')
+      .from('sales_entries').select('recipe_id, qty_sold, discount, unit_price').eq('period_id', periodId).neq('source', 'pos_comp')
     const agg = {}
     const discAgg = {}
+    const pricedAgg = {}
+    const unpricedAgg = {}
     ;(data || []).forEach(e => {
-      agg[e.recipe_id] = (agg[e.recipe_id] || 0) + (parseFloat(e.qty_sold) || 0)
+      const qty = parseFloat(e.qty_sold) || 0
+      agg[e.recipe_id] = (agg[e.recipe_id] || 0) + qty
       discAgg[e.recipe_id] = (discAgg[e.recipe_id] || 0) + (parseFloat(e.discount) || 0)
+      if (e.unit_price != null) {
+        pricedAgg[e.recipe_id] = (pricedAgg[e.recipe_id] || 0) + qty * (parseFloat(e.unit_price) || 0)
+      } else {
+        unpricedAgg[e.recipe_id] = (unpricedAgg[e.recipe_id] || 0) + qty
+      }
     })
     setAllDaySums(agg)
     setAllDayDiscounts(discAgg)
+    setAllDayPricedRev(pricedAgg)
+    setAllDayUnpricedQty(unpricedAgg)
   }
 
   async function loadMonthlyEntries(periodId) {
@@ -224,6 +265,11 @@ export default function Sales() {
   // straight away. See findSupersededRows() for why this warning exists (S457).
   async function requestSave(mode) {
     if (!selectedPeriod) return
+    // Both writing tabs are unreachable when POS owns sales, so this can't be hit through the UI.
+    // It stays as the last line of defence for any path that doesn't go through a tab — the Excel
+    // import button, a stale render mid-load, a future caller — since the cost of being wrong here
+    // is writing manual rows that contradict the till.
+    if (posOwnsSales) return
     const isBulk = mode === 'bulk'
     if (isBulk ? bulkSaving : dailySaving) return
     const setSaving = isBulk ? setBulkSaving : setDailySaving
@@ -380,9 +426,25 @@ export default function Sales() {
     return getQtyNum(recipe.id) * (parseFloat(recipe.selling_price) || 0)
   }
 
-  const totalQty     = recipes.reduce((s, r) => s + getQtyNum(r.id), 0)
-  const totalRevenue = recipes.reduce((s, r) => s + getRevenue(r), 0)
-  const itemsWithSales = recipes.filter(r => getQtyNum(r.id) > 0).length
+  // Period revenue for one recipe, across EVERY row (bulk + daily), priced the way every other
+  // report in the codebase prices sales: the row's own unit_price snapshot wins, and the recipe's
+  // current selling_price is only a fallback for rows written before that snapshot existed
+  // (S375). Using the live price for everything — which this page used to do — silently restates
+  // a whole period's revenue the moment someone edits a menu price.
+  function recipeRevenue(recipe) {
+    const priced = allDayPricedRev[recipe.id] || 0
+    const unpricedQty = allDayUnpricedQty[recipe.id] || 0
+    const disc = allDayDiscounts[recipe.id] || 0
+    return priced + unpricedQty * (parseFloat(recipe.selling_price) || 0) - disc
+  }
+
+  // The three stat cards are PERIOD figures and must read allDaySums. They used to read
+  // getQtyNum(), whose `sales` map is loaded with .eq('bs_day', 0) — bulk rows only — so on a
+  // client entering sales daily, "Total Covers"/"Period Revenue" showed roughly nothing while the
+  // Period Summary tab on the same page showed the real number.
+  const totalQty     = recipes.reduce((s, r) => s + (allDaySums[r.id] || 0), 0)
+  const totalRevenue = recipes.reduce((s, r) => s + recipeRevenue(r), 0)
+  const itemsWithSales = recipes.filter(r => (allDaySums[r.id] || 0) > 0).length
 
   const sortedRecipes = [...recipes].sort((a, b) => {
     switch (sortBy) {
@@ -412,6 +474,14 @@ export default function Sales() {
 
   const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
   const tabPrintLabel = `${TAB_LABELS[viewMode]} — ${periodLabel}${viewMode === 'daily' ? `, Day ${selectedDay}` : ''}`
+
+  // 'staff' is the floor tier every other IMS page's guard is measured against — this page had no
+  // guard at all, so ModuleGate's client-level ims_enabled check was the only thing in front of
+  // it. sales_entries is deliberately left readable/writable for POS PIN staff at the RLS level
+  // (billing has to post to it), so a pos_role='staff' account with no ims_role could type /sales
+  // and read, then overwrite, the client's whole manual sales ledger. Nav already hid it
+  // (Layout.js's imsVisible requires an imsRole); the route did not.
+  if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>
@@ -445,6 +515,13 @@ export default function Sales() {
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
         </div>
       )}
+      {/* POS-supersedes-manual banner. Accent rather than red — this is how the product is meant
+          to work for a two-module client, not an error or a lockout they need to resolve. */}
+      {posOwnsSales && (
+        <div style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.35)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-text1)' }}>
+          🛈 <span><strong>Sales come from Crest POS.</strong> Every bill closed at the till posts its own sales automatically, so Bulk Entry and Daily Entry are disabled — manual figures would duplicate or contradict the till. These views stay live and read-only.</span>
+        </div>
+      )}
       {/* Stat cards */}
       <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 20 }}>
         <div className="stat-card">
@@ -469,15 +546,25 @@ export default function Sales() {
       {/* Tabs */}
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--theme-border)', marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 4 }}>
-          {Object.entries(TAB_LABELS).map(([key, label]) => (
-            <button key={key} onClick={() => setViewMode(key)} style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              padding: '10px 20px', fontSize: 13, fontWeight: 500,
-              color: viewMode === key ? 'var(--theme-accent)' : 'var(--theme-text2)',
-              borderBottom: viewMode === key ? '2px solid var(--theme-accent)' : '2px solid transparent',
-              marginBottom: -1, transition: 'color 0.12s'
-            }}>{label}</button>
-          ))}
+          {Object.entries(TAB_LABELS).map(([key, label]) => {
+            const tabDisabled = posOwnsSales && ENTRY_TABS.includes(key)
+            // aria-disabled, NOT the disabled attribute: a disabled <button> swallows mouse events
+            // and never bubbles them, so Tip (which binds onMouseEnter on its wrapper span) would
+            // never fire and the user would get a greyed-out tab with no way to find out why.
+            const btn = (
+              <button key={key} onClick={() => { if (!tabDisabled) setViewMode(key) }} aria-disabled={tabDisabled} style={{
+                background: 'none', border: 'none', cursor: tabDisabled ? 'not-allowed' : 'pointer',
+                padding: '10px 20px', fontSize: 13, fontWeight: 500,
+                color: tabDisabled ? 'var(--theme-text3)' : viewMode === key ? 'var(--theme-accent)' : 'var(--theme-text2)',
+                borderBottom: viewMode === key ? '2px solid var(--theme-accent)' : '2px solid transparent',
+                marginBottom: -1, transition: 'color 0.12s'
+              }}>{tabDisabled ? `🔒 ${label}` : label}</button>
+            )
+            return tabDisabled
+              ? <Tip key={key} style={{ borderBottom: 'none', cursor: 'not-allowed' }} width={300}
+                     text="Disabled because Crest POS is active. Every bill closed at the till posts its own sales automatically, so manual entry would duplicate or contradict it. Review or correct sales in the POS Sales Report instead.">{btn}</Tip>
+              : btn
+          })}
         </div>
         {(viewMode === 'bulk' || viewMode === 'daily' || viewMode === 'breakdown' || viewMode === 'summary') && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -940,8 +1027,8 @@ export default function Sales() {
               .sort((a, b) => {
                 const aqty = allDaySums[a.id] || 0
                 const bqty = allDaySums[b.id] || 0
-                const arev = aqty * (parseFloat(a.selling_price) || 0) - (allDayDiscounts[a.id] || 0)
-                const brev = bqty * (parseFloat(b.selling_price) || 0) - (allDayDiscounts[b.id] || 0)
+                const arev = recipeRevenue(a)
+                const brev = recipeRevenue(b)
                 switch (sortBy) {
                   case 'rev_desc':   return brev - arev
                   case 'rev_asc':    return arev - brev
@@ -954,7 +1041,7 @@ export default function Sales() {
               })
             const sumTotalQty = summaryRecipes.reduce((s, r) => s + (allDaySums[r.id] || 0), 0)
             const sumTotalDiscount = summaryRecipes.reduce((s, r) => s + (allDayDiscounts[r.id] || 0), 0)
-            const sumTotalRev = summaryRecipes.reduce((s, r) => s + (allDaySums[r.id] || 0) * (parseFloat(r.selling_price) || 0) - (allDayDiscounts[r.id] || 0), 0)
+            const sumTotalRev = summaryRecipes.reduce((s, r) => s + recipeRevenue(r), 0)
             return (
               <div className="card">
                 <div className="table-wrap">
@@ -974,7 +1061,7 @@ export default function Sales() {
                       {summaryRecipes.map(recipe => {
                         const sold = allDaySums[recipe.id] || 0
                         const disc = allDayDiscounts[recipe.id] || 0
-                        const rev  = sold * (parseFloat(recipe.selling_price) || 0) - disc
+                        const rev  = recipeRevenue(recipe)
                         const revPct = sumTotalRev > 0 ? (rev / sumTotalRev) * 100 : 0
                         return (
                           <tr key={recipe.id} style={{ opacity: sold === 0 ? 0.4 : 1 }}>

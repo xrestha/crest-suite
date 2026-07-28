@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd } from '../../../utils/bsCalendar'
+import { calcBillTotals } from '../purchases/purchasesHelpers'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { Navigate } from 'react-router-dom'
@@ -16,6 +17,14 @@ const INPUT = {
   border: '1px solid var(--theme-border, var(--theme-border))',
   borderRadius: 6, padding: '7px 10px', fontSize: 13,
   color: 'var(--theme-text, var(--theme-text1))', outline: 'none',
+}
+
+// One bill = one vendor's invoice on one day of one period. Defined once and stamped onto each
+// entry at load time, because the totals pass and the render-time grouping MUST agree on what a
+// bill is — the bill's grand total is computed in the first and displayed by the second.
+function billKeyOf(e, period) {
+  const vName = e.vendors?.name || 'Unknown'
+  return `${vName}|${e.invoice_ref || 'noinv'}|${period.bs_year}-${period.bs_month}-${e.bs_day || 0}`
 }
 
 function aging(days) {
@@ -61,7 +70,7 @@ export default function OutstandingPayables() {
 
     let query = supabase
       .from('purchase_entries')
-      .select('id, bs_day, qty, rate, invoice_ref, paid_at, monthly_periods!inner(client_id, bs_year, bs_month), items(name, uom, categories(name)), vendors(name)')
+      .select('id, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, monthly_periods!inner(client_id, bs_year, bs_month), items(name, uom, categories(name)), vendors(name)')
       .eq('monthly_periods.client_id', effectiveClientId)
       .eq('payment_method', 'Credit')
 
@@ -94,14 +103,58 @@ export default function OutstandingPayables() {
     }
     setPaymentsMap(pmtMap)
 
+    // Goods sent back reduce what's owed. ReturnsTab always writes purchase_entry_id (it refuses
+    // to save without one) and copies the linked purchase's payment_method, so a return against a
+    // Credit bill is always attributable to the exact line it cancels — no allocation guesswork.
+    let returnedByEntry = {}
+    if (ids.length > 0) {
+      const { data: rets } = await scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate')
+        .in('purchase_entry_id', ids)
+      ;(rets || []).forEach(r => {
+        returnedByEntry[r.purchase_entry_id] =
+          (returnedByEntry[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0)
+      })
+    }
+
     const enriched = (data || []).map(e => {
       const pr = e.monthly_periods
       const adDate = bsToAd(pr.bs_year, pr.bs_month, e.bs_day || 1)
       const daysOld = Math.max(0, Math.floor((today - adDate) / (1000 * 60 * 60 * 24)))
-      const value = parseFloat(e.qty) * parseFloat(e.rate)
+      // Net of returns, still EXCLUDING bill-level discount and VAT — those are bill-level, not
+      // line-level, so they're applied in the grouping pass below.
+      const netLine = Math.max(0, parseFloat(e.qty) * parseFloat(e.rate) - (returnedByEntry[e.id] || 0))
       const paidTotal = (pmtMap[e.id] || []).reduce((s, p) => s + parseFloat(p.amount), 0)
-      const remaining = Math.max(0, value - paidTotal)
-      return { ...e, period: pr, value, paidTotal, remaining, daysOld, aging: aging(daysOld) }
+      return { ...e, period: pr, netLine, paidTotal, daysOld, aging: aging(daysOld), billKey: billKeyOf(e, pr) }
+    })
+
+    // What this page shows must be what the vendor actually invoiced. `value` used to be a bare
+    // qty × rate: no VAT, no bill discount, no returns — so a VAT-inclusive credit bill read ~13%
+    // LOW and "Settle Bill" marked it fully paid at 88.5% of the real amount, while discounts and
+    // returns pushed it the other way. calcBillTotals() is the same function PurchaseBillModal's
+    // live total and the printed voucher use, so routing through it is what makes the three agree.
+    //
+    // The grand total is then spread back across the bill's lines in proportion to their net
+    // value, because payments allocate per purchase_entry_id — keeping `value` per-line means the
+    // existing payment/settle logic needs no changes at all.
+    const byBill = {}
+    enriched.forEach(e => { (byBill[e.billKey] = byBill[e.billKey] || []).push(e) })
+    Object.values(byBill).forEach(lines => {
+      // discount_amount is stored on every row of a bill but represents ONE bill-level discount,
+      // so it's deduped per purchase_group_id before summing (same as VendorReport does).
+      const discountByGroup = {}
+      lines.forEach(l => { discountByGroup[l.purchase_group_id || l.id] = parseFloat(l.discount_amount || 0) })
+      const billDiscount = Object.values(discountByGroup).reduce((s, d) => s + d, 0)
+      // qty 1 × rate netLine: calcBillTotals only ever multiplies the two, and the returns
+      // netting above already collapsed each line to a single net figure.
+      const { grandTotal } = calcBillTotals(
+        lines.map(l => ({ qty: 1, rate: l.netLine, vat_inclusive: l.vat_inclusive })),
+        billDiscount
+      )
+      const netSum = lines.reduce((s, l) => s + l.netLine, 0)
+      lines.forEach(l => {
+        l.value = netSum > 0 ? l.netLine * (grandTotal / netSum) : 0
+        l.remaining = Math.max(0, l.value - l.paidTotal)
+      })
     })
     setEntries(enriched)
     setLoading(false)
@@ -211,7 +264,9 @@ export default function OutstandingPayables() {
   const billMap = {}
   entries.forEach(e => {
     const vName = e.vendors?.name || 'Unknown'
-    const key = `${vName}|${e.invoice_ref || 'noinv'}|${e.period.bs_year}-${e.period.bs_month}-${e.bs_day || 0}`
+    // e.billKey is stamped in load() by the same billKeyOf() the grand-total pass grouped on —
+    // reusing it here is what guarantees bill.total equals the total that was actually computed.
+    const key = e.billKey
     if (!billMap[key]) billMap[key] = { key, vendorName: vName, invoice_ref: e.invoice_ref, period: e.period, bs_day: e.bs_day, entries: [] }
     billMap[key].entries.push(e)
   })
@@ -280,7 +335,7 @@ export default function OutstandingPayables() {
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 24 }}>
         {activeTab === 'outstanding' ? (<>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills." width={220}>Total Remaining</Tip></div>
+            <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills, less any payments already recorded. Bill amounts match the vendor's invoice: net of goods returned and any bill discount, plus 13% VAT on VAT-inclusive lines." width={280}>Total Remaining</Tip></div>
             <div className="stat-value" style={{ fontSize: 18, color: totalRemaining > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>{fmt(totalRemaining)}</div>
             <div className="stat-sub">{filteredBills.length} bill{filteredBills.length !== 1 ? 's' : ''} · {Object.keys(byVendor).length} vendor{Object.keys(byVendor).length !== 1 ? 's' : ''}</div>
           </div>
@@ -296,7 +351,7 @@ export default function OutstandingPayables() {
           </div>
         </>) : (<>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="Total value of all fully settled credit bills." width={220}>Total Paid</Tip></div>
+            <div className="stat-label"><Tip text="Total invoiced value of all fully settled credit bills — net of returns and discount, including VAT where applicable." width={260}>Total Paid</Tip></div>
             <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-green)' }}>{fmt(totalRemaining)}</div>
             <div className="stat-sub">{filteredBills.length} settled bill{filteredBills.length !== 1 ? 's' : ''}</div>
           </div>
@@ -412,7 +467,7 @@ export default function OutstandingPayables() {
                         <th>Invoice</th>
                         <th>Period</th>
                         <th style={{ textAlign: 'right' }}>Items</th>
-                        <th style={{ textAlign: 'right' }}>Bill Total</th>
+                        <th style={{ textAlign: 'right' }}><Tip text="What the vendor actually invoiced, computed the same way as the printed purchase voucher: line values net of any goods returned, minus the bill discount, plus 13% VAT on VAT-inclusive lines." width={290}>Bill Total</Tip></th>
                         {activeTab === 'outstanding' ? (<>
                           <th style={{ textAlign: 'right' }}>Paid</th>
                           <th style={{ textAlign: 'right' }}>Remaining</th>

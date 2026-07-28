@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import { Navigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -34,7 +35,7 @@ const DEPARTMENTS = [
 ]
 
 export default function Requisitions() {
-  const { clientId, profile, loading: authLoading } = useAuth()
+  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
@@ -329,6 +330,10 @@ export default function Requisitions() {
   const issuedReqs = reqs.filter(r => r.status === 'issued')
   const draftReqs = reqs.filter(r => r.status === 'draft')
   const totalIssuedValue = issuedReqs.reduce((s, r) => s + reqIssuedValue(r), 0)
+
+  // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
+  // the route was reachable by any account at an ims_enabled client regardless of ims_role.
+  if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

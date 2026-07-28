@@ -17,6 +17,13 @@ export function isMissingFunctionError(error) {
 
 const signalled = (builder, signal) => (signal ? builder.abortSignal(signal) : builder)
 
+// sales_entries is shared with POS: a POS client's rows carry source 'pos' (one per bill),
+// 'pos_comp' (comped lines) or 'pos_credit' (negative credit-note reversals). Manual entry must
+// never read those as its own baseline or delete them — see migration 20260727180000 for the full
+// writeup. `source` is DEFAULT 'manual' but nullable, so rows predating the default read as NULL
+// and must still count as manual, or they become undeletable through the UI.
+const manualOnly = builder => builder.or('source.is.null,source.eq.manual')
+
 // Which existing rows a save is about to SILENTLY delete, so the user can be warned first (S457).
 //
 // Bulk (bs_day 0) and Daily (bs_day > 0) are mutually exclusive per recipe — saving one supersedes
@@ -33,7 +40,7 @@ const signalled = (builder, signal) => (signal ? builder.abortSignal(signal) : b
 export async function findSupersededRows(supabase, { periodId, bsDay, recipeIds, signal, timeoutMs = SAVE_TIMEOUT_MS }) {
   if (!recipeIds.length) return { total: 0, byRecipe: [] }
 
-  const base = supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold').eq('period_id', periodId)
+  const base = manualOnly(supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold').eq('period_id', periodId))
   const scoped = bsDay === 0 ? base.gt('bs_day', 0) : base.eq('bs_day', 0)
 
   const { data, error } = await withTimeout(signalled(scoped, signal), timeoutMs, 'Check')
@@ -101,16 +108,18 @@ export async function persistSalesDay(supabase, { periodId, bsDay, rows, signal,
 
 async function persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, timeoutMs }) {
   const { error: delErr } = await withTimeout(
-    signalled(supabase.from('sales_entries').delete().eq('period_id', periodId).eq('bs_day', bsDay), signal),
+    signalled(manualOnly(supabase.from('sales_entries').delete()).eq('period_id', periodId).eq('bs_day', bsDay), signal),
     timeoutMs, 'Save'
   )
   if (delErr) throw new Error(delErr.message)
 
   if (!rows.length) return
 
+  // source is written explicitly, matching the RPC — these rows are manual by construction, and
+  // the deletes above/below key off that value, so it must not be left to the column default.
   const { error: insErr } = await withTimeout(
     signalled(
-      supabase.from('sales_entries').insert(rows.map(r => ({ ...r, period_id: periodId, bs_day: bsDay }))),
+      supabase.from('sales_entries').insert(rows.map(r => ({ ...r, period_id: periodId, bs_day: bsDay, source: 'manual' }))),
       signal
     ),
     timeoutMs, 'Save'
@@ -118,7 +127,7 @@ async function persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, 
   if (insErr) throw new Error(insErr.message)
 
   const recipeIds = rows.map(r => r.recipe_id)
-  const cleanup = supabase.from('sales_entries').delete().eq('period_id', periodId)
+  const cleanup = manualOnly(supabase.from('sales_entries').delete().eq('period_id', periodId))
   const scoped = bsDay === 0 ? cleanup.gt('bs_day', 0) : cleanup.eq('bs_day', 0)
   const { error: clearErr } = await withTimeout(
     signalled(scoped.in('recipe_id', recipeIds), signal),

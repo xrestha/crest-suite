@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -16,7 +17,7 @@ import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 export default function Purchases() {
-  const { clientId, profile, loading: authLoading, isAdmin } = useAuth()
+  const { clientId, profile, loading: authLoading, isAdmin, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedDelete } = useScopedDb()
 
@@ -270,6 +271,10 @@ export default function Purchases() {
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
+
+  // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
+  // the route was reachable by any account at an ims_enabled client regardless of ims_role.
+  if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
 
   return (
     <>

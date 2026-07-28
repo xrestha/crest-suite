@@ -18,7 +18,9 @@ export async function computeInventoryVariance(clientId, period) {
     supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id),
     scopedFrom('items', clientId, 'id, name, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
     scopedFrom('recipes', clientId, 'id'),
-    supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id).neq('source', 'pos_comp'),
+    // Comps INCLUDED — this is a consumption figure, not a revenue one. See the same note in
+    // computeInventoryShrinkageTrend.js; Variance.js (which this mirrors) has never filtered them.
+    supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id),
   ])
 
   const sum = (rows, key) => { const m = {}; (rows || []).forEach(r => { m[r.item_id] = (m[r.item_id] || 0) + (parseFloat(r[key]) || 0) }); return m }

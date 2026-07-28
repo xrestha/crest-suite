@@ -29,7 +29,13 @@ async function computeImsSection(clientId, period) {
   const results = await Promise.all([
     supabase.from('purchase_entries').select('id, item_id, qty, rate, payment_method').eq('period_id', period.id),
     supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id),
+    // Two sales fetches, because one row set cannot answer both questions. REVENUE excludes comps
+    // (a comped dish collected nothing), CONSUMPTION includes them (its ingredients were still
+    // used). This was a single comp-excluding query feeding both, so theoretical usage — and the
+    // reorder shortfall built on it below — silently understated by the comp volume, and the
+    // section disagreed with the live Variance/Reorder pages, which have never filtered comps.
     supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp'),
+    supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id),
     scopedFrom('recipes', clientId, 'id, selling_price'),
     supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead'),
     supabase.from('wastages').select('item_id, qty').eq('period_id', period.id),
@@ -47,7 +53,7 @@ async function computeImsSection(clientId, period) {
     scopedFrom('payable_payments', clientId, 'purchase_entry_id, amount'),
   ])
   const [
-    { data: purchases }, { data: returns }, { data: salesData }, { data: recipes },
+    { data: purchases }, { data: returns }, { data: salesData }, { data: consumptionSales }, { data: recipes },
     { data: overheadsData }, { data: wastagesData }, { data: items }, { data: parLevels },
     { data: opening }, { data: closing }, { data: payablePayments },
   ] = results
@@ -91,7 +97,8 @@ async function computeImsSection(clientId, period) {
 
   const recipeIds = (recipes || []).map(r => r.id)
   const ingredientBreakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
-  const soldMap = {}; (salesData || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0) })
+  // consumptionSales, not salesData — comps consumed ingredients even though they earned nothing.
+  const soldMap = {}; (consumptionSales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0) })
   const theoreticalMap = {}
   Object.entries(ingredientBreakdown).forEach(([recipeId, rows]) => {
     const sold = soldMap[recipeId] || 0
@@ -449,7 +456,11 @@ async function computeTrendSection(clientId, period, currentPartial) {
 // Current shape version — bump whenever a new top-level snapshot field is added. Never branched
 // on anywhere (no migration/upgrade system exists) — reads just optional-chain defensively, same
 // as every existing render site already does for a module that was never enabled.
-export const CURRENT_SCHEMA_VERSION = 2
+// 3: no shape change, but theoretical usage (and the reorder shortfall derived from it) now
+// includes comped covers, where v1/v2 snapshots excluded them. Bumped anyway because the Trend
+// section compares this period against already-frozen prior snapshots — a v2 row and a v3 row are
+// not computed the same way, and the version is the only trace of that a reader will ever have.
+export const CURRENT_SCHEMA_VERSION = 3
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

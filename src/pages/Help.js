@@ -82,8 +82,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '↑', name: 'Sales Entry',
-        guide: 'Record total qty sold per menu item for the period. Only items with a recipe appear here. Revenue is calculated automatically from selling price × qty sold, minus any per-item Discount entered on Daily Entry. Use Bulk Entry for monthly POS totals.',
-        tips: ['Sales data is required for the Variance Report to calculate theoretical usage', 'Sub-recipes are excluded — only top-level recipes appear here', 'You can update sales entries any time while the period is open', 'Daily Entry: click ↑ Import Excel to auto-fill qty AND discount from a vendor/POS "Sales Report Item Wise" export (.xlsx) for the currently selected day — it matches by Product Name and reads the Net qty sold and Discount columns; unmatched product names are listed in a small banner so you can fix names or enter them manually. Review the filled table, then click Save Day as usual', 'Discount (Daily Entry only) is a per-item NPR reduction for that day — e.g. staff discount or a promo — subtracted from Day Revenue and rolled up into Period Summary\'s Total Revenue. It has no effect on Bulk Entry, which has no per-day/discount concept']
+        guide: 'Record total qty sold per menu item for the period. Only items with a recipe appear here. Revenue is calculated automatically from selling price × qty sold, minus any per-item Discount entered on Daily Entry. Use Bulk Entry for a month-end tally. If you also run Crest POS, Bulk Entry and Daily Entry are locked: every bill closed at the till already posts its own sales, so POS is the source of truth and manual entry would duplicate or contradict it. The Daily Breakdown and Period Summary tabs stay available read-only.',
+        tips: ['Sales data is required for the Variance Report to calculate theoretical usage', 'The Total Covers / Items with Sales / Period Revenue cards at the top cover the whole period — bulk and daily entries together — and price each sale at what it was actually sold for, not at the current menu price. Changing a menu price today does not restate last period revenue.', 'Sub-recipes are excluded — only top-level recipes appear here', 'You can update sales entries any time while the period is open', 'Daily Entry: click ↑ Import Excel to auto-fill qty AND discount from a vendor/POS "Sales Report Item Wise" export (.xlsx) for the currently selected day — it matches by Product Name and reads the Net qty sold and Discount columns; unmatched product names are listed in a small banner so you can fix names or enter them manually. Review the filled table, then click Save Day as usual', 'Discount (Daily Entry only) is a per-item NPR reduction for that day — e.g. staff discount or a promo — subtracted from Day Revenue and rolled up into Period Summary\'s Total Revenue. It has no effect on Bulk Entry, which has no per-day/discount concept']
       },
       {
         icon: '◎', name: 'Payment Summary',
@@ -127,8 +127,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '⊘', name: 'Non-VAT Report',
-        guide: 'Lists all purchases from non-VAT registered vendors. Useful for accounting and for separating VAT vs non-VAT purchase records.',
-        tips: ['Non-VAT purchases are those not marked as VAT-inclusive in the Purchases entry']
+        guide: 'Lists all purchases from non-VAT registered vendors. Useful for accounting and for separating VAT vs non-VAT purchase records. Totals are net of bill discounts and of any non-VAT goods returned to the vendor, matching how the VAT Report treats its own half of the filing.',
+        tips: ['Non-VAT purchases are those not marked as VAT-inclusive in the Purchases entry', 'Returns are deducted from both the headline total and each vendor row. A Returns column appears only when there were returns in the period.']
       },
       {
         icon: '⚠', name: 'Wastage Report',
@@ -162,7 +162,7 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '₿', name: 'Outstanding Payables',
-        guide: 'Tracks all credit purchases that have not been paid, grouped by vendor and by bill (invoice). Aging buckets: Current / 31–60 / 61–90 / 90+ days. Click a bill to expand it and record a payment against the whole invoice at once. For a monthly credit run across several bills, use the checkboxes (or the header checkbox to select a whole vendor, or "Select All Filtered") to pick multiple bills and pay them all in full together with one shared date/note. A Month filter narrows the list to one BS period before selecting.',
+        guide: 'Tracks all credit purchases that have not been paid, grouped by vendor and by bill (invoice). Bill Total is what the vendor actually invoiced — net of any goods returned, minus the bill discount, plus 13% VAT on VAT-inclusive lines — so it matches the printed purchase voucher exactly. Aging buckets: Current / 31–60 / 61–90 / 90+ days. Click a bill to expand it and record a payment against the whole invoice at once. For a monthly credit run across several bills, use the checkboxes (or the header checkbox to select a whole vendor, or "Select All Filtered") to pick multiple bills and pay them all in full together with one shared date/note. A Month filter narrows the list to one BS period before selecting.',
         tips: ['Anything in the 61–90 day bucket needs immediate follow-up with finance', 'Filter by Vendor + Month, then "Select All Filtered" to clear an entire month\'s bills for one vendor in one action', 'Partial payments are still per-bill only — expand a single bill to pay less than the full remaining amount']
       },
       {
@@ -217,7 +217,7 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '⊕', name: 'Shrinkage Report',
-        guide: 'Multi-period analysis of actual vs theoretical usage per item. Flags items with consistent over-use across periods. Status: Consistent / Occasional / Once / Clear. Helps identify systematic waste or theft.',
+        guide: 'Multi-period analysis of actual vs theoretical usage per item. Flags items with consistent over-use across periods. Status: Consistent / Occasional / Once / Clear. Helps identify systematic waste or theft. Theoretical usage recurses through sub-recipes and accounts for each ingredient trim loss (yield %), so it agrees with the Variance Report.',
         tips: ['Consistent shrinkage on a high-value item over 3+ periods is a serious red flag', 'Use alongside the Variance Report for a complete picture of stock losses']
       },
       {
@@ -716,7 +716,7 @@ export default function Help() {
               { step: 2, title: 'Enter Opening Stock',              desc: 'Stock Count → Opening Stock tab → enter qty for each item. For month 2 onward, this auto-carries from last month\'s closing.' },
               { step: 3, title: 'Record Purchases as they arrive',  desc: 'Purchases → Add Purchase → enter vendor, item, qty, rate, payment method. Enter each bill on the day it arrives.' },
               { step: 4, title: 'Record Wastage as it happens',     desc: 'Stock Count → Wastage tab → log any spoilage or discards on the day.' },
-              { step: 5, title: 'Enter Sales',                      desc: 'Sales Entry → enter qty sold per menu item. Use Bulk Entry if you have a POS or month-end tally.', plan: 'Starter+' },
+              { step: 5, title: 'Enter Sales',                      desc: 'Sales Entry → enter qty sold per menu item. Use Bulk Entry for a month-end tally. Running Crest POS? Skip this step entirely — the till posts sales for you, and both entry tabs are locked.', plan: 'Starter+' },
               { step: 6, title: 'Physical Stock Count',             desc: 'On the last day: print the Stock Count Sheet (Stock → Print Sheet), do a physical walk of your storeroom, enter counts in Stock Count → Closing Stock.' },
               { step: 7, title: 'Review Monthly Summary',           desc: 'Monthly Summary → check food cost %, COGS per category, and revenue. Export to Excel for management.' },
               { step: 8, title: 'Review Variance Report',           desc: 'Variance → sort by NPR value → investigate any item with >10% variance. High variance = waste, theft, or over-portioning.', plan: 'Growth+' },

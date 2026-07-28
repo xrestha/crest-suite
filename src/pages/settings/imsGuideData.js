@@ -219,6 +219,7 @@ export const IMS_GUIDE_GROUPS = [
         summary:
           'Records how many portions of each recipe sold in the period — the revenue side of Food Cost % and the demand driver behind every variance calculation.',
         workflow: [
+          'POS-enabled clients: Bulk Entry and Daily Entry are DISABLED (locked, with a tooltip). Manual sales entry exists for IMS clients who do not run POS; where both modules are on, POS is the source of truth and supersedes manual entry. The two read-only tabs stay available. Admin is exempt.',
           'Bulk Entry tab: one input per recipe for the whole period\'s total qty (stored as bs_day = 0).',
           'Daily Entry tab: pick a specific BS day, enter qty per recipe for just that day (bs_day > 0).',
           'Daily Breakdown tab: read-only Item × Day pivot with totals.',
@@ -228,11 +229,13 @@ export const IMS_GUIDE_GROUPS = [
           { label: 'unit_price / vat_rate (snapshotted)', desc: 'Captured from the recipe\'s current selling_price/vat_rate at the moment the sale is saved — deliberately, so a later menu price change never retroactively distorts past periods\' revenue/FC% history. Reports prefer the row\'s own unit_price over the recipe\'s live price whenever it\'s present.' },
         ],
         formulas: [
-          'Period Revenue = Σ(qty_sold × selling_price), ex-VAT.',
+          'Period Revenue = Sum over EVERY row of the period (bulk + daily) of qty_sold x unit_price - discount, where unit_price is the price-at-entry snapshot on the row and the recipe current selling_price is only a fallback for rows written before that snapshot existed. Until 2026-07-27 this page priced everything at the current selling_price, so editing a menu price restated the whole period retroactively — the exact thing the snapshot exists to prevent, and a reason this total disagreed with the dashboard Sales Breakdown tile.',
+          'The three stat cards at the top (Total Covers / Items with Sales / Period Revenue) read the same all-rows totals as the Period Summary tab. They used to read the BULK-only map (loaded with bs_day = 0), so a client entering sales daily saw them read near zero while the Period Summary tab below showed the real figure.',
           '% of Revenue (per item) = itemRevenue ÷ totalRevenue × 100.',
         ],
         gotchas: [
           'Bulk and Daily entry are mutually exclusive per recipe by application logic only — the DB constraint (period, recipe, bs_day) treats bulk (bs_day=0) and daily (bs_day>0) rows as different keys, so nothing at the DB level stops both existing for the same recipe simultaneously, which would double-count revenue everywhere. The app enforces this itself: saving a Daily entry deletes that recipe\'s bulk row and vice versa — never bypass this by writing to sales_entries directly.',
+          'save_sales_day() scopes every one of its deletes to source=manual. Until 2026-07-27 it did not, so on a POS client one Save Day wiped the POS bill rows for that day, and one Bulk save wiped a whole month of them for every recipe in the payload — comp and credit-note rows were deleted with nothing re-inserted, since neither is ever part of the payload this page builds. Fixed in both the RPC and the legacy JS fallback; the disabled entry tabs above are the product-level half of the same fix.',
           'Comps (source=\'pos_comp\', written automatically by POS) are excluded from every read here — manual entries from this page are never comps by construction.',
           'Sub-recipes never appear on any tab — you record sales of finished dishes only.',
         ],
@@ -757,10 +760,12 @@ export const IMS_GUIDE_GROUPS = [
         formulas: [
           'Per covered period (theoretical>0 for that item): variance = Actual − Theoretical. If variance>0, that period counts as a shrinkage occurrence.',
           'Total Loss (NPR) = Σ variance qty across occurrences × per_uom_rate.',
+          'Theoretical usage comes from the shared explodeRecipeIngredients() util — the same one Variance Report, Stock Report and Reorder use — so it recurses through sub-recipes and divides by each ingredient yield_pct. Until 2026-07-27 this page read recipe_ingredients flat instead, dropping sub-recipe ingredients entirely and ignoring yield_pct; both errors understated theoretical usage, which OVERSTATED shrinkage. Figures from before that date read high.',
         ],
         gotchas: [
           'Items with zero covered periods (no recipe/sales linkage in any selected period) are excluded from the report entirely — not just hidden.',
           'Requires closed periods to exist at all — an all-open-periods client sees an empty report with a prompt to close a period first.',
+          'Comped covers ARE counted in theoretical usage (unlike every revenue report, which excludes source=pos_comp). A comped dish collected no money but its ingredients were still consumed, so excluding it would show up as fake shrinkage.',
         ],
         connections: 'A statistical/longitudinal extension of Variance Report\'s per-period gap, tracked the way Annual Summary tracks multiple periods at once.',
       },
@@ -804,9 +809,12 @@ export const IMS_GUIDE_GROUPS = [
         workflow: ['Same period-picker/tab pattern as VAT Report: Entries + CA Summary.'],
         fields: [],
         formulas: [
-          'Total = Σ(qty×rate) of non-VAT lines − unique-per-bill discount. "Input VAT Credit: NIL" is a fixed, deliberate stat card contrasting this report against VAT Report.',
+          'Total = Σ(qty×rate) of non-VAT lines − unique-per-bill discount − non-VAT returns. "Input VAT Credit: NIL" is a fixed, deliberate stat card contrasting this report against VAT Report.',
         ],
-        gotchas: [],
+        gotchas: [
+          'Returns were not deducted here until 2026-07-27, while VAT Report had always deducted its own — so the two halves of the same IRD filing used different definitions of "purchases". Figures from before that date read high by the value of any non-VAT goods sent back.',
+          'A return is counted as non-VAT by joining back to its purchase_entries.vat_inclusive — vendor_returns has no VAT flag of its own.',
+        ],
         connections: 'Mutually exclusive dataset with VAT Report — same purchase_entries table, split by the vat_inclusive flag set at purchase-entry time.',
       },
       {
@@ -844,9 +852,12 @@ export const IMS_GUIDE_GROUPS = [
           { label: 'Status badge', desc: 'Partial (purple, some payment recorded but not full) vs the aging-bucket label.' },
         ],
         formulas: [
+          'Bill Total = what the vendor actually invoiced, via the SAME calcBillTotals() helper that backs the live total in PurchaseBillModal and the printed purchase voucher: line values net of any goods returned against them, minus the bill-level discount (deduped per purchase_group_id), plus 13% VAT on the VAT-inclusive portion net of its share of that discount.',
+          'That grand total is then spread back across the lines of the bill in proportion to their net value, because payments allocate per purchase_entry_id.',
           'Remaining (per line) = max(0, value − Σ payments against it). A bill only moves to Paid History once EVERY one of its line items individually reaches full payment.',
         ],
         gotchas: [
+          'Until 2026-07-27 Bill Total was a bare qty x rate — no VAT, no bill discount, no returns. A VAT-inclusive credit bill therefore read about 13% LOW, and "Pay in full" settled it at roughly 88.5% of what was actually owed, while discounts and returns pushed the figure the other way. Any bill settled before that date is worth re-checking against its printed voucher.',
           'Only payment_method=\'Credit\' purchases appear here at all — Cash/FonePay purchases are assumed settled at time of purchase and never show up.',
           'Requires a one-time DB migration (a paid_at column on purchase_entries) — if missing, the page shows a setup banner with the exact SQL to run.',
           'There is no way from this UI to pay a single line item independently of its bill — payment always allocates automatically across the whole bill.',

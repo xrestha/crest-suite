@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -14,7 +15,7 @@ const PURPOSE_LABELS = { delivery: 'Delivery', pickup: 'Pickup', maintenance: 'M
 // staff/supervisor role concept the way POS does, so any Owner/Admin who can reach this page
 // can issue a gate pass. See CLAUDE.md's Parking Slip feature notes.
 export default function GatePasses() {
-  const { clientId, profile } = useAuth()
+  const { clientId, profile, hasImsAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
 
   const [passes, setPasses]   = useState([])
@@ -91,6 +92,10 @@ export default function GatePasses() {
   }
 
   const visible = filter === 'open' ? passes.filter(p => p.status === 'open') : passes
+
+  // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
+  // the route was reachable by any account at an ims_enabled client regardless of ims_role.
+  if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
 
   return (
     <>

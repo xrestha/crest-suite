@@ -18,6 +18,7 @@ function makeMockSupabase({ rpcResult = { error: null }, rpcResults, tableResult
       eq: (c, v) => { rec.filters.push(['eq', c, v]); return b },
       gt: (c, v) => { rec.filters.push(['gt', c, v]); return b },
       in: (c, v) => { rec.filters.push(['in', c, v]); return b },
+      or: (expr) => { rec.filters.push(['or', expr]); return b },
       abortSignal: (s) => { rec.signal = s; return b },
       then: (res, rej) => Promise.resolve(result()).then(res, rej),
     }
@@ -37,6 +38,9 @@ function makeMockSupabase({ rpcResult = { error: null }, rpcResults, tableResult
 }
 
 const ROWS = [{ recipe_id: 'r1', qty_sold: 3, unit_price: 30.97, vat_rate: 13, discount: 5 }]
+// Manual entry must only ever read or delete rows it wrote — POS bills, comps and credit-note
+// reversals live in this same table. NULL counts as manual (rows predating the column default).
+const MANUAL_ONLY = ['or', 'source.is.null,source.eq.manual']
 const MISSING_FN = { error: { code: 'PGRST202', message: 'Could not find the function public.save_sales_day' } }
 
 describe('isMissingFunctionError', () => {
@@ -122,11 +126,11 @@ describe('persistSalesDay — legacy fallback (migration not yet applied)', () =
     expect(res).toEqual({ atomic: false })
     expect(sb.calls.map(c => c.kind)).toEqual(['rpc', 'delete', 'insert', 'delete'])
 
-    expect(sb.calls[1].filters).toEqual([['eq', 'period_id', 'p1'], ['eq', 'bs_day', 11]])
-    expect(sb.calls[2].rows[0]).toMatchObject({ recipe_id: 'r1', period_id: 'p1', bs_day: 11, discount: 5 })
+    expect(sb.calls[1].filters).toEqual([MANUAL_ONLY, ['eq', 'period_id', 'p1'], ['eq', 'bs_day', 11]])
+    expect(sb.calls[2].rows[0]).toMatchObject({ recipe_id: 'r1', period_id: 'p1', bs_day: 11, discount: 5, source: 'manual' })
     // cross-mode: a Daily save supersedes the Bulk (bs_day = 0) row
     expect(sb.calls[3].filters).toEqual([
-      ['eq', 'period_id', 'p1'], ['eq', 'bs_day', 0], ['in', 'recipe_id', ['r1']],
+      ['eq', 'period_id', 'p1'], MANUAL_ONLY, ['eq', 'bs_day', 0], ['in', 'recipe_id', ['r1']],
     ])
   })
 
@@ -134,10 +138,24 @@ describe('persistSalesDay — legacy fallback (migration not yet applied)', () =
     const sb = makeMockSupabase({ rpcResult: MISSING_FN })
     await persistSalesDay(sb, { periodId: 'p1', bsDay: 0, rows: ROWS })
 
-    expect(sb.calls[1].filters).toEqual([['eq', 'period_id', 'p1'], ['eq', 'bs_day', 0]])
+    expect(sb.calls[1].filters).toEqual([MANUAL_ONLY, ['eq', 'period_id', 'p1'], ['eq', 'bs_day', 0]])
     expect(sb.calls[3].filters).toEqual([
-      ['eq', 'period_id', 'p1'], ['gt', 'bs_day', 0], ['in', 'recipe_id', ['r1']],
+      ['eq', 'period_id', 'p1'], MANUAL_ONLY, ['gt', 'bs_day', 0], ['in', 'recipe_id', ['r1']],
     ])
+  })
+
+  // The whole reason the legacy path scopes to manual (mirrors migration 20260727180000).
+  // sales_entries is shared with POS: without this, one Bulk save wiped a month of POS bill rows,
+  // and comp/credit-note rows were deleted with nothing re-inserted in their place.
+  test('every delete is scoped to manual rows, so POS rows are never touched', async () => {
+    const sb = makeMockSupabase({ rpcResult: MISSING_FN })
+    await persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })
+
+    sb.calls.filter(c => c.kind === 'delete').forEach(c => {
+      expect(c.filters).toContainEqual(MANUAL_ONLY)
+    })
+    // and the rows written back are explicitly tagged, not left to the column default
+    expect(sb.calls.find(c => c.kind === 'insert').rows.every(r => r.source === 'manual')).toBe(true)
   })
 
   test('empty rows: deletes the day and skips insert + cross-mode cleanup', async () => {
@@ -168,7 +186,7 @@ describe('findSupersededRows — what a save will silently delete (S457)', () =>
 
     expect(res.total).toBe(2)
     expect(res.byRecipe).toEqual([{ recipeId: 'r1', count: 2, days: [4, 7], qty: 5 }])
-    expect(sb.calls[0].filters).toEqual([['eq', 'period_id', 'p1'], ['gt', 'bs_day', 0]])
+    expect(sb.calls[0].filters).toEqual([['eq', 'period_id', 'p1'], MANUAL_ONLY, ['gt', 'bs_day', 0]])
   })
 
   test('Daily save: looks at the Bulk row instead', async () => {
@@ -177,7 +195,7 @@ describe('findSupersededRows — what a save will silently delete (S457)', () =>
 
     expect(res.total).toBe(1)
     expect(res.byRecipe[0].days).toEqual([]) // bs_day 0 isn't a "day" to list
-    expect(sb.calls[0].filters).toEqual([['eq', 'period_id', 'p1'], ['eq', 'bs_day', 0]])
+    expect(sb.calls[0].filters).toEqual([['eq', 'period_id', 'p1'], MANUAL_ONLY, ['eq', 'bs_day', 0]])
   })
 
   test('nothing to supersede → total 0, so no confirmation is shown', async () => {

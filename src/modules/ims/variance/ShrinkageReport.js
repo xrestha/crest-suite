@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
+import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import Tip from '../../../components/Tip'
 import { Navigate } from 'react-router-dom'
 
@@ -71,10 +72,17 @@ export default function ShrinkageReport() {
       scopedFrom('recipes', 'id'),
     ])
 
+    // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
+    // this page used to read recipe_ingredients flat with `.not('item_id','is',null)`, which
+    // dropped every sub-recipe ingredient outright and never divided by yield_pct at all. Both
+    // errors push theoretical usage DOWN, and shrinkage is (actual − theoretical), so the page
+    // systematically over-reported shrinkage — on the one report a client uses to decide whether
+    // staff are stealing. Every other consumer (Variance, StockReport, ReorderReport, Requisitions,
+    // FifoReport, both dashboards) was moved to this util; Shrinkage was the last one left behind.
     const shrinkRecipeIds = (clientRecipes || []).map(r => r.id)
-    const { data: recipeIngs } = shrinkRecipeIds.length > 0
-      ? await supabase.from('recipe_ingredients').select('recipe_id, item_id, qty_per_portion').not('item_id', 'is', null).in('recipe_id', shrinkRecipeIds)
-      : { data: [] }
+    const ingredientBreakdown = shrinkRecipeIds.length > 0
+      ? await explodeRecipeIngredients(supabase, shrinkRecipeIds)
+      : {}
 
     // Build per-period-per-item lookups
     function makeMap(rows, valKey) {
@@ -115,13 +123,17 @@ export default function ShrinkageReport() {
       if (!soldMap[s.period_id]) soldMap[s.period_id] = {}
       soldMap[s.period_id][s.recipe_id] = (soldMap[s.period_id][s.recipe_id] || 0) + parseFloat(s.qty_sold)
     })
+    // breakdown[recipeId] is already yield_pct-adjusted, per-one-portion raw-ingredient qty
     const theorMap = {}
-    ;(recipeIngs || []).forEach(ri => {
-      periodIds.forEach(pid => {
-        const sold = soldMap[pid]?.[ri.recipe_id] || 0
+    periodIds.forEach(pid => {
+      theorMap[pid] = {}
+      const soldThisPeriod = soldMap[pid] || {}
+      Object.entries(ingredientBreakdown).forEach(([recipeId, rows]) => {
+        const sold = soldThisPeriod[recipeId] || 0
         if (sold <= 0) return
-        if (!theorMap[pid]) theorMap[pid] = {}
-        theorMap[pid][ri.item_id] = (theorMap[pid][ri.item_id] || 0) + sold * parseFloat(ri.qty_per_portion)
+        rows.forEach(({ item_id, qty }) => {
+          theorMap[pid][item_id] = (theorMap[pid][item_id] || 0) + sold * qty
+        })
       })
     })
 
