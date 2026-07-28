@@ -66,15 +66,26 @@ export default function SelfServiceLogin() {
       setPin(''); setSigningIn(false); return
     }
 
-    const { error: err } = await supabase.auth.signInWithPassword({
-      email:    selected.hr_self_service_email,
-      password: pin,
+    // The actual sign-in now happens server-side (hr-selfservice-login Edge Function) so the
+    // browser never has to hold the account's real email — get_hr_self_service_staff above no
+    // longer returns it at all. See that function's own comment for the full incident writeup
+    // (2026-07-28): the picker's client_id is a link an admin hands out to their whole staff by
+    // design, so anything sensitive it returned to an anonymous caller was effectively public.
+    const { data: loginData, error: err } = await supabase.functions.invoke('hr-selfservice-login', {
+      body: { staff_id: selected.id, pin },
     })
     const { data: attemptData } = await supabase.rpc('record_hr_pin_attempt', {
       p_staff_id: selected.id, p_success: !err,
     })
 
-    if (err) {
+    if (!err && loginData?.access_token) {
+      await supabase.auth.setSession({
+        access_token: loginData.access_token,
+        refresh_token: loginData.refresh_token,
+      })
+    }
+
+    if (err || !loginData?.access_token) {
       const afterAttempt = attemptData?.[0]
       setError(afterAttempt?.locked
         ? `Too many incorrect attempts. Try again ${formatLockRemaining(afterAttempt.locked_until)}.`
