@@ -127,6 +127,19 @@ export default function ReorderReport() {
       }
     })
 
+    // TEMP DEBUG (remove once the Dashboard-vs-Reorder-Report "Calc'd" stock mismatch is
+    // root-caused) — same shape as ClientDashboard.jsx's [ReorderDebug] log, so the two can be
+    // diffed term-by-term for the same item/period.
+    // eslint-disable-next-line no-console
+    console.log('[ReorderDebug] Reorder Report calc inputs — compare against the same item on the Dashboard:')
+    // eslint-disable-next-line no-console
+    console.table(built.filter(r => r.par > 0).map(r => ({
+      item: r.item.name, itemId: r.item.id,
+      openQty: r.openQty, netPurchQty: r.purchQty, wasteQty: r.wasteQty, usageQty: r.usageQty,
+      hasClosing: r.stockSource === 'closing', closingQty: r.stockSource === 'closing' ? r.currentStock : undefined,
+      currentStock: Math.round(r.currentStock * 100) / 100, par: r.par,
+    })))
+
     setRows(built)
   }
 

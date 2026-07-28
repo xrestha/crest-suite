@@ -377,6 +377,12 @@ export default function ClientDashboard() {
     // Reorder — use net purchMap for theoretical stock. Gated on canReorder (Growth+); see Menu
     // Health comment above for why this needs a data gate, not just a render gate.
     if (canReorder) {
+      // TEMP DEBUG (remove once the Dashboard-vs-Reorder-Report "Calc'd" stock mismatch,
+      // reported S4xx, is root-caused): logs every input term per item so a console.table
+      // snapshot can be diffed against ReorderReport.js's own openQty/netPurch/usageQty for the
+      // same item/period — the two "Calc'd" formulas look identical on paper but have produced
+      // different numbers for the same item (Chicken-Breast, Acai Powder) on live data.
+      const reorderDebugRows = []
       const reorderRows = (items || [])
         .filter(i => parMap[i.id] > 0)
         .map(i => {
@@ -391,6 +397,15 @@ export default function ClientDashboard() {
           const par = parMap[i.id]
           const shortfall = par - currentStock
           const estValue = shortfall > 0 ? shortfall * parseFloat(i.per_uom_rate || 0) : 0
+          reorderDebugRows.push({
+            item: i.name, itemId: i.id,
+            openQty: openMap[i.id] || 0,
+            netPurchQty: purchMap[i.id] || 0,
+            theoreticalUsageQty: theoreticalMap[i.id] || 0,
+            hasPhysical, closingQty: closeMap[i.id],
+            currentStock: Math.round(currentStock * 100) / 100,
+            par, shortfall: Math.round(shortfall * 100) / 100,
+          })
           return {
             name: i.name, uom: i.uom, currentStock: Math.round(currentStock * 100) / 100,
             par, shortfall: Math.round(shortfall * 100) / 100,
@@ -401,6 +416,10 @@ export default function ClientDashboard() {
         .filter(r => r.needsReorder)
         .sort((a, b) => b.estValue - a.estValue)
         .slice(0, 8)
+      // eslint-disable-next-line no-console
+      console.log('[ReorderDebug] Dashboard reorder calc inputs — compare against the same item on /reorder:')
+      // eslint-disable-next-line no-console
+      console.table(reorderDebugRows)
       setAndCache(setReorderItems, 'reorderItems', reorderRows)
     } else {
       setAndCache(setReorderItems, 'reorderItems', [])
