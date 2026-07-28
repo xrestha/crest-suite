@@ -75,7 +75,25 @@ export function AuthProvider({ children }) {
       // sometimes get stuck" reports: not any one query being slow, but the same waterfall running
       // two-plus times, competing for the same connection, on every load.
       if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') return
-      await fetchProfile(session.user.id, mounted)
+      // Deliberately NOT awaited (found live, 2026-07-28, via HR Self-Service PIN login hanging
+      // forever on every single attempt, deterministically, regardless of device/network).
+      // supabase.auth.setSession() — the only place in this app that calls it, since every other
+      // login uses signInWithPassword() — routes through GoTrueClient's internal _acquireLock and
+      // holds `lockAcquired = true` for its entire duration. _setSession() then does
+      // `await this._notifyAllSubscribers('SIGNED_IN', ...)`, which awaits every onAuthStateChange
+      // subscriber via Promise.all — including this one. If this callback awaits fetchProfile(),
+      // and fetchProfile()'s `profiles` query needs a fresh access token (it does, on every call),
+      // supabase-js's own internal getAccessToken() call ALSO goes through _acquireLock — sees
+      // lockAcquired already true, and queues behind the *outer* setSession() call via
+      // `await last`. The outer call can't finish until this callback returns; this callback can't
+      // return until the nested call finishes. Permanent deadlock — 100% reproducible, not a
+      // network stall (confirmed: the actual /auth/v1/user request completed in 195ms; the
+      // `profiles` request never even got issued). signInWithPassword() never hits _acquireLock at
+      // all, so every other login in the app was never at risk. Firing fetchProfile() without
+      // awaiting it here breaks the cycle: this callback returns immediately, _notifyAllSubscribers
+      // resolves, the outer lock releases, and fetchProfile's own nested call then proceeds
+      // normally. React state updates inside fetchProfile still land whenever it actually finishes.
+      fetchProfile(session.user.id, mounted)
     })
 
     // Top the access token up whenever the tab wakes (S458). auth-js's own refresh ticker only

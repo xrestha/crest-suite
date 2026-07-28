@@ -150,6 +150,25 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S468 — 2026-07-28 — S467's real bug: `setSession()` deadlocked against `AuthContext`'s own profile fetch, 100% of the time — not a network stall at all
+
+S467 (below) added `withTimeout()` around Self-Service PIN login's network calls, reasoning it was the documented "stalled request" hang class. It shipped, and the exact same "Signing in…" freeze was reported again live minutes later — this time via a Network-tab walkthrough with the user, which disproved the network theory directly: the `GET /auth/v1/user` request our own `setSession()` call depends on completed in **195ms** (Timing tab, TTFB), yet the call still didn't resolve within our 15s budget, and no `profiles` request ever appeared in the log at all — meaning the code never even got that far.
+
+Root cause, traced through the actual installed `@supabase/auth-js` source: `SelfServiceLogin.jsx` is the **only** call site in this app that uses `supabase.auth.setSession()` — every other login (`AuthContext.signIn`, `PosLogin.jsx`) uses `signInWithPassword()`, which never touches `_acquireLock`. `setSession()` does, whenever a custom `lock` is configured (this app's `noOpLock`, chosen in `supabaseClient.js` to sidestep a separate upstream `navigator.locks` bug — unrelated, and not the cause here). The deadlock:
+
+1. `setSession()` → `_acquireLock` sets `lockAcquired = true`, then runs `_setSession()`.
+2. `_setSession()` fetches `/auth/v1/user` (fast), then `await this._notifyAllSubscribers('SIGNED_IN', session)`.
+3. `_notifyAllSubscribers` awaits every `onAuthStateChange` subscriber via `Promise.all` — including `AuthContext.js`'s, which ran `await fetchProfile(session.user.id, mounted)` for a `SIGNED_IN` event.
+4. `fetchProfile()`'s `profiles` query needs a fresh token; supabase-js's internal `getAccessToken()` calls `getSession()`, which **also** goes through `_acquireLock`.
+5. `lockAcquired` is still `true` (step 1 hasn't returned — it's still waiting on step 3→4). The nested call takes `_acquireLock`'s "already locked" branch and does `await last`, where `last` is the *outer* `_setSession()` promise from step 1.
+6. Outer waits on inner; inner waits on outer. **Permanent deadlock** — deterministic, zero dependency on network conditions, which is exactly why it hit three different employees on three different networks/devices identically.
+
+Confirmed independently of the app or any credentials: a standalone script (`GoTrueClient` from the installed `@supabase/auth-js`, mocked `fetch`, no network) reproduced it exactly — `setSession()` timed out at the test harness's 5s cutoff with the subscriber's nested call never even starting, then resolved in **3ms** once the subscriber's `fetchProfile()`-equivalent call was fired without `await`.
+
+**Fix:** `AuthContext.js`'s `onAuthStateChange` handler no longer `await`s `fetchProfile()` — it fires it and lets React state land whenever it actually resolves. This breaks the cycle (the handler returns immediately, `_notifyAllSubscribers` resolves, the outer lock releases, and the nested call proceeds normally) without changing behavior for any `signInWithPassword()`-based login, since those never touched `_acquireLock` to begin with. S467's `withTimeout()` work stays in place as a legitimate genuine-network-stall safety net — it just wasn't the actual bug on its own.
+
+**Files:** `src/context/AuthContext.js`
+
 ### S467 — 2026-07-28 — Self-Service PIN login could hang forever on "Signing in…" with a flaky connection, no error, no retry
 
 Reported live via two screenshots — different employees (Jeevan, Sarita), different networks (weak wifi, 4G) — both stuck on the "Signing in…" button indefinitely with no error and no way out short of closing the tab.
