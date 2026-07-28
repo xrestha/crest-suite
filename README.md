@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S471 — 2026-07-28 — Admin shift-swap approval failed every time the requester and target picked the same calendar day
+
+Reported live: approving a real pending swap (Jeevan Tamang day 13 Afternoon ⇄ Sarita Bishwokarma day 13 Morning) threw `duplicate key value violates unique constraint "hr_roster_client_id_employee_id_bs_year_bs_month_bs_day_key"`.
+
+Root cause in `SwapRequestsPanel.jsx`'s `approve()`: it traded `employee_id` between the two underlying `hr_roster` rows (each day keeps its own shift, only who's scheduled on it changes — the behavior `Help.js` itself documents), on the assumption baked into the old comment that "they're on different bs_days, so the unique constraint never collides mid-swap." That assumption is false the moment a requester and target pick the SAME day (a completely normal request — trading Morning↔Afternoon on one date, exactly this case) — moving either row onto the other's `employee_id` momentarily duplicates the other row's `(client_id,employee_id,bs_year,bs_month,bs_day)` key, and it fails identically no matter which row is updated first. First instinct (swapping shift *content* — `shift_type_id`/`note` — instead of `employee_id`) would have "fixed" the crash but silently broken the feature's actual meaning for the far more common different-day case, changing it from "trade which day you work" to "trade which shift label appears on your own unchanged day" — caught before shipping by rereading `Help.js`'s own description of the feature.
+
+Fixed with a 3-step dance through a sentinel `bs_day` of `-1` (`hr_roster.bs_day` has no range `CHECK`, unlike every other `bs_day` column in this schema, so `-1` can never collide with a real row): park the requester's row on the sentinel day, move the target's row onto the requester's old identity, then bring the requester's row back onto the target's old identity. Each step only ever collides with itself, so it works uniformly whether the two swapped days are the same or different — no more fragile same-day/different-day distinction. Rollback branches extended from 2 to 3 failure points, restoring both rows to their pre-swap state on any partial failure.
+
+Verified against the live report itself, not a synthetic case: approved the actual pending Jeevan/Sarita request, reloaded the roster board, and confirmed exactly the expected swap (Jeevan → Morning, Sarita → Afternoon, both only on day 13, every other day untouched) with no error and the request correctly leaving the pending queue.
+
+**Files:** `src/modules/hr/roster/SwapRequestsPanel.jsx`
+
 ### S470 — 2026-07-28 — Renamed "Plowhouse" to "Plowhorse" app-wide, including the persisted `recipes.me_class` DB value
 
 Follow-up to S469: the user decided to actually rename the quadrant rather than leave the non-standard spelling in place. This touched more than display text — `me_class` is a real, persisted column with a `CHECK` constraint (`recipes_me_class_check`, added in the baseline schema) restricted to `'star'|'plowhouse'|'puzzle'|'dog'`, written by `MenuEngineering.js`'s background write-back and read live by `PosOrders.jsx`'s same-category upsell-suppression logic — so this was a rename with a real migration and a real live feature depending on the exact string, not just a label swap.

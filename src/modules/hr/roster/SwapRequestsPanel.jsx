@@ -6,8 +6,17 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 // Admin-side queue of shift-swap requests a coworker has already accepted (status='pending_admin')
 // and is now waiting on final sign-off for. Approving trades the employee_id on the two underlying
-// hr_roster rows — safe because they're on different bs_days, so the
-// (client_id,employee_id,bs_year,bs_month,bs_day) unique constraint never collides mid-swap.
+// hr_roster rows — each day keeps its own shift, only who's scheduled on it changes (per Help.js's
+// own description of this feature). Found live (2026-07-28): the original two-step version
+// (target's row -> requester's id, then requester's row -> target's id) assumed the two swapped
+// days are always different, which breaks the moment they're the SAME calendar day (e.g. trading
+// Morning<->Afternoon on one date — a normal request, not an edge case): for one instant two rows
+// would share the same (client_id,employee_id,bs_year,bs_month,bs_day) key, which the unique
+// constraint rejects no matter which row is updated first. Routed around it with a 3-step dance
+// through an impossible sentinel bs_day (hr_roster.bs_day has no range CHECK, unlike every other
+// bs_day column in this schema, so -1 can never collide with a real row): park the requester's row
+// on the sentinel day, move the target's row onto the requester's old identity, then bring the
+// requester's row back onto the target's old identity. Each step only ever collides with itself.
 export default function SwapRequestsPanel({ employees, shiftMap }) {
   const { profile } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
@@ -36,18 +45,32 @@ export default function SwapRequestsPanel({ employees, shiftMap }) {
     ])
     if (!reqRow || !tgtRow) { setMsg('One of the shifts no longer exists — cannot swap.'); setBusyId(null); return }
 
-    const { error: e1 } = await scopedUpdate('hr_roster', { employee_id: swap.target_employee_id }).eq('id', reqRow.id)
+    const SENTINEL_DAY = -1
+
+    const { error: e1 } = await scopedUpdate('hr_roster', { bs_day: SENTINEL_DAY }).eq('id', reqRow.id)
     if (e1) { setMsg('Failed to swap: ' + e1.message); setBusyId(null); return }
+
     const { error: e2 } = await scopedUpdate('hr_roster', { employee_id: swap.requester_employee_id }).eq('id', tgtRow.id)
     if (e2) {
-      // Roll back the first update — without this, a partial failure left the roster
-      // half-swapped (target owned both shifts) AND made the request unrecoverable through this
-      // UI (a retry's row lookup above matches on employee_id, which the first update already
-      // moved off the requester, so it would report "shift no longer exists").
-      const { error: rollbackErr } = await scopedUpdate('hr_roster', { employee_id: swap.requester_employee_id }).eq('id', reqRow.id)
+      const { error: rollbackErr } = await scopedUpdate('hr_roster', { bs_day: swap.requester_bs_day }).eq('id', reqRow.id)
       setMsg(rollbackErr
         ? 'Swap failed and rollback also failed — please check the roster manually: ' + e2.message
         : 'Swap failed: ' + e2.message + ' — no changes were applied, you can retry.')
+      setBusyId(null)
+      return
+    }
+
+    const { error: e3 } = await scopedUpdate('hr_roster', { employee_id: swap.target_employee_id, bs_day: swap.requester_bs_day }).eq('id', reqRow.id)
+    if (e3) {
+      // tgtRow already carries the requester's identity at this point, and reqRow is stranded on
+      // the sentinel day — undo both to get back to the pre-swap state.
+      const [{ error: rb1 }, { error: rb2 }] = await Promise.all([
+        scopedUpdate('hr_roster', { employee_id: swap.target_employee_id }).eq('id', tgtRow.id),
+        scopedUpdate('hr_roster', { employee_id: swap.requester_employee_id, bs_day: swap.requester_bs_day }).eq('id', reqRow.id),
+      ])
+      setMsg((rb1 || rb2)
+        ? 'Swap failed and rollback also failed — please check the roster manually: ' + e3.message
+        : 'Swap failed: ' + e3.message + ' — no changes were applied, you can retry.')
       setBusyId(null)
       return
     }
