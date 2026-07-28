@@ -232,13 +232,13 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
 
       {/* Line items table — mirrors vendor bill: Item | Qty | NetRate | NetAmt | VAT */}
       <div className="table-wrap">
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 920 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 956 }}>
           <thead>
             <tr>
               <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px 0', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                 <Tip text="Select the item to purchase." width={200}>Item *</Tip>
               </th>
-              <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 82 }}>Qty *</th>
+              <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 118 }}>Qty *</th>
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 105 }}>
                 <Tip text="Enter the ex-VAT rate per unit. Check the VAT box on each line for items attracting 13% VAT." width={270}>Rate (NPR) *</Tip>
               </th>

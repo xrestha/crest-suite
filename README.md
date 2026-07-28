@@ -150,6 +150,24 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S473 — 2026-07-28 — Purchase Bill's Qty column was too narrow to display 6-digit quantities
+
+Reported live as "the qty field isn't showing the correct data entered" — turned out not to be a data bug at all. I first suspected the actual stored/typed value was wrong (locale comma handling, the arithmetic evaluator, a stale unit-conversion factor) and tried to reproduce a real truncation by typing "3000" into the exact same field for the exact same item, both at normal speed and via Playwright's fast native typing — it correctly held "3000" the whole time, disproving the data-corruption theories. Asked the user directly what was actually typed; the answer clarified this was purely a display/width issue, not a value bug.
+
+Root cause: the Qty `<th>` in `PurchaseBillModal.jsx` was only 82px wide, and the unit-label badge (e.g. "GM") overlaying the input via a 34px left padding left barely enough room for 3 digits before the text got visually clipped — a quantity like 300000 (a legitimate 6-digit gram quantity for a bulk buy) would render as if truncated. Widened the column to 118px (table `minWidth` bumped from 920 to 956 to match) — verified live that "300000" now displays in full with no clipping.
+
+**Files:** `src/modules/ims/purchases/PurchaseBillModal.jsx`
+
+### S472 — 2026-07-28 — Roster gets a Swap History section for admin/HR
+
+Follow-up to S471: asked whether resolved swap requests should be recorded anywhere for admin/HR to look back at — they currently aren't. `SwapRequestsPanel.jsx`'s queue only ever queries `status = 'pending_admin'`, so once a request is approved/rejected it silently vanishes from the admin side (self-service employees can already see their own past requests via their Self-Service Roster tab; admin/HR had no equivalent). No new table or RPC needed — `hr_shift_swap_requests` already keeps a permanent row per request (who, which days/shifts, when the coworker responded, who on the admin side decided and when); it just wasn't being surfaced anywhere.
+
+Added a second collapsible "🕘 Swap History" section to the same card, querying the 4 resolved statuses (`approved`, `rejected_by_target`, `rejected_by_admin`, `cancelled`), newest first, capped at 50. Resolves `admin_decided_by` (a `profiles.id`, not an `hr_employees.id` like requester/target) to a name via `get_client_profile_names()` — a raw `profiles` query only ever returns the caller's own row under RLS, the same gotcha `PosShifts.jsx` etc. already work around. The component now only returns `null` when *both* the pending queue and history are empty, instead of hiding the whole card (and therefore the history too) whenever nothing is currently pending.
+
+Verified live against real data: approving the Jeevan/Sarita request from S471 immediately showed up as "Approved by Aashishh · Jul 28, 2026," and a real pre-existing declined request (day 24↔25, Ashadh 2083, declined by the coworker before ever reaching admin) that had never been visible to admin surfaced correctly too.
+
+**Files:** `src/modules/hr/roster/SwapRequestsPanel.jsx`
+
 ### S471 — 2026-07-28 — Admin shift-swap approval failed every time the requester and target picked the same calendar day
 
 Reported live: approving a real pending swap (Jeevan Tamang day 13 Afternoon ⇄ Sarita Bishwokarma day 13 Morning) threw `duplicate key value violates unique constraint "hr_roster_client_id_employee_id_bs_year_bs_month_bs_day_key"`.
