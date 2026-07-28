@@ -127,9 +127,12 @@ export default function ClientDashboard() {
       scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).eq('category', 'Sub-Recipe'),
       period ? supabase.from('purchase_entries').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
-      // Revenue (and the daily revenue trend below) excludes comps (source='pos_comp') — a
-      // comped dish was never paid for.
-      period ? supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
+      // Fetches every source (including 'pos_comp') — revenue figures below filter comps out
+      // client-side, but theoreticalMap (Reorder + Variance widgets) needs every source counted,
+      // matching every other consumption-facing report (ReorderReport, Variance, ShrinkageReport
+      // etc. per PosOrders.jsx's own source-taxonomy comment) — a comped dish still used real
+      // stock even though it collected no revenue.
+      period ? supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount, source').eq('period_id', period.id) : { data: [] },
       scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct'),
       period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id) : { data: [] },
@@ -184,9 +187,15 @@ export default function ClientDashboard() {
     // unit_price captured on the row (price actually charged) used per-row when present, else
     // falls back to the recipe's current price — previously always used the current price, so
     // this period's revenue silently reflected today's menu price rather than what was charged.
-    const soldMap = {}, revenueMap = {}
+    // soldMap/revenueMap (comp-excluded) drive every revenue-facing figure on this page —
+    // Revenue, daily trend, projections, Menu Health opportunity. soldMapAll (every source,
+    // including 'pos_comp') feeds theoreticalMap below instead, since a comped dish still
+    // consumed real stock even though it collected no revenue — see the query comment above.
+    const soldMap = {}, soldMapAll = {}, revenueMap = {}
     ;(salesData || []).forEach(s => {
       const qty = parseFloat(s.qty_sold)
+      soldMapAll[s.recipe_id] = (soldMapAll[s.recipe_id] || 0) + qty
+      if (s.source === 'pos_comp') return
       const price = s.unit_price != null ? parseFloat(s.unit_price) : (currentPriceMap[s.recipe_id] || 0)
       soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + qty
       revenueMap[s.recipe_id] = (revenueMap[s.recipe_id] || 0) + qty * price - (parseFloat(s.discount) || 0)
@@ -195,10 +204,10 @@ export default function ClientDashboard() {
 
     // theoreticalMap: item-level usage this period. ingredientBreakdown rows are already
     // recursed through sub-recipe nesting and yield_pct-adjusted per one portion — just scale by
-    // how many portions actually sold.
+    // how many portions actually sold. Uses soldMapAll (comps included) — see comment above.
     const theoreticalMap = {}
     Object.entries(ingredientBreakdown).forEach(([recipeId, rows]) => {
-      const sold = soldMap[recipeId] || 0
+      const sold = soldMapAll[recipeId] || 0
       if (sold <= 0) return
       rows.forEach(({ item_id, qty }) => { theoreticalMap[item_id] = (theoreticalMap[item_id] || 0) + sold * qty })
     })
@@ -299,6 +308,7 @@ export default function ClientDashboard() {
     // current price (see revenueTotal above for why).
     const daySalesMap = {}
     ;(salesData || []).forEach(s => {
+      if (s.source === 'pos_comp') return
       const d = parseInt(s.bs_day)
       if (!d || d <= 0) return
       const price = s.unit_price != null ? parseFloat(s.unit_price) : (currentPriceMap[s.recipe_id] || 0)
@@ -377,12 +387,6 @@ export default function ClientDashboard() {
     // Reorder — use net purchMap for theoretical stock. Gated on canReorder (Growth+); see Menu
     // Health comment above for why this needs a data gate, not just a render gate.
     if (canReorder) {
-      // TEMP DEBUG (remove once the Dashboard-vs-Reorder-Report "Calc'd" stock mismatch,
-      // reported S4xx, is root-caused): logs every input term per item so a console.table
-      // snapshot can be diffed against ReorderReport.js's own openQty/netPurch/usageQty for the
-      // same item/period — the two "Calc'd" formulas look identical on paper but have produced
-      // different numbers for the same item (Chicken-Breast, Acai Powder) on live data.
-      const reorderDebugRows = []
       const reorderRows = (items || [])
         .filter(i => parMap[i.id] > 0)
         .map(i => {
@@ -397,15 +401,6 @@ export default function ClientDashboard() {
           const par = parMap[i.id]
           const shortfall = par - currentStock
           const estValue = shortfall > 0 ? shortfall * parseFloat(i.per_uom_rate || 0) : 0
-          reorderDebugRows.push({
-            item: i.name, itemId: i.id,
-            openQty: openMap[i.id] || 0,
-            netPurchQty: purchMap[i.id] || 0,
-            theoreticalUsageQty: theoreticalMap[i.id] || 0,
-            hasPhysical, closingQty: closeMap[i.id],
-            currentStock: Math.round(currentStock * 100) / 100,
-            par, shortfall: Math.round(shortfall * 100) / 100,
-          })
           return {
             name: i.name, uom: i.uom, currentStock: Math.round(currentStock * 100) / 100,
             par, shortfall: Math.round(shortfall * 100) / 100,
@@ -416,10 +411,6 @@ export default function ClientDashboard() {
         .filter(r => r.needsReorder)
         .sort((a, b) => b.estValue - a.estValue)
         .slice(0, 8)
-      // eslint-disable-next-line no-console
-      console.log('[ReorderDebug] Dashboard reorder calc inputs — compare against the same item on /reorder:')
-      // eslint-disable-next-line no-console
-      console.table(reorderDebugRows)
       setAndCache(setReorderItems, 'reorderItems', reorderRows)
     } else {
       setAndCache(setReorderItems, 'reorderItems', [])
