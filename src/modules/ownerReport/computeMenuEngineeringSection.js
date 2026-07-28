@@ -17,8 +17,6 @@ function median(nums) {
   return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
 
-// Correct spelling used here even though the source page's constant/label says "Plowhouse" —
-// this is freshly re-derived classification logic, not a literal import, so the copy is ours.
 function classify(fcPct, qtySold, medianQty) {
   const highProfit = fcPct <= FC_CUTOFF
   const highPop = qtySold >= medianQty

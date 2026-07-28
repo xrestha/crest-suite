@@ -411,15 +411,15 @@ export const IMS_GUIDE_GROUPS = [
           'Quadrant summary cards act as click-to-filter toggles.',
         ],
         fields: [
-          { label: 'Quadrant names', desc: 'As literally labeled in this app: Star, Plowhouse, Puzzle, Dog. Note "Plowhouse," not the traditional restaurant-menu-engineering term "Plowhorse" — the app\'s own spelling, worth knowing so it doesn\'t read as a typo when training someone.' },
+          { label: 'Quadrant names', desc: 'Star, Plowhorse, Puzzle, Dog. Note this app\'s Plowhorse/Puzzle definitions are swapped from the traditional restaurant-menu-engineering meaning of those two words: here Plowhorse means high profit / low popularity (the industry\'s usual "Puzzle") and Puzzle means low profit / high popularity (the industry\'s usual "Plowhorse") — worth knowing so it doesn\'t read as backwards when training someone.' },
         ],
         formulas: [
           'FC% (per recipe) = ingredientCost ÷ sellingPrice × 100 (0 if unpriced).',
           'medianQty = median qty sold across all active recipes this period.',
-          'Star = FC% ≤35 AND qty ≥ median. Plowhouse = FC% ≤35 AND qty < median. Puzzle = FC% >35 AND qty ≥ median. Dog = FC% >35 AND qty < median.',
+          'Star = FC% ≤35 AND qty ≥ median. Plowhorse = FC% ≤35 AND qty < median. Puzzle = FC% >35 AND qty ≥ median. Dog = FC% >35 AND qty < median.',
         ],
         gotchas: [
-          'A recipe with zero sales this period is automatically Dog or Plowhouse (never counts as "high popularity" by definition) — a brand-new or seasonal item will always land in the low-popularity half regardless of how healthy its food cost is.',
+          'A recipe with zero sales this period is automatically Dog or Plowhorse (never counts as "high popularity" by definition) — a brand-new or seasonal item will always land in the low-popularity half regardless of how healthy its food cost is.',
           'Because the popularity cutoff is the median qty sold THIS period, quadrant assignments are not stable month to month — always read them as "as of this period\'s sales," not a permanent label.',
         ],
         connections: 'Reads Recipe Costing and Sales Entry data. Writes recipes.me_class, which the POS module\'s suggestion engine reads.',

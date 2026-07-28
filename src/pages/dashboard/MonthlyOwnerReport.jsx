@@ -439,8 +439,14 @@ export default function MonthlyOwnerReport() {
                       <thead><tr><th>Quadrant</th><th style={{ textAlign: 'right' }}>Items</th><th>Meaning</th></tr></thead>
                       <tbody>
                         <tr><td style={{ color: quadrantColor.Star, fontWeight: 700 }}>Star</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Star}</td><td style={{ color: 'var(--theme-text3)' }}>High profit, high popularity — feature these</td></tr>
-                        <tr><td style={{ color: quadrantColor.Plowhorse, fontWeight: 700 }}>Plowhorse</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Plowhorse}</td><td style={{ color: 'var(--theme-text3)' }}>Popular, low profit — consider reprice/portion</td></tr>
-                        <tr><td style={{ color: quadrantColor.Puzzle, fontWeight: 700 }}>Puzzle</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Puzzle}</td><td style={{ color: 'var(--theme-text3)' }}>Profitable, underselling — promote/reposition</td></tr>
+                        {/* Descriptions match this app's own classify() condition (mirrored verbatim from
+                            MenuEngineering.js), not the traditional restaurant-industry meaning of these two
+                            words — this app's "Plowhorse"/"Puzzle" mapping is swapped from convention (see
+                            MenuEngineering.js's own quadrants, same swap). Found live 2026-07-28: these two
+                            rows previously had the traditional-meaning text, which was backwards advice
+                            against what quadrantCounts actually counts. */}
+                        <tr><td style={{ color: quadrantColor.Plowhorse, fontWeight: 700 }}>Plowhorse</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Plowhorse}</td><td style={{ color: 'var(--theme-text3)' }}>Profitable, underselling — promote/reposition</td></tr>
+                        <tr><td style={{ color: quadrantColor.Puzzle, fontWeight: 700 }}>Puzzle</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Puzzle}</td><td style={{ color: 'var(--theme-text3)' }}>Popular, low profit — consider reprice/portion</td></tr>
                         <tr><td style={{ color: quadrantColor.Dog, fontWeight: 700 }}>Dog</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Dog}</td><td style={{ color: 'var(--theme-text3)' }}>Low profit, low popularity — consider cutting</td></tr>
                       </tbody>
                     </table>

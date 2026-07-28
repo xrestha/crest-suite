@@ -222,7 +222,7 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '⬢', name: 'Menu Engineering',
-        guide: 'Classifies menu items into Star / Puzzle / Plowhouse / Dog based on profitability and popularity. FC% cutoff is 35%; volume cutoff is median qty sold. Sub-recipes are excluded from this analysis.',
+        guide: 'Classifies menu items into Star / Puzzle / Plowhorse / Dog based on profitability and popularity. FC% cutoff is 35%; volume cutoff is median qty sold. Sub-recipes are excluded from this analysis.',
         tips: ['Stars = high margin + high volume → protect and promote', 'Dogs = low margin + low volume → consider removing from the menu']
       },
       {
@@ -448,7 +448,7 @@ const GLOSSARY = [
   // — Crest IMS (Growth/Pro) —
   { term: 'Dead Stock',       def: 'Items with zero usage over the lookback window (Slow Movers = used less than 20% of available stock) — ingredients tying up money without turning over.' },
   { term: 'Shrinkage',        def: 'Recurring unexplained stock loss seen consistently across multiple periods — distinguished from a one-off Variance by checking period-over-period consistency.' },
-  { term: 'Menu Engineering', def: 'Classifies menu items by popularity and profitability into four quadrants — Star (both high), Puzzle (profitable but unpopular), Plowhorse (popular but low-margin), Dog (both low) — to guide menu and pricing decisions.' },
+  { term: 'Menu Engineering', def: 'Classifies menu items by popularity and profitability into four quadrants — Star (both high), Puzzle (popular but low-margin), Plowhorse (profitable but unpopular), Dog (both low) — to guide menu and pricing decisions. Note: this app\'s Plowhorse/Puzzle swap the traditional restaurant-industry meaning of those two words; the definitions here match what this app actually computes.' },
   { term: 'Demand Forecast',  def: 'A prediction of covers and revenue for upcoming days (7/30-day horizon), used to plan labour scheduling and purchasing.' },
   { term: 'Requisition',      def: 'An internal stock transfer from the main store to a department (e.g. kitchen, bar), tracked separately from external purchases.' },
 ]

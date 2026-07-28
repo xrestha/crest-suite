@@ -14,7 +14,7 @@ import { Navigate } from 'react-router-dom'
 
 const QUADRANTS = {
   Star:      { color: 'var(--theme-green)', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.30)', icon: '★', desc: 'High profit · High popularity' },
-  Plowhouse: { color: 'var(--theme-purple)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)', icon: '⬛', desc: 'High profit · Low popularity' },
+  Plowhorse: { color: 'var(--theme-purple)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)', icon: '⬛', desc: 'High profit · Low popularity' },
   Puzzle:    { color: 'var(--theme-amber)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)',  icon: '?', desc: 'Low profit · High popularity' },
   Dog:       { color: 'var(--theme-red)', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.30)', icon: '✕', desc: 'Low profit · Low popularity' },
 }
@@ -22,7 +22,7 @@ const QUADRANTS = {
 const FC_CUTOFF = 35 // %
 
 // Hex colors for Recharts SVG (CSS vars don't resolve inside SVG presentation attributes)
-const Q_HEX = { Star: '#34d399', Plowhouse: '#60a5fa', Puzzle: '#f59e0b', Dog: '#f87171' }
+const Q_HEX = { Star: '#34d399', Plowhorse: '#60a5fa', Puzzle: '#f59e0b', Dog: '#f87171' }
 
 function ScatterDot({ cx, cy, payload }) {
   const color = Q_HEX[payload.quadrant] || '#888'
@@ -61,7 +61,7 @@ function classify(fcPct, qtySold, medianQty) {
   const highProfit = fcPct <= FC_CUTOFF
   const highPop    = qtySold >= medianQty
   if (highProfit && highPop)  return 'Star'
-  if (highProfit && !highPop) return 'Plowhouse'
+  if (highProfit && !highPop) return 'Plowhorse'
   if (!highProfit && highPop) return 'Puzzle'
   return 'Dog'
 }
@@ -177,7 +177,7 @@ export default function MenuEngineering() {
 
   // Quadrant summary counts
   const summary = useMemo(() => {
-    const s = { Star: 0, Plowhouse: 0, Puzzle: 0, Dog: 0 }
+    const s = { Star: 0, Plowhorse: 0, Puzzle: 0, Dog: 0 }
     items.forEach(r => { if (s[r.quadrant] !== undefined) s[r.quadrant]++ })
     return s
   }, [items])
@@ -189,7 +189,7 @@ export default function MenuEngineering() {
 
   // For matrix view — group by quadrant
   const byQuadrant = useMemo(() => {
-    const map = { Star: [], Plowhouse: [], Puzzle: [], Dog: [] }
+    const map = { Star: [], Plowhorse: [], Puzzle: [], Dog: [] }
     filtered.forEach(r => map[r.quadrant]?.push(r))
     return map
   }, [filtered])
@@ -216,7 +216,7 @@ export default function MenuEngineering() {
     const map = {}
     items.forEach(r => {
       const cat = r.category || 'Uncategorized'
-      if (!map[cat]) map[cat] = { Star: 0, Plowhouse: 0, Puzzle: 0, Dog: 0, total: 0 }
+      if (!map[cat]) map[cat] = { Star: 0, Plowhorse: 0, Puzzle: 0, Dog: 0, total: 0 }
       map[cat][r.quadrant]++
       map[cat].total++
     })
@@ -323,7 +323,7 @@ export default function MenuEngineering() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginTop: 4 }}>
                 {[
                   { q: 'Star',      pos: 'right + top (high qty, low FC%)',     hint: 'Keep, feature prominently' },
-                  { q: 'Plowhouse', pos: 'left + top (low qty, low FC%)',       hint: 'Good margin — promote harder' },
+                  { q: 'Plowhorse', pos: 'left + top (low qty, low FC%)',       hint: 'Good margin — promote harder' },
                   { q: 'Puzzle',    pos: 'right + bottom (high qty, high FC%)', hint: 'Popular — review recipe cost' },
                   { q: 'Dog',       pos: 'left + bottom (low qty, high FC%)',   hint: 'Consider redesign or removal' },
                 ].map(({ q, pos, hint }) => (
@@ -480,7 +480,7 @@ export default function MenuEngineering() {
                       </td>
                       <td style={{ fontSize: 11, color: 'var(--theme-text2)', maxWidth: 160 }}>
                         {r.quadrant === 'Star'      && 'Keep on menu. Feature prominently.'}
-                        {r.quadrant === 'Plowhouse' && 'Good margin. Promote to boost volume.'}
+                        {r.quadrant === 'Plowhorse' && 'Good margin. Promote to boost volume.'}
                         {r.quadrant === 'Puzzle'    && 'Review recipe cost. Can price be raised?'}
                         {r.quadrant === 'Dog'       && 'Consider removing or redesigning.'}
                       </td>

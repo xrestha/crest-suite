@@ -913,7 +913,7 @@ export default function PosOrders() {
     }
 
     const hasMeData   = allowMeFilter && menu.some(r => r.me_class)
-    const isPlowhouse = allowMeFilter && recipe.me_class === 'plowhouse'
+    const isPlowhorse = allowMeFilter && recipe.me_class === 'plowhorse'
     const triggerCat  = recipe.category || 'Other'
     const manualIds   = new Set(manualSuggestions[recipe.id] || []) // allowManualSuggestions is true at this point
 
@@ -923,7 +923,7 @@ export default function PosOrders() {
       if (hasMeData) {
         s = r.me_class === 'star' ? 10 : r.me_class === 'puzzle' ? 6 : 2
         if (r.category !== triggerCat) s += 3
-        if (isPlowhouse && r.category === triggerCat) s -= 4
+        if (isPlowhorse && r.category === triggerCat) s -= 4
       }
       if (allowCoOccurrence && coMap[r.id] && maxCo > 0) s += (coMap[r.id] / maxCo) * 5
       return s
