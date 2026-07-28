@@ -150,6 +150,16 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S467 — 2026-07-28 — Self-Service PIN login could hang forever on "Signing in…" with a flaky connection, no error, no retry
+
+Reported live via two screenshots — different employees (Jeevan, Sarita), different networks (weak wifi, 4G) — both stuck on the "Signing in…" button indefinitely with no error and no way out short of closing the tab.
+
+Root cause was the exact hang class CLAUDE.md already documents for Sales.js (S449→S454): a plain `await` on a Supabase call can hang forever on a stalled request or a GoTrue `getSession()` deadlock, and `.abortSignal()` doesn't help since the request may never even reach `fetch()`. `handleSignIn()` in `SelfServiceLogin.jsx` awaited `check_hr_pin_lock`, the `hr-selfservice-login` Edge Function invoke, `record_hr_pin_attempt`, and `auth.setSession()` back-to-back with no timeout on any of them and no `finally` — one stalled call left `signingIn` stuck `true` forever. Wrapped all four in `withTimeout()` (15s each, the same utility Sales.js uses) inside a try/catch/finally, so a stall now surfaces as a real, retryable error message instead of a frozen button.
+
+The picker screen one step earlier (loading the staff list via `get_hr_self_service_staff`) had the identical unguarded shape, just less visibly — any RPC error there previously rendered as "self-service isn't enabled for anyone yet," indistinguishable from a real empty roster, and a stall left it stuck on "Loading…" forever. Fixed the same way, plus a new `loadError` state with a Retry button.
+
+**Files:** `src/modules/hr/selfservice/SelfServiceLogin.jsx`
+
 ### S466 — 2026-07-28 — Self-Service Roster switched from a full-month scroll to a week view; Overheads now carries forward the prior period's numbers
 
 Two independent UX fixes from live screenshots.

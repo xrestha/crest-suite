@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { useTheme } from '../../../context/ThemeContext'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
+import { withTimeout } from '../../../utils/withTimeout'
 
 const KEYS = [
   ['1', '2', '3'],
@@ -23,16 +24,33 @@ export default function SelfServiceLogin() {
 
   const [staff,     setStaff]     = useState([])
   const [loading,   setLoading]   = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [selected,  setSelected]  = useState(null)
   const [pin,       setPin]       = useState('')
   const [error,     setError]     = useState('')
   const [signingIn, setSigningIn] = useState(false)
 
+  const loadStaff = useCallback(async () => {
+    setLoading(true); setLoadError('')
+    try {
+      const { data, error: err } = await withTimeout(
+        supabase.rpc('get_hr_self_service_staff', { p_client_id: clientId }), 15000, 'Loading staff list'
+      )
+      if (err) throw err
+      setStaff(data || [])
+    } catch (e) {
+      // Same hang-forever risk as handleSignIn below, one screen earlier — without this, a stalled
+      // request left this page stuck on "Loading…" with no error and no way to retry.
+      setLoadError(e.message || 'Could not load the staff list. Check your connection and try again.')
+    } finally {
+      setLoading(false)
+    }
+  }, [clientId])
+
   useEffect(() => {
     if (!clientId) { navigate('/login', { replace: true }); return }
-    supabase.rpc('get_hr_self_service_staff', { p_client_id: clientId })
-      .then(({ data }) => { setStaff(data || []); setLoading(false) })
-  }, [clientId, navigate])
+    loadStaff()
+  }, [clientId, navigate, loadStaff])
 
   const pressKey = useCallback((k) => {
     if (k === '⌫') { setPin(p => p.slice(0, -1)); setError(''); return }
@@ -58,41 +76,57 @@ export default function SelfServiceLogin() {
     if (pin.length < 4 || signingIn) return
     setSigningIn(true); setError('')
 
-    // Same PIN-brute-force mitigation as PosLogin.jsx — checked before attempting sign-in so an
-    // already-locked account doesn't burn a real auth attempt.
-    const { data: lockData } = await supabase.rpc('check_hr_pin_lock', { p_staff_id: selected.id })
-    if (lockData?.[0]?.locked) {
-      setError(`Too many incorrect attempts. Try again ${formatLockRemaining(lockData[0].locked_until)}.`)
-      setPin(''); setSigningIn(false); return
-    }
+    // Every network call here is wrapped in withTimeout — a plain await on a Supabase call (RPC,
+    // Edge Function, or auth) can hang forever on a flaky connection (getSession()'s known
+    // GoTrue stall, or just a dropped mobile request), which otherwise leaves the button stuck on
+    // "Signing in..." with no error and no way to retry (found live, 2026-07-28, on two different
+    // employees' phones — one on weak wifi, one on 4G). See withTimeout.js for the full mechanism.
+    try {
+      // Same PIN-brute-force mitigation as PosLogin.jsx — checked before attempting sign-in so an
+      // already-locked account doesn't burn a real auth attempt.
+      const { data: lockData } = await withTimeout(
+        supabase.rpc('check_hr_pin_lock', { p_staff_id: selected.id }), 15000, 'Checking account status'
+      )
+      if (lockData?.[0]?.locked) {
+        setError(`Too many incorrect attempts. Try again ${formatLockRemaining(lockData[0].locked_until)}.`)
+        setPin(''); return
+      }
 
-    // The actual sign-in now happens server-side (hr-selfservice-login Edge Function) so the
-    // browser never has to hold the account's real email — get_hr_self_service_staff above no
-    // longer returns it at all. See that function's own comment for the full incident writeup
-    // (2026-07-28): the picker's client_id is a link an admin hands out to their whole staff by
-    // design, so anything sensitive it returned to an anonymous caller was effectively public.
-    const { data: loginData, error: err } = await supabase.functions.invoke('hr-selfservice-login', {
-      body: { staff_id: selected.id, pin },
-    })
-    const { data: attemptData } = await supabase.rpc('record_hr_pin_attempt', {
-      p_staff_id: selected.id, p_success: !err,
-    })
+      // The actual sign-in now happens server-side (hr-selfservice-login Edge Function) so the
+      // browser never has to hold the account's real email — get_hr_self_service_staff above no
+      // longer returns it at all. See that function's own comment for the full incident writeup
+      // (2026-07-28): the picker's client_id is a link an admin hands out to their whole staff by
+      // design, so anything sensitive it returned to an anonymous caller was effectively public.
+      const { data: loginData, error: err } = await withTimeout(
+        supabase.functions.invoke('hr-selfservice-login', { body: { staff_id: selected.id, pin } }), 15000, 'Signing in'
+      )
+      const { data: attemptData } = await withTimeout(
+        supabase.rpc('record_hr_pin_attempt', { p_staff_id: selected.id, p_success: !err }), 15000, 'Recording attempt'
+      )
 
-    if (!err && loginData?.access_token) {
-      await supabase.auth.setSession({
-        access_token: loginData.access_token,
-        refresh_token: loginData.refresh_token,
-      })
-    }
+      if (!err && loginData?.access_token) {
+        await withTimeout(
+          supabase.auth.setSession({
+            access_token: loginData.access_token,
+            refresh_token: loginData.refresh_token,
+          }), 15000, 'Starting your session'
+        )
+      }
 
-    if (err || !loginData?.access_token) {
-      const afterAttempt = attemptData?.[0]
-      setError(afterAttempt?.locked
-        ? `Too many incorrect attempts. Try again ${formatLockRemaining(afterAttempt.locked_until)}.`
-        : 'Incorrect PIN. Try again.')
-      setPin(''); setSigningIn(false); return
+      if (err || !loginData?.access_token) {
+        const afterAttempt = attemptData?.[0]
+        setError(afterAttempt?.locked
+          ? `Too many incorrect attempts. Try again ${formatLockRemaining(afterAttempt.locked_until)}.`
+          : 'Incorrect PIN. Try again.')
+        setPin(''); return
+      }
+      navigate('/hr/self-service', { replace: true })
+    } catch (e) {
+      setError(e.message || 'Something went wrong. Check your connection and try again.')
+      setPin('')
+    } finally {
+      setSigningIn(false)
     }
-    navigate('/hr/self-service', { replace: true })
   }
 
   function formatLockRemaining(lockedUntil) {
@@ -129,6 +163,11 @@ export default function SelfServiceLogin() {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 32 }}>
           {loading ? (
             <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
+          ) : loadError ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+              <p role="alert" style={{ color: 'var(--theme-red)', textAlign: 'center', maxWidth: 300, margin: 0 }}>{loadError}</p>
+              <button className="btn btn-ghost" onClick={loadStaff}>Retry</button>
+            </div>
           ) : staff.length === 0 ? (
             <p style={{ color: 'var(--theme-text3)', textAlign: 'center', maxWidth: 300 }}>
               Self-service isn't enabled for anyone yet. Ask HR to enable it for you from Employees.
