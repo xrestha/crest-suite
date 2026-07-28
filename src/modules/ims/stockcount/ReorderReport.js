@@ -98,9 +98,17 @@ export default function ReorderReport() {
     const soldRecipeIds = Object.keys(soldMap).filter(id => soldMap[id] > 0)
     const breakdown = await explodeRecipeIngredients(supabase, soldRecipeIds)
     const usageMap = {}
+    // TEMP DEBUG (remove once root-caused) — same shape as ClientDashboard.jsx's
+    // [UsageDebug][Dashboard] log, to diff per-recipe contributions for the same item/period.
+    const DEBUG_ITEM_NAME_MATCH = 'acai'
+    const debugItemIds = new Set((items || []).filter(i => i.name.toLowerCase().includes(DEBUG_ITEM_NAME_MATCH)).map(i => i.id))
     soldRecipeIds.forEach(recipeId => {
       (breakdown[recipeId] || []).forEach(({ item_id, qty }) => {
         usageMap[item_id] = (usageMap[item_id] || 0) + qty * soldMap[recipeId]
+        if (debugItemIds.has(item_id)) {
+          // eslint-disable-next-line no-console
+          console.log(`[UsageDebug][Report] recipeId=${recipeId} sold=${soldMap[recipeId]} qtyPerPortion=${qty} contribution=${qty * soldMap[recipeId]}`)
+        }
       })
     })
 
