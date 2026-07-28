@@ -206,22 +206,10 @@ export default function ClientDashboard() {
     // recursed through sub-recipe nesting and yield_pct-adjusted per one portion — just scale by
     // how many portions actually sold. Uses soldMapAll (comps included) — see comment above.
     const theoreticalMap = {}
-    // TEMP DEBUG (remove once root-caused) — per-recipe contribution breakdown for whichever
-    // item's name matches the search string below, so it can be diffed line-by-line against
-    // ReorderReport.js's equivalent per-recipe usageMap contributions for the same item/period.
-    const DEBUG_ITEM_NAME_MATCH = 'acai'
-    const debugItemIds = new Set((allItems || []).filter(i => i.name.toLowerCase().includes(DEBUG_ITEM_NAME_MATCH)).map(i => i.id))
     Object.entries(ingredientBreakdown).forEach(([recipeId, rows]) => {
       const sold = soldMapAll[recipeId] || 0
       if (sold <= 0) return
-      rows.forEach(({ item_id, qty }) => {
-        theoreticalMap[item_id] = (theoreticalMap[item_id] || 0) + sold * qty
-        if (debugItemIds.has(item_id)) {
-          const recipeName = (recipes || []).find(r => r.id === recipeId)?.name || recipeId
-          // eslint-disable-next-line no-console
-          console.log(`[UsageDebug][Dashboard] recipe="${recipeName}" recipeId=${recipeId} sold=${sold} qtyPerPortion=${qty} contribution=${sold * qty}`)
-        }
-      })
+      rows.forEach(({ item_id, qty }) => { theoreticalMap[item_id] = (theoreticalMap[item_id] || 0) + sold * qty })
     })
 
     // itemRateMap built from allItems (unfiltered by is_active) — an item deactivated mid-period

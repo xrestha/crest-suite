@@ -23,13 +23,32 @@ export async function explodeRecipeIngredients(supabase, recipeIds) {
 
   const allIng = [...(topIng || [])]
   const recipeMeta = {} // sub_recipe id -> { id, yield_qty }
+  // Tracks whose recipe_ingredients rows are already in `allIng` — starts with the caller's own
+  // seed list, since `topIng` above already covers every id in it. Without this, a recipe that's
+  // BOTH a caller-supplied seed id AND referenced as someone else's sub_recipe_id (e.g. a caller
+  // that passes every recipe including sub-recipes, like ClientDashboard.jsx's reorder/variance
+  // calc) gets its ingredient rows fetched a second time via the frontier loop below and pushed
+  // into `allIng` twice — silently doubling its contribution for every parent recipe that
+  // references it. Found live (S477): Acai Powder's usage on the Dashboard was showing exactly
+  // 2x its real value because "Acai Base" (a sub-recipe) was both a seed id and referenced by two
+  // other seed recipes, while ReorderReport.js — which only ever seeds with sold top-level
+  // dishes, never a sub-recipe id directly — never hit this path and computed correctly.
+  const fetchedIngredientsFor = new Set(recipeIds)
   let frontier = [...new Set(allIng.map(r => r.sub_recipe_id).filter(Boolean))]
   for (let round = 0; round < 5 && frontier.length > 0; round++) {
+    // yield_qty (`sr`) is still fetched for the whole frontier every round — recipeMeta must
+    // have an entry for every sub-recipe `explode()` might recurse into, including ones already
+    // covered by `topIng`. Only the ingredient rows (`si`, the actual duplication risk) are
+    // narrowed to ids not already fetched.
+    const toFetchIngredients = frontier.filter(id => !fetchedIngredientsFor.has(id))
     const [{ data: sr }, { data: si }] = await Promise.all([
       supabase.from('recipes').select('id, yield_qty').in('id', frontier),
-      supabase.from('recipe_ingredients').select('recipe_id, qty_per_portion, item_id, sub_recipe_id, items(yield_pct)').in('recipe_id', frontier),
+      toFetchIngredients.length > 0
+        ? supabase.from('recipe_ingredients').select('recipe_id, qty_per_portion, item_id, sub_recipe_id, items(yield_pct)').in('recipe_id', toFetchIngredients)
+        : Promise.resolve({ data: [] }),
     ])
     ;(sr || []).forEach(r => { recipeMeta[r.id] = r })
+    toFetchIngredients.forEach(id => fetchedIngredientsFor.add(id))
     allIng.push(...(si || []))
     frontier = [...new Set((si || []).map(r => r.sub_recipe_id).filter(Boolean))].filter(id => !recipeMeta[id])
   }
