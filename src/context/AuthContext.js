@@ -51,17 +51,31 @@ export function AuthProvider({ children }) {
 
     initialize()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
       setSession(session)
-      if (session) {
-        await fetchProfile(session.user.id, mounted)
-      } else {
+      if (!session) {
         setProfile(null)
         setFeatureFlags({})
         setLoading(false)
         setReady(true)
+        return
       }
+      // INITIAL_SESSION replays the exact session `initialize()` above already fetched a profile
+      // for. This isn't a rare double-fire: auth-js's onAuthStateChange unconditionally emits it
+      // on every subscription (GoTrueClient.ts's _emitInitialSession, scheduled the moment you
+      // subscribe), so this callback and `initialize()` were BOTH running the full
+      // profile -> clients+feature_flags waterfall on every single page load. Confirmed live via
+      // the network tab: profiles fetched twice, clients twice, feature_flags three times, on one
+      // dashboard load. TOKEN_REFRESHED still needs the session updated (done above — a plain
+      // state set, not a fetch) but never the profile re-fetched: nothing about who the user is
+      // changes when only the token rotates, and startSessionKeepAlive (S458) fires a refresh on
+      // every tab focus/visibility/online event, not just once an hour — so this path was firing
+      // on ordinary alt-tabbing. Together these were the real cause of the "pages load slowly,
+      // sometimes get stuck" reports: not any one query being slow, but the same waterfall running
+      // two-plus times, competing for the same connection, on every load.
+      if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') return
+      await fetchProfile(session.user.id, mounted)
     })
 
     // Top the access token up whenever the tab wakes (S458). auth-js's own refresh ticker only

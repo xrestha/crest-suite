@@ -150,6 +150,29 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S463 — 2026-07-27 — Smoke-tested the S462 IMS audit live, found and fixed the real cause of the reported page-loading slowness
+
+Ran the app in a real browser against Casa Acai Cafe's live data (not just `npm run build`/tests) to verify S462's fixes actually hold against real numbers, not just compile. Also chased down the "pages have been very late in loading the data, sometimes stuck" report from earlier the same day — that turned out to be a genuine, well-understood bug, not vague slowness.
+
+**Smoke test, verified live:**
+- Dashboard's "Manual Sales by Category" pivot Period column now reads NPR 109,504 — matching the Dashboard's own Revenue stat card exactly, and the four category rows (Food/Beverage/Dessert/Other) sum to it precisely. This is S462's PivotTable/SalesPivot fix confirmed against a real total, not a synthetic one.
+- Sales Entry: this client has POS enabled, so the lock fired correctly — banner shown, Bulk/Daily tabs rendered with a lock icon and `aria-disabled="true"`. Playwright's own actionability check refused to click the disabled button; a raw `element.click()` via `page.evaluate` (bypassing Playwright's guard) confirmed the `onClick` handler's own check also holds — the active tab never moved. Total Covers/Items/Revenue on this page read the same NPR 109,504 as the two figures above — three independent surfaces agreeing where before S462 they didn't.
+- All five newly-guarded routes (`/sales`, `/stock`, `/purchases`, `/requisitions`, `/gate-passes`) render normally for the Owner login — confirms the new `hasImsAccess('staff')` guards aren't over-blocking legitimate access.
+- Shrinkage Report, Outstanding Payables, Non-VAT Report, Theoretical Variance: all render with plausible, non-NaN real figures. Payables' one expanded bill (Mahalaxmi Store #3066) summed its 5 line items to exactly its Bill Total — the pass-through case (no VAT/discount/returns on that particular bill), confirming no regression on the common path even though it didn't exercise the new VAT/discount math. Deliberately did not click "Pay in full"/Save anywhere, since that writes a real payment against live client data.
+- Zero console errors across all nine page navigations.
+
+Not covered this pass: the admin-exemption path on Sales Entry (needs a separate admin login) and a non-POS client (needs a second test client with `pos_enabled=false`).
+
+**The loading-slowness bug — root-caused, not just described.** `AuthContext.js`'s effect both calls `initialize()` (its own `getSession()` + `fetchProfile()`) AND subscribes via `supabase.auth.onAuthStateChange(callback)`. Checked the actual installed `@supabase/auth-js` 2.108.0 TypeScript source (not the minified bundle, not memory of the library) and confirmed `onAuthStateChange` unconditionally fires an `INITIAL_SESSION` event with the current session the moment you subscribe (`GoTrueClient.ts`'s `_emitInitialSession`, scheduled in an IIFE right after `stateChangeEmitters.set`) — every subscription, no exceptions, and not conditional on anything the caller does. The callback didn't check event type, so it called `fetchProfile()` again with the identical session `initialize()` had just fetched. Confirmed live via the network tab on a single fresh dashboard load: `profiles` fetched twice, `clients` twice, `feature_flags` three times, the `last_seen_at` `PATCH` twice — each `fetchProfile()` call being its own profile-fetch-then-`Promise.all(clients,flags)`-then-fire-and-forget-PATCH waterfall, running two-plus times in competition for the same connection, on every single page load.
+
+Specifically ruled out React StrictMode (which double-invokes effects in dev only) as the explanation before concluding this was a production bug — `src/index.js` does wrap the app in `<React.StrictMode>`, so that was a real candidate, but the `INITIAL_SESSION` duplication is unconditional supabase-js behavior in both dev and production, independent of StrictMode entirely.
+
+Fix: the `onAuthStateChange` callback now returns early on `event === 'INITIAL_SESSION'` (already handled by `initialize()`) and `event === 'TOKEN_REFRESHED'` (nothing about who the user is changes when only the token rotates — `setSession(session)` still runs unconditionally above the check, so context consumers still see the fresh token). `TOKEN_REFRESHED` matters beyond the obvious hourly case: `startSessionKeepAlive` (S458) calls `ensureFreshSession()` on every tab `focus`/`visibilitychange`/`online` event, so this path was firing on ordinary alt-tabbing, not just once an hour — compounding the same redundant waterfall throughout a session, not only at login.
+
+Re-verified live post-fix on a fresh cold navigation: `profiles`, `clients`, and the `last_seen_at` `PATCH` each fire exactly once now (down from 2×). `feature_flags` still shows twice, but that second read is `SettingsContext`'s own independent fetch (documented in this file's own history — "SettingsContext loads feature_flags for every session") — a separate provider, unrelated to the bug fixed here, left untouched. Did not force-test the `TOKEN_REFRESHED` branch live (would require either waiting ~55 minutes or manufacturing an expired token, and the latter risks logging out the session being tested for no added confidence over reading the — identical-shape — code path already verified for `INITIAL_SESSION`). Build compiles clean under `CI=true`, all 127 tests pass, no console errors, dashboard renders identically post-fix.
+
+**Files:** `src/context/AuthContext.js`
+
 ### S462 — 2026-07-27 — IMS deep audit: POS/manual sales collision, five unguarded routes, four wrong report formulas
 
 Full audit of the IMS module (45 files) against the gotcha classes CLAUDE.md already documents, then fixed everything it turned up. Eight findings, roughly in severity order.
