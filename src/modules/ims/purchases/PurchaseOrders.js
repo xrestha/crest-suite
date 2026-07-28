@@ -13,7 +13,7 @@ const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kart
 const PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
 
 const STATUS_META = {
-  draft:     { label: 'Draft',     color: 'var(--theme-text2)', bg: 'rgba(107,114,128,0.1)', border: 'rgba(107,114,128,0.3)' },
+  draft:     { label: 'Draft',     color: 'var(--theme-text2)', bg: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-text2) 30%, transparent)' },
   sent:      { label: 'Sent',      color: 'var(--theme-purple)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)' },
   partial:   { label: 'Partial',   color: 'var(--theme-accent)', bg: 'rgba(201,168,76,0.1)',  border: 'rgba(201,168,76,0.3)' },
   received:  { label: 'Received',  color: 'var(--theme-green)', bg: 'rgba(52,211,153,0.1)',  border: 'rgba(52,211,153,0.3)' },

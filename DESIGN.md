@@ -16,12 +16,37 @@ colors:
   signal-danger: "#f87171"
   signal-warning: "#fbbf24"
   signal-categorical: "#a78bfa"
-  # Print-only, documented 2026-07-20. Print is a real surface here (stock count sheets,
-  # payslips, purchase bills, KOTs), but the palette above is all theme-token driven and none
-  # of it survives onto paper — @media print forces white bg / black text. These two neutral
-  # rules are the only non-black print values. Valid ONLY inside a print block.
-  print-rule: "#cccccc"
-  print-rule-strong: "#999999"
+  # Print-only, documented 2026-07-20, expanded 2026-07-28. Print is a real surface here (stock
+  # count sheets, payslips, purchase bills, KOTs, gate passes, recipe cost cards, POs), but the
+  # palette above is all theme-token driven and none of it survives onto paper — @media print
+  # forces white bg / black-ish text. The letterhead-style print templates (GatePassPrint.jsx,
+  # PurchaseBillPrint.jsx, RecipeCostCardPrint.jsx, PurchaseOrders.js's print block, and their
+  # HR/POS equivalents) share one literal grayscale ramp for ink/rule/label hierarchy instead of
+  # theme tokens — CSS var() still resolves fine in a print stylesheet, but these are print-only
+  # documents that were never meant to shift with the active theme preset (a purchase order
+  # printed on Dracula must read identically to one printed on Latte). Valid ONLY inside a
+  # print-only component or `.print-only`/`@media print` block; do not use these on-screen.
+  print-ink: "#000000"      # heading text, rule dividers, PurchaseOrders.js's own #111 is the same role
+  print-text: "#333333"     # body copy needing more weight than a label
+  print-label: "#555555"    # secondary meta lines (dates, addresses, PAN/VAT)
+  print-label-lt: "#777777" # field labels, table body secondary text
+  print-notes: "#444444"    # notes/callout box text (PurchaseOrders.js print block)
+  print-muted: "#888888"    # uppercase section eyebrows, footer/index columns
+  print-faint: "#aaaaaa"    # generated-by footers, least emphasis
+  print-rule: "#cccccc"     # table header/footer rule lines
+  print-rule-strong: "#999999" # bordered chips (e.g. status pill outline)
+  print-rule-lt: "#dddddd"  # notes-box border
+  print-rule-xlt: "#eeeeee" # table row divider
+  print-fill: "#f3f3f3"     # table header row background
+  # On-screen exceptions where a CSS var() token genuinely can't be used, documented 2026-07-28
+  # instead of left as silent drift.
+  chart-tick: "#6b7280"     # Recharts axis tick/label/reference-line fill — var() does not
+                             # resolve inside SVG presentation attributes (see Do's and Don'ts)
+  toggle-knob: "#ffffff"    # the sliding thumb inside a toggle switch (e.g. PurchaseBillModal's
+                             # per-line VAT toggle) — a literal white dot regardless of theme is
+                             # the near-universal toggle convention; it sits on a colored track,
+                             # never directly on the page background, so contrast holds on all
+                             # ten presets
 typography:
   wordmark:
     fontFamily: "Georgia, serif"

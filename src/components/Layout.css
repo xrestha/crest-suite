@@ -849,6 +849,19 @@ input[type="number"] {
   appearance: textfield;
 }
 
+/* Backstop for any input/select/textarea not already wrapped in .form-field, .form-select,
+   or a data-table cell (each of those pairs its own outline:none with a :focus box-shadow
+   ring already). Plain :focus-visible so it only shows for keyboard navigation, not every
+   mouse click, and its low specificity means it never overrides the more specific rules above
+   — it only fills the gap for bare inputs that were losing focus visibility entirely. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--theme-accent);
+  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+}
+
 .badge {
   display: inline-block;
   padding: 2px 8px;

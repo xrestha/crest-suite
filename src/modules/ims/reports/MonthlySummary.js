@@ -207,7 +207,7 @@ export default function MonthlySummary() {
 
           {/* Food cost summary box */}
           <div style={{
-            background: report.fcPct == null ? 'rgba(107,114,128,0.08)' :
+            background: report.fcPct == null ? 'color-mix(in srgb, var(--theme-text2) 8%, transparent)' :
               report.fcPct <= 35 ? 'rgba(52,211,153,0.06)' :
               report.fcPct <= 45 ? 'rgba(201,168,76,0.06)' : 'rgba(248,113,113,0.06)',
             border: `1px solid ${report.fcPct == null ? 'var(--theme-border)' :

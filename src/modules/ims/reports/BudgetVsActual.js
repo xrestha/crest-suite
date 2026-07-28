@@ -187,7 +187,7 @@ export default function BudgetVsActual() {
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         {noBudget
-                          ? <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'rgba(107,114,128,0.15)', padding: '2px 10px', borderRadius: 10 }}>No Budget</span>
+                          ? <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 15%, transparent)', padding: '2px 10px', borderRadius: 10 }}>No Budget</span>
                           : isOver
                           ? <span style={{ fontSize: 11, color: 'var(--theme-red)', background: 'rgba(248,113,113,0.12)', padding: '2px 10px', borderRadius: 10 }}>Over Budget</span>
                           : <span style={{ fontSize: 11, color: 'var(--theme-green)', background: 'rgba(52,211,153,0.12)', padding: '2px 10px', borderRadius: 10 }}>Under Budget</span>

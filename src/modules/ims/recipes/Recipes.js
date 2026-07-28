@@ -791,7 +791,7 @@ export default function Recipes() {
                     alignItems: 'center',
                     gap: 7,
                     transition: 'color 0.15s',
-                    borderRadius: '6px 6px 0 0',
+                    borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
                     marginBottom: -1,
                   }}
                 >
@@ -814,7 +814,7 @@ export default function Recipes() {
           </div>
 
           {/* Tab content */}
-          <div className="card" style={{ borderRadius: '0 6px 6px 6px', marginTop: 0 }}>
+          <div className="card" style={{ borderRadius: '0 var(--radius-sm) var(--radius-sm) var(--radius-sm)', marginTop: 0 }}>
             {loading ? (
               <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
             ) : tabFiltered.length === 0 ? (

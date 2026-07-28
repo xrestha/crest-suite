@@ -150,6 +150,33 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S465 — 2026-07-28 — `/impeccable audit` pass on the IMS module: two real WCAG AA gaps, a systemic theming drift, and 48 detector false positives traced to a stale DESIGN.md
+
+Ran the `impeccable` skill's `audit` command scoped to `src/modules/ims/` (52 files) — a technical quality pass, not a redesign. The skill self-updated mid-session (v3.9.1 → v4.0.2, `npx impeccable update`); the new version drops the brand/product "register" concept in favor of four visitor modes (Persuade/Operate/Read/Experience) and flagged PRODUCT.md's `## Register` field as deprecated-but-harmless — noted, not acted on, since removing it wasn't part of this session's ask.
+
+**Scored 14/20 (Good band).** Ran the bundled local detector (54 raw findings) and verified each in context rather than trusting the raw count:
+
+- **48 of 51 "color outside DESIGN.md" hits were false positives**, all traced to one root cause: `GatePassPrint.jsx`, `PurchaseBillPrint.jsx`, `RecipeCostCardPrint.jsx`, and the print block inside `PurchaseOrders.js` all use a shared literal grayscale (`#000`/`#333`/`#444`/`#555`/`#777`/`#888`/`#999`/`#aaa`/`#ccc`/`#ddd`/`#eee`/`#f3f3f3`) for their letterhead-style print documents — a real, deliberate, already-established convention (print ignores theme tokens so a purchase order prints identically regardless of which of the 10 UI presets is active), just never fully documented. DESIGN.md's print section only named 2 of the ~12 grays actually in use.
+- **2 real WCAG AA violations, both at the shared-component level** (highest leverage, fixed once each):
+  - `Tip.js` (the tooltip component used across 42 of 52 IMS files, and every other module) was hover-only — no `tabIndex`, no `onFocus`/`onBlur`, no `role="tooltip"`/`aria-describedby`. Every "non-obvious column/label" tooltip CLAUDE.md itself mandates was invisible to keyboard/screen-reader users.
+  - Bare filter/search `<input>`s across ~20 files (e.g. `Items.js`, `Vendors.js`, `SupplierPriceTracker.js`, `VendorReport.js`) had `outline:'none'` inline with no `.form-field`/`.form-select` wrapper — the only two selectors in `Layout.css` that pair `outline:none` with a `:focus` ring. Tabbing to one showed zero visible focus state (WCAG 2.4.7).
+- **1 systemic theming pattern**: `rgba(107,114,128,…)` (raw gray-500) used for "neutral"/"draft"/"no budget" badge tints in 4 files (`Items.js`, `PurchaseOrders.js`, `BudgetVsActual.js`, `MonthlySummary.js`), while every other status color in the same files correctly derived from a theme token — meaning the neutral variant alone wouldn't track the active preset on the other 9.
+- **1 real "side-tab" hit** (the flagged AI-slop tell — colored `border-left` on a card): `MenuEngineering.js`'s quadrant-legend footer cards, functionally justified (color-coding to the scatter chart above) but inconsistent with that same chart's own legend, which uses a dot for the identical mapping one section up.
+- **2 stale radii**: `Recipes.js`'s file-folder tab treatment still at the pre-2026-07-12 6px, never migrated to the current 8/12/18/24px scale.
+
+**All fixed, verified back to 0 detector findings:**
+
+- `Tip.js`: added `tabIndex={0}`, `onFocus`/`onBlur` mirroring the mouse handlers, `role="tooltip"` + `aria-describedby` via `useId()`. Fixes tooltip a11y app-wide, not just IMS.
+- `Layout.css`: added a global `input/select/textarea:focus-visible` backstop (low specificity so it never overrides `.form-field`/`.form-select`'s own `:focus` rules — it only fills the gap for bare inputs that had nothing).
+- `Items.js`, `PurchaseOrders.js`, `BudgetVsActual.js`, `MonthlySummary.js`: `rgba(107,114,128,…)` → `color-mix(in srgb, var(--theme-text2) N%, transparent)`, matching the pattern `PurchaseOrders.js`'s own `sent` status already used correctly for purple one line below the broken one.
+- `MenuEngineering.js`: quadrant-card `border-left` swapped for the same colored-dot treatment its own legend uses.
+- `Recipes.js`: both stale 6px radii → `var(--radius-sm)`.
+- `DESIGN.md`: expanded the print-only color block from 2 documented grays to the full ~12-value ramp actually in use (named `print-ink`/`print-text`/`print-label`/`print-label-lt`/`print-notes`/`print-muted`/`print-faint`/`print-rule`/`print-rule-strong`/`print-rule-lt`/`print-rule-xlt`/`print-fill`), plus two newly-documented on-screen exceptions: `chart-tick` (`#6b7280`, Recharts SVG props can't resolve `var()`, matching the existing documented exception) and `toggle-knob` (`#ffffff`, the near-universal literal-white toggle-thumb convention, safe since it never sits directly on the page background).
+
+Two hook-flagged findings on `Layout.css` (`layout-transition` on `.sidebar-shell`'s `width` and `.main-content`'s `margin-left`) were reviewed and left unchanged — both pre-existing, untouched by this session's edits, and already the subject of DESIGN.md's Navigation section's own "Accepted exception" writeup (confirmed 2026-07-12: `.sidebar-wrap` is `position:fixed` so real layout space must be reserved, the toggle is rare/manual not continuous, real jank risk is low).
+
+**Files:** `src/components/Tip.js`, `src/components/Layout.css`, `src/modules/ims/items/Items.js`, `src/modules/ims/purchases/PurchaseOrders.js`, `src/modules/ims/recipes/MenuEngineering.js`, `src/modules/ims/recipes/Recipes.js`, `src/modules/ims/reports/BudgetVsActual.js`, `src/modules/ims/reports/MonthlySummary.js`, `DESIGN.md`
+
 ### S464 — 2026-07-28 — HR Self-Service PIN login was leaking every employee's name and login email to anonymous callers
 
 Aashish pasted a Supabase Security Advisor export (36+ `SECURITY DEFINER` execute-grant warnings). Most matched already-documented, deliberate patterns (`is_admin()`/`my_client_id()`/`is_*_staff()` helpers left anon-callable for the `settings` pre-login read; guest-ordering functions; the PIN-lockout check/record pair's accepted no-rate-limit trade-off; trigger-typed `assign_*_no` functions, inert as RPC targets) — verified each against the actual migration source rather than assumed, including two ("client_user_emails", "find_user_id_by_email") not explicitly named in CLAUDE.md, both correctly `is_admin()`-gated.

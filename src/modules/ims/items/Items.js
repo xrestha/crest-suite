@@ -680,7 +680,7 @@ export default function Items() {
                 : tab.name}
               <span style={{
                 fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
-                background: active ? 'rgba(201,168,76,0.12)' : 'rgba(107,114,128,0.12)',
+                background: active ? 'rgba(201,168,76,0.12)' : 'color-mix(in srgb, var(--theme-text2) 12%, transparent)',
                 color: active ? 'var(--theme-accent)' : 'var(--theme-text2)'
               }}>{count}</span>
             </button>

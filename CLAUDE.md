@@ -205,7 +205,7 @@ Shape and type have their own token sets at the top of `Layout.css`: `--radius-s
 
 | Component | File | Notes |
 | --- | --- | --- |
-| `Tip` | `src/components/Tip.js` | Hover tooltip using `createPortal` — escapes `overflow:hidden` containers. All non-obvious columns and form labels must have one. |
+| `Tip` | `src/components/Tip.js` | Tooltip using `createPortal` — escapes `overflow:hidden` containers. All non-obvious columns and form labels must have one. Keyboard-accessible since S465 (`tabIndex`, `onFocus`/`onBlur`, `role="tooltip"` + `aria-describedby`) — not hover-only. |
 | `SearchableSelect` | `src/components/SearchableSelect.js` | Drop-in for long `<select>` lists. `position:fixed` dropdown never clips inside modals. Flips above the trigger near the bottom of the viewport. |
 | `Fab` | `src/components/Fab.js` | Fixed bottom-right `+ Add` button |
 | `Modal` | `src/components/Modal.js` | Centered overlay with backdrop-click close |

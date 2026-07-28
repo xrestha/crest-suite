@@ -327,8 +327,11 @@ export default function MenuEngineering() {
                   { q: 'Puzzle',    pos: 'right + bottom (high qty, high FC%)', hint: 'Popular — review recipe cost' },
                   { q: 'Dog',       pos: 'left + bottom (low qty, high FC%)',   hint: 'Consider redesign or removal' },
                 ].map(({ q, pos, hint }) => (
-                  <div key={q} style={{ background: 'var(--theme-table-hover)', borderRadius: 6, padding: '8px 10px', borderLeft: `3px solid ${Q_HEX[q]}` }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: Q_HEX[q] }}>{QUADRANTS[q].icon} {q}</div>
+                  <div key={q} style={{ background: 'var(--theme-table-hover)', borderRadius: 6, padding: '8px 10px' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: Q_HEX[q], display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: Q_HEX[q], display: 'inline-block', flexShrink: 0 }} />
+                      {QUADRANTS[q].icon} {q}
+                    </div>
                     <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginTop: 2 }}>{pos}</div>
                     <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 2 }}>{hint}</div>
                   </div>
