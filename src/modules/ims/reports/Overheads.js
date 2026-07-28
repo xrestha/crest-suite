@@ -98,19 +98,52 @@ export default function Overheads() {
       .eq('period_id', periodId)
       .order('created_at')
 
-    const grouped = { overhead: [], labor: [], tax_fees: [] }
     if (data && data.length > 0) {
+      const grouped = { overhead: [], labor: [], tax_fees: [] }
       data.forEach(r => {
         const b = r.bucket || 'overhead'
         if (grouped[b]) grouped[b].push({ ...r, _dirty: false })
         else grouped.overhead.push({ ...r, _dirty: false })
       })
+      Object.keys(BUCKET_CONFIG).forEach(b => {
+        if (grouped[b].length === 0) grouped[b] = seedBucket(b)
+      })
+      setRows(grouped)
+      return
     }
-    // Seed empty buckets with preset rows
+
+    // This period has never been saved — most fixed costs (rent, salaries, licenses) don't
+    // actually change month to month, so starting from a blank sheet every period forces the
+    // user to re-type the same numbers. Carry forward the nearest prior period's own saved rows
+    // as an editable draft instead (_dirty: true, so nothing is written to the DB — and Save
+    // stays disabled on a closed period — until the user actually hits Save).
+    const currentIdx = periods.findIndex(p => p.id === periodId)
+    const priorPeriods = currentIdx >= 0 ? periods.slice(currentIdx + 1) : []
+    const priorRows = await findMostRecentOverheads(priorPeriods)
+
+    const grouped = { overhead: [], labor: [], tax_fees: [] }
+    if (priorRows) {
+      priorRows.forEach(r => {
+        const b = r.bucket || 'overhead'
+        const row = { id: null, category: r.category, description: r.description, amount: r.amount, _dirty: true }
+        if (grouped[b]) grouped[b].push(row)
+        else grouped.overhead.push(row)
+      })
+    }
     Object.keys(BUCKET_CONFIG).forEach(b => {
       if (grouped[b].length === 0) grouped[b] = seedBucket(b)
     })
     setRows(grouped)
+  }
+
+  // Walks backward through chronologically-prior periods (nearest first) and returns the first
+  // one's saved overhead rows, or null if none of them ever had any.
+  async function findMostRecentOverheads(candidatePeriods) {
+    for (const p of candidatePeriods) {
+      const { data } = await scopedFrom('overheads').eq('period_id', p.id).order('created_at')
+      if (data && data.length > 0) return data
+    }
+    return null
   }
 
   async function loadPeriodData() {

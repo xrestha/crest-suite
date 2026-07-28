@@ -150,6 +150,16 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S466 — 2026-07-28 — Self-Service Roster switched from a full-month scroll to a week view; Overheads now carries forward the prior period's numbers
+
+Two independent UX fixes from live screenshots.
+
+**HR Self-Service Roster** (`SelfServiceHome.jsx`): the Roster tab used to render every day of the selected BS month in one long list — an employee had to scroll past weeks of already-past days just to see today's shift. Replaced the Month/Year dropdown with a week view (Sunday–Saturday) defaulting to the current week, with ‹ Prev / This Week / Next › navigation. Each of the 7 rows is a real AD calendar day, independently converted to its own BS year/month/day — BS months run 28–32 days so a week occasionally straddles two of them (e.g. late Ashadh into early Shrawan); the page now fetches and merges `get_my_roster`/`get_my_roster_publish_status` for both months in that case instead of one day silently going missing at the boundary. Days whose month isn't published yet show "Not published yet" per-row rather than blocking the whole week. Request Swap and its panel now key off the specific day's own BS date (needed since two rows in the same week can belong to different months) rather than one shared selected month.
+
+**Overheads & Cost Breakdown** (`Overheads.js`): opening a freshly-created period (e.g. the new month after Periods → Close & Advance) showed every fixed-overhead/labor/tax line at NPR 0, even though almost none of those numbers (rent, salaries, licenses) actually change month to month — forcing a full re-entry every period. `loadOverheads` now walks backward through chronologically-prior periods (nearest first) when the current period has zero saved rows, and pre-fills the most recent one that has data as an editable draft. Nothing is written to the database until Save is clicked — a closed period with no rows still can't be saved over (Save stays disabled), and an open period lets the user revise any line (a raise, a new lease rate) before confirming. Falls back to the original blank preset rows if no prior period ever had data either.
+
+**Files:** `src/modules/hr/selfservice/SelfServiceHome.jsx`, `src/modules/ims/reports/Overheads.js`, `src/pages/Help.js`
+
 ### S465 — 2026-07-28 — `/impeccable audit` pass on the IMS module: two real WCAG AA gaps, a systemic theming drift, and 48 detector false positives traced to a stale DESIGN.md
 
 Ran the `impeccable` skill's `audit` command scoped to `src/modules/ims/` (52 files) — a technical quality pass, not a redesign. The skill self-updated mid-session (v3.9.1 → v4.0.2, `npx impeccable update`); the new version drops the brand/product "register" concept in favor of four visitor modes (Persuade/Operate/Read/Experience) and flagged PRODUCT.md's `## Register` field as deprecated-but-harmless — noted, not acted on, since removing it wasn't part of this session's ask.

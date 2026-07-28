@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { getBsToday, BS_MONTHS, adToBs, bsToAd, formatAd } from '../../../utils/bsCalendar'
+import { BS_MONTHS, adToBs, formatAd } from '../../../utils/bsCalendar'
 import { workingDaysInRange, DAY_TYPES } from '../leave/leaveConstants'
 import { isOffDay } from '../payrollConstants'
 import { subscribeToPush, isPushSubscribed } from '../../../utils/webPush'
@@ -13,6 +13,18 @@ import Modal from '../../../components/Modal'
 import PayslipBody from '../payroll/PayslipBody'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function startOfWeek(d) {
+  const x = new Date(d)
+  x.setHours(0, 0, 0, 0)
+  x.setDate(x.getDate() - x.getDay())
+  return x
+}
+function addDays(d, n) {
+  const x = new Date(d)
+  x.setDate(x.getDate() + n)
+  return x
+}
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
 const fmtD = iso => {
@@ -46,7 +58,6 @@ const SWAP_STATUS_BADGE = {
 export default function SelfServiceHome() {
   const { session, profile, loading: authLoading } = useAuth()
   const navigate = useNavigate()
-  const today = getBsToday()
 
   const [tab, setTab] = useState('payslip') // payslip | leave | tada | roster
   const [payslips, setPayslips] = useState(null)
@@ -58,10 +69,14 @@ export default function SelfServiceHome() {
   const [dataError, setDataError] = useState('')
   const [leaveTypes, setLeaveTypes] = useState([])
   const [leaveRequests, setLeaveRequests] = useState(null)
-  const [rosterYear, setRosterYear] = useState(today.year)
-  const [rosterMonth, setRosterMonth] = useState(today.month)
-  const [roster, setRoster] = useState(null)
-  const [rosterPublished, setRosterPublished] = useState(false)
+  // Week view (Sun-Sat) instead of a full BS month — see the swap request session for why:
+  // an employee only cares about "what's my schedule this week", and a month-long list was a
+  // long scroll of already-past days for no benefit. weekStart is the AD Sunday of the shown
+  // week; each day is converted to its own BS year/month/day since a week can straddle two BS
+  // months (BS months run 28-32 days, so at most 2 months per 7-day week, never 3).
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
+  const [roster, setRoster] = useState(null) // Map<"year-month-day", row>
+  const [rosterPublishMap, setRosterPublishMap] = useState(new Map()) // Map<"year-month", boolean>
 
   const [leaveTypeId, setLeaveTypeId] = useState('')
   const [startDate, setStartDate] = useState('')
@@ -87,7 +102,7 @@ export default function SelfServiceHome() {
   const [pushMsg, setPushMsg] = useState('')
 
   const [swapRequests, setSwapRequests] = useState(null)
-  const [swapDay, setSwapDay] = useState(null) // the requester's own day being offered
+  const [swapDay, setSwapDay] = useState(null) // { bsYear, bsMonth, bsDay } of the requester's own day being offered
   const [coworkerRoster, setCoworkerRoster] = useState([])
   const [coworkerLoading, setCoworkerLoading] = useState(false)
   const [swapTargetEmpId, setSwapTargetEmpId] = useState('')
@@ -153,15 +168,47 @@ export default function SelfServiceHome() {
     if (!leaveTypeId && types?.length > 0) setLeaveTypeId(types[0].id)
   }, [leaveTypeId])
 
+  // One AD calendar day per column; each is independently converted to its own BS date so a
+  // week that straddles a BS month boundary (common — BS months are 28-32 days, rarely aligned
+  // to a 7-day week) still resolves every day correctly.
+  const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const ad = addDays(weekStart, i)
+    const bs = adToBs(ad)
+    return { ad, bsYear: bs.year, bsMonth: bs.month, bsDay: bs.day, weekday: WEEKDAYS[ad.getDay()] }
+  }), [weekStart])
+
+  const monthsNeeded = useMemo(() => {
+    const map = new Map()
+    weekDays.forEach(d => map.set(`${d.bsYear}-${d.bsMonth}`, { year: d.bsYear, month: d.bsMonth }))
+    return [...map.values()]
+  }, [weekDays])
+
+  const weekRangeLabel = useMemo(() => {
+    const first = weekDays[0], last = weekDays[6]
+    if (first.bsYear === last.bsYear && first.bsMonth === last.bsMonth) {
+      return `${BS_MONTHS[first.bsMonth - 1]} ${first.bsDay}–${last.bsDay}, BS ${first.bsYear}`
+    }
+    return `${BS_MONTHS[first.bsMonth - 1]} ${first.bsDay}, BS ${first.bsYear} – ${BS_MONTHS[last.bsMonth - 1]} ${last.bsDay}, BS ${last.bsYear}`
+  }, [weekDays])
+
   const loadRoster = useCallback(async () => {
-    const [{ data, error }, { data: published }] = await Promise.all([
-      supabase.rpc('get_my_roster', { p_bs_year: rosterYear, p_bs_month: rosterMonth }),
-      supabase.rpc('get_my_roster_publish_status', { p_bs_year: rosterYear, p_bs_month: rosterMonth }),
-    ])
-    setDataError(error ? 'Could not load your roster. Please try again, or contact your manager if it keeps happening.' : '')
-    setRoster(data || [])
-    setRosterPublished(!!published)
-  }, [rosterYear, rosterMonth])
+    const results = await Promise.all(monthsNeeded.map(async ({ year, month }) => {
+      const [{ data, error }, { data: published }] = await Promise.all([
+        supabase.rpc('get_my_roster', { p_bs_year: year, p_bs_month: month }),
+        supabase.rpc('get_my_roster_publish_status', { p_bs_year: year, p_bs_month: month }),
+      ])
+      return { year, month, rows: data || [], error, published: !!published }
+    }))
+    setDataError(results.some(r => r.error) ? 'Could not load your roster. Please try again, or contact your manager if it keeps happening.' : '')
+    const rowMap = new Map()
+    const pubMap = new Map()
+    results.forEach(r => {
+      pubMap.set(`${r.year}-${r.month}`, r.published)
+      r.rows.forEach(row => rowMap.set(`${r.year}-${r.month}-${row.bs_day}`, row))
+    })
+    setRoster(rowMap)
+    setRosterPublishMap(pubMap)
+  }, [monthsNeeded])
 
   const loadSwapRequests = useCallback(async () => {
     const { data } = await supabase.rpc('get_my_swap_requests')
@@ -205,13 +252,13 @@ export default function SelfServiceHome() {
     }
   }, [profile, tab, loadPayslips, loadLeave, loadTada, loadRoster, loadSwapRequests])
 
-  function openSwapRequest(bsDay) {
-    setSwapDay(bsDay); setSwapTargetEmpId(''); setSwapTargetDay(''); setSwapNote(''); setSwapMsg('')
+  function openSwapRequest(day) {
+    setSwapDay(day); setSwapTargetEmpId(''); setSwapTargetDay(''); setSwapNote(''); setSwapMsg('')
     // Clear stale data and show a loading state — otherwise the picker briefly renders with only
     // the placeholder option while the fetch is in flight, which on a slow connection can look
     // like coworkers never loaded at all.
     setCoworkerRoster([]); setCoworkerLoading(true)
-    supabase.rpc('get_coworker_roster', { p_bs_year: rosterYear, p_bs_month: rosterMonth })
+    supabase.rpc('get_coworker_roster', { p_bs_year: day.bsYear, p_bs_month: day.bsMonth })
       .then(({ data, error }) => {
         setCoworkerLoading(false)
         if (error) { setSwapMsg(error.message); return }
@@ -226,8 +273,8 @@ export default function SelfServiceHome() {
     if (!swapTargetEmpId || !swapTargetDay) { setSwapMsg('Pick a coworker and one of their scheduled days.'); return }
     setSwapSubmitting(true); setSwapMsg('')
     const { data: requestId, error } = await supabase.rpc('request_shift_swap', {
-      p_target_employee_id: swapTargetEmpId, p_bs_year: rosterYear, p_bs_month: rosterMonth,
-      p_my_bs_day: swapDay, p_target_bs_day: parseInt(swapTargetDay, 10), p_note: swapNote,
+      p_target_employee_id: swapTargetEmpId, p_bs_year: swapDay.bsYear, p_bs_month: swapDay.bsMonth,
+      p_my_bs_day: swapDay.bsDay, p_target_bs_day: parseInt(swapTargetDay, 10), p_note: swapNote,
     })
     setSwapSubmitting(false)
     if (error) { setSwapMsg(error.message); return }
@@ -615,37 +662,45 @@ export default function SelfServiceHome() {
 
         {tab === 'roster' && (
           <div>
-            <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-              <select aria-label="Month" className="form-select" value={rosterMonth} onChange={e => setRosterMonth(parseInt(e.target.value, 10))}>
-                {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-              </select>
-              <select aria-label="Year" className="form-select" value={rosterYear} onChange={e => setRosterYear(parseInt(e.target.value, 10))}>
-                {Array.from({ length: 3 }, (_, i) => today.year - 1 + i).map(y => <option key={y} value={y}>BS {y}</option>)}
-              </select>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 16 }}>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={() => setWeekStart(w => addDays(w, -7))} aria-label="Previous week">‹ Prev</button>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>{weekRangeLabel}</div>
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', marginTop: 2 }} onClick={() => setWeekStart(startOfWeek(new Date()))}>This Week</button>
+              </div>
+              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={() => setWeekStart(w => addDays(w, 7))} aria-label="Next week">Next ›</button>
             </div>
             {roster === null ? <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
-              : !rosterPublished ? <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Your manager hasn't published the schedule for this month yet.</p>
-              : roster.length === 0 ? <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No shifts scheduled this month.</p>
               : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-                  {roster.map((r, i) => {
-                    const off = isOffDay(r.shift_type_name)
-                    const weekday = WEEKDAYS[bsToAd(rosterYear, rosterMonth, r.bs_day).getDay()]
+                  {weekDays.map(d => {
+                    const r = roster.get(`${d.bsYear}-${d.bsMonth}-${d.bsDay}`)
+                    const monthPublished = rosterPublishMap.get(`${d.bsYear}-${d.bsMonth}`)
+                    const off = r && isOffDay(r.shift_type_name)
+                    const isSwapOpen = swapDay && swapDay.bsYear === d.bsYear && swapDay.bsMonth === d.bsMonth && swapDay.bsDay === d.bsDay
                     return (
-                    <div key={i} className="card" style={{ padding: 12, background: off ? 'rgba(107,114,128,0.12)' : undefined, border: off ? '1px solid rgba(107,114,128,0.3)' : undefined }}>
+                    <div key={`${d.bsYear}-${d.bsMonth}-${d.bsDay}`} className="card" style={{ padding: 12, background: off ? 'rgba(107,114,128,0.12)' : undefined, border: off ? '1px solid rgba(107,114,128,0.3)' : undefined }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600 }}>{weekday}, Day {r.bs_day}</span>
+                        <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600 }}>{d.weekday}, {BS_MONTHS[d.bsMonth - 1]} {d.bsDay}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <span style={{ fontSize: 13, color: off ? 'var(--theme-text3)' : 'var(--theme-text2)', fontWeight: off ? 600 : 400 }}>
-                            {r.shift_type_name || '—'}{r.shift_start && ` (${r.shift_start}–${r.shift_end})`}
-                          </span>
-                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 14px' }} onClick={() => openSwapRequest(r.bs_day)}>
-                            Request Swap
-                          </button>
+                          {!monthPublished ? (
+                            <span style={{ fontSize: 13, color: 'var(--theme-text3)' }}>Not published yet</span>
+                          ) : (
+                            <>
+                              <span style={{ fontSize: 13, color: off ? 'var(--theme-text3)' : 'var(--theme-text2)', fontWeight: off ? 600 : 400 }}>
+                                {r?.shift_type_name || '—'}{r?.shift_start && ` (${r.shift_start}–${r.shift_end})`}
+                              </span>
+                              {r && (
+                                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 14px' }} onClick={() => openSwapRequest(d)}>
+                                  Request Swap
+                                </button>
+                              )}
+                            </>
+                          )}
                         </div>
                       </div>
 
-                      {swapDay === r.bs_day && (
+                      {isSwapOpen && (
                         <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--theme-border-lt)', display: 'flex', flexDirection: 'column', gap: 8 }}>
                           {coworkerLoading ? (
                             <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Loading coworkers…</div>
@@ -661,7 +716,7 @@ export default function SelfServiceHome() {
                           {swapTargetEmpId && (
                             <select aria-label="Their day" className="form-select" style={{ width: '100%' }} value={swapTargetDay} onChange={e => setSwapTargetDay(e.target.value)}>
                               <option value="">Their day…</option>
-                              {coworkerDays.map(d => <option key={d.bs_day} value={d.bs_day}>Day {d.bs_day} — {d.shift_type_name || '—'}</option>)}
+                              {coworkerDays.map(cd => <option key={cd.bs_day} value={cd.bs_day}>Day {cd.bs_day} — {cd.shift_type_name || '—'}</option>)}
                             </select>
                           )}
                           <textarea aria-label="Note for the swap request" placeholder="Note (optional)" style={{ ...inp, height: 44, resize: 'vertical' }} value={swapNote} onChange={e => setSwapNote(e.target.value)} />
