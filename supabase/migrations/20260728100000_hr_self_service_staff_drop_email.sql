@@ -36,7 +36,13 @@
 --    reliable form -- REVOKE FROM a specific role silently no-ops while PUBLIC still holds it,
 --    S-2026-07-20).
 
-CREATE OR REPLACE FUNCTION public.get_hr_self_service_staff(p_client_id uuid) RETURNS TABLE(
+-- CREATE OR REPLACE cannot change an existing function's OUT-parameter signature (Postgres
+-- 42P13, "cannot change return type of existing function") -- the old return shape had 3 columns
+-- (id, full_name, hr_self_service_email), this one has 2. DROP first; IF EXISTS keeps the
+-- migration safe to re-run.
+DROP FUNCTION IF EXISTS public.get_hr_self_service_staff(uuid);
+
+CREATE FUNCTION public.get_hr_self_service_staff(p_client_id uuid) RETURNS TABLE(
     id uuid, full_name text
 ) LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public'
