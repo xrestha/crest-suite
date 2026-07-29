@@ -150,6 +150,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S479 — 2026-07-29 — Recipe Costing: Share via WhatsApp
+
+Requested directly, with a Reorder Report screenshot (S476) as the reference for what the button should look/behave like: "a filter to select a category and a button to share in whatsapp" on Recipe Costing. Checked the page first — unlike Reorder Report (a flat page with a real `<select className="form-select">` Category filter), Recipe Costing already has a category **tab bar** (All/Food/Beverage/.../⚙ Sub-Recipes, driven by `activeTab`) that Print already scopes to; there's also a vestigial `filterCat` local (hardcoded `'all'`, comment noted "no active UI to change this") that was dead code, not a real second filter. Rather than add a redundant dropdown next to the existing tabs, wired the WhatsApp share to the same `tabFiltered` list Print already uses — picking a category tab first (e.g. Beverage) and then sharing sends just that subset, satisfying both halves of the request with the filter mechanism that already existed.
+
+`buildRecipeWhatsAppText()` mirrors `ReorderReport.js`'s `buildWhatsAppText()` pattern (plain text, WhatsApp's own `*bold*` markdown, no HTML) but branches on `activeTab === 'sub-recipes'` since that tab's rows have no selling price/FC% — regular tabs list `name — FC x% (NPR cost / NPR price)`, the sub-recipes tab lists `⚙ name — NPR cost-per-unit / uom`. `shareRecipesWhatsApp()` opens `wa.me/?text=...` with no phone number, same "opens WhatsApp's own contact/group picker" convention as Reorder Report's share. Verified live: switching to the Beverage tab (3 recipes) and clicking Share via WhatsApp opened `api.whatsapp.com/send` prefilled with exactly those 3 recipes and nothing else.
+
+**Files:** `src/modules/ims/recipes/Recipes.js`, `public/service-worker.js` (`crest-v41`), `src/pages/Help.js`
+
 ### S478 — 2026-07-29 — App-wide primary font switched to Poppins
 
 Requested directly: swap the app's primary typeface to Poppins. Researched the existing setup first — there was no `--font-family` CSS variable anywhere (unlike the color system's `--theme-*` tokens or the closed-set `--font-size-*` scale in `Layout.css`); the single entry point was a literal `font-family` list on `body` in `src/index.css`, inherited app-wide via the `font-family: inherit` rules scattered across `Layout.css`'s buttons/inputs. No Google Font was loaded anywhere before this.

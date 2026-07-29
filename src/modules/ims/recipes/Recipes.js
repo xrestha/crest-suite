@@ -693,6 +693,34 @@ export default function Recipes() {
 
   const activeTabLabel = (tabs.find(t => t.key === activeTab)?.label || 'All Recipes').replace(/^⚙\s*/, '')
 
+  // Plain text, WhatsApp's own markdown (*bold*) — no HTML, mirrors ReorderReport's share pattern.
+  // Scoped to whatever the Category tab bar + search currently show (tabFiltered) so picking
+  // "Food" before sharing sends just that category, same as Print already does.
+  function buildRecipeWhatsAppText() {
+    const lines = [`*Recipe Costing — ${activeTabLabel}*`, `${tabFiltered.length} recipe${tabFiltered.length !== 1 ? 's' : ''}`, '']
+    if (activeTab === 'sub-recipes') {
+      tabFiltered.forEach(recipe => {
+        const cost = calcRecipeCost(recipe, recipes)
+        const yieldQty = parseFloat(recipe.yield_qty) || 1
+        lines.push(`⚙ ${recipe.name} — NPR ${(cost / yieldQty).toFixed(2)} / ${recipe.yield_uom}`)
+      })
+    } else {
+      tabFiltered.forEach(recipe => {
+        const cost = calcRecipeCost(recipe, recipes)
+        const price = parseFloat(recipe.selling_price) || 0
+        const fcPct = price > 0 ? (cost / price) * 100 : null
+        lines.push(`${recipe.name} — FC ${fcPct != null ? fcPct.toFixed(1) + '%' : '—'} (NPR ${cost.toFixed(2)}${price ? ` / NPR ${price.toFixed(2)}` : ''})`)
+      })
+    }
+    return lines.join('\n').trim()
+  }
+
+  // No phone number in the wa.me URL — general "share to whoever" action, WhatsApp opens its
+  // own contact/group picker (same convention as ReorderReport's share).
+  function shareRecipesWhatsApp() {
+    window.open(`https://wa.me/?text=${encodeURIComponent(buildRecipeWhatsAppText())}`, '_blank', 'noopener,noreferrer')
+  }
+
   return (
     <div>
       {/* Header */}
@@ -723,6 +751,9 @@ export default function Recipes() {
               placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} />
             <RecipeImportButton items={items} subRecipes={subRecipes} recipes={recipes} clientId={clientId} scopedInsert={scopedInsert} onImported={init} isAdmin={isAdmin} />
             <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)}>🖶 Print</button>
+            <Tip text="Opens WhatsApp with the current tab's recipe list (name, food cost, FC%) pre-filled as a text message — pick a category tab first to share just that category, then choose a contact or group to send it to." width={280}>
+              <button className="btn btn-ghost" onClick={shareRecipesWhatsApp} disabled={tabFiltered.length === 0}>📱 Share via WhatsApp</button>
+            </Tip>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Tip text="Find every recipe that uses an ingredient — e.g. type 'milk' to list all dishes containing it. Also matches ingredients hidden inside sub-recipes (e.g. 'coffee' finds a Flat White via its Doppio)." width={300}>
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>ⓘ</span>
