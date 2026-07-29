@@ -150,6 +150,20 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S478 — 2026-07-29 — App-wide primary font switched to Poppins
+
+Requested directly: swap the app's primary typeface to Poppins. Researched the existing setup first — there was no `--font-family` CSS variable anywhere (unlike the color system's `--theme-*` tokens or the closed-set `--font-size-*` scale in `Layout.css`); the single entry point was a literal `font-family` list on `body` in `src/index.css`, inherited app-wide via the `font-family: inherit` rules scattered across `Layout.css`'s buttons/inputs. No Google Font was loaded anywhere before this.
+
+Added Poppins via `public/index.html` (`<link rel="preconnect">` ×2 + the `fonts.googleapis.com/css2` stylesheet, weights 400/500/600/700 plus italic 400 — the weights actually used by the existing type scale), then changed `src/index.css`'s `body` rule to lead with `'Poppins'`, keeping the entire original system-font stack as the fallback chain if the webfont ever fails to load. Bumped `service-worker.js`'s `CACHE_NAME` to `crest-v40` per the standing rule (CLAUDE.md) that a plain deploy doesn't reach already-cached users otherwise — this change specifically added a new `<link>` tag to the cached `index.html` shell, so without the bump existing users would never even request the font.
+
+Deliberately left untouched, per `DESIGN.md`'s existing "One Serif Rule": the Georgia serif wordmark (`Layout.css`'s `.sidebar-brand-name`, `Login.css`'s `.login-brand-name`) — the user asked for the *primary* font, and the rule already frames the serif as a one-off signature, not part of the typographic system. Also left the POS/HR thermal-receipt print templates (`posOrderPrintHtml.js`, `creditNoteHtml.js`, `parkingSlipHtml.js`, `PosShifts.jsx`'s shift-report print) on `Courier New` monospace — those build fully standalone HTML documents in a separate print window, outside the app's own CSS cascade entirely.
+
+Updated `DESIGN.md`'s `typography.body`/`typography.label` frontmatter and the "Body Font" prose line to name Poppins as the documented system font. Checked `.impeccable/design.json`'s sidecar — it carries no `fontFamily` values (only display names/purposes per token), so it needed no update; skipped a full `/impeccable document` rescan since nothing in the sidecar's schema was actually stale.
+
+Verified live via Playwright: `getComputedStyle(document.body).fontFamily` resolves to Poppins first, `document.fonts` shows the four real weights (400/500/600/700, normal style) as `status: "loaded"`, and screenshots of both the Dashboard and Login page confirm Poppins rendering on all body copy/labels/buttons while the wordmark stays Georgia serif as designed.
+
+**Files:** `public/index.html`, `src/index.css`, `public/service-worker.js`, `DESIGN.md`
+
 ### S477 — 2026-07-28 — `explodeRecipeIngredients()` double-counted a shared sub-recipe's ingredients whenever the caller's own seed list included it
 
 S475's `pos_comp` fix was real (kept) but didn't explain the reported mismatch — verified live after deploy: Acai Powder's Dashboard number didn't move at all, meaning its recipes have no comp sales this period. Reopened the investigation with per-recipe debug logging (`[UsageDebug]`, plain `console.log` lines this time, not a table, after the previous round's cropped/truncated screenshots proved unreliable to read precisely) on both pages, filtered to whichever item's name matched a search string — asked the user to paste the raw lines back rather than a screenshot of a UI.

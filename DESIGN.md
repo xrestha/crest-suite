@@ -55,13 +55,13 @@ typography:
     lineHeight: 1.2
     letterSpacing: "0.04em"
   body:
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif"
+    fontFamily: "'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif"
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "normal"
   label:
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif"
+    fontFamily: "'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif"
     fontSize: "11px"
     fontWeight: 500
     lineHeight: 1.4
@@ -187,10 +187,10 @@ The palette is a dark charcoal neutral scale with a single warm accent; every ot
 ## 3. Typography
 
 **Display Font:** Georgia, serif (fallback: serif) - reserved for the wordmark only.
-**Body Font:** -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, sans-serif.
+**Body Font:** Poppins (Google Font, weights 400/500/600/700 + italic 400), falling back to -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, sans-serif if the webfont fails to load.
 **Label/Mono Font:** none distinct; labels use the body stack at a smaller size and wider tracking instead of a separate typeface.
 
-**Character:** A restrained system sans for every working surface, broken exactly once by a serif wordmark. The serif is a signature, not a typographic system - it never appears on a second element.
+**Character:** A restrained geometric sans for every working surface, broken exactly once by a serif wordmark. The serif is a signature, not a typographic system - it never appears on a second element.
 
 ### Hierarchy
 - **Display** (700, 16-20px depending on placement, line-height 1.2, letter-spacing 0.04em, Georgia serif): the "Crest" wordmark only - sidebar brand mark and the login screen. Nowhere else.
