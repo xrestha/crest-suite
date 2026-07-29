@@ -105,58 +105,91 @@ export default function Login() {
     <div className="login-root">
       <div className="login-split">
 
-        {/* ── Left: Trial signup ── */}
-        <div className="login-left">
-          <div className="login-brand" style={{ justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-              <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />
-              <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
+        <div className="login-top">
+          {/* ── Left: Pitch ── */}
+          <div className="login-left">
+            <div className="login-brand" style={{ justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />
+                <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
+              </div>
+              <button
+                onClick={() => navigate('/pricing')}
+                className="login-btn login-btn--trial"
+                style={{ padding: '7px 16px', fontSize: 12, marginTop: 0 }}>
+                View Pricing →
+              </button>
             </div>
-            <button
-              onClick={() => navigate('/pricing')}
-              className="login-btn login-btn--trial"
-              style={{ padding: '7px 16px', fontSize: 12, marginTop: 0 }}>
-              View Pricing →
+
+            <div className="login-pitch">
+              <div className="login-pitch-headline">Smarter menus. Better margins.</div>
+              <div className="login-pitch-sub">Built for Nepal's F&amp;B industry.</div>
+            </div>
+
+            <ul className="login-highlights">
+              {HIGHLIGHTS.map((text, i) => (
+                <li key={i}>
+                  <span className="login-highlight-bullet" />
+                  <span>{text}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* ── Divider ── */}
+          <div className="login-vdivider" />
+
+          {/* ── Right: Sign in ── */}
+          <div className="login-right">
+            <h1 className="login-heading">Welcome back</h1>
+            <p className="login-sub">Sign in to your account</p>
+            <form onSubmit={handleSignIn} className="login-form">
+              <div className="login-field">
+                <label htmlFor="signin-email">Email</label>
+                <input id="signin-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus={!startOnTrial} />
+              </div>
+              <div className="login-field">
+                <label htmlFor="signin-password">Password</label>
+                <input
+                  id="signin-password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  value={password} onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••" required />
+                <label className="login-show-pw">
+                  <input type="checkbox" checked={showPassword} onChange={e => setShowPassword(e.target.checked)} />
+                  Show password
+                </label>
+              </div>
+              {error && <p className="login-error">{error}</p>}
+              <button type="submit" className="login-btn" disabled={loading}>
+                {loading ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
+            <button type="button" className="login-staff-btn" onClick={() => navigate('/pos/login')}>
+              Staff Login →
             </button>
           </div>
+        </div>
 
-          <div className="login-pitch">
-            <div className="login-pitch-headline">Smarter menus. Better margins.</div>
-            <div className="login-pitch-sub">Built for Nepal's F&amp;B industry.</div>
-          </div>
-
-          <ul className="login-highlights">
-            {HIGHLIGHTS.map((text, i) => (
-              <li key={i}>
-                <span className="login-highlight-bullet" />
-                <span>{text}</span>
-              </li>
-            ))}
-          </ul>
-
+        {/* ── Trial signup: one full-width block below both columns, so the whole form reads
+            left-to-right in a single continuous flow instead of being split by the vertical
+            divider above. ── */}
+        <div className="login-hdivider" />
+        <div className="login-trial-block">
           <div className="login-divider-label">Start your free trial</div>
 
           {trialSuccess ? (
             <div style={{ padding: '16px', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--theme-green)', lineHeight: 1.6 }}>
-              Account created! Sign in on the right with your email and password.
+              Account created! Sign in above with your email and password.
             </div>
           ) : (
             <form onSubmit={handleTrialSignup} className="login-form">
-              <div className="login-field">
-                <label htmlFor="trial-biz">Business Name *</label>
-                <input id="trial-biz" value={tBiz} onChange={e => setTBiz(e.target.value)} placeholder="e.g. Sunrise Café" autoFocus={startOnTrial} />
-              </div>
-              <div className="login-2col">
+              <div className="login-row-top">
                 <div className="login-field">
-                  <label htmlFor="trial-name">Your Name <span className="login-optional">(optional)</span></label>
-                  <input id="trial-name" value={tName} onChange={e => setTName(e.target.value)} placeholder="e.g. Ramesh Shrestha" />
+                  <label htmlFor="trial-biz">Business Name *</label>
+                  <input id="trial-biz" value={tBiz} onChange={e => setTBiz(e.target.value)} placeholder="e.g. Sunrise Café" autoFocus={startOnTrial} />
                 </div>
-                <div className="login-field">
-                  <label htmlFor="trial-phone">Phone *</label>
-                  <input id="trial-phone" type="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="98XXXXXXXX" />
-                </div>
-              </div>
-              <div className="login-2col">
                 <div className="login-field">
                   <label htmlFor="trial-email">Email *</label>
                   <input id="trial-email" type="email" autoComplete="email" value={tEmail} onChange={e => setTEmail(e.target.value)} placeholder="you@restaurant.com" />
@@ -165,53 +198,28 @@ export default function Login() {
                   <label htmlFor="trial-password">Password *</label>
                   <input id="trial-password" type={tShowPass ? 'text' : 'password'} autoComplete="new-password" value={tPass} onChange={e => setTPass(e.target.value)} placeholder="Min. 6 characters" />
                 </div>
+                <label className="login-show-pw login-show-pw--inline">
+                  <input type="checkbox" checked={tShowPass} onChange={e => setTShowPass(e.target.checked)} />
+                  Show password
+                </label>
               </div>
-              <label className="login-show-pw">
-                <input type="checkbox" checked={tShowPass} onChange={e => setTShowPass(e.target.checked)} />
-                Show password
-              </label>
+              <div className="login-row-second">
+                <div className="login-field">
+                  <label htmlFor="trial-name">Your Name <span className="login-optional">(optional)</span></label>
+                  <input id="trial-name" value={tName} onChange={e => setTName(e.target.value)} placeholder="e.g. Ramesh Shrestha" />
+                </div>
+                <div className="login-field">
+                  <label htmlFor="trial-phone">Phone *</label>
+                  <input id="trial-phone" type="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="98XXXXXXXX" />
+                </div>
+                <button type="submit" className="login-btn login-btn--trial login-btn--inline" disabled={tLoading}>
+                  {tLoading ? 'Creating your account…' : 'Start Free Trial →'}
+                </button>
+              </div>
               {tError && <p className="login-error">{tError}</p>}
-              <button type="submit" className="login-btn login-btn--trial" disabled={tLoading}>
-                {tLoading ? 'Creating your account…' : 'Start Free Trial →'}
-              </button>
               <p className="login-trial-note">7-day free trial · Starter plan · No credit card needed</p>
             </form>
           )}
-        </div>
-
-        {/* ── Divider ── */}
-        <div className="login-vdivider" />
-
-        {/* ── Right: Sign in ── */}
-        <div className="login-right">
-          <h1 className="login-heading">Welcome back</h1>
-          <p className="login-sub">Sign in to your account</p>
-          <form onSubmit={handleSignIn} className="login-form">
-            <div className="login-field">
-              <label htmlFor="signin-email">Email</label>
-              <input id="signin-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus={!startOnTrial} />
-            </div>
-            <div className="login-field">
-              <label htmlFor="signin-password">Password</label>
-              <input
-                id="signin-password"
-                type={showPassword ? 'text' : 'password'}
-                autoComplete="current-password"
-                value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••" required />
-              <label className="login-show-pw">
-                <input type="checkbox" checked={showPassword} onChange={e => setShowPassword(e.target.checked)} />
-                Show password
-              </label>
-            </div>
-            {error && <p className="login-error">{error}</p>}
-            <button type="submit" className="login-btn" disabled={loading}>
-              {loading ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
-          <button type="button" className="login-staff-btn" onClick={() => navigate('/pos/login')}>
-            Staff Login →
-          </button>
         </div>
 
       </div>

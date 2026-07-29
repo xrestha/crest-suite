@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S481 — 2026-07-29 — Login page: trial signup form condensed into one full-width block
+
+Follow-up to the earlier-reverted "trust footer" attempt at closing the right column's empty space below Staff Login (see S479's session — that fix was undone, not this one). This time driven by explicit, iterative layout instructions rather than an open-ended redesign: (1) put Email/Password/the Show-password checkbox on the same row as Business Name; (2) put Start Free Trial on the same row as Your Name/Phone; (3) after seeing that split the form across the vertical divider into two separately-headed halves ("Start your free trial" left, "Finish your free trial" right, screenshotted mid-iteration), pull the whole thing back into one unified block instead.
+
+Landed structure: `.login-split` is now a column (`.login-top` row + a new full-bleed `.login-hdivider` + a new `.login-trial-block`) instead of the old single flex row — `.login-top` holds the original two columns (pitch-only on the left now, sign-in-only on the right, both notably shorter with the trial form removed from both), and `.login-trial-block` is the entire trial signup form as one `<form>`, full card width, two internal rows (`.login-row-top`: Business Name/Email/Password/Show password; `.login-row-second`: Your Name/Phone/Start Free Trial — both CSS grids with `align-items: end` so the label-less checkbox/button sit flush with the bottom of their row's inputs, not the top). This incidentally fixed the truncated-placeholder look from the mid-iteration screenshot too ("you@restaurant" clipping) — full block width gives each field far more room than either column alone could.
+
+Net effect on the original ask: the two top columns are now much closer in height on their own (neither carries the trial form's extra height), and the trial block adds a shared, symmetric amount of height below both — closing the imbalance from a different angle than the reverted S479 attempt, without touching either column's actual content.
+
+Both intermediate states were verified live (Playwright) before the final pass, plus the final one at three widths (1400px desktop, 700px/420px mobile — `.login-row-top`/`.login-row-second` collapse to 1 column at 750px, `.login-top` stacks sign-in-first via `flex-direction: column-reverse` at 640px, matching the pre-existing mobile-priority convention) and a functional check (filled fields across both rows, toggled Show password, submitted with Phone blank to confirm the existing client-side validation and error message still render correctly under the new markup — no changes were needed to `handleSignIn`/`handleTrialSignup` themselves, this was a pure markup/CSS restructure).
+
+**Files:** `src/pages/Login.js`, `src/pages/Login.css`, `public/service-worker.js` (`crest-v43`)
+
 ### S480 — 2026-07-29 — Row-select checkboxes for Print/Export/Share on Recipe Costing and Reorder Report
 
 Requested directly, as a follow-up to S479: "a checkbox beside the recipe item in the left side to select the recipe items to print, export or share via whatsapp — same in the reorder report as well." Followed the codebase's existing bulk-select convention (`OutstandingPayables.js`'s `selectedBills` Set + `toggleSelectBill`/`toggleSelectKeys` pair) rather than inventing a new pattern — same naming shape (`toggleSelectRecipe`/`toggleSelectRecipes` on Recipe Costing, `toggleSelectItem`/`toggleSelectItems` on Reorder Report), same "selection persists across tab/filter changes, only an explicit Clear button resets it" behavior (confirmed live in `OutstandingPayables.js`: nothing there clears `selectedBills` on tab switch either).

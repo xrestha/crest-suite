@@ -7,9 +7,10 @@
   padding: 16px;
 }
 
-/* ── Two-column card ── */
+/* ── Card ── */
 .login-split {
   display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 1020px;
   background: var(--theme-card, #181c27);
@@ -17,6 +18,11 @@
   border-radius: var(--radius-xl, 24px);
   box-shadow: var(--theme-card-shadow, 0 4px 40px rgba(0,0,0,0.35));
   overflow: hidden;
+}
+
+/* ── Two-column top: pitch (left) vs sign-in (right) ── */
+.login-top {
+  display: flex;
 }
 
 .login-left {
@@ -38,6 +44,18 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+}
+
+/* ── Trial signup: one full-width block below the two-column top, so the whole form reads as a
+   single left-to-right flow instead of being split by .login-vdivider above. ── */
+.login-hdivider {
+  height: 1px;
+  background: var(--theme-border, #2a2f3d);
+  flex-shrink: 0;
+}
+
+.login-trial-block {
+  padding: 20px 30px 24px;
 }
 
 /* ── Brand ── */
@@ -121,10 +139,35 @@
   gap: 8px;
 }
 
-.login-2col {
+/* Trial signup form's top row (Business Name/Email/Password/Show password) — condensed
+   (2026-07-29) so the left column's height stops dwarfing the sign-in column on the right.
+   Grid's `end`-aligned tracks let the no-label checkbox sit flush with the bottom of the row's
+   inputs instead of the top. */
+.login-row-top {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1.3fr 1.3fr 1.1fr auto;
   gap: 10px;
+  align-items: end;
+}
+
+.login-show-pw--inline {
+  white-space: nowrap;
+  padding-bottom: 8px;
+}
+
+/* Trial signup form's second row (Your Name/Phone/Start Free Trial) — same `end`-aligned-grid
+   treatment as .login-row-top, so the label-less button sits flush with the bottom of the row's
+   inputs. */
+.login-row-second {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.login-btn--inline {
+  margin-top: 0;
+  white-space: nowrap;
 }
 
 .login-field {
@@ -272,20 +315,21 @@
   background: color-mix(in srgb, var(--theme-purple, #8b5cf6) 20%, var(--theme-input-bg, #0f1117));
 }
 
-/* ── Just above the mobile breakpoint, the 2-col field grid (Your Name/Phone,
-   Email/Password) gets too narrow for its own placeholder text ("you@restaurant.com",
-   "e.g. Ramesh Shrestha" visibly clip in the ~641-750px range) before .login-split
-   itself collapses to a single column at 640px below. Collapse just this sub-grid
+/* ── Just above the mobile breakpoint, the trial-form rows (Business Name/Email/Password/Show
+   password, then Your Name/Phone/Start Free Trial) get too narrow for their own placeholder text
+   ("you@restaurant.com", "e.g. Ramesh Shrestha" visibly clip in the ~641-750px range) before
+   .login-top itself collapses to a single column at 640px below. Collapse just these sub-grids
    earlier so there's no pinch zone between the two breakpoints. ── */
 @media (max-width: 750px) {
-  .login-2col {
+  .login-row-top,
+  .login-row-second {
     grid-template-columns: 1fr;
   }
 }
 
 /* ── Mobile: stack vertically ── */
 @media (max-width: 640px) {
-  .login-split {
+  .login-top {
     flex-direction: column-reverse;
   }
 
@@ -295,11 +339,13 @@
   }
 
   .login-left,
-  .login-right {
+  .login-right,
+  .login-trial-block {
     padding: 28px 20px;
   }
 
-  .login-2col {
+  .login-row-top,
+  .login-row-second {
     grid-template-columns: 1fr;
   }
 }
