@@ -1,4 +1,5 @@
 import { calcAmount, tallyAttendance, hourlyRateOf, computePayslip } from './payrollCompute'
+import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 
 describe('calcAmount', () => {
   test('percent_of_basic computes a share of basic salary', () => {
@@ -114,6 +115,46 @@ describe('computePayslip — monthly basis', () => {
     const slip = computePayslip(employee, [], [{ status: 'half_unpaid_leave' }], period)
     expect(slip.absence_deduction).toBe(500) // 0.5 day's share of gross
     expect(slip.net_pay).toBe(30500)
+  })
+
+  test('employee with no join_date is unaffected (existing behavior)', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 30000, ssf_enrolled: false }
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.breakdown.preJoinDays).toBe(0)
+    expect(slip.absence_deduction).toBe(0)
+  })
+
+  test('employee who joined before this period is paid in full', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 30000, ssf_enrolled: false, join_date: formatAd(bsToAd(2081, 12, 1)) }
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.breakdown.preJoinDays).toBe(0)
+    expect(slip.absence_deduction).toBe(0)
+    expect(slip.net_pay).toBe(30000)
+  })
+
+  test('employee whose join date falls entirely after this period gets zero net pay, not a full month', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 30000, ssf_enrolled: false, join_date: formatAd(bsToAd(2082, 2, 1)) } // next BS month
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.gross).toBe(30000)              // contractual gross is still shown
+    expect(slip.breakdown.preJoinDays).toBe(31) // every day of this 31-day period predates joining
+    expect(slip.absence_deduction).toBe(30000)  // fully forfeited
+    expect(slip.net_pay).toBe(0)
+  })
+
+  test('mid-period joiner is paid only from their join date onward', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false, join_date: formatAd(bsToAd(2082, 1, 16)) } // 1000/day
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.breakdown.preJoinDays).toBe(15) // days 1-15 predate joining
+    expect(slip.absence_deduction).toBe(15000)
+    expect(slip.net_pay).toBe(16000)
+  })
+
+  test('pre-join days combine additively with attendance-marked absence after joining', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false, join_date: formatAd(bsToAd(2082, 1, 11)) } // 1000/day, 10 pre-join days
+    const slip = computePayslip(employee, [], [{ status: 'absent' }], period)
+    expect(slip.breakdown.unpaidDays).toBe(11) // 10 pre-join + 1 attendance-marked absent
+    expect(slip.absence_deduction).toBe(11000)
+    expect(slip.net_pay).toBe(20000)
   })
 })
 

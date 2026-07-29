@@ -1,6 +1,6 @@
 // Pure payroll computation — no React, no Supabase. Reused by the payroll
 // register and the payslip view. See memory: nepal-payroll-law.
-import { daysInBsMonth } from '../../../utils/bsCalendar'
+import { daysInBsMonth, bsToAd } from '../../../utils/bsCalendar'
 import {
   SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT,
   OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY,
@@ -35,6 +35,25 @@ export function hourlyRateOf(basis, basic, monthDays) {
   if (basis === 'hourly') return basic
   if (basis === 'daily')  return basic / STANDARD_HOURS_PER_DAY
   return monthDays > 0 ? basic / (monthDays * STANDARD_HOURS_PER_DAY) : 0
+}
+
+// Days within this BS period that fall before the employee's join date — folded into unpaidDays
+// below so a newly hired employee (or one who joins mid-period) is paid only for days they've
+// actually been employed, not a full contractual month. Attendance rows can't exist for days
+// before an employee's record was even created, so without this a monthly employee joining after
+// (or partway through) a period would otherwise draw full basic + allowances for days they never
+// worked — daily/hourly staff don't have this gap since their pay is derived from attendance rows
+// directly, which are naturally absent for pre-join days.
+function daysNotYetJoined(joinDateStr, period, monthDays) {
+  if (!joinDateStr) return 0
+  const [jy, jm, jd] = joinDateStr.split('-').map(Number)
+  if (!jy || !jm || !jd) return 0
+  const join = new Date(jy, jm - 1, jd)
+  let count = 0
+  for (let d = 1; d <= monthDays; d++) {
+    if (bsToAd(period.bs_year, period.bs_month, d) < join) count++
+  }
+  return count
 }
 
 // Compute OT amount from approved hr_overtime_entries rows.
@@ -116,7 +135,8 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     const allowances  = earnings.reduce((s, c)   => s + calcAmount(c, basic), 0)
     const otherDed    = deductions.reduce((s, c) => s + calcAmount(c, basic), 0)
     const gross       = basic + allowances
-    const unpaidDays  = t.absent + t.unpaid_leave + t.half_day * 0.5 + t.half_unpaid_leave * 0.5
+    const preJoinDays = daysNotYetJoined(employee.join_date, period, monthDays)
+    const unpaidDays  = t.absent + t.unpaid_leave + t.half_day * 0.5 + t.half_unpaid_leave * 0.5 + preJoinDays
     // Unpaid days forfeit the whole day's pay — allowances included, not just the basic
     // portion (otherwise a full-month absence would still pay full allowances).
     const perDay      = monthDays > 0 ? gross / monthDays : 0
@@ -137,7 +157,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
       ssf_employee:      ssfEmp,
       ssf_employer:      ssfEmpr,
       net_pay: gross + otAmount - absenceDed - ssfEmp - otherDed - tdsVal - advDed,
-      breakdown: { basis, monthDays, tally: t, hourlyRate: hr, gross, unpaidDays, perDay, paidFraction, ssfBase, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount },
+      breakdown: { basis, monthDays, tally: t, hourlyRate: hr, gross, unpaidDays, perDay, paidFraction, ssfBase, preJoinDays, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount },
     }
   }
 

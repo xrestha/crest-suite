@@ -74,7 +74,7 @@ export default function PayrollRun() {
       { data: advs },   { data: reps },
     ] = await Promise.all([
       scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle(),
-      scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status')
+      scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('hr_salary_components'),
       scopedFrom('hr_attendance').eq('period_id', periodId),

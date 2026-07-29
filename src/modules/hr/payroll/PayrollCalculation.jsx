@@ -95,6 +95,7 @@ function CalcDetail({ row, monthDays, advances }) {
             <Line label="Unpaid Leave Days" op="+" value={t.unpaid_leave || 0} />
             <Line label="Half-day × 0.5" op="+" value={((t.half_day || 0) * 0.5).toFixed(2)} />
             <Line label="Half-day Unpaid Leave × 0.5" op="+" value={((t.half_unpaid_leave || 0) * 0.5).toFixed(2)} />
+            {b.preJoinDays > 0 && <Line label="Not Yet Joined Days" op="+" value={b.preJoinDays} hint="Days this period before the employee's join date" />}
             <Line label="Unpaid Days" op="=" value={`${b.unpaidDays.toFixed(2)} days`} strong />
             <Line label="Gross" value={`NPR ${fmt(b.gross)}`} />
             <Line label="Days in Month" op="÷" value={monthDays} />
@@ -223,7 +224,7 @@ export default function PayrollCalculation() {
       { data: emps }, { data: comps }, { data: att }, { data: ot },
       { data: advs }, { data: reps }, { data: runRow },
     ] = await Promise.all([
-      scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status')
+      scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('hr_salary_components'),
       scopedFrom('hr_attendance').eq('period_id', p.id),
@@ -288,11 +289,15 @@ export default function PayrollCalculation() {
     const tadaAmount = Math.round(tada.total)
     const netPay = slip.net_pay - tdsBreakdown.tds + tadaAmount
     const stored = payslipByEmp[emp.id]
-    const stale = stored && Math.round(stored.net_pay) !== Math.round(netPay)
-    return { emp, comps, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay, stored, stale }
+    // Distinct from `stale` below — a run exists but never picked up this employee at all (added
+    // after the last Generate/Regenerate). Gated on `run` so "no run yet" doesn't itself flag every
+    // employee as missing; that case is its own runStatusLabel branch.
+    const missing = !!run && !stored
+    const stale = !!stored && Math.round(stored.net_pay) !== Math.round(netPay)
+    return { emp, comps, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay, stored, stale, missing }
   }) : []
 
-  const flaggedCount = rows.filter(r => r.slip.breakdown.otDoubleCountRisk || r.stale).length
+  const flaggedCount = rows.filter(r => r.slip.breakdown.otDoubleCountRisk || r.stale || r.missing).length
   const totalGross = rows.reduce((s, r) => s + r.slip.gross, 0)
   const totalNet   = rows.reduce((s, r) => s + r.netPay, 0)
   const totals = rows.reduce((a, r) => {
@@ -345,7 +350,7 @@ export default function PayrollCalculation() {
             {[
               { label: 'Total Gross',       value: `NPR ${fmt(totalGross)}`, color: 'var(--theme-accent)', tip: 'Sum of live-computed gross across all employees this period.' },
               { label: 'Total Net Pay',     value: `NPR ${fmt(totalNet)}`,   color: 'var(--theme-green)',  tip: 'Sum of live-computed net pay — compare against Payroll Run\'s Net Payable.' },
-              { label: 'Flagged for Review', value: flaggedCount, color: flaggedCount > 0 ? 'var(--theme-amber)' : 'var(--theme-text2)', tip: 'Employees with an OT-in-two-places risk, or whose stored Payroll payslip no longer matches this live calculation.' },
+              { label: 'Flagged for Review', value: flaggedCount, color: flaggedCount > 0 ? 'var(--theme-amber)' : 'var(--theme-text2)', tip: 'Employees with an OT-in-two-places risk, whose stored Payroll payslip no longer matches this live calculation, or who have no payslip in the run at all.' },
               { label: 'Payroll Run Status', value: runStatusLabel, color: 'var(--theme-text1)', tip: 'Whether a Payroll run exists for this period, and whether it still matches what\'s computed here.' },
             ].map(s => (
               <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
@@ -377,7 +382,7 @@ export default function PayrollCalculation() {
                 </thead>
                 <tbody>
                   {rows.map(row => {
-                    const { emp, slip, tdsBreakdown, advDed, tadaAmount, netPay, stored, stale } = row
+                    const { emp, slip, tdsBreakdown, advDed, tadaAmount, netPay, stored, stale, missing } = row
                     const expanded = expandedId === emp.id
                     return (
                       <Fragment key={emp.id}>
@@ -390,6 +395,11 @@ export default function PayrollCalculation() {
                               {slip.breakdown.otDoubleCountRisk && (
                                 <Tip text="OT recorded in TWO places for this employee — attendance sheet AND approved Overtime entries. Both are paid." width={280}>
                                   <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-amber)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>⚠ OT ×2?</span>
+                                </Tip>
+                              )}
+                              {missing && (
+                                <Tip text="This employee has no payslip in the current Payroll run for this period — Regenerate to include them before finalizing." width={280}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-red)', background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>⚠ Missing</span>
                                 </Tip>
                               )}
                               {stale && (
