@@ -1253,6 +1253,10 @@ textarea:focus-visible {
   .badge { border: 1px solid #ccc !important; color: black !important; background: white !important; }
   input { background: white !important; color: black !important; border: 1px solid #ccc !important; }
   .no-print { display: none !important; }
+  /* Row-level checkbox selection (Recipe Costing, Reorder Report) — when at least one row is
+     checked, everything else gets this class so Print only outputs the checked subset. Only
+     takes effect under print; on-screen the same rows render normally regardless. */
+  .print-hide-row { display: none !important; }
   .print-sheet-header { display: block !important; margin-bottom: 16px; }
   .print-sheet-header h2,
   .print-sheet-header p { color: black !important; }

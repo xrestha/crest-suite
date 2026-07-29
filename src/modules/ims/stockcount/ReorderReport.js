@@ -32,6 +32,27 @@ export default function ReorderReport() {
   // would print together no matter which button was clicked.
   const [printMode, setPrintMode] = useState(null)
 
+  // Row-select checkboxes (Print Reorder List/Share via WhatsApp/Export scope to just these when
+  // non-empty) — same Set + toggle-pair convention as OutstandingPayables.js's selectedBills.
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+
+  function toggleSelectItem(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectItems(ids) {
+    setSelectedIds(prev => {
+      const allSelected = ids.length > 0 && ids.every(id => prev.has(id))
+      const next = new Set(prev)
+      ids.forEach(id => allSelected ? next.delete(id) : next.add(id))
+      return next
+    })
+  }
+
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
@@ -194,9 +215,15 @@ export default function ReorderReport() {
   // on-screen status filter (a list handed to staff to go buy is never useful with "OK" items
   // mixed in), but still respects Category/search so a client can scope it (e.g. "just Meats &
   // Poultry today"). Sorted by category then name for a predictable, groupable printout.
-  const reorderPrintRows = rows
+  const reorderPrintRowsAll = rows
     .filter(r => r.needsReorder && (filterCat === 'all' || r.category === filterCat) && r.item.name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => a.category.localeCompare(b.category) || a.item.name.localeCompare(b.item.name))
+
+  // Print Reorder List / Share via WhatsApp / Export Excel all narrow to just the checked rows
+  // once any are checked (still within reorderPrintRowsAll's own reorder-only/Category/Search
+  // scope for the first two — checking an "OK" item under Status: All simply has no effect on
+  // those, exactly like the on-screen Status filter already doesn't), else behave as before.
+  const reorderPrintRows = selectedIds.size > 0 ? reorderPrintRowsAll.filter(r => selectedIds.has(r.item.id)) : reorderPrintRowsAll
   const reorderPrintGroups = Object.values(
     reorderPrintRows.reduce((acc, r) => {
       (acc[r.category] = acc[r.category] || { category: r.category, items: [] }).items.push(r)
@@ -234,7 +261,8 @@ export default function ReorderReport() {
   }
 
   function exportExcel() {
-    const data = filtered.map(r => ({
+    const exportRows = selectedIds.size > 0 ? filtered.filter(r => selectedIds.has(r.item.id)) : filtered
+    const data = exportRows.map(r => ({
       'Item': r.item.name,
       'Code': r.item.item_code || '',
       'Category': r.category,
@@ -282,16 +310,24 @@ export default function ReorderReport() {
           <p className="page-subtitle">Items below par level — auto purchase list — {periodLabel}</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Tip text="Prints the actual purchase list — items at/below par, grouped by category, with qty to order and estimated value (respects the Category/Search filters above, always Reorder-only regardless of the Status filter)." width={270}>
+          <Tip text="Prints the actual purchase list — items at/below par, grouped by category, with qty to order and estimated value (respects the Category/Search filters above, always Reorder-only regardless of the Status filter). Check specific rows in the table below first to print just those." width={280}>
             <button className="btn btn-ghost" onClick={printReorderList} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>🖨 Print Reorder List</button>
           </Tip>
-          <Tip text="Opens WhatsApp with the same purchase list pre-filled as a text message — pick a contact or group to send it to." width={250}>
+          <Tip text="Opens WhatsApp with the same purchase list pre-filled as a text message — pick a contact or group to send it to. Respects the same row checkboxes as Print Reorder List." width={270}>
             <button className="btn btn-ghost" onClick={shareReorderListWhatsApp} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>📱 Share via WhatsApp</button>
           </Tip>
-          <Tip text="Prints a blank par-level sheet (grouped by category, respecting the Category/Search filters above) for staff to fill in by hand — enter the values back into the Par Level column here afterward." width={260}>
+          <Tip text="Prints a blank par-level sheet (grouped by category, respecting the Category/Search filters above) for staff to fill in by hand — enter the values back into the Par Level column here afterward. Not affected by row checkboxes — always the full filtered list." width={280}>
             <button className="btn btn-ghost" onClick={() => { setPrintMode('par'); setTimeout(() => { printWithTitle(`Par Level Sheet - ${periodLabel}`); setPrintMode(null) }, 80) }} style={{ fontSize: 12 }}>🖨 Print Par Sheet</button>
           </Tip>
-          <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
+          <Tip text="Exports the current Category/Status/Search view to Excel — or just the checked rows, if any are checked." width={260}>
+            <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
+          </Tip>
+          {selectedIds.size > 0 && (
+            <span style={{ fontSize: 12, color: 'var(--theme-accent)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              {selectedIds.size} selected
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
+            </span>
+          )}
           <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>)}
           </select>
@@ -374,6 +410,14 @@ export default function ReorderReport() {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th style={{ width: 28 }}>
+                    <Tip text="Check specific items to limit Print Reorder List, Share via WhatsApp and Export Excel to just these — leave none checked to include the whole filtered list." width={270}>
+                      <input type="checkbox"
+                        checked={filtered.length > 0 && filtered.every(r => selectedIds.has(r.item.id))}
+                        onChange={() => toggleSelectItems(filtered.map(r => r.item.id))}
+                        aria-label="Select all filtered items" />
+                    </Tip>
+                  </th>
                   <th>Item</th><th>Category</th><th>UOM</th>
                   <th style={{ textAlign: 'right' }}><Tip text="Minimum stock you want on hand at all times. Set this per item — when stock falls to or below par, a reorder is triggered." width={240}>Par Level</Tip></th>
                   <th style={{ textAlign: 'right' }}>Current Stock</th>
@@ -392,6 +436,10 @@ export default function ReorderReport() {
                     const isSaving  = savingPar[row.item.id]
                     return (
                       <tr key={row.item.id} style={{ background: row.needsReorder ? 'rgba(248,113,113,0.03)' : 'transparent' }}>
+                        <td>
+                          <input type="checkbox" checked={selectedIds.has(row.item.id)} onChange={() => toggleSelectItem(row.item.id)}
+                            aria-label={`Select ${row.item.name}`} />
+                        </td>
                         <td>
                           <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.item.name}</div>
                           {row.item.item_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{row.item.item_code}</div>}
@@ -461,7 +509,7 @@ export default function ReorderReport() {
               {reorderCount > 0 && filterStatus === 'reorder' && (
                 <tfoot>
                   <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                    <td colSpan={8} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total estimated purchase needed</td>
+                    <td colSpan={9} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total estimated purchase needed</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', fontSize: 15, paddingTop: 12 }}>
                       NPR {totalShortfallValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
                     </td>

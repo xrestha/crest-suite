@@ -642,6 +642,30 @@ export default function Recipes() {
   // ── Tab state ─────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState('all')
 
+  // Row-select checkboxes (Print/Share via WhatsApp/Export scope to just these when non-empty) —
+  // same Set + toggle-pair convention as OutstandingPayables.js's selectedBills. Deliberately not
+  // cleared on tab switch (matches that convention too): a recipe checked in Food stays checked
+  // if you flip to Beverage, it's just not rendered there — Export (admin, JS-built) still counts
+  // it since it isn't tied to the live DOM the way Print/Share are.
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+
+  function toggleSelectRecipe(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectRecipes(ids) {
+    setSelectedIds(prev => {
+      const allSelected = ids.length > 0 && ids.every(id => prev.has(id))
+      const next = new Set(prev)
+      ids.forEach(id => allSelected ? next.delete(id) : next.add(id))
+      return next
+    })
+  }
+
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   // ── Filtered list ─────────────────────────────────────────────
@@ -693,19 +717,27 @@ export default function Recipes() {
 
   const activeTabLabel = (tabs.find(t => t.key === activeTab)?.label || 'All Recipes').replace(/^⚙\s*/, '')
 
+  // Print/Share are both bound to the current tab (Print literally prints the live DOM table;
+  // Share stays in lockstep with it rather than silently reaching into other tabs' checked rows).
+  // Export (below, passed to RecipeImportButton) is the one exception — it's JS-built, not
+  // DOM-bound, so it keeps its existing "whole dataset" default and honors a cross-tab selection.
+  const checkedInTab = tabFiltered.filter(r => selectedIds.has(r.id))
+  const printShareRows = selectedIds.size > 0 ? checkedInTab : tabFiltered
+  const exportRows = selectedIds.size > 0 ? recipes.filter(r => selectedIds.has(r.id)) : recipes
+
   // Plain text, WhatsApp's own markdown (*bold*) — no HTML, mirrors ReorderReport's share pattern.
-  // Scoped to whatever the Category tab bar + search currently show (tabFiltered) so picking
-  // "Food" before sharing sends just that category, same as Print already does.
+  // Scoped to printShareRows: the Category tab bar + search by default, or just the checked rows
+  // in this tab once any are checked.
   function buildRecipeWhatsAppText() {
-    const lines = [`*Recipe Costing — ${activeTabLabel}*`, `${tabFiltered.length} recipe${tabFiltered.length !== 1 ? 's' : ''}`, '']
+    const lines = [`*Recipe Costing — ${activeTabLabel}*`, `${printShareRows.length} recipe${printShareRows.length !== 1 ? 's' : ''}`, '']
     if (activeTab === 'sub-recipes') {
-      tabFiltered.forEach(recipe => {
+      printShareRows.forEach(recipe => {
         const cost = calcRecipeCost(recipe, recipes)
         const yieldQty = parseFloat(recipe.yield_qty) || 1
         lines.push(`⚙ ${recipe.name} — NPR ${(cost / yieldQty).toFixed(2)} / ${recipe.yield_uom}`)
       })
     } else {
-      tabFiltered.forEach(recipe => {
+      printShareRows.forEach(recipe => {
         const cost = calcRecipeCost(recipe, recipes)
         const price = parseFloat(recipe.selling_price) || 0
         const fcPct = price > 0 ? (cost / price) * 100 : null
@@ -733,7 +765,7 @@ export default function Recipes() {
             {view === 'detail' && selectedRecipe?.name}
           </p>
           {view === 'list' && (
-            <p className="page-subtitle print-only" style={{ marginTop: 2 }}>{activeTabLabel} — {tabFiltered.length} recipe{tabFiltered.length === 1 ? '' : 's'}</p>
+            <p className="page-subtitle print-only" style={{ marginTop: 2 }}>{activeTabLabel} — {printShareRows.length} recipe{printShareRows.length === 1 ? '' : 's'}</p>
           )}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -749,11 +781,19 @@ export default function Recipes() {
             <input
               style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} />
-            <RecipeImportButton items={items} subRecipes={subRecipes} recipes={recipes} clientId={clientId} scopedInsert={scopedInsert} onImported={init} isAdmin={isAdmin} />
-            <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)}>🖶 Print</button>
-            <Tip text="Opens WhatsApp with the current tab's recipe list (name, food cost, FC%) pre-filled as a text message — pick a category tab first to share just that category, then choose a contact or group to send it to." width={280}>
-              <button className="btn btn-ghost" onClick={shareRecipesWhatsApp} disabled={tabFiltered.length === 0}>📱 Share via WhatsApp</button>
+            <RecipeImportButton items={items} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedInsert={scopedInsert} onImported={init} isAdmin={isAdmin} />
+            <Tip text="Prints just the checked recipes in this tab, if any are checked — otherwise the whole tab, same as before." width={260}>
+              <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)} disabled={printShareRows.length === 0}>🖶 Print</button>
             </Tip>
+            <Tip text="Opens WhatsApp with this tab's recipe list (name, food cost, FC%) pre-filled as a text message — check specific rows first to share just those, or leave none checked to share the whole tab. Pick a contact or group to send it to." width={290}>
+              <button className="btn btn-ghost" onClick={shareRecipesWhatsApp} disabled={printShareRows.length === 0}>📱 Share via WhatsApp</button>
+            </Tip>
+            {selectedIds.size > 0 && (
+              <span style={{ fontSize: 12, color: 'var(--theme-accent)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {selectedIds.size} selected
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
+              </span>
+            )}
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Tip text="Find every recipe that uses an ingredient — e.g. type 'milk' to list all dishes containing it. Also matches ingredients hidden inside sub-recipes (e.g. 'coffee' finds a Flat White via its Doppio)." width={300}>
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>ⓘ</span>
@@ -865,6 +905,14 @@ export default function Recipes() {
                 <table className="data-table">
                   <thead>
                     <tr>
+                      <th className="no-print" style={{ width: 28 }}>
+                        <Tip text="Check specific sub-recipes to limit Print, Share via WhatsApp and ↓ Export to just these — leave none checked to include the whole tab." width={260}>
+                          <input type="checkbox"
+                            checked={tabFiltered.length > 0 && tabFiltered.every(r => selectedIds.has(r.id))}
+                            onChange={() => toggleSelectRecipes(tabFiltered.map(r => r.id))}
+                            aria-label="Select all sub-recipes in this tab" />
+                        </Tip>
+                      </th>
                       <th>Code</th>
                       <th>Sub-Recipe</th>
                       <th>Ingredients</th>
@@ -880,8 +928,13 @@ export default function Recipes() {
                       const cost = calcRecipeCost(recipe, recipes)
                       const yieldQty = parseFloat(recipe.yield_qty) || 1
                       const costPerUnit = cost / yieldQty
+                      const rowHidden = selectedIds.size > 0 && !selectedIds.has(recipe.id)
                       return (
-                        <tr key={recipe.id}>
+                        <tr key={recipe.id} className={rowHidden ? 'print-hide-row' : ''}>
+                          <td className="no-print">
+                            <input type="checkbox" checked={selectedIds.has(recipe.id)} onChange={() => toggleSelectRecipe(recipe.id)}
+                              aria-label={`Select ${recipe.name}`} />
+                          </td>
                           <td style={{ color: 'var(--theme-accent)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
                             {recipe.recipe_code || '—'}
                           </td>
@@ -919,6 +972,14 @@ export default function Recipes() {
                 <table className="data-table">
                   <thead>
                     <tr>
+                      <th className="no-print" style={{ width: 28 }}>
+                        <Tip text="Check specific recipes to limit Print, Share via WhatsApp and ↓ Export to just these — leave none checked to include the whole tab." width={260}>
+                          <input type="checkbox"
+                            checked={tabFiltered.length > 0 && tabFiltered.every(r => selectedIds.has(r.id))}
+                            onChange={() => toggleSelectRecipes(tabFiltered.map(r => r.id))}
+                            aria-label="Select all recipes in this tab" />
+                        </Tip>
+                      </th>
                       <th>Recipe</th>
                       {activeTab === 'all' && <th>Category</th>}
                       <th>Ingredients</th>
@@ -936,8 +997,13 @@ export default function Recipes() {
                       const fcPct = price > 0 ? (cost / price) * 100 : null
                       const fcColor = fcPct == null ? 'var(--theme-text2)' : fcPct <= 30 ? 'var(--theme-green)' : fcPct <= 38 ? 'var(--theme-accent)' : 'var(--theme-red)'
                       const subIngCount = (recipe.recipe_ingredients || []).filter(ri => ri.sub_recipe_id).length
+                      const rowHidden = selectedIds.size > 0 && !selectedIds.has(recipe.id)
                       return (
-                        <tr key={recipe.id}>
+                        <tr key={recipe.id} className={rowHidden ? 'print-hide-row' : ''}>
+                          <td className="no-print">
+                            <input type="checkbox" checked={selectedIds.has(recipe.id)} onChange={() => toggleSelectRecipe(recipe.id)}
+                              aria-label={`Select ${recipe.name}`} />
+                          </td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)', cursor: 'pointer' }} onClick={() => openDetail(recipe)}>
                             {recipe.name}
                             {subIngCount > 0 && <span style={{ fontSize: 10, color: 'var(--theme-accent)', marginLeft: 6 }}>⚙ {subIngCount} sub</span>}
