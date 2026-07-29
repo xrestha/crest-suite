@@ -30,6 +30,15 @@ function actualPrepMin(r) {
   return (r.started_at && r.ready_at) ? Math.round((new Date(r.ready_at) - new Date(r.started_at)) / 60000) : null
 }
 
+// A comped (close_type='writeoff') order shares status='billed' with a genuinely paid one — only
+// close_type tells them apart. Shared by Reconciliation and Bill Trail so a manager scanning either
+// tab can tell a real payment from ₨0-collected comp at a glance, instead of both reading "Billed".
+function statusBadge(order) {
+  if (order.status === 'voided') return { label: 'Voided', className: 'badge-red' }
+  if (order.close_type === 'writeoff') return { label: 'Comp', className: 'badge-amber' }
+  return { label: 'Billed', className: 'badge-green' }
+}
+
 function flagOrderDiscrepancies(orderById, sentByOrderItem, currentByOrderItem) {
   const rows = []
   for (const entry of Object.values(sentByOrderItem)) {
@@ -136,7 +145,7 @@ export default function KotLog() {
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
-    const { data: orders } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, status, table_name, closed_at, buyer_name')
+    const { data: orders } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, status, close_type, table_name, closed_at, buyer_name')
       .in('status', ['billed', 'voided'])
       .gte('closed_at', fromTs).lte('closed_at', toTs)
     const orderList = orders || []
@@ -204,7 +213,7 @@ export default function KotLog() {
       XLSX.writeFile(wb, `kot-register-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'reconciliation') {
       const ws = XLSX.utils.json_to_sheet(discrepancies.map(d => ({
-        'Order#': d.order.order_no, 'Table': d.order.table_name || 'Takeaway', 'Status': d.order.status,
+        'Order#': d.order.order_no, 'Table': d.order.table_name || 'Takeaway', 'Status': statusBadge(d.order).label,
         'Item': d.name, 'Sent Qty': d.sentQty, 'Current Qty': d.currentQty, 'Discrepancy': d.discrepancy, 'Reason': d.reason,
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'KOT Reconciliation')
@@ -216,7 +225,7 @@ export default function KotLog() {
         const bs = adToBs(new Date(o.closed_at))
         const dateBs = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
         const flag = row.reasons.length > 0 ? `Discrepancy: ${row.reasons.join('; ')}` : ''
-        const base = { 'Date (BS)': dateBs, 'Order#': o.order_no, 'Invoice#': o.invoice_no || '', 'Table': o.table_name || 'Takeaway', 'Status': o.status }
+        const base = { 'Date (BS)': dateBs, 'Order#': o.order_no, 'Invoice#': o.invoice_no || '', 'Table': o.table_name || 'Takeaway', 'Status': statusBadge(o).label }
         if (row.logs.length === 0) {
           rows.push({ ...base, 'Station': '', 'Time': '', 'Items': '', 'Sent By': '', 'Flag': flag || 'No KOT Sent' })
         } else {
@@ -325,7 +334,7 @@ export default function KotLog() {
                     <tr onClick={() => setExpandedOrderId(expanded ? null : o.id)} style={{ cursor: 'pointer' }}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{o.order_no}</td>
                       <td>{o.table_name || 'Takeaway'}</td>
-                      <td><span className={o.status === 'voided' ? 'badge-red' : 'badge-green'} style={{ fontSize: 11 }}>{o.status === 'voided' ? 'Voided' : 'Billed'}</span></td>
+                      <td><span className={statusBadge(o).className} style={{ fontSize: 11 }}>{statusBadge(o).label}</span></td>
                       <td>
                         {noKot
                           ? <span className="badge-amber" style={{ fontSize: 11 }}>No KOT</span>
@@ -383,7 +392,7 @@ export default function KotLog() {
                 <tr key={d.key}>
                   <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{d.order.order_no}</td>
                   <td>{d.order.table_name || 'Takeaway'}</td>
-                  <td><span className={d.order.status === 'voided' ? 'badge-red' : 'badge-green'} style={{ fontSize: 11 }}>{d.order.status === 'voided' ? 'Voided' : 'Billed'}</span></td>
+                  <td><span className={statusBadge(d.order).className} style={{ fontSize: 11 }}>{statusBadge(d.order).label}</span></td>
                   <td>{d.name}</td>
                   <td style={{ textAlign: 'right' }}>{d.sentQty}</td>
                   <td style={{ textAlign: 'right' }}>{d.currentQty}</td>
