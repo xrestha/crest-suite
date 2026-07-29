@@ -214,7 +214,7 @@ export default function Layout() {
     if (p.startsWith('/pos')) setActivePanel('pos')
     else if (p.startsWith('/hr')) setActivePanel('hr')
     else if (p.startsWith('/admin')) setActivePanel('admin')
-    else if ([...NAV, ...REPORTS].some(i => p === i.to || p.startsWith(i.to + '/')) || p === '/settings') {
+    else if ([...NAV, ...REPORTS, ...IMS_GROUPS.flatMap(g => g.items)].some(i => p === i.to || p.startsWith(i.to + '/')) || p === '/settings') {
       // /periods and /settings also live in the admin panel — don't switch away from it
       setActivePanel(prev => (prev === 'admin' && (p === '/periods' || p === '/settings')) ? 'admin' : 'ims')
     }

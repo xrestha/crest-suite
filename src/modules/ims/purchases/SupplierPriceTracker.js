@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -364,9 +364,8 @@ export default function SupplierPriceTracker() {
                 const isSaving = savingPrice[item.id]
 
                 return (
-                  <>
+                  <Fragment key={key}>
                     <tr
-                      key={`row-${key}`}
                       style={{ background: trend === 'up' ? 'rgba(248,113,113,0.03)' : 'transparent', cursor: 'pointer' }}
                       onClick={() => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
                       role="button"
@@ -469,7 +468,7 @@ export default function SupplierPriceTracker() {
                         </tr>
                       )
                     })}
-                  </>
+                  </Fragment>
                 )
               })}
             </tbody>
