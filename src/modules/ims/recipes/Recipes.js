@@ -1407,6 +1407,18 @@ export default function Recipes() {
         const nutriLabel = isSubRec ? 'total batch' : 'per portion'
         const nutriValues = nutri ? nutri.perPortion : null
 
+        // Qty-per-portion total for the cost breakdown table's footer row — only meaningful when
+        // every ingredient shares one UOM (summing grams + ml + "each" would be nonsense), so a
+        // mixed-UOM recipe shows a dash instead of a misleading number.
+        const ingredientUoms = new Set(
+          (selectedRecipe.recipe_ingredients || [])
+            .map(ri => ri.item_id ? ri.items?.uom : ri.sub_recipe?.yield_uom)
+            .filter(Boolean)
+        )
+        const totalQtyPerPortion = ingredientUoms.size === 1
+          ? (selectedRecipe.recipe_ingredients || []).reduce((s, ri) => s + (parseFloat(ri.qty_per_portion) || 0), 0)
+          : null
+
         return (
           <>
           <div className="no-print">
@@ -1608,7 +1620,14 @@ export default function Recipes() {
                     )
                   })}
                   <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                    <td colSpan={6} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
+                    <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>
+                      {totalQtyPerPortion != null ? totalQtyPerPortion.toFixed(2).replace(/\.?0+$/, '') : '—'}
+                    </td>
+                    <td style={{ color: 'var(--theme-text2)', paddingTop: 12 }}>
+                      {totalQtyPerPortion != null ? [...ingredientUoms][0] : ''}
+                    </td>
+                    <td colSpan={2} style={{ paddingTop: 12 }}></td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 15, paddingTop: 12 }}>NPR {cost.toFixed(2)}</td>
                     <td></td>
                   </tr>

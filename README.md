@@ -150,6 +150,12 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S493 — 2026-07-30 — Recipe cost breakdown table gets a Qty per Portion total
+
+Recipes.js's ingredient cost breakdown (the detail-view table under a recipe, plus its print view) already totaled the Cost column but left Qty per Portion blank. Added a total there too — only shown when every ingredient in the recipe shares one UOM (summing grams + ml + "each" together would be meaningless), computed via a `Set` of UOMs across `recipe_ingredients` (item rows read `items.uom`, sub-recipe rows read `sub_recipe.yield_uom`); a mixed-UOM recipe shows a dash instead of a number. `RecipeCostCardPrint.jsx` has no ingredient-level qty column, so it needed no matching change.
+
+**Files:** `src/modules/ims/recipes/Recipes.js`
+
 ### S492 — 2026-07-30 — Manual Sales Entry now deplete stock too, POS still supersedes per recipe/day
 
 `stock_movements` (the perpetual ledger behind Stock Movements/Reorder Report projections) was POS-only — an IMS client with no POS module, or an admin typing manual sales for a POS client, got zero automatic depletion, since only `PosOrders.jsx`'s bill-close wrote to it. Product decisions (confirmed with Aashish, 2026-07-30): (1) POS supersedes manual per recipe/day, not per period — if POS already sold a recipe on a given day (Bulk mode: anywhere in the period, since POS never posts a bs_day=0 row), the manual row for that recipe deposits no movement; (2) applies going forward only, no backfill of prior saves; (3) triggered client-side after a save succeeds rather than inside the `save_sales_day` RPC — `explodeRecipeIngredients` (`recipeCost.js`) recurses through sub-recipes up to 5 levels with yield%, and reimplementing that in plpgsql would duplicate real logic across two languages for no benefit, since POS's own depletion write is already best-effort/non-blocking rather than atomic with its sale.
