@@ -104,6 +104,17 @@ export default function BestSellers() {
   const fmt = (n) => `NPR ${Math.round(n).toLocaleString('en-NP')}`
   const periodLabel = (p) => p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : ''
 
+  // Top-10 chart footer stat — shown inside the ChartCard modal too, so the "how does the top 10
+  // compare to everything" context (otherwise only in the page-level Summary strip below) survives
+  // when the chart is expanded full-screen. What it shows adapts to the active sort, since summing
+  // margin % across items isn't meaningful the way summing revenue/qty is.
+  const totalRevenueAll = rows.reduce((s, r) => s + r.revenue, 0)
+  const totalQtyAll = rows.reduce((s, r) => s + r.qty, 0)
+  const top10Revenue = top10.reduce((s, r) => s + r.revenue, 0)
+  const top10Qty = top10.reduce((s, r) => s + r.qty, 0)
+  const top10AvgMargin = top10.length > 0 ? top10.reduce((s, r) => s + r.margin, 0) / top10.length : 0
+  const overallAvgMargin = rows.length > 0 ? rows.reduce((s, r) => s + r.margin, 0) / rows.length : 0
+
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
@@ -147,6 +158,19 @@ export default function BestSellers() {
             titleStyle={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}
             cardStyle={{ marginBottom: 24 }}
             smallHeight={220}
+            footer={
+              <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
+                {sortBy === 'revenue' && totalRevenueAll > 0 && (
+                  <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{fmt(top10Revenue)}</strong> · <span style={{ color: GOLD, fontWeight: 600 }}>{((top10Revenue / totalRevenueAll) * 100).toFixed(0)}%</span> of total revenue</>
+                )}
+                {sortBy === 'qty' && totalQtyAll > 0 && (
+                  <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{Math.round(top10Qty).toLocaleString()} units</strong> · <span style={{ color: GOLD, fontWeight: 600 }}>{((top10Qty / totalQtyAll) * 100).toFixed(0)}%</span> of total volume sold</>
+                )}
+                {sortBy === 'margin' && (
+                  <>Top 10 average margin <strong style={{ color: 'var(--theme-text1)' }}>{top10AvgMargin.toFixed(1)}%</strong> vs <span style={{ color: MUTED }}>{overallAvgMargin.toFixed(1)}%</span> across all {rows.length} items</>
+                )}
+              </div>
+            }
             renderChart={h => (
               <ResponsiveContainer width="100%" height={h}>
                 <BarChart data={chartData} margin={{ top: 0, right: 10, left: 0, bottom: h > 200 ? 60 : 40 }}>

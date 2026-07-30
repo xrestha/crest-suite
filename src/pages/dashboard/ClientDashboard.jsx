@@ -677,6 +677,9 @@ export default function ClientDashboard() {
   const fcTrendSummary = fcTrend.length === 0
     ? 'No food cost history yet.'
     : `Food cost percentage over the last ${fcTrend.length} month${fcTrend.length === 1 ? '' : 's'}: ${fcTrend.map(p => `${p.label} ${p.fc}%`).join(', ')}.`
+  const fcTrendAvg = fcTrend.length > 0 ? fcTrend.reduce((s, p) => s + p.fc, 0) / fcTrend.length : null
+  const fcTrendBest = fcTrend.length > 0 ? fcTrend.reduce((best, p) => p.fc < best.fc ? p : best) : null
+  const fcTrendWorst = fcTrend.length > 0 ? fcTrend.reduce((worst, p) => p.fc > worst.fc ? p : worst) : null
 
   // Revenue vs Cost Breakdown pie — a "P&L at a glance" composition of the same figures behind
   // the Est. Net Margin % card (revenue minus food cost and overheads). Labor is basic payroll
@@ -977,42 +980,58 @@ export default function ClientDashboard() {
           title="Spend by Category"
           smallHeight={140}
           footer={<p className="sr-only">{categorySpendSummary}</p>}
-          renderChart={h => categorySpend.length === 0 ? (
-            <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
-            </div>
-          ) : (
-            <>
-              <ResponsiveContainer width="100%" height={h}>
-                <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                  <Pie
-                    data={categorySpend} dataKey="value" nameKey="name"
-                    cx="50%" cy="50%"
-                    innerRadius={h > 200 ? 80 : 38} outerRadius={h > 200 ? 140 : 60}
-                    paddingAngle={2}
-                  >
-                    {categorySpend.map((entry, i) => <Cell key={entry.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
-                    formatter={v => [`NPR ${Number(v).toLocaleString()}`, '']}
-                    labelFormatter={name => name}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
-                {categorySpend.map((entry, i) => {
-                  return (
-                    <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
-                      <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{entry.name}</span>
-                      <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
-                    </div>
-                  )
-                })}
+          renderChart={h => {
+            if (categorySpend.length === 0) return (
+              <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
               </div>
-            </>
-          )}
+            )
+            const big = h > 200
+            return (
+              <>
+                {big && (
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                    <TrendStatPill label="Total spend" value={`NPR ${categorySpendTotal.toLocaleString()}`} />
+                    <TrendStatPill label="Top category" value={`${categorySpend[0].name} (${((categorySpend[0].value / categorySpendTotal) * 100).toFixed(0)}%)`} color={CHART_COLORS[0]} />
+                    <TrendStatPill label="Categories" value={categorySpend.length} />
+                  </div>
+                )}
+                <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
+                  <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                    <Pie
+                      data={categorySpend} dataKey="value" nameKey="name"
+                      cx="50%" cy="50%"
+                      innerRadius={big ? 80 : 38} outerRadius={big ? 140 : 60}
+                      paddingAngle={2}
+                      {...(big ? {
+                        label: ({ percent }) => `${(percent * 100).toFixed(0)}%`,
+                        labelLine: { stroke: colors.text3, strokeWidth: 1 },
+                      } : {})}
+                    >
+                      {categorySpend.map((entry, i) => <Cell key={entry.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+                      formatter={(v, name) => [`NPR ${Number(v).toLocaleString()} (${((v / categorySpendTotal) * 100).toFixed(1)}%)`, name]}
+                      labelFormatter={name => name}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
+                  {categorySpend.map((entry, i) => {
+                    return (
+                      <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
+                        <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{entry.name}</span>
+                        {big && <span style={{ fontSize: 10, color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString()}</span>}
+                        <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )
+          }}
         />
 
         {/* Line — Daily Purchases vs Sales */}
@@ -1122,27 +1141,40 @@ export default function ClientDashboard() {
           renderChart={h => {
             const big = h > 200
             const count = big ? topItemSpend.length : 6
-            return topItemSpend.length === 0 ? (
+            if (topItemSpend.length === 0) return (
               <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
               </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={h}>
-                <BarChart data={topItemSpend.slice(0, count)} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
-                  <XAxis type="number" hide />
-                  <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
-                  <Tooltip
-                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
-                    formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}`, p.payload.fullName || n]}
-                    labelFormatter={() => ''}
-                  />
-                  <Bar dataKey="value" fill={colors.accent} radius={[0, 3, 3, 0]} barSize={big ? 18 : 10}>
-                    {topItemSpend.slice(0, count).map((entry, i) => (
-                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+            )
+            const shown = topItemSpend.slice(0, count)
+            const shownTotal = shown.reduce((s, r) => s + r.value, 0)
+            const purchaseTotal = stats?.purchaseTotal || 0
+            return (
+              <>
+                {big && (
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                    <TrendStatPill label={`Top ${shown.length} total`} value={`NPR ${shownTotal.toLocaleString()}`} color={colors.accent} />
+                    <TrendStatPill label="Top item" value={shown[0].fullName || shown[0].name} color={CHART_COLORS[0]} />
+                    {purchaseTotal > 0 && <TrendStatPill label="Share of net purchases" value={`${((shownTotal / purchaseTotal) * 100).toFixed(0)}%`} />}
+                  </div>
+                )}
+                <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
+                  <BarChart data={shown} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
+                    <XAxis type="number" hide />
+                    <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
+                    <Tooltip
+                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+                      formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}${purchaseTotal > 0 ? ` (${((v / purchaseTotal) * 100).toFixed(1)}% of purchases)` : ''}`, p.payload.fullName || n]}
+                      labelFormatter={() => ''}
+                    />
+                    <Bar dataKey="value" fill={colors.accent} radius={[0, 3, 3, 0]} barSize={big ? 18 : 10}>
+                      {shown.map((entry, i) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </>
             )
           }}
         />
@@ -1164,16 +1196,26 @@ export default function ClientDashboard() {
                 </div>
                 <p className="sr-only">{fcTrendSummary}</p>
               </>}
-              renderChart={h => (
+              renderChart={h => {
+                const big = h > 200
+                return (
                 <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-                  <div style={{ minWidth: Math.max(0, fcTrend.length * 64), height: h }}>
-                    <ResponsiveContainer width="100%" height={h}>
+                  {big && fcTrendAvg != null && (
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                      <TrendStatPill label="Average" value={`${fcTrendAvg.toFixed(1)}%`} color={colors.accent} />
+                      <TrendStatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.green} />
+                      <TrendStatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.red} />
+                    </div>
+                  )}
+                  <div style={{ minWidth: Math.max(0, fcTrend.length * 64), height: big ? h - 60 : h }}>
+                    <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
                       <LineChart data={fcTrend} margin={{ top: 8, right: 48, bottom: 0, left: 0 }}>
                         <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
                         <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
                         <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
                         <ReferenceLine y={35} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '35%', fill: colors.green, fontSize: 9, position: 'right' }} />
                         <ReferenceLine y={45} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '45%', fill: colors.red, fontSize: 9, position: 'right' }} />
+                        {big && fcTrendAvg != null && <ReferenceLine y={fcTrendAvg} stroke={colors.purple} strokeDasharray="2 3" strokeOpacity={0.7} label={{ value: `avg ${fcTrendAvg.toFixed(1)}%`, fill: colors.purple, fontSize: 9, position: 'insideBottomRight' }} />}
                         <Tooltip
                           contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
                           labelStyle={{ color: 'var(--theme-text1)' }}
@@ -1198,7 +1240,8 @@ export default function ClientDashboard() {
                     </ResponsiveContainer>
                   </div>
                 </div>
-              )}
+                )
+              }}
             />
           )}
 
@@ -1216,23 +1259,33 @@ export default function ClientDashboard() {
                 </div>
                 <p className="sr-only">{costBreakdownSummary}</p>
               </>}
-              renderChart={h => costBreakdown.length === 0 ? (
-                <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No cost data</p>
-                </div>
-              ) : (
+              renderChart={h => {
+                if (costBreakdown.length === 0) return (
+                  <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No cost data</p>
+                  </div>
+                )
+                const big = h > 200
+                return (
                 <>
-                  <ResponsiveContainer width="100%" height={h}>
+                  {big && (
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                      <TrendStatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString()}`} />
+                      {fcPct != null && <TrendStatPill label="Food cost %" value={`${fcPct.toFixed(1)}%`} color={colors.accent} />}
+                      <TrendStatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
+                    </div>
+                  )}
+                  <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
                     <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                       <Pie
                         data={costBreakdown} dataKey="value" nameKey="name"
                         cx="50%" cy="50%"
-                        innerRadius={h > 200 ? 80 : 38} outerRadius={h > 200 ? 140 : 60}
+                        innerRadius={big ? 80 : 38} outerRadius={big ? 140 : 60}
                         paddingAngle={2}
                         // Percent-on-slice labels only in the expanded view — at dashboard-tile
                         // size (h ≤ 200) the label lines would overlap the small donut, so the
                         // legend below (which carries NPR + %) is the only detail there.
-                        {...(h > 200 ? {
+                        {...(big ? {
                           label: ({ percent }) => `${(percent * 100).toFixed(0)}%`,
                           labelLine: { stroke: colors.text3, strokeWidth: 1 },
                         } : {})}
@@ -1257,7 +1310,8 @@ export default function ClientDashboard() {
                     ))}
                   </div>
                 </>
-              )}
+                )
+              }}
             />
           )}
         </div>

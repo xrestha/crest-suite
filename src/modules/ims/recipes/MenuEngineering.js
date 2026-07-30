@@ -211,6 +211,8 @@ export default function MenuEngineering() {
       .slice(0, 10)
       .map(r => ({ name: r.name.length > 22 ? r.name.slice(0, 20) + '…' : r.name, revenue: Math.round(r.revenue), quadrant: r.quadrant }))
   , [items])
+  const allItemsRevenue = useMemo(() => items.reduce((s, r) => s + r.revenue, 0), [items])
+  const topItemsRevenue = useMemo(() => topItems.reduce((s, r) => s + r.revenue, 0), [topItems])
 
   const categoryPivot = useMemo(() => {
     const map = {}
@@ -328,9 +330,12 @@ export default function MenuEngineering() {
                   { q: 'Dog',       pos: 'left + bottom (low qty, high FC%)',   hint: 'Consider redesign or removal' },
                 ].map(({ q, pos, hint }) => (
                   <div key={q} style={{ background: 'var(--theme-table-hover)', borderRadius: 6, padding: '8px 10px' }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: Q_HEX[q], display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: Q_HEX[q], display: 'inline-block', flexShrink: 0 }} />
-                      {QUADRANTS[q].icon} {q}
+                    <div style={{ fontSize: 11, fontWeight: 700, color: Q_HEX[q], display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: Q_HEX[q], display: 'inline-block', flexShrink: 0 }} />
+                        {QUADRANTS[q].icon} {q}
+                      </span>
+                      <span>{summary[q]} item{summary[q] !== 1 ? 's' : ''}</span>
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginTop: 2 }}>{pos}</div>
                     <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 2 }}>{hint}</div>
@@ -363,6 +368,12 @@ export default function MenuEngineering() {
               titleStyle={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}
               cardStyle={{ padding: '16px 16px 8px' }}
               smallHeight={Math.max(topItems.length * 32 + 20, 80)}
+              footer={topItems.length > 0 && (
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 8 }}>
+                  Top {topItems.length} = <strong style={{ color: 'var(--theme-text1)' }}>NPR {topItemsRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
+                  {allItemsRevenue > 0 && <> · <span style={{ color: 'var(--theme-accent)', fontWeight: 600 }}>{((topItemsRevenue / allItemsRevenue) * 100).toFixed(0)}%</span> of total menu revenue</>}
+                </div>
+              )}
               renderChart={h => topItems.length === 0 ? (
                 <p style={{ fontSize: 12, color: 'var(--theme-text3)' }}>No sales recorded this period.</p>
               ) : (

@@ -167,6 +167,9 @@ export default function CoversReport() {
   }, [orders, itemsByOrder, vatReg])
 
   const trendChartData = trendRows.map(r => ({ name: `${r.day}/${r.month}`, value: r.covers }))
+  const trendTotalCovers = trendRows.reduce((s, r) => s + r.covers, 0)
+  const trendAvgPerDay = trendRows.length > 0 ? trendTotalCovers / trendRows.length : 0
+  const trendBusiestDay = trendRows.length > 0 ? trendRows.reduce((best, r) => r.covers > best.covers ? r : best) : null
 
   const peakRows = useMemo(() => {
     const buckets = Array.from({ length: 24 }, (_, h) => ({ hour: h, covers: 0, bills: 0 }))
@@ -178,6 +181,8 @@ export default function CoversReport() {
     return buckets
   }, [orders])
   const peakChartData = peakRows.map(h => ({ name: hourLabel(h.hour), value: h.covers }))
+  const peakTotalCovers = peakRows.reduce((s, h) => s + h.covers, 0)
+  const peakBusiestHour = peakRows.reduce((best, h) => h.covers > best.covers ? h : best, peakRows[0])
 
   const turnoverRows = useMemo(() => {
     const buckets = PARTY_BANDS.map(b => ({ ...b, orders: 0, totalMinutes: 0, covers: 0, net: 0 }))
@@ -351,6 +356,13 @@ export default function CoversReport() {
           <ChartCard
             title="Covers Served by Day"
             cardStyle={{ marginBottom: 24 }}
+            footer={trendRows.length > 0 && (
+              <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
+                Total <strong style={{ color: 'var(--theme-text1)' }}>{trendTotalCovers.toLocaleString()}</strong> covers
+                {' '}· avg <strong style={{ color: 'var(--theme-text1)' }}>{trendAvgPerDay.toFixed(1)}</strong>/day
+                {trendBusiestDay && <> · busiest <span style={{ color: GOLD, fontWeight: 600 }}>{trendBusiestDay.day}/{trendBusiestDay.month}</span> ({trendBusiestDay.covers} covers)</>}
+              </div>
+            )}
             renderChart={h => (
               <ResponsiveContainer width="100%" height={h}>
                 <BarChart data={trendChartData} margin={{ top: 0, right: 10, left: 0, bottom: 10 }}>
@@ -417,6 +429,12 @@ export default function CoversReport() {
           <ChartCard
             title="Covers by Hour Seated"
             cardStyle={{ marginBottom: 24 }}
+            footer={peakTotalCovers > 0 && (
+              <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
+                Total <strong style={{ color: 'var(--theme-text1)' }}>{peakTotalCovers.toLocaleString()}</strong> covers
+                {peakBusiestHour && peakBusiestHour.covers > 0 && <> · peak hour <span style={{ color: GOLD, fontWeight: 600 }}>{hourLabel(peakBusiestHour.hour)}</span> ({peakBusiestHour.covers} covers)</>}
+              </div>
+            )}
             renderChart={h => (
               <ResponsiveContainer width="100%" height={h}>
                 <BarChart data={peakChartData} margin={{ top: 0, right: 10, left: 0, bottom: 30 }}>

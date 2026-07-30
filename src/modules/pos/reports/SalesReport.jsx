@@ -392,6 +392,8 @@ export default function SalesReport() {
   const oneLakhTotals = parties.reduce((s, p) => ({ gross: s.gross + p.gross, vat: s.vat + p.vat, net: s.net + p.net }), { gross: 0, vat: 0, net: 0 })
 
   const hourlyChartData = hourlyRows.map(h => ({ name: hourLabel(h.hour), value: h.net }))
+  const hourlyTotalNet = hourlyRows.reduce((s, h) => s + h.net, 0)
+  const hourlyPeak = hourlyRows.reduce((best, h) => h.net > best.net ? h : best, hourlyRows[0])
 
   // Printable-statutory-document look (Company Name/VAT/Address letterhead + date-range line baked
   // into the sheet itself), matching the format competitor ERP exports use — see [[pos_reports_gap_list]].
@@ -630,6 +632,12 @@ export default function SalesReport() {
           <ChartCard
             title="Net Sales by Hour"
             cardStyle={{ marginBottom: 24 }}
+            footer={hourlyTotalNet > 0 && (
+              <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
+                Total <strong style={{ color: 'var(--theme-text1)' }}>{fmtNpr(hourlyTotalNet)}</strong>
+                {hourlyPeak && hourlyPeak.net > 0 && <> · peak hour <span style={{ color: GOLD, fontWeight: 600 }}>{hourLabel(hourlyPeak.hour)}</span> ({fmtNpr(hourlyPeak.net)})</>}
+              </div>
+            )}
             renderChart={h => (
               <ResponsiveContainer width="100%" height={h}>
                 <BarChart data={hourlyChartData} margin={{ top: 0, right: 10, left: 0, bottom: 30 }}>
