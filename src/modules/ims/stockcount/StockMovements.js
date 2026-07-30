@@ -58,14 +58,17 @@ export default function StockMovements() {
         'pos_orders(order_no, close_type, closed_by)'
       ).eq('period_id', periodId).order('created_at', { ascending: false }),
       supabase.rpc('get_client_profile_names', { p_client_id: effectiveClientId }),
-      // sales_entries is period_id-scoped, not client_id-scoped — stays on raw supabase.from() (see scopedDb notes)
-      supabase.from('sales_entries').select('recipe_id').eq('period_id', periodId).in('source', ['pos', 'pos_comp']),
+      // sales_entries is period_id-scoped, not client_id-scoped — stays on raw supabase.from() (see scopedDb notes).
+      // No source filter: manual Sales Entry saves deplete stock too (S492), same as POS, so a
+      // recipe with no BOM is a gap regardless of which one sold it.
+      supabase.from('sales_entries').select('recipe_id').eq('period_id', periodId),
     ])
     setStaffNames(Object.fromEntries((profs || []).map(s => [s.id, s.full_name])))
 
     // Cross-reference recipes actually sold this period against ones with zero recipe_ingredients
-    // rows — explodeRecipeIngredients() (PosOrders.jsx) produces nothing to deplete for those, so
-    // they were sold but never wrote a stock_movements row and would otherwise vanish silently.
+    // rows — explodeRecipeIngredients() (PosOrders.jsx/depleteManualSales()) produces nothing to
+    // deplete for those, so they were sold but never wrote a stock_movements row and would
+    // otherwise vanish silently.
     const soldRecipeIds = [...new Set((soldEntries || []).map(s => s.recipe_id).filter(Boolean))]
     if (soldRecipeIds.length > 0) {
       const [{ data: ingRows }, { data: recipeRows }] = await Promise.all([
@@ -114,7 +117,7 @@ export default function StockMovements() {
       'Category': r.category,
       'UOM': r.item.uom || '',
       'Qty Depleted': parseFloat(r.qtyAbs.toFixed(3)),
-      'Source': r.source === 'pos_comp' ? 'POS Comp' : 'POS Sale',
+      'Source': r.source === 'pos_comp' ? 'POS Comp' : r.source === 'manual' ? 'Manual Entry' : 'POS Sale',
       'Order #': r.order?.order_no || '',
       'Staff': (r.order && staffNames[r.order.closed_by]) || '',
       'Value (NPR)': parseFloat(r.value.toFixed(0)),
@@ -136,7 +139,7 @@ export default function StockMovements() {
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title">Stock Movements</h1>
-          <p className="page-subtitle">Ledger of every POS-driven stock depletion — {periodLabel}</p>
+          <p className="page-subtitle">Ledger of every stock depletion from POS sales/comps and manual Sales Entry — {periodLabel}</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
@@ -185,6 +188,7 @@ export default function StockMovements() {
           <option value="all">All Sources</option>
           <option value="pos_sale">POS Sale</option>
           <option value="pos_comp">POS Comp</option>
+          <option value="manual">Manual Entry</option>
         </select>
         <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} entr{filtered.length !== 1 ? 'ies' : 'y'}</span>
       </div>
@@ -195,7 +199,7 @@ export default function StockMovements() {
         ) : filtered.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">✓</div>
-            <p className="empty-state-text">No stock movements yet for this period. Entries appear here automatically the moment a POS bill is charged or marked Complimentary.</p>
+            <p className="empty-state-text">No stock movements yet for this period. Entries appear here automatically the moment a POS bill is charged or marked Complimentary, or a manual Sales Entry day is saved.</p>
           </div>
         ) : (
           <div className="table-wrap">
@@ -204,7 +208,7 @@ export default function StockMovements() {
                 <tr>
                   <th>Day</th><th>Item</th><th>Category</th><th>UOM</th>
                   <th style={{ textAlign: 'right' }}>Qty Depleted</th>
-                  <th><Tip text="POS Sale = billed and paid for. POS Comp = given away complimentary — zero revenue, but the food cost was still consumed." width={260}>Source</Tip></th>
+                  <th><Tip text="POS Sale = billed and paid for. POS Comp = given away complimentary — zero revenue, but the food cost was still consumed. Manual Entry = depleted from a manual Sales Entry save (Bulk/Daily), not a POS bill." width={280}>Source</Tip></th>
                   <th><Tip text="Click to open the exact original bill or complimentary slip this depletion came from." width={240}>Order #</Tip></th>
                   <th>Staff</th>
                   <th style={{ textAlign: 'right' }}>Value (NPR)</th>
@@ -222,8 +226,8 @@ export default function StockMovements() {
                     <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{r.qtyAbs.toFixed(3)}</td>
                     <td>
-                      <span className={`badge ${r.source === 'pos_comp' ? 'badge-amber' : 'badge-green'}`}>
-                        {r.source === 'pos_comp' ? 'POS Comp' : 'POS Sale'}
+                      <span className={`badge ${r.source === 'pos_comp' ? 'badge-amber' : r.source === 'manual' ? 'badge-gray' : 'badge-green'}`}>
+                        {r.source === 'pos_comp' ? 'POS Comp' : r.source === 'manual' ? 'Manual Entry' : 'POS Sale'}
                       </span>
                     </td>
                     <td>

@@ -150,6 +150,16 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S495 — 2026-07-30 — Stock Movements page catches up to manual-sales depletion (S492)
+
+`StockMovements.js` predated S492 and still assumed every row was POS-driven: the Source filter only offered POS Sale/POS Comp, the badge/Excel export hardcoded anything non-comp to "POS Sale" (so the S494 backfill's manual rows were literally mislabeled as POS Sale on screen), the page subtitle and empty-state copy both said "POS bill"/"POS-driven" only, and the no-BOM warning banner's underlying query filtered `sales_entries` to `source in ('pos','pos_comp')` — silently blind to a manual-only recipe with no ingredients linked, the exact gap that banner exists to catch. Added a `manual` option to the Source filter, a third badge/label branch (`badge-gray`, "Manual Entry") in both the table and the Excel export, updated the Source column tooltip and the page subtitle/empty-state text to mention manual Sales Entry, and dropped the `source` filter on the no-BOM check's `sales_entries` query so it now looks at every sale regardless of source.
+
+**Files:** `src/modules/ims/stockcount/StockMovements.js`
+
+### S494 — 2026-07-30 — One-time stock_movements backfill for CASA ACAI CAFE, Shrawan 2083
+
+S492 (manual-sales stock depletion) only fires on saves made from that deploy onward — by design, no backfill of prior saves. Asked to retroactively "activate" it from the 1st of the currently-open Shrawan 2083 period for one client, CASA ACAI CAFE (`client_id 3508bf4e-b17b-4b53-a8de-65e07928c4d9`, `pos_enabled=false` so the POS-supersedes rule was a no-op here). Data-only operation, no schema change, so no migration file: pulled that period's manual `sales_entries` (192 rows, bs_day 1–13) plus the client's `recipe_ingredients`/`recipes`/`items` via `supabase db query --linked` (avoids needing the service-role key or a DB password — the CLI's already-linked Management API session handles auth), ran the exact same explosion math as `depleteManualSales()`/`explodeRecipeIngredients` in a throwaway local Node script (not reimplemented in SQL, same reasoning as S492 — recursive sub-recipe BOM logic belongs in one place), and inserted the resulting 833 `stock_movements` rows (64 distinct recipes, 0 with a missing BOM) via a generated `INSERT`. Verified post-insert: 833 rows, bs_day range 1–13, matching the computed count exactly. Script and generated SQL were scratch files, not committed — one-off client data, not a repeatable schema change.
+
 ### S493 — 2026-07-30 — Recipe cost breakdown table gets a Qty per Portion total
 
 Recipes.js's ingredient cost breakdown (the detail-view table under a recipe, plus its print view) already totaled the Cost column but left Qty per Portion blank. Added a total there too — only shown when every ingredient in the recipe shares one UOM (summing grams + ml + "each" together would be meaningless), computed via a `Set` of UOMs across `recipe_ingredients` (item rows read `items.uom`, sub-recipe rows read `sub_recipe.yield_uom`); a mixed-UOM recipe shows a dash instead of a number. `RecipeCostCardPrint.jsx` has no ingredient-level qty column, so it needed no matching change.
