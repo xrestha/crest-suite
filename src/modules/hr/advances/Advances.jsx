@@ -138,6 +138,7 @@ export default function Advances() {
   async function handleDelete(advId) {
     const hasReps = (repayMap[advId]?.rows || []).length > 0
     if (hasReps) return // button shouldn't show if repayments exist
+    if (!window.confirm('Delete this advance? This cannot be undone.')) return
     await scopedDelete('hr_advances').eq('id', advId)
     if (selected === advId) setSelected(null)
     load()
@@ -322,24 +323,26 @@ export default function Advances() {
           {selectedReps.length === 0 ? (
             <div style={{ fontSize: 13, color: 'var(--theme-text3)', padding: '8px 0' }}>No repayments recorded yet.</div>
           ) : (
-            <table className="data-table" style={{ fontSize: 12 }}>
-              <thead>
-                <tr>
-                  <th>Date (BS)</th>
-                  <th style={{ textAlign: 'right' }}>Amount</th>
-                  <th>Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedReps.map(r => (
-                  <tr key={r.id}>
-                    <td>{fmtD(r.repaid_date)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-green)', fontWeight: 600 }}>NPR {fmt(r.amount)}</td>
-                    <td style={{ color: 'var(--theme-text3)' }}>{r.notes || '—'}</td>
+            <div className="table-wrap">
+              <table className="data-table" style={{ fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    <th>Date (BS)</th>
+                    <th style={{ textAlign: 'right' }}>Amount</th>
+                    <th>Notes</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {selectedReps.map(r => (
+                    <tr key={r.id}>
+                      <td>{fmtD(r.repaid_date)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-green)', fontWeight: 600 }}>NPR {fmt(r.amount)}</td>
+                      <td style={{ color: 'var(--theme-text3)' }}>{r.notes || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

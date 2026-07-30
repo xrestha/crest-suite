@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useTheme } from '../../../context/ThemeContext'
+import { contrastRatio } from '../../../utils/avatarColor'
 import Modal from '../../../components/Modal'
 import Fab from '../../../components/Fab'
 import { getCf } from './purchasesHelpers'
@@ -9,6 +11,10 @@ const EMPTY_RETURN = { purchase_entry_id: '', qty: '', notes: '' }
 // Vendor Returns tab — record + list returns against an existing purchase entry. Rate, vendor,
 // and payment method are always inherited from the linked purchase (a return can't have its own).
 export default function ReturnsTab({ period, purchases, returns, isLocked, effectiveClientId, onChanged }) {
+  const { colors } = useTheme()
+  // .btn-primary's CSS pairs its background with --theme-accent-text, calibrated for --theme-accent
+  // — overriding just the background to red here left the text color mismatched to accent, not red.
+  const redText = contrastRatio(colors.red, '#ffffff') >= contrastRatio(colors.red, '#000000') ? '#ffffff' : '#000000'
   const { scopedUpdate, scopedInsert, scopedDelete } = useScopedDb()
   const [showReturnForm, setShowReturnForm] = useState(false)
   const [returnForm, setReturnForm]         = useState(EMPTY_RETURN)
@@ -199,7 +205,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
           {returnError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '10px 0 0' }}>{returnError}</p>}
           <div className="form-actions">
             <button className="btn btn-ghost" onClick={() => { setShowReturnForm(false); setEditingReturnId(null) }}>Cancel</button>
-            <button className="btn btn-primary" style={{ background: 'var(--theme-red)', borderColor: 'var(--theme-red)' }} onClick={saveReturn} disabled={returnSaving}>
+            <button className="btn btn-primary" style={{ background: 'var(--theme-red)', borderColor: 'var(--theme-red)', color: redText }} onClick={saveReturn} disabled={returnSaving}>
               {returnSaving ? 'Saving…' : editingReturnId ? 'Update Return' : 'Record Return'}
             </button>
           </div>

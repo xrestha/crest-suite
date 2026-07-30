@@ -168,7 +168,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
 
         {loading ? <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading bill…</p> : (
           <>
-            <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--theme-border)', borderRadius: 8, marginBottom: 12 }}>
+            <div className="table-wrap" style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--theme-border)', borderRadius: 8, marginBottom: 12 }}>
               <table className="data-table" style={{ fontSize: 12 }}>
                 <thead><tr><th>Item</th><th>Qty</th><th>Amount</th></tr></thead>
                 <tbody>

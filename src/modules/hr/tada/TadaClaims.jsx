@@ -189,6 +189,7 @@ export default function TadaClaims() {
   }
 
   async function handleDelete(claimId) {
+    if (!window.confirm('Delete this TADA claim? This cannot be undone.')) return
     await supabase.from('hr_tada_claim_items').delete().eq('claim_id', claimId)
     await scopedDelete('hr_tada_claims').eq('id', claimId)
     if (selected === claimId) setSelected(null)
@@ -321,26 +322,28 @@ export default function TadaClaims() {
             </div>
           )}
 
-          <table className="data-table" style={{ fontSize: 12 }}>
-            <thead>
-              <tr><th>Category</th><th>Description</th><th style={{ textAlign: 'right' }}>Amount</th></tr>
-            </thead>
-            <tbody>
-              {selectedItems.map(it => (
-                <tr key={it.id}>
-                  <td>{it.category}</td>
-                  <td style={{ color: 'var(--theme-text3)' }}>{it.description || '—'}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{fmt(it.amount)}</td>
+          <div className="table-wrap">
+            <table className="data-table" style={{ fontSize: 12 }}>
+              <thead>
+                <tr><th>Category</th><th>Description</th><th style={{ textAlign: 'right' }}>Amount</th></tr>
+              </thead>
+              <tbody>
+                {selectedItems.map(it => (
+                  <tr key={it.id}>
+                    <td>{it.category}</td>
+                    <td style={{ color: 'var(--theme-text3)' }}>{it.description || '—'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{fmt(it.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 700 }}>
+                  <td colSpan={2}>Total</td>
+                  <td style={{ textAlign: 'right' }}>{fmt(selectedClaim.total_amount)}</td>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ fontWeight: 700 }}>
-                <td colSpan={2}>Total</td>
-                <td style={{ textAlign: 'right' }}>{fmt(selectedClaim.total_amount)}</td>
-              </tr>
-            </tfoot>
-          </table>
+              </tfoot>
+            </table>
+          </div>
         </div>
       )}
 

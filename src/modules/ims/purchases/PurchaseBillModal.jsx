@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Calculator as CalculatorIcon } from 'lucide-react'
 import { supabase } from '../../../supabaseClient'
+import { useTheme } from '../../../context/ThemeContext'
+import { contrastRatio } from '../../../utils/avatarColor'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import Tip from '../../../components/Tip'
@@ -49,6 +51,11 @@ function initFromEditingEntries(entries, items) {
 // (period, items, vendors) and gets a single onSaved(validLines) callback so it can reload the
 // purchases list and run its own "did any item's rate change" check.
 export default function PurchaseBillModal({ period, items, itemOptions, vendors, editingGroupId, editingEntries, onClose, onSaved }) {
+  const { colors } = useTheme()
+  // --theme-amber has no paired foreground token the way --theme-accent does (--theme-accent-text)
+  // — a hardcoded black/white would fail on whichever presets land on the opposite end, so pick
+  // whichever of black/white actually contrasts best against this preset's real amber hex.
+  const amberText = contrastRatio(colors.amber, '#ffffff') >= contrastRatio(colors.amber, '#000000') ? '#ffffff' : '#000000'
   const initial = editingEntries?.length ? initFromEditingEntries(editingEntries, items) : { header: { ...EMPTY_HEADER }, lines: [newLine()] }
   const [billHeader, setBillHeader] = useState(initial.header)
   const [billLines, setBillLines]   = useState(initial.lines)
@@ -396,7 +403,7 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
         <button className="btn btn-ghost" onClick={onClose}
           style={{ justifySelf: 'start', fontSize: 13, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}>Cancel</button>
         <button className="btn" onClick={addBillLine}
-          style={{ fontSize: 13, background: 'var(--theme-amber)', color: '#000', borderColor: 'var(--theme-amber)' }}>
+          style={{ fontSize: 13, background: 'var(--theme-amber)', color: amberText, borderColor: 'var(--theme-amber)' }}>
           + Add Item
         </button>
         <button className="btn btn-primary" onClick={saveBill} disabled={saving} style={{ justifySelf: 'end', fontSize: 13 }}>

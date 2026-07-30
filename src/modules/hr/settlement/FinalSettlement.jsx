@@ -294,83 +294,7 @@ export default function FinalSettlement() {
           {/* Earnings table */}
           <div className="card" style={{ padding: 0, marginBottom: 12 }}>
             <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--theme-border)', fontWeight: 600, fontSize: 13 }}>Earnings</div>
-            <table className="data-table" style={{ tableLayout: 'fixed' }}>
-              <colgroup>
-                <col style={{ width: '55%' }} />
-                <col style={{ width: '25%' }} />
-                <col style={{ width: '20%' }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Component</th>
-                  <th style={{ textAlign: 'right' }}>Formula</th>
-                  <th style={{ textAlign: 'right' }}>Amount (NPR)</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>
-                    <Tip text="Basic salary pro-rated for days worked in the last BS month. Formula: basic ÷ total days in month × days worked." width={280}>Partial Month Salary</Tip>
-                  </td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
-                    {fmt(result.basic)} ÷ {result.totalDaysInLastMonth} × {result.daysWorked}
-                  </td>
-                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.partialSalary)}</td>
-                </tr>
-                {parseFloat(leaveDays) > 0 && (
-                  <tr>
-                    <td>
-                      <Tip text="Encashment of unused annual leave at the rate of basic ÷ 26 per day (Nepal Labour Act)." width={260}>Leave Encashment ({leaveDays} days)</Tip>
-                    </td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
-                      {fmt(result.basic)} ÷ 26 × {leaveDays}
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.leaveEncashment)}</td>
-                  </tr>
-                )}
-                {result.vested && result.gratuity > 0 && (
-                  <tr>
-                    <td>
-                      <Tip text={result.gratuitySsfCovered > 0
-                        ? 'Gratuity accrual (1 month basic per year of service) minus the portion already funded through the employer’s monthly SSF contribution (3.33% of capped basic goes to the SSF gratuity fund) — so it isn’t paid twice.'
-                        : 'Gratuity under Nepal Labour Act: 1 month basic per year of service. Formula: basic ÷ 12 × total months of service.'} width={300}>
-                        Gratuity ({fmtService(result.serviceMonths)}){result.gratuitySsfCovered > 0 ? ' — net of SSF-funded' : ''}
-                      </Tip>
-                    </td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
-                      {result.gratuitySsfCovered > 0
-                        ? `${fmt(result.gratuityAccrued)} − ${fmt(result.gratuitySsfCovered)} (SSF)`
-                        : `${fmt(result.basic)} ÷ 12 × ${result.serviceMonths}`}
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.gratuity)}</td>
-                  </tr>
-                )}
-                {result.festivalPro > 0 && (
-                  <tr>
-                    <td>
-                      <Tip text="Pro-rated festival (Dashain) allowance for months worked since Shrawan of this fiscal year, since full allowance has not yet been paid." width={300}>Festival Pro-ration ({result.fyStart})</Tip>
-                    </td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
-                      {fmt(result.basic)} × {result.lumpSum > 0 ? Math.round((result.festivalPro / result.basic) * 100) / 100 : '—'}
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.festivalPro)}</td>
-                  </tr>
-                )}
-              </tbody>
-              <tfoot>
-                <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
-                  <td>Gross Payout</td>
-                  <td></td>
-                  <td style={{ textAlign: 'right', fontSize: 15, color: 'var(--theme-green)' }}>{fmt(result.grossPayout)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-
-          {/* Deductions table */}
-          {result.totalDeductions > 0 && (
-            <div className="card" style={{ padding: 0, marginBottom: 12 }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--theme-border)', fontWeight: 600, fontSize: 13 }}>Deductions</div>
+            <div className="table-wrap">
               <table className="data-table" style={{ tableLayout: 'fixed' }}>
                 <colgroup>
                   <col style={{ width: '55%' }} />
@@ -385,46 +309,126 @@ export default function FinalSettlement() {
                   </tr>
                 </thead>
                 <tbody>
-                  {!noticeServed && result.noticeDeduction > 0 && (
+                  <tr>
+                    <td>
+                      <Tip text="Basic salary pro-rated for days worked in the last BS month. Formula: basic ÷ total days in month × days worked." width={280}>Partial Month Salary</Tip>
+                    </td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
+                      {fmt(result.basic)} ÷ {result.totalDaysInLastMonth} × {result.daysWorked}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.partialSalary)}</td>
+                  </tr>
+                  {parseFloat(leaveDays) > 0 && (
                     <tr>
                       <td>
-                        <Tip text="Pay in lieu of notice: deducted when the employee does not serve the required notice period. Rate: basic ÷ 26 per day." width={280}>Notice Pay Deduction ({noticeDays} days unserved)</Tip>
+                        <Tip text="Encashment of unused annual leave at the rate of basic ÷ 26 per day (Nepal Labour Act)." width={260}>Leave Encashment ({leaveDays} days)</Tip>
                       </td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
-                        {fmt(result.basic)} ÷ 26 × {noticeDays}
+                        {fmt(result.basic)} ÷ 26 × {leaveDays}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red)' }}>{fmt(result.noticeDeduction)}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.leaveEncashment)}</td>
                     </tr>
                   )}
-                  {result.lumpTds > 0 && (
+                  {result.vested && result.gratuity > 0 && (
                     <tr>
                       <td>
-                        <Tip text="TDS on lump-sum components (gratuity + leave encashment + festival pro-ration) computed at the marginal income tax rate using the incremental method." width={300}>TDS on Lump Sum</Tip>
-                      </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>Marginal rate on NPR {fmt(result.lumpSum)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red)' }}>{fmt(result.lumpTds)}</td>
-                    </tr>
-                  )}
-                  {advances.map(adv => (
-                    <tr key={adv.id}>
-                      <td>
-                        <Tip text={`Advance issued on ${adv.issued_date || '—'}. Outstanding balance (amount minus repayments recorded in Advances & Loans) recovered from final pay.`} width={270}>
-                          Advance Recovery — {adv.purpose || 'Advance'}
+                        <Tip text={result.gratuitySsfCovered > 0
+                          ? 'Gratuity accrual (1 month basic per year of service) minus the portion already funded through the employer’s monthly SSF contribution (3.33% of capped basic goes to the SSF gratuity fund) — so it isn’t paid twice.'
+                          : 'Gratuity under Nepal Labour Act: 1 month basic per year of service. Formula: basic ÷ 12 × total months of service.'} width={300}>
+                          Gratuity ({fmtService(result.serviceMonths)}){result.gratuitySsfCovered > 0 ? ' — net of SSF-funded' : ''}
                         </Tip>
                       </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>{fmt(adv.amount)} − repaid</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red)' }}>{fmt(adv.outstanding)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
+                        {result.gratuitySsfCovered > 0
+                          ? `${fmt(result.gratuityAccrued)} − ${fmt(result.gratuitySsfCovered)} (SSF)`
+                          : `${fmt(result.basic)} ÷ 12 × ${result.serviceMonths}`}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.gratuity)}</td>
                     </tr>
-                  ))}
+                  )}
+                  {result.festivalPro > 0 && (
+                    <tr>
+                      <td>
+                        <Tip text="Pro-rated festival (Dashain) allowance for months worked since Shrawan of this fiscal year, since full allowance has not yet been paid." width={300}>Festival Pro-ration ({result.fyStart})</Tip>
+                      </td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
+                        {fmt(result.basic)} × {result.lumpSum > 0 ? Math.round((result.festivalPro / result.basic) * 100) / 100 : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.festivalPro)}</td>
+                    </tr>
+                  )}
                 </tbody>
                 <tfoot>
                   <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
-                    <td>Total Deductions</td>
+                    <td>Gross Payout</td>
                     <td></td>
-                    <td style={{ textAlign: 'right', fontSize: 15, color: 'var(--theme-red)' }}>{fmt(result.totalDeductions)}</td>
+                    <td style={{ textAlign: 'right', fontSize: 15, color: 'var(--theme-green)' }}>{fmt(result.grossPayout)}</td>
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          </div>
+
+          {/* Deductions table */}
+          {result.totalDeductions > 0 && (
+            <div className="card" style={{ padding: 0, marginBottom: 12 }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--theme-border)', fontWeight: 600, fontSize: 13 }}>Deductions</div>
+              <div className="table-wrap">
+                <table className="data-table" style={{ tableLayout: 'fixed' }}>
+                  <colgroup>
+                    <col style={{ width: '55%' }} />
+                    <col style={{ width: '25%' }} />
+                    <col style={{ width: '20%' }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>Component</th>
+                      <th style={{ textAlign: 'right' }}>Formula</th>
+                      <th style={{ textAlign: 'right' }}>Amount (NPR)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!noticeServed && result.noticeDeduction > 0 && (
+                      <tr>
+                        <td>
+                          <Tip text="Pay in lieu of notice: deducted when the employee does not serve the required notice period. Rate: basic ÷ 26 per day." width={280}>Notice Pay Deduction ({noticeDays} days unserved)</Tip>
+                        </td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
+                          {fmt(result.basic)} ÷ 26 × {noticeDays}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red)' }}>{fmt(result.noticeDeduction)}</td>
+                      </tr>
+                    )}
+                    {result.lumpTds > 0 && (
+                      <tr>
+                        <td>
+                          <Tip text="TDS on lump-sum components (gratuity + leave encashment + festival pro-ration) computed at the marginal income tax rate using the incremental method." width={300}>TDS on Lump Sum</Tip>
+                        </td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>Marginal rate on NPR {fmt(result.lumpSum)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red)' }}>{fmt(result.lumpTds)}</td>
+                      </tr>
+                    )}
+                    {advances.map(adv => (
+                      <tr key={adv.id}>
+                        <td>
+                          <Tip text={`Advance issued on ${adv.issued_date || '—'}. Outstanding balance (amount minus repayments recorded in Advances & Loans) recovered from final pay.`} width={270}>
+                            Advance Recovery — {adv.purpose || 'Advance'}
+                          </Tip>
+                        </td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>{fmt(adv.amount)} − repaid</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red)' }}>{fmt(adv.outstanding)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
+                      <td>Total Deductions</td>
+                      <td></td>
+                      <td style={{ textAlign: 'right', fontSize: 15, color: 'var(--theme-red)' }}>{fmt(result.totalDeductions)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             </div>
           )}
 
