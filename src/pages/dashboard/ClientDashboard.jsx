@@ -27,10 +27,12 @@ function TrendStatPill({ label, value, color }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 2, padding: '7px 14px',
-      background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-      borderLeft: `3px solid ${color || 'var(--theme-border)'}`, borderRadius: 'var(--radius-md)',
+      background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)',
     }}>
-      <span style={{ fontSize: 9, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+      <span style={{ fontSize: 9, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 5 }}>
+        {color && <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />}
+        {label}
+      </span>
       <span style={{ fontSize: 13, fontWeight: 700, color: color || 'var(--theme-text1)' }}>{value}</span>
     </div>
   )
