@@ -10,6 +10,16 @@
   100% { box-shadow: 0 0 0 0 rgba(248,113,113,0);    }
 }
 
+/* ChartCard's expanded-chart modal (src/components/ChartCard.js) */
+@keyframes chart-modal-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes chart-modal-panel-in {
+  from { opacity: 0; transform: scale(0.96) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

@@ -22,13 +22,13 @@ export default function ChartCard({
   const modal = expanded ? createPortal(
     <div
       onClick={() => setExpanded(false)}
-      style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+      style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, animation: 'chart-modal-backdrop-in 0.15s ease-out' }}
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xl)', padding: '20px 28px', width: '92%', maxWidth: 1100, boxShadow: '0 8px 60px rgba(0,0,0,0.5)' }}
+        style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xl)', padding: '20px 28px', width: '92%', maxWidth: 1100, boxShadow: '0 8px 60px rgba(0,0,0,0.5)', animation: 'chart-modal-panel-in 0.18s cubic-bezier(0.16,1,0.3,1)' }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--theme-border)' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>{title}</div>
           <div style={{ display: 'flex', gap: 18, fontSize: 11, alignItems: 'center' }}>
             {legend}

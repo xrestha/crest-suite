@@ -6,7 +6,7 @@ import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
-  LineChart, Line, XAxis, YAxis, CartesianGrid, ReferenceLine,
+  LineChart, Line, ComposedChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine,
   BarChart, Bar
 } from 'recharts'
 import { ArrowDown, ArrowUp, Percent, Receipt, Target, Lock, TriangleAlert, Clock, LayoutGrid } from 'lucide-react'
@@ -20,6 +20,21 @@ import SalesPivot from '../../modules/dashboard/SalesPivot'
 import FoodBeverageSplit from '../../modules/dashboard/FoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
+
+// Small KPI callout used only in ChartCard's expanded (modal) view of Daily Purchases vs Sales —
+// the compact inline card stays exactly as before, this only renders when the chart is expanded.
+function TrendStatPill({ label, value, color }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 2, padding: '7px 14px',
+      background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
+      borderLeft: `3px solid ${color || 'var(--theme-border)'}`, borderRadius: 'var(--radius-md)',
+    }}>
+      <span style={{ fontSize: 9, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: color || 'var(--theme-text1)' }}>{value}</span>
+    </div>
+  )
+}
 
 export default function ClientDashboard() {
   const { profile, clientId, isAdmin, clientModules, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
@@ -990,13 +1005,13 @@ export default function ClientDashboard() {
           legend={<>
             <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-accent)' }}>●</span> Purchases</span>
             {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green)' }}>●</span> Sales</span>}
-            {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green)', letterSpacing: '-2px' }}>┄</span> Projection</span>}
+            {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-purple)', letterSpacing: '-2px' }}>┄</span> Projection</span>}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
           </>}
           footer={<>
             {salesProjection && (
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)' }}>
-                Projected month-end revenue: <strong style={{ color: 'var(--theme-green)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString()}</strong>
+                Projected month-end revenue: <strong style={{ color: 'var(--theme-purple)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString()}</strong>
                 <span style={{ color: 'var(--theme-text3)' }}> · trend estimate</span>
               </div>
             )}
@@ -1011,7 +1026,19 @@ export default function ClientDashboard() {
             const big = h > 200
             const chart = (
               <ResponsiveContainer width="100%" height={h}>
-                <LineChart data={dailyTrend} margin={{ top: big ? 8 : 4, right: big ? 16 : 8, bottom: big ? 4 : 0, left: big ? 8 : 0 }}>
+                <ComposedChart data={dailyTrend} margin={{ top: big ? 8 : 4, right: big ? 16 : 8, bottom: big ? 4 : 0, left: big ? 8 : 0 }}>
+                  {big && (
+                    <defs>
+                      <linearGradient id="dtPurchasesFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={colors.accent} stopOpacity={0.28} />
+                        <stop offset="100%" stopColor={colors.accent} stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="dtSalesFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={colors.green} stopOpacity={0.28} />
+                        <stop offset="100%" stopColor={colors.green} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                  )}
                   <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="day" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} interval={0} tickFormatter={v => v.replace('Day ', '')} />
                   <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
@@ -1021,16 +1048,36 @@ export default function ClientDashboard() {
                     formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
                     labelFormatter={l => l}
                   />
-                  <Line type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={big ? 2.5 : 2} connectNulls dot={{ r: big ? 3 : 2, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: big ? 5 : 4, fill: colors.accent }} />
-                  {hasDailySales && <Line type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={big ? 2.5 : 2} connectNulls dot={{ r: big ? 3 : 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: big ? 5 : 4, fill: colors.green }} />}
-                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Projection" stroke={colors.green} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.65} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.green }} />}
-                </LineChart>
+                  {big ? (
+                    <Area type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2.5} fill="url(#dtPurchasesFill)" connectNulls dot={{ r: 3, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.accent }} />
+                  ) : (
+                    <Line type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.accent }} />
+                  )}
+                  {hasDailySales && (big ? (
+                    <Area type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={2.5} fill="url(#dtSalesFill)" connectNulls dot={{ r: 3, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.green }} />
+                  ) : (
+                    <Line type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.green }} />
+                  ))}
+                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Projection" stroke={colors.purple} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.purple }} />}
+                </ComposedChart>
               </ResponsiveContainer>
             )
-            return big ? chart : (
-              <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-                <div style={{ minWidth: Math.max(0, dailyTrend.length * 44), height: h }}>{chart}</div>
-              </div>
+            return (
+              <>
+                {big && (
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                    <TrendStatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString()}`} color={colors.accent} />
+                    {hasDailySales && <TrendStatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString()}`} color={colors.green} />}
+                    {salesProjection && <TrendStatPill label="Projected month-end" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString()}`} color={colors.purple} />}
+                    <TrendStatPill label="Period" value={periodLabel} />
+                  </div>
+                )}
+                {big ? chart : (
+                  <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
+                    <div style={{ minWidth: Math.max(0, dailyTrend.length * 44), height: h }}>{chart}</div>
+                  </div>
+                )}
+              </>
             )
           }}
         />
