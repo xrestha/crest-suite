@@ -12,6 +12,7 @@ import {
 import { ArrowDown, ArrowUp, Percent, Receipt, Target, Lock, TriangleAlert, Clock, LayoutGrid } from 'lucide-react'
 import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
+import StatPill from '../../components/StatPill'
 import { getBsToday, BS_MONTHS, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
@@ -43,23 +44,6 @@ function projectTrend(dayNums, valueMap, monthEndDay) {
     projDays[d] = v; projSum += v
   }
   return { projDays, projectedTotal: Math.round(sumY + projSum), lastActual }
-}
-
-// Small KPI callout used only in ChartCard's expanded (modal) view of Daily Purchases vs Sales —
-// the compact inline card stays exactly as before, this only renders when the chart is expanded.
-function TrendStatPill({ label, value, color }) {
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', gap: 2, padding: '7px 14px',
-      background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)',
-    }}>
-      <span style={{ fontSize: 9, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 5 }}>
-        {color && <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />}
-        {label}
-      </span>
-      <span style={{ fontSize: 13, fontWeight: 700, color: color || 'var(--theme-text1)' }}>{value}</span>
-    </div>
-  )
 }
 
 export default function ClientDashboard() {
@@ -991,9 +975,9 @@ export default function ClientDashboard() {
               <>
                 {big && (
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                    <TrendStatPill label="Total spend" value={`NPR ${categorySpendTotal.toLocaleString()}`} />
-                    <TrendStatPill label="Top category" value={`${categorySpend[0].name} (${((categorySpend[0].value / categorySpendTotal) * 100).toFixed(0)}%)`} color={CHART_COLORS[0]} />
-                    <TrendStatPill label="Categories" value={categorySpend.length} />
+                    <StatPill label="Total spend" value={`NPR ${categorySpendTotal.toLocaleString()}`} />
+                    <StatPill label="Top category" value={`${categorySpend[0].name} (${((categorySpend[0].value / categorySpendTotal) * 100).toFixed(0)}%)`} color={CHART_COLORS[0]} />
+                    <StatPill label="Categories" value={categorySpend.length} />
                   </div>
                 )}
                 <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
@@ -1116,11 +1100,11 @@ export default function ClientDashboard() {
               <>
                 {big && (
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                    <TrendStatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString()}`} color={colors.accent} />
-                    {hasDailySales && <TrendStatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString()}`} color={colors.green} />}
-                    {salesProjection && <TrendStatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString()}`} color={colors.purple} />}
-                    {purchProjection && <TrendStatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString()}`} color={colors.red} />}
-                    <TrendStatPill label="Period" value={periodLabel} />
+                    <StatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString()}`} color={colors.accent} />
+                    {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString()}`} color={colors.green} />}
+                    {salesProjection && <StatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString()}`} color={colors.purple} />}
+                    {purchProjection && <StatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString()}`} color={colors.red} />}
+                    <StatPill label="Period" value={periodLabel} />
                   </div>
                 )}
                 {big ? chart : (
@@ -1153,9 +1137,9 @@ export default function ClientDashboard() {
               <>
                 {big && (
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                    <TrendStatPill label={`Top ${shown.length} total`} value={`NPR ${shownTotal.toLocaleString()}`} color={colors.accent} />
-                    <TrendStatPill label="Top item" value={shown[0].fullName || shown[0].name} color={CHART_COLORS[0]} />
-                    {purchaseTotal > 0 && <TrendStatPill label="Share of net purchases" value={`${((shownTotal / purchaseTotal) * 100).toFixed(0)}%`} />}
+                    <StatPill label={`Top ${shown.length} total`} value={`NPR ${shownTotal.toLocaleString()}`} color={colors.accent} />
+                    <StatPill label="Top item" value={shown[0].fullName || shown[0].name} color={CHART_COLORS[0]} />
+                    {purchaseTotal > 0 && <StatPill label="Share of net purchases" value={`${((shownTotal / purchaseTotal) * 100).toFixed(0)}%`} />}
                   </div>
                 )}
                 <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
@@ -1202,9 +1186,9 @@ export default function ClientDashboard() {
                 <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
                   {big && fcTrendAvg != null && (
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                      <TrendStatPill label="Average" value={`${fcTrendAvg.toFixed(1)}%`} color={colors.accent} />
-                      <TrendStatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.green} />
-                      <TrendStatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.red} />
+                      <StatPill label="Average" value={`${fcTrendAvg.toFixed(1)}%`} color={colors.accent} />
+                      <StatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.green} />
+                      <StatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.red} />
                     </div>
                   )}
                   <div style={{ minWidth: Math.max(0, fcTrend.length * 64), height: big ? h - 60 : h }}>
@@ -1270,9 +1254,9 @@ export default function ClientDashboard() {
                 <>
                   {big && (
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                      <TrendStatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString()}`} />
-                      {fcPct != null && <TrendStatPill label="Food cost %" value={`${fcPct.toFixed(1)}%`} color={colors.accent} />}
-                      <TrendStatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
+                      <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString()}`} />
+                      {fcPct != null && <StatPill label="Food cost %" value={`${fcPct.toFixed(1)}%`} color={colors.accent} />}
+                      <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
                     </div>
                   )}
                   <ResponsiveContainer width="100%" height={big ? h - 60 : h}>

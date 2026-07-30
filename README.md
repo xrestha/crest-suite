@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S488 — 2026-07-30 — Sales Mix got the same ChartCard treatment as every other dashboard chart
+
+Follow-up to S487, asked directly: "add more details in this modal as done to the others and add a zoom icon." Sales Mix (née Food vs Beverage) was still a plain `.card` div — never wrapped in `ChartCard`, so it had neither the expand icon ("zoom") every other dashboard chart got in S484/S486, nor a way to show an expanded-only stat strip.
+
+`FoodBeverageSplit.jsx` now returns a `ChartCard` (`title="Sales Mix"`, `smallHeight={140}`) instead of a bare `div.card`, with `renderChart(h)` gating on the same `h > 200` "big" convention as `Spend by Category`: percent-on-slice labels and a 3-pill stat strip (Total revenue / Top category / Category count — same shape as `Spend by Category`'s own strip) only in the expanded modal, the per-category NPR+% legend list unchanged and still shown at both sizes.
+
+This was the second file needing the small `label`/`value`/`color` stat-pill component (`ClientDashboard.jsx` had it privately as `TrendStatPill` since S484) — promoted to a real shared component, `src/components/StatPill.js`, and renamed `StatPill` at all 17 call sites in `ClientDashboard.jsx` (mechanical rename, no behavior change) plus the new 3 in `FoodBeverageSplit.jsx`. Added both `ChartCard` and the new `StatPill` to CLAUDE.md's Component Library table — `ChartCard` had never been listed there despite being the single most-reused chart pattern in the app.
+
+`CI=true npm run build` clean. Not re-verified live in-browser this session, same sandbox constraint noted in S485–S487.
+
+**Files:** `src/components/StatPill.js` (new), `src/modules/dashboard/FoodBeverageSplit.jsx`, `src/pages/dashboard/ClientDashboard.jsx`, `CLAUDE.md`
+
 ### S487 — 2026-07-30 — Dashboard's Food vs Beverage card became a real Sales Mix pie chart
 
 Requested directly off two screenshots — the dashboard's "Food vs Beverage" stacked-bar card, and the neighboring "Manual Sales by Category" pivot table showing Food/Beverage/Dessert/Other as separate rows: "make the food vs beverage into a pie chart and add all categories as in image 2." The card had always collapsed anything that wasn't exactly `'Food'` or `'Beverage'` into a catch-all `'Other'` bucket (`useFoodBeverageSplit.js`'s original `bucketOf()`), so a client with Dessert/Snack revenue never saw it broken out — even though the pivot table right next to it, reading the same underlying `recipes.category` text via the same `useSalesPivotData.js` loaders, already showed every real category as its own row.
