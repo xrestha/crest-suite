@@ -8,7 +8,7 @@ import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
-import { persistSalesDay, findSupersededRows, SAVE_TIMEOUT_MS } from './persistSalesDay'
+import { persistSalesDay, findSupersededRows, depleteManualSales, SAVE_TIMEOUT_MS } from './persistSalesDay'
 import SupersedeConfirmModal from './SupersedeConfirmModal'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 
@@ -354,6 +354,11 @@ export default function Sales() {
       setSaving(false)
     }
     if (!saveSucceeded) return
+    // Manual-sales stock depletion — best-effort, non-blocking (see depleteManualSales' own
+    // try/catch); the sales save itself already committed above regardless of this outcome.
+    depleteManualSales(supabase, {
+      clientId, periodId: selectedPeriod.id, bsDay: isBulk ? 0 : selectedDay, rows,
+    })
     // Refresh the displayed data — best-effort. Both modes reload both maps, since a save in
     // either one may have just superseded rows belonging to the other. If this hangs or fails,
     // the save itself already succeeded; the table just won't reflect it until the next reload.

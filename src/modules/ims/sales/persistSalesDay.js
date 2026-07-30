@@ -1,5 +1,7 @@
 import { withTimeout } from '../../../utils/withTimeout'
 import { isAuthExpiredError } from '../../../utils/sessionKeepAlive'
+import { scopedInsert, scopedDelete } from '../../../shared/scopedDb'
+import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 
 // How long any single save request may hang before we give up and re-enable the button (S453/S454).
 export const SAVE_TIMEOUT_MS = 20000
@@ -134,4 +136,57 @@ async function persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, 
     timeoutMs, 'Save'
   )
   if (clearErr) throw new Error(clearErr.message)
+}
+
+// Manual-sales stock depletion (added 2026-07-30) — mirrors PosOrders.jsx's POS depletion exactly
+// (same explodeRecipeIngredients, same stock_movements shape) so an IMS client without POS — or an
+// admin typing manual sales alongside a live POS — gets the same perpetual ledger POS already
+// writes. Deliberately client-side rather than inside the save_sales_day RPC: explodeRecipeIngredients
+// recurses through sub-recipes (up to 5 levels, yield%), and reimplementing that in plpgsql would
+// duplicate real logic across two languages. Best-effort and non-blocking, same as POS's own write —
+// a failure here must never undo or retry the sales_entries save that already committed.
+//
+// Product decision (confirmed with Aashish, 2026-07-30): only applies going forward from today, no
+// backfill of prior saves. Where POS already sold a recipe on the same day (Bulk: anywhere in the
+// period, since POS never posts a bs_day=0 row), POS supersedes and the manual row deposits no
+// movement for that recipe — two different facts about the same recipe/day should not both deplete
+// stock for it.
+export async function depleteManualSales(supabase, { clientId, periodId, bsDay, rows }) {
+  try {
+    // Replace this day's manual movements wholesale, matching save_sales_day's own delete+reinsert
+    // semantics for sales_entries — otherwise a re-save with fewer/changed rows leaves stale
+    // movements behind from a previous save.
+    await scopedDelete('stock_movements', clientId)
+      .eq('period_id', periodId).eq('bs_day', bsDay).eq('source', 'manual')
+
+    const candidates = (rows || []).filter(r => Number(r.qty_sold) > 0)
+    if (candidates.length === 0) return
+
+    const recipeIds = [...new Set(candidates.map(r => r.recipe_id))]
+    const posQuery = supabase.from('sales_entries').select('recipe_id')
+      .eq('period_id', periodId).in('recipe_id', recipeIds).in('source', ['pos', 'pos_comp'])
+    const { data: posRows } = await (bsDay === 0 ? posQuery : posQuery.eq('bs_day', bsDay))
+    const posRecipeIds = new Set((posRows || []).map(r => r.recipe_id))
+
+    const qualifying = candidates.filter(r => !posRecipeIds.has(r.recipe_id))
+    if (qualifying.length === 0) return
+
+    const breakdown = await explodeRecipeIngredients(supabase, [...new Set(qualifying.map(r => r.recipe_id))])
+    const agg = {}
+    qualifying.forEach(({ recipe_id, qty_sold }) => {
+      ;(breakdown[recipe_id] || []).forEach(({ item_id, qty }) => {
+        agg[item_id] = (agg[item_id] || 0) + qty * Number(qty_sold)
+      })
+    })
+
+    const movementRows = Object.entries(agg).map(([item_id, qty]) => ({
+      item_id, period_id: periodId, bs_day: bsDay, qty: -qty, source: 'manual',
+    }))
+    if (movementRows.length > 0) {
+      const { error } = await scopedInsert('stock_movements', clientId, movementRows)
+      if (error) console.error('manual stock_movements write failed:', error)
+    }
+  } catch (err) {
+    console.error('manual stock_movements write failed:', err)
+  }
 }
