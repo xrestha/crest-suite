@@ -150,6 +150,20 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S489 — 2026-07-30 — `npx skills add` clobbered tracked `.claude/skills/` via a symlink; fully reverted, no code changed
+
+Not a feature session — a tooling incident, recorded because the lesson is worth keeping. User tried `/plugin marketplace add`/`/plugin install` (unavailable in this Claude Code environment), then asked to run `npx skills add nextlevelbuilder/ui-ux-pro-max-skill` directly. Flagged the risk (third-party code execution) before running it; user confirmed "run it."
+
+The install did two things at once: added 6 unrequested bonus skills bundled in the same repo (`banner-design`, `brand`, `design`, `design-system`, `slides`, `ui-styling`), and — the real problem — **replaced this project's own git-tracked `.claude/skills/ui-ux-pro-max/` with a symlink into a new `.agents/skills/ui-ux-pro-max/`**, silently deleting a tracked data-sync script and ~3,500 lines across two CSVs and rewriting everything else in that skill. The installer's own security assessment rated the result "High Risk" (Gen) vs. "0 alerts"/"Low Risk" (Socket/Snyk).
+
+Full-repo scan of every script across all 7 skills (`subprocess`/`eval`/`exec`/network calls/base64/prompt-injection phrasing/hidden unicode) found nothing malicious — the "High Risk" rating reads as flagging *capability* (scripts that shell out to `npx shadcn add` and delegate to a local sibling script, both narrowly scoped) rather than anything actually found. The real damage was the silent overwrite of tracked project files, not the code itself. User chose full revert.
+
+**The revert itself had one real mistake, caught immediately.** `git restore` on `.claude/skills/ui-ux-pro-max` followed the (unnoticed) symlink and wrote the restored original content into `.agents/skills/ui-ux-pro-max` rather than recreating a real directory at the tracked path — so the next cleanup step, `rm -rf .agents`, deleted the just-restored content along with the new stuff, leaving `.claude/skills/ui-ux-pro-max` as a dangling symlink. Fixed by removing the broken symlink and re-running `git restore` with the path now clear, which correctly recreated it as a real directory (verified: 42 files, `git diff` empty, byte-identical to HEAD). **Lesson for next time a tracked path needs restoring: check `ls -la`/whether it's a symlink first** — `git restore`/`git checkout` write through a symlink rather than replacing it, so restoring a path that's become a symlink silently writes to the symlink's target instead of recreating the original tracked entry.
+
+A requested deeper recheck afterward confirmed the fix was complete: full untracked scan (`git status -uall`) at repo root empty, full content diff (not just `--stat`) empty, `.claude/settings*.json` untouched, no Copilot-related artifacts, and no trace at the user/global config level (`~/.claude`, npm cache, `AppData/Roaming/Claude` — one similarly-named `skills-plugin` directory found there predates this session by months, unrelated). Nothing was ever committed during the whole incident, so it left zero trace in git history either way — this log entry is the only record.
+
+**Files:** none (fully reverted; `.claude/skills/` and repo root are byte-identical to the prior commit)
+
 ### S488 — 2026-07-30 — Sales Mix got the same ChartCard treatment as every other dashboard chart
 
 Follow-up to S487, asked directly: "add more details in this modal as done to the others and add a zoom icon." Sales Mix (née Food vs Beverage) was still a plain `.card` div — never wrapped in `ChartCard`, so it had neither the expand icon ("zoom") every other dashboard chart got in S484/S486, nor a way to show an expanded-only stat strip.
