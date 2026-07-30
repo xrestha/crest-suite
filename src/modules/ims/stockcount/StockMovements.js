@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { viewPosBill } from '../../../utils/viewPosBill'
+import { daysInBsMonth } from '../../../utils/bsCalendar'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -22,6 +23,8 @@ export default function StockMovements() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterSource, setFilterSource] = useState('all')
+  const [dayFrom, setDayFrom] = useState('')
+  const [dayTo, setDayTo] = useState('')
   const [noBomRecipes, setNoBomRecipes] = useState([])
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -45,6 +48,8 @@ export default function StockMovements() {
   async function handlePeriodChange(periodId) {
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
+    setDayFrom('')
+    setDayTo('')
     setLoading(true)
     await loadReport(periodId)
     setLoading(false)
@@ -103,7 +108,8 @@ export default function StockMovements() {
   const filtered = rows.filter(r => {
     const matchSource = filterSource === 'all' || r.source === filterSource
     const matchSearch = (r.item.name || '').toLowerCase().includes(search.toLowerCase())
-    return matchSource && matchSearch
+    const matchDay = (dayFrom === '' || (r.bsDay || 0) >= Number(dayFrom)) && (dayTo === '' || (r.bsDay || 0) <= Number(dayTo))
+    return matchSource && matchSearch && matchDay
   })
 
   const totalValue = filtered.reduce((s, r) => s + r.value, 0)
@@ -131,6 +137,7 @@ export default function StockMovements() {
   }
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
+  const maxDay = selectedPeriod ? daysInBsMonth(selectedPeriod.bs_year, selectedPeriod.bs_month) : 32
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
@@ -190,6 +197,23 @@ export default function StockMovements() {
           <option value="pos_comp">POS Comp</option>
           <option value="manual">Manual Entry</option>
         </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Tip text="Filters by Day within the selected period above — not a calendar date." width={220}>
+            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Day</span>
+          </Tip>
+          <select className="form-select" style={{ width: 90 }} value={dayFrom} onChange={e => setDayFrom(e.target.value)}>
+            <option value="">From</option>
+            {Array.from({ length: maxDay }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <span style={{ color: 'var(--theme-text3)' }}>–</span>
+          <select className="form-select" style={{ width: 90 }} value={dayTo} onChange={e => setDayTo(e.target.value)}>
+            <option value="">To</option>
+            {Array.from({ length: maxDay }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+          {(dayFrom !== '' || dayTo !== '') && (
+            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => { setDayFrom(''); setDayTo('') }}>✕ Clear</button>
+          )}
+        </div>
         <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} entr{filtered.length !== 1 ? 'ies' : 'y'}</span>
       </div>
 

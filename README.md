@@ -150,6 +150,12 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S496 — 2026-07-30 — Stock Movements gets a Day filter
+
+Added a From/To Day range filter to `StockMovements.js`, alongside the existing item search and Source filter. Since the page's data is period+`bs_day`-scoped (no stored calendar date), the filter is two plain day-number `<select>`s bounded by `daysInBsMonth()` for whichever period is selected, not a date picker — a `Tip` clarifies it filters Day within the period above, not a calendar date. Resets to unfiltered whenever the period dropdown changes, since a day bound from a 32-day month would otherwise silently over-filter a 29-day one. A "✕ Clear" button appears only once either bound is set.
+
+**Files:** `src/modules/ims/stockcount/StockMovements.js`
+
 ### S495 — 2026-07-30 — Stock Movements page catches up to manual-sales depletion (S492)
 
 `StockMovements.js` predated S492 and still assumed every row was POS-driven: the Source filter only offered POS Sale/POS Comp, the badge/Excel export hardcoded anything non-comp to "POS Sale" (so the S494 backfill's manual rows were literally mislabeled as POS Sale on screen), the page subtitle and empty-state copy both said "POS bill"/"POS-driven" only, and the no-BOM warning banner's underlying query filtered `sales_entries` to `source in ('pos','pos_comp')` — silently blind to a manual-only recipe with no ingredients linked, the exact gap that banner exists to catch. Added a `manual` option to the Source filter, a third badge/label branch (`badge-gray`, "Manual Entry") in both the table and the Excel export, updated the Source column tooltip and the page subtitle/empty-state text to mention manual Sales Entry, and dropped the `source` filter on the no-BOM check's `sales_entries` query so it now looks at every sale regardless of source.
