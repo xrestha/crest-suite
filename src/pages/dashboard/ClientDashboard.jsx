@@ -362,15 +362,17 @@ export default function ClientDashboard() {
     setAndCache(setSalesProjection, 'salesProjection', salesTrend ? { projectedMonthEnd: salesTrend.projectedTotal } : null)
     setAndCache(setPurchProjection, 'purchProjection', purchTrend ? { projectedMonthEnd: purchTrend.projectedTotal } : null)
 
-    // Build the unified day axis. Current month: 6 days back → 3 days ahead (10-day window).
-    // Past months: show full actuals only.
+    // Build the unified day axis, full month (Day 1 → month end for the current month; full actual
+    // range for past months). The compact card slices this down to a 10-day window (6 days back →
+    // 3 days ahead) at render time — see `dailyTrendWindowed` below — while the expanded modal shows
+    // this whole-month array so the full trend is visible there.
     const baseDays = [...purchDayNums, ...salesDayNums].filter(d => d > 0)
     const lastActualSalesDay = salesDayNums.length ? salesDayNums[salesDayNums.length - 1] : null
     const lastActualPurchDay = purchDayNums.length ? purchDayNums[purchDayNums.length - 1] : null
     const hasProj = Object.keys(projDays).length > 0
     const hasPurchProj = Object.keys(purchProjDays).length > 0
-    const startDay = isCurrentMonth ? Math.max(1, bsToday.day - 6) : (baseDays.length ? Math.min(...baseDays) : 1)
-    const lastDay  = isCurrentMonth ? Math.min(monthEndDay, bsToday.day + 3) : (baseDays.length ? Math.max(...baseDays) : 0)
+    const startDay = isCurrentMonth ? 1 : (baseDays.length ? Math.min(...baseDays) : 1)
+    const lastDay  = isCurrentMonth ? monthEndDay : (baseDays.length ? Math.max(...baseDays) : 0)
     const trend = []
     for (let d = startDay; d <= lastDay; d++) {
       const isProj = projDays[d] != null
@@ -650,6 +652,16 @@ export default function ClientDashboard() {
   const categorySpendSummary = categorySpend.length === 0
     ? 'No purchase data for this period.'
     : `Top spend category: ${categorySpend[0].name} at NPR ${categorySpend[0].value.toLocaleString('en-NP')}${categorySpendTotal > 0 ? ` (${Math.round((categorySpend[0].value / categorySpendTotal) * 100)}% of total purchases)` : ''}.`
+  // Compact card window — 6 days back → 3 days ahead of today, sliced out of the full-month
+  // `dailyTrend` array so the small glanceable card stays readable; the expanded modal (`big`
+  // in renderChart below) uses the full `dailyTrend` array instead.
+  const dailyTrendWindowed = (() => {
+    if (dailyTrend.length <= 10) return dailyTrend
+    const bsToday = getBsToday()
+    const todayIdx = dailyTrend.findIndex(d => d.day === `Day ${bsToday.day}`)
+    if (todayIdx === -1) return dailyTrend.slice(-10)
+    return dailyTrend.slice(Math.max(0, todayIdx - 6), todayIdx + 4)
+  })()
   const dailyTrendPurchTotal = dailyTrend.reduce((s, d) => s + (d.purchases || 0), 0)
   const dailyTrendSalesTotal = dailyTrend.reduce((s, d) => s + (d.sales || 0), 0)
   const dailyTrendSummary = dailyTrend.length === 0
@@ -1057,9 +1069,10 @@ export default function ClientDashboard() {
               </div>
             )
             const big = h > 200
+            const chartData = big ? dailyTrend : dailyTrendWindowed
             const chart = (
               <ResponsiveContainer width="100%" height={h}>
-                <ComposedChart data={dailyTrend} margin={{ top: big ? 8 : 4, right: big ? 16 : 8, bottom: big ? 4 : 0, left: big ? 8 : 0 }}>
+                <ComposedChart data={chartData} margin={{ top: big ? 8 : 4, right: big ? 16 : 8, bottom: big ? 4 : 0, left: big ? 8 : 0 }}>
                   {big && (
                     <defs>
                       <linearGradient id="dtPurchasesFill" x1="0" y1="0" x2="0" y2="1">
@@ -1109,7 +1122,7 @@ export default function ClientDashboard() {
                 )}
                 {big ? chart : (
                   <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-                    <div style={{ minWidth: Math.max(0, dailyTrend.length * 44), height: h }}>{chart}</div>
+                    <div style={{ minWidth: Math.max(0, dailyTrendWindowed.length * 44), height: h }}>{chart}</div>
                   </div>
                 )}
               </>

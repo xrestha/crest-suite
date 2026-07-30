@@ -150,6 +150,12 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S491 — 2026-07-30 — Daily Purchases vs Sales modal now shows the full month, not just the 10-day window
+
+The Dashboard's "Daily Purchases vs Sales" card deliberately windows the current month to 6 days back → 3 days ahead (10 days) to stay glanceable — but the `ChartCard` expand-to-modal view was reusing that same windowed array, so opening the modal for a wider look still only showed those same ~10 days (screenshot: Day 8–17 with the axis empty past the projection). Fixed by splitting the single `dailyTrend` state into two: the effect in `ClientDashboard.jsx` now always builds the full-month day range (Day 1 → month end for the current month, unchanged full-actuals range for past months) into `dailyTrend`, and a new `dailyTrendWindowed` (derived via `.slice()` around today's day) is computed at render time for the compact card. `renderChart(h)`'s existing `big` flag (already true only inside the expanded modal, `h > 200`) now picks which array to feed the chart — `big ? dailyTrend : dailyTrendWindowed` — and the small-card horizontal-scroll `minWidth` calc was updated to size off `dailyTrendWindowed.length` instead of the now-full-month `dailyTrend.length`. No change to projection logic, the compact card's appearance, or any other chart.
+
+**Files:** `src/pages/dashboard/ClientDashboard.jsx`
+
 ### S490 — 2026-07-30 — ui-ux-pro-max audit across the codebase, then fixed everything it found
 
 Follow-up to the S489 tooling incident, back on track: asked to run the newly-clarified-as-"ui-ux-pro-max, all pages in all modules" scope, then "audit only, report findings" once asked to narrow it. Rather than spawning subagents per module (declined when tried) or reading all ~80 route components individually (would have been enormously expensive for little marginal value, since most pages share the same handful of components/patterns), ran targeted pattern scans across every module for the highest-confidence, most reliably-detectable issue classes from the skill's rubric. Two categories came back fully clean and are worth recording as such: every `type="password"` field has the correct `autoComplete`, and `PosOrders.jsx` already had a genuinely good `contrastRatio()`-based pattern that the fixes below now also use.
