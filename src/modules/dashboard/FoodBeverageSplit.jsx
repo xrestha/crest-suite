@@ -1,24 +1,40 @@
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
+import { useTheme } from '../../context/ThemeContext'
 import { useFoodBeverageSplit } from './useFoodBeverageSplit'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString('en-NP')}`
 
-const SEGMENTS = [
-  { key: 'Food', color: 'var(--theme-green)' },
-  { key: 'Beverage', color: 'var(--theme-purple)' },
-  { key: 'Other', color: 'var(--theme-text3)' },
-]
+// Fallback categorical rotation for any category beyond Food/Beverage (which get fixed semantic
+// colors below) — mirrors ClientDashboard.jsx's own CHART_COLORS array for the same "Spend by
+// Category" visual language, duplicated locally rather than imported since that constant lives in
+// a page file, not a shared module.
+const FALLBACK_HEX = ['#c9a84c', '#60a5fa', '#f87171', '#fb923c', '#22d3ee', '#f472b6', '#facc15', '#818cf8']
 
-// Compact card summarizing this period's revenue as Food / Beverage / Other — combines whichever
-// of the manual (sales_entries) and POS (pos_order_items) sources apply, so it reads as one total
-// regardless of how many sales channels this client has active.
+// Pie chart summarizing this period's revenue by menu category — combines whichever of the manual
+// (sales_entries) and POS (pos_order_items) sources apply, so it reads as one total regardless of
+// how many sales channels this client has active. Shows every real category present (the same set
+// SalesPivot.jsx's Category × Day table shows), not a collapsed Food/Beverage/Other split.
 export default function FoodBeverageSplit({ activePeriod, includeManual, includePos }) {
+  const { colors } = useTheme()
   const { buckets, loading } = useFoodBeverageSplit({ activePeriod, includeManual, includePos })
-  const total = buckets.Food + buckets.Beverage + buckets.Other
+  const categories = Object.keys(buckets).filter(c => buckets[c] > 0).sort((a, b) => buckets[b] - buckets[a])
+  const total = categories.reduce((s, c) => s + buckets[c], 0)
+
+  const colorOf = (() => {
+    let nextFallback = 0
+    const assigned = {}
+    return (cat) => {
+      if (assigned[cat]) return assigned[cat]
+      if (cat === 'Food') return (assigned[cat] = colors.green)
+      if (cat === 'Beverage') return (assigned[cat] = colors.purple)
+      return (assigned[cat] = FALLBACK_HEX[nextFallback++ % FALLBACK_HEX.length])
+    }
+  })()
 
   if (loading) {
     return (
       <div className="card" style={{ padding: '14px 16px' }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Food vs Beverage</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Sales Mix</div>
         <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
       </div>
     )
@@ -26,25 +42,31 @@ export default function FoodBeverageSplit({ activePeriod, includeManual, include
 
   if (total <= 0) return null
 
+  const pieData = categories.map(c => ({ name: c, value: buckets[c] }))
+
   return (
     <div className="card" style={{ padding: '14px 16px' }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>Food vs Beverage</div>
-      <div style={{ display: 'flex', width: '100%', height: 8, borderRadius: 999, overflow: 'hidden', marginBottom: 12 }}>
-        {SEGMENTS.map(seg => {
-          const pct = (buckets[seg.key] / total) * 100
-          if (pct <= 0) return null
-          return <div key={seg.key} style={{ width: `${pct}%`, background: seg.color }} />
-        })}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {SEGMENTS.map(seg => {
-          const amount = buckets[seg.key]
-          const pct = total > 0 ? (amount / total) * 100 : 0
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Sales Mix</div>
+      <ResponsiveContainer width="100%" height={140}>
+        <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+          <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={38} outerRadius={60} paddingAngle={2}>
+            {pieData.map(entry => <Cell key={entry.name} fill={colorOf(entry.name)} />)}
+          </Pie>
+          <Tooltip
+            contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+            formatter={(v, name) => [`${fmtNpr(v)} (${((v / total) * 100).toFixed(1)}%)`, name]}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+        {categories.map(cat => {
+          const amount = buckets[cat]
+          const pct = (amount / total) * 100
           return (
-            <div key={seg.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12.5 }}>
+            <div key={cat} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12.5 }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--theme-text1)' }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: seg.color, flexShrink: 0 }} />
-                {seg.key}
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: colorOf(cat), flexShrink: 0 }} />
+                {cat}
               </span>
               <span style={{ color: 'var(--theme-text2)' }}>{fmtNpr(amount)} · {pct.toFixed(0)}%</span>
             </div>
