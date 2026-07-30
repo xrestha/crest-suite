@@ -21,6 +21,30 @@ import FoodBeverageSplit from '../../modules/dashboard/FoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
 
+// Least-squares trend on a day→value map, extended to monthEndDay — shared by both the Sales and
+// Purchases month-end projections on the Daily Purchases vs Sales chart. Dampened so a steep slope
+// fitted to a few volatile early days can't run away: each projected day is clamped to
+// [0, 1.25 × recent (up-to-7-day) peak]. Needs ≥5 data points to bother projecting at all.
+function projectTrend(dayNums, valueMap, monthEndDay) {
+  if (dayNums.length < 5) return null
+  const xs = dayNums, ys = xs.map(d => valueMap[d]), n = xs.length
+  const sumX = xs.reduce((a, b) => a + b, 0), sumY = ys.reduce((a, b) => a + b, 0)
+  const sumXY = xs.reduce((a, x, i) => a + x * ys[i], 0), sumXX = xs.reduce((a, x) => a + x * x, 0)
+  const denom = n * sumXX - sumX * sumX
+  const slope = denom !== 0 ? (n * sumXY - sumX * sumY) / denom : 0
+  const intercept = (sumY - slope * sumX) / n
+  const recentYs = xs.slice(-7).map(d => valueMap[d]) // last up-to-7 days
+  const cap = Math.round(Math.max(...recentYs) * 1.25)
+  const lastActual = xs[xs.length - 1]
+  const projDays = {}
+  let projSum = 0
+  for (let d = lastActual + 1; d <= monthEndDay; d++) {
+    const v = Math.min(cap, Math.max(0, Math.round(slope * d + intercept)))
+    projDays[d] = v; projSum += v
+  }
+  return { projDays, projectedTotal: Math.round(sumY + projSum), lastActual }
+}
+
 // Small KPI callout used only in ChartCard's expanded (modal) view of Daily Purchases vs Sales —
 // the compact inline card stays exactly as before, this only renders when the chart is expanded.
 function TrendStatPill({ label, value, color }) {
@@ -64,6 +88,7 @@ export default function ClientDashboard() {
   const [dailyTrend, setDailyTrend]     = useState(() => readDashboardCache('dailyTrend', effectiveClientId) ?? [])
   const [hasDailySales, setHasDailySales] = useState(() => readDashboardCache('hasDailySales', effectiveClientId) ?? false)
   const [salesProjection, setSalesProjection] = useState(() => readDashboardCache('salesProjection', effectiveClientId)) // { projectedMonthEnd } | null
+  const [purchProjection, setPurchProjection] = useState(() => readDashboardCache('purchProjection', effectiveClientId)) // { projectedMonthEnd } | null
   const [topItemSpend, setTopItemSpend] = useState(() => readDashboardCache('topItemSpend', effectiveClientId) ?? [])
   const [reorderItems, setReorderItems]   = useState(() => readDashboardCache('reorderItems', effectiveClientId) ?? [])
   const [fcTrend, setFcTrend]             = useState(() => readDashboardCache('fcTrend', effectiveClientId) ?? [])
@@ -335,46 +360,37 @@ export default function ClientDashboard() {
     const salesDayNums = Object.keys(daySalesMap).map(Number).sort((a, b) => a - b)
     const dailySalesOn = salesDayNums.length > 0
     setAndCache(setHasDailySales, 'hasDailySales', dailySalesOn)
+    const purchDayNums = Object.keys(dayPurchMap).map(Number).sort((a, b) => a - b)
 
-    // Projection: current open month + ≥5 sales days only. Least-squares trend on daily revenue,
-    // extended to the last day of the BS month — but DAMPENED so a steep slope fitted to a few
-    // volatile early days can't run away: each projected day is clamped to [0, 1.25 × recent peak].
-    // Past/closed months show actuals only.
+    // Projections: current open month only, via the shared projectTrend() helper (≥5 data points,
+    // dampened cap) — Sales and Purchases each get their own independent trend line. Past/closed
+    // months show actuals only. Purchases are inherently lumpier than sales (a bulk restock lands
+    // in one day rather than accruing steadily with daily covers), so its projection is expected to
+    // be noisier — the same dampening cap that guards Sales keeps one big purchase day from
+    // blowing up the forecast here too.
     const bsToday = getBsToday()
     const isCurrentMonth = !!period && period.bs_year === bsToday.year && period.bs_month === bsToday.month
     const monthEndDay = period ? daysInBsMonth(period.bs_year, period.bs_month) : 31
-    const projDays = {}
-    let projectedMonthEnd = null
-    if (dailySalesOn && isCurrentMonth && salesDayNums.length >= 5) {
-      const xs = salesDayNums, ys = xs.map(d => daySalesMap[d]), n = xs.length
-      const sumX = xs.reduce((a, b) => a + b, 0), sumY = ys.reduce((a, b) => a + b, 0)
-      const sumXY = xs.reduce((a, x, i) => a + x * ys[i], 0), sumXX = xs.reduce((a, x) => a + x * x, 0)
-      const denom = n * sumXX - sumX * sumX
-      const slope = denom !== 0 ? (n * sumXY - sumX * sumY) / denom : 0
-      const intercept = (sumY - slope * sumX) / n
-      const recentYs = salesDayNums.slice(-7).map(d => daySalesMap[d]) // last up-to-7 days
-      const cap = Math.round(Math.max(...recentYs) * 1.25)
-      const lastActual = salesDayNums[salesDayNums.length - 1]
-      let projSum = 0
-      for (let d = lastActual + 1; d <= monthEndDay; d++) {
-        const v = Math.min(cap, Math.max(0, Math.round(slope * d + intercept)))
-        projDays[d] = v; projSum += v
-      }
-      projectedMonthEnd = Math.round(sumY + projSum)
-    }
-    setAndCache(setSalesProjection, 'salesProjection', projectedMonthEnd != null ? { projectedMonthEnd } : null)
+    const salesTrend = (dailySalesOn && isCurrentMonth) ? projectTrend(salesDayNums, daySalesMap, monthEndDay) : null
+    const purchTrend = isCurrentMonth ? projectTrend(purchDayNums, dayPurchMap, monthEndDay) : null
+    const projDays = salesTrend?.projDays || {}
+    const purchProjDays = purchTrend?.projDays || {}
+    setAndCache(setSalesProjection, 'salesProjection', salesTrend ? { projectedMonthEnd: salesTrend.projectedTotal } : null)
+    setAndCache(setPurchProjection, 'purchProjection', purchTrend ? { projectedMonthEnd: purchTrend.projectedTotal } : null)
 
     // Build the unified day axis. Current month: 6 days back → 3 days ahead (10-day window).
     // Past months: show full actuals only.
-    const purchDayNums = Object.keys(dayPurchMap).map(Number)
     const baseDays = [...purchDayNums, ...salesDayNums].filter(d => d > 0)
     const lastActualSalesDay = salesDayNums.length ? salesDayNums[salesDayNums.length - 1] : null
+    const lastActualPurchDay = purchDayNums.length ? purchDayNums[purchDayNums.length - 1] : null
     const hasProj = Object.keys(projDays).length > 0
+    const hasPurchProj = Object.keys(purchProjDays).length > 0
     const startDay = isCurrentMonth ? Math.max(1, bsToday.day - 6) : (baseDays.length ? Math.min(...baseDays) : 1)
     const lastDay  = isCurrentMonth ? Math.min(monthEndDay, bsToday.day + 3) : (baseDays.length ? Math.max(...baseDays) : 0)
     const trend = []
     for (let d = startDay; d <= lastDay; d++) {
       const isProj = projDays[d] != null
+      const isPurchProj = purchProjDays[d] != null
       trend.push({
         day: `Day ${d}`,
         purchases: dayPurchMap[d] != null ? dayPurchMap[d] : null,
@@ -382,6 +398,8 @@ export default function ClientDashboard() {
         // dashed line: anchor at the last actual sales day so it connects, then projected days
         salesProj: isProj ? projDays[d]
           : (d === lastActualSalesDay && hasProj ? daySalesMap[d] : null),
+        purchProj: isPurchProj ? purchProjDays[d]
+          : (d === lastActualPurchDay && hasPurchProj ? dayPurchMap[d] : null),
       })
     }
     setAndCache(setDailyTrend, 'dailyTrend', trend)
@@ -652,7 +670,7 @@ export default function ClientDashboard() {
   const dailyTrendSalesTotal = dailyTrend.reduce((s, d) => s + (d.sales || 0), 0)
   const dailyTrendSummary = dailyTrend.length === 0
     ? 'No purchase or sales data for this period.'
-    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-NP')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-NP')}.` : ''}${salesProjection ? ` Projected month-end revenue: NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}`
+    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-NP')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-NP')}.` : ''}${salesProjection ? ` Projected month-end revenue: NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}`
   const topItemSpendSummary = topItemSpend.length === 0
     ? 'No purchase data for this period.'
     : `Top items by spend: ${topItemSpend.slice(0, 3).map(i => `${i.fullName} at NPR ${i.value.toLocaleString('en-NP')}`).join(', ')}.`
@@ -1007,14 +1025,24 @@ export default function ClientDashboard() {
           legend={<>
             <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-accent)' }}>●</span> Purchases</span>
             {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green)' }}>●</span> Sales</span>}
-            {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-purple)', letterSpacing: '-2px' }}>┄</span> Projection</span>}
+            {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-purple)', letterSpacing: '-2px' }}>┄</span> Sales Proj.</span>}
+            {purchProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-red)', letterSpacing: '-2px' }}>┄</span> Purch. Proj.</span>}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
           </>}
           footer={<>
-            {salesProjection && (
-              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)' }}>
-                Projected month-end revenue: <strong style={{ color: 'var(--theme-purple)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString()}</strong>
-                <span style={{ color: 'var(--theme-text3)' }}> · trend estimate</span>
+            {(salesProjection || purchProjection) && (
+              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '2px 16px' }}>
+                {salesProjection && (
+                  <span>
+                    Projected month-end revenue: <strong style={{ color: 'var(--theme-purple)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString()}</strong>
+                  </span>
+                )}
+                {purchProjection && (
+                  <span>
+                    Projected month-end purchases: <strong style={{ color: 'var(--theme-red)' }}>NPR {purchProjection.projectedMonthEnd.toLocaleString()}</strong>
+                  </span>
+                )}
+                <span style={{ color: 'var(--theme-text3)' }}>· trend estimate</span>
               </div>
             )}
             <p className="sr-only">{dailyTrendSummary}</p>
@@ -1060,7 +1088,8 @@ export default function ClientDashboard() {
                   ) : (
                     <Line type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.green }} />
                   ))}
-                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Projection" stroke={colors.purple} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.purple }} />}
+                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={colors.purple} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.purple }} />}
+                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={colors.red} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.red }} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )
@@ -1070,7 +1099,8 @@ export default function ClientDashboard() {
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                     <TrendStatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString()}`} color={colors.accent} />
                     {hasDailySales && <TrendStatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString()}`} color={colors.green} />}
-                    {salesProjection && <TrendStatPill label="Projected month-end" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString()}`} color={colors.purple} />}
+                    {salesProjection && <TrendStatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString()}`} color={colors.purple} />}
+                    {purchProjection && <TrendStatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString()}`} color={colors.red} />}
                     <TrendStatPill label="Period" value={periodLabel} />
                   </div>
                 )}
