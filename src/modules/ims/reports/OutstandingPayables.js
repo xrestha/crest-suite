@@ -43,6 +43,11 @@ export default function OutstandingPayables() {
   const [bulkSaving, setBulkSaving]       = useState(false)
   const [bulkError, setBulkError]         = useState('')
 
+  // Bulk "select several payment-history rows and delete them at once" — one-by-one deletion
+  // (each a click + native confirm dialog round trip) is slow when correcting a batch of
+  // mis-entered payments, same reasoning as bulk-pay above.
+  const [selectedPayments, setSelectedPayments] = useState(new Set())
+
   useEffect(() => { if (!authLoading && effectiveClientId) load(activeTab) }, [effectiveClientId]) // eslint-disable-line
 
   async function load(tab = activeTab) {
@@ -153,6 +158,36 @@ export default function OutstandingPayables() {
     setPayError('')
   }
 
+  // Allocates a payment amount across a bill's unpaid lines, oldest-first, rounding each line's
+  // share via a running-cumulative technique (round the cumulative allocated-so-far total at each
+  // step, take the difference) instead of rounding each line's raw proportional share
+  // independently. The naive per-line rounding can lose fractions of a paisa across several lines
+  // — found live: a 10-line "Pay in full" landed a paisa short of the real bill total, leaving a
+  // permanently uncollectable NPR 0.01 balance the UI has no way to ever fully clear. This
+  // guarantees the inserted rows always sum to exactly the rounded payment amount. Shared by
+  // payBill() and paySelectedBills() (bulk pay) so the two can't independently drift on this.
+  function allocatePayment(entries, amount, date, note) {
+    let left = amount
+    let rawAllocatedSoFar = 0
+    let roundedAllocatedSoFar = 0
+    const rows = []
+    const settleIds = []
+    for (const e of entries) {
+      if (left <= EPS) break
+      if (e.remaining <= EPS) continue
+      const rawAlloc = Math.min(e.remaining, left)
+      rawAllocatedSoFar += rawAlloc
+      const cumulativeRounded = Math.round(rawAllocatedSoFar * 100) / 100
+      const alloc = Math.round((cumulativeRounded - roundedAllocatedSoFar) * 100) / 100
+      roundedAllocatedSoFar = cumulativeRounded
+      left -= rawAlloc
+      if (alloc <= 0) continue
+      rows.push({ purchase_entry_id: e.id, amount: alloc, paid_at: date, note })
+      if (e.paidTotal + rawAlloc >= e.value - EPS) settleIds.push(e.id)
+    }
+    return { rows, settleIds }
+  }
+
   // One payment for a whole bill — distributed across its unpaid line items (oldest first).
   async function payBill(bill) {
     let amount = parseFloat(payForm.amount)
@@ -164,17 +199,7 @@ export default function OutstandingPayables() {
     const date = payForm.paid_at || TODAY
     const note = payForm.note || null
 
-    let left = amount
-    const rows = []
-    const settleIds = []
-    for (const e of bill.entries) {
-      if (left <= EPS) break
-      if (e.remaining <= EPS) continue
-      const alloc = Math.min(e.remaining, left)
-      rows.push({ purchase_entry_id: e.id, amount: alloc, paid_at: date, note })
-      left -= alloc
-      if (e.paidTotal + alloc >= e.value - EPS) settleIds.push(e.id)
-    }
+    const { rows, settleIds } = allocatePayment(bill.entries, amount, date, note)
     if (rows.length === 0) { setSavingPayment(false); return }
 
     const { error: insErr } = await scopedInsert('payable_payments', rows)
@@ -210,6 +235,42 @@ export default function OutstandingPayables() {
     load(activeTab)
   }
 
+  function toggleSelectPayment(id) {
+    setSelectedPayments(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectPayments(ids) {
+    setSelectedPayments(prev => {
+      const allSelected = ids.every(id => prev.has(id))
+      const next = new Set(prev)
+      ids.forEach(id => allSelected ? next.delete(id) : next.add(id))
+      return next
+    })
+  }
+
+  // Same one-payment logic as deletePayment(), batched — one confirm dialog and one DELETE call
+  // for however many rows are checked, instead of one round trip per row.
+  async function deleteSelectedPayments(bill) {
+    const toDelete = bill.payments.filter(p => selectedPayments.has(p.id))
+    if (toDelete.length === 0) return
+    const total = toDelete.reduce((s, p) => s + parseFloat(p.amount), 0)
+    if (!window.confirm(`Delete ${toDelete.length} selected payment${toDelete.length === 1 ? '' : 's'} totaling ${fmt(total)}? This cannot be undone.`)) return
+    const ids = toDelete.map(p => p.id)
+    const { error } = await scopedDelete('payable_payments').in('id', ids)
+    if (error) { alert(error.message || 'Failed to delete payments.'); return }
+    const affectedEntryIds = [...new Set(toDelete.map(p => p.purchase_entry_id))]
+      .filter(id => entries.find(e => e.id === id)?.paid_at)
+    if (affectedEntryIds.length > 0) {
+      await supabase.from('purchase_entries').update({ paid_at: null }).in('id', affectedEntryIds)
+    }
+    setSelectedPayments(new Set())
+    load(activeTab)
+  }
+
   function toggleSelectBill(key) {
     setSelectedBills(prev => {
       const next = new Set(prev)
@@ -242,15 +303,9 @@ export default function OutstandingPayables() {
     const rows = []
     const settleIds = []
     targets.forEach(bill => {
-      let left = bill.remaining
-      for (const e of bill.entries) {
-        if (left <= EPS) break
-        if (e.remaining <= EPS) continue
-        const alloc = Math.min(e.remaining, left)
-        rows.push({ purchase_entry_id: e.id, amount: alloc, paid_at: date, note })
-        left -= alloc
-        if (e.paidTotal + alloc >= e.value - EPS) settleIds.push(e.id)
-      }
+      const alloc = allocatePayment(bill.entries, bill.remaining, date, note)
+      rows.push(...alloc.rows)
+      settleIds.push(...alloc.settleIds)
     })
     if (rows.length === 0) { setBulkSaving(false); return }
 
@@ -564,13 +619,39 @@ export default function OutstandingPayables() {
                                     </table>
 
                                     {/* Payment history (across the whole bill) */}
-                                    {b.payments.length > 0 && (
+                                    {b.payments.length > 0 && (() => {
+                                      const paymentIds = b.payments.map(p => p.id)
+                                      const selectedHere = paymentIds.filter(id => selectedPayments.has(id))
+                                      return (
                                       <div style={{ marginBottom: activeTab === 'outstanding' ? 20 : 0 }}>
-                                        <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Payment History</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                                          <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Payment History</div>
+                                          {selectedHere.length > 0 && (
+                                            <button className="btn btn-danger" style={{ fontSize: 11, padding: '2px 10px' }}
+                                              onClick={ev => { ev.stopPropagation(); deleteSelectedPayments(b) }}>
+                                              Delete Selected ({selectedHere.length})
+                                            </button>
+                                          )}
+                                        </div>
                                         <table style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: 400 }}>
+                                          <thead>
+                                            <tr>
+                                              <th style={{ padding: '0 16px 5px 0' }}>
+                                                <input type="checkbox" checked={selectedHere.length === paymentIds.length}
+                                                  onChange={ev => { ev.stopPropagation(); toggleSelectPayments(paymentIds) }}
+                                                  onClick={ev => ev.stopPropagation()} title="Select all payments in this bill" />
+                                              </th>
+                                              <th /><th /><th /><th />
+                                            </tr>
+                                          </thead>
                                           <tbody>
                                             {b.payments.map(p => (
                                               <tr key={p.id}>
+                                                <td style={{ padding: '5px 16px 5px 0' }}>
+                                                  <input type="checkbox" checked={selectedPayments.has(p.id)}
+                                                    onChange={ev => { ev.stopPropagation(); toggleSelectPayment(p.id) }}
+                                                    onClick={ev => ev.stopPropagation()} />
+                                                </td>
                                                 <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green)' }}>{p.paid_at}</td>
                                                 <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(p.amount)}</td>
                                                 <td style={{ padding: '5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
@@ -583,6 +664,7 @@ export default function OutstandingPayables() {
                                               </tr>
                                             ))}
                                             <tr style={{ borderTop: '1px solid var(--theme-border)' }}>
+                                              <td />
                                               <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
                                               <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)' }}>{fmt(b.paid)}</td>
                                               <td />
@@ -591,7 +673,8 @@ export default function OutstandingPayables() {
                                           </tbody>
                                         </table>
                                       </div>
-                                    )}
+                                      )
+                                    })()}
 
                                     {/* Record one payment for the whole bill — outstanding only */}
                                     {activeTab === 'outstanding' && (
