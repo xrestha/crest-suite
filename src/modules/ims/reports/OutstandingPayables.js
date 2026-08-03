@@ -6,6 +6,7 @@ import { bsToAd } from '../../../utils/bsCalendar'
 import { calcBillTotals, billKeyOf, aging } from '../purchases/purchasesHelpers'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import Modal from '../../../components/Modal'
 import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
@@ -22,7 +23,7 @@ const INPUT = {
 export default function OutstandingPayables() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
-  const { scopedFrom, scopedInsert, scopedDelete } = useScopedDb()
+  const { scopedFrom, scopedInsert, scopedDelete, scopedUpdate } = useScopedDb()
 
   const [entries, setEntries]           = useState([])
   const [paymentsMap, setPaymentsMap]   = useState({})
@@ -48,6 +49,18 @@ export default function OutstandingPayables() {
   // mis-entered payments, same reasoning as bulk-pay above.
   const [selectedPayments, setSelectedPayments] = useState(new Set())
 
+  // Per-vendor payment terms (free text, e.g. "Net 30", "COD") — quick-editable right from this
+  // page's vendor group header instead of only via the Vendors page. Fetched as its own small,
+  // separately-erroring query (not folded into the main entries select) so a client whose DB
+  // predates the payment_terms migration still gets a fully working Outstanding Payables page —
+  // same reasoning as setupNeeded above, just scoped to this one optional column.
+  const [vendorTerms, setVendorTerms]         = useState({})
+  const [termsSetupNeeded, setTermsSetupNeeded] = useState(false)
+  const [editingTermsVendor, setEditingTermsVendor] = useState(null)
+  const [termsForm, setTermsForm]             = useState('')
+  const [termsSaving, setTermsSaving]         = useState(false)
+  const [termsError, setTermsError]           = useState('')
+
   useEffect(() => { if (!authLoading && effectiveClientId) load(activeTab) }, [effectiveClientId]) // eslint-disable-line
 
   async function load(tab = activeTab) {
@@ -60,7 +73,7 @@ export default function OutstandingPayables() {
 
     let query = supabase
       .from('purchase_entries')
-      .select('id, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, monthly_periods!inner(client_id, bs_year, bs_month), items(name, uom, categories(name)), vendors(name)')
+      .select('id, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, monthly_periods!inner(client_id, bs_year, bs_month), items(name, uom, categories(name)), vendors(id, name)')
       .eq('monthly_periods.client_id', effectiveClientId)
       .eq('payment_method', 'Credit')
 
@@ -76,6 +89,19 @@ export default function OutstandingPayables() {
       if (error.code === '42703' || error.message?.includes('paid_at')) setSetupNeeded(true)
       setLoading(false)
       return
+    }
+
+    const vendorIds = [...new Set((data || []).map(e => e.vendors?.id).filter(Boolean))]
+    if (vendorIds.length > 0) {
+      const { data: vt, error: vtErr } = await supabase.from('vendors').select('id, payment_terms').in('id', vendorIds)
+      if (vtErr) {
+        if (vtErr.code === '42703') setTermsSetupNeeded(true)
+      } else {
+        const map = {}
+        vt.forEach(v => { map[v.id] = v.payment_terms })
+        setVendorTerms(map)
+        setTermsSetupNeeded(false)
+      }
     }
 
     const today = new Date()
@@ -211,6 +237,34 @@ export default function OutstandingPayables() {
     load(activeTab)
   }
 
+  function openEditTerms(vendor) {
+    setEditingTermsVendor(vendor)
+    setTermsForm(vendorTerms[vendor.id] || '')
+    // Surface the one-time-setup message immediately on open (rather than only after a failed
+    // save) when the payment_terms column isn't deployed yet — keeps the button itself always
+    // visible/discoverable instead of hiding the whole feature until someone runs the migration.
+    setTermsError(termsSetupNeeded
+      ? 'Needs a one-time database setup. Run this in Supabase → SQL Editor, then try again: ALTER TABLE vendors ADD COLUMN IF NOT EXISTS payment_terms text;'
+      : '')
+  }
+
+  async function saveTerms() {
+    if (!editingTermsVendor) return
+    setTermsSaving(true)
+    setTermsError('')
+    const trimmed = termsForm.trim() || null
+    const { error } = await scopedUpdate('vendors', { payment_terms: trimmed }).eq('id', editingTermsVendor.id)
+    setTermsSaving(false)
+    if (error) {
+      setTermsError(error.code === '42703'
+        ? 'Needs a one-time database setup. Run this in Supabase → SQL Editor, then try again: ALTER TABLE vendors ADD COLUMN IF NOT EXISTS payment_terms text;'
+        : (error.message || 'Failed to save payment terms.'))
+      return
+    }
+    setVendorTerms(prev => ({ ...prev, [editingTermsVendor.id]: trimmed }))
+    setEditingTermsVendor(null)
+  }
+
   // Removes a mis-entered payment — there was previously no way to correct one anywhere in the
   // app (only "add", never "delete"/"edit"). Found live: a vendor's payment history contained the
   // bill's raw pre-discount/pre-VAT line amounts instead of what was actually paid, inflating the
@@ -323,6 +377,7 @@ export default function OutstandingPayables() {
 
   // ── Group line entries into BILLS (vendor + invoice + period + day) ──
   const vendors = [...new Map(entries.map(e => [e.vendors?.name, e.vendors])).values()].filter(Boolean)
+  const vendorByName = Object.fromEntries(vendors.map(v => [v.name, v]))
   const AGING_LABELS = ['Current', '31–60 days', '61–90 days', '90+ days']
 
   const billMap = {}
@@ -513,7 +568,20 @@ export default function OutstandingPayables() {
             return (
               <div key={vName} className="card" style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--theme-border)' }}>
-                  <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{vName}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{vName}</span>
+                    {vendorByName[vName] && (<>
+                      {!termsSetupNeeded && (
+                        <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+                          {vendorTerms[vendorByName[vName].id] ? `Terms: ${vendorTerms[vendorByName[vName].id]}` : 'No payment terms set'}
+                        </span>
+                      )}
+                      <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }}
+                        onClick={() => openEditTerms(vendorByName[vName])}>
+                        Edit Terms
+                      </button>
+                    </>)}
+                  </div>
                   <span style={{ fontSize: 15, fontWeight: 700, color: activeTab === 'outstanding' ? 'var(--theme-red)' : 'var(--theme-green)' }}>{fmt(vendorTotal)}</span>
                 </div>
                 <div className="table-wrap">
@@ -748,6 +816,28 @@ export default function OutstandingPayables() {
               </div>
             )
           })
+      )}
+
+      {editingTermsVendor && (
+        <Modal onClose={() => setEditingTermsVendor(null)} title={`Payment Terms — ${editingTermsVendor.name}`}>
+          <div className="form-field">
+            <label>Payment Terms</label>
+            <input
+              value={termsForm}
+              onChange={e => setTermsForm(e.target.value)}
+              placeholder="e.g. Net 30, COD, 50% Advance"
+              autoFocus
+              style={{ ...INPUT, width: '100%' }}
+            />
+          </div>
+          {termsError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{termsError}</p>}
+          <div className="form-actions">
+            <button className="btn btn-ghost" onClick={() => setEditingTermsVendor(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={saveTerms} disabled={termsSaving}>
+              {termsSaving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   )

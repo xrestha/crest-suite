@@ -150,6 +150,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S507 — 2026-08-03 — Vendors: payment terms field, quick-editable from Outstanding Payables
+
+New `vendors.payment_terms` free-text column (e.g. "Net 30", "COD", "50% Advance") — manageable from the Vendors page (new form field + table column) and, per direct request, quick-editable right from Outstanding Payables' vendor group header row via an "Edit Terms" button next to the vendor name, without navigating away.
+
+**Migration not yet applied to the live DB** — needs a one-time manual step (see `supabase/migrations/20260803090000_vendors_payment_terms.sql`): paste `ALTER TABLE public.vendors ADD COLUMN IF NOT EXISTS payment_terms text;` into Supabase → SQL Editor and run it. Until then, Outstanding Payables' small separate `payment_terms` fetch 400s (`42703 undefined_column`) and is caught — same `setupNeeded` pattern this file already uses for `paid_at` — so the page keeps working normally with the terms display hidden and the Edit Terms modal showing the exact SQL to run instead of failing silently.
+
+**Files:** `supabase/migrations/20260803090000_vendors_payment_terms.sql`, `src/modules/ims/vendors/Vendors.js`, `src/modules/ims/reports/OutstandingPayables.js`
+
 ### S506 — 2026-08-03 — Vendor Balance Confirmation: show Payments and Returns as two separate headline figures
 
 Follow-up UI request: the combined "Payments + Returns (FY)" headline box blended two different figures into one number, even though the supporting schedule below it already listed Payment and Return line items separately. Split into two boxes — "Payments (FY)" and "Returns (FY)" — using the exact same `totals.totalPaymentsFy`/`totals.totalReturnsFy` values already computed in `vendorBalanceHelpers.js` (no computation change, display only), and updated the letter's opening-balance sentence to match: "Opening Balance + Purchases − Payments − Returns = Balance Payable" instead of "− Payments/Returns". Headline grid went from 4 to 5 columns.

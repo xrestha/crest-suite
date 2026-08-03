@@ -9,7 +9,7 @@ import Tip from '../../../components/Tip'
 import { Navigate, Link } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
 
-const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '' }
+const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '', payment_terms: '' }
 
 export default function Vendors() {
   const { clientId, isAdmin, hasImsAccess } = useAuth()
@@ -47,7 +47,8 @@ export default function Vendors() {
       contact_person: vendor.contact_person || '',
       phone: vendor.phone || '',
       address: vendor.address || '',
-      pan_vat_no: vendor.pan_vat_no || ''
+      pan_vat_no: vendor.pan_vat_no || '',
+      payment_terms: vendor.payment_terms || ''
     })
     setError('')
     setShowForm(true)
@@ -65,7 +66,8 @@ export default function Vendors() {
         contact_person: form.contact_person.trim(),
         phone: form.phone.trim(),
         address: form.address.trim(),
-        pan_vat_no: form.pan_vat_no.trim()
+        pan_vat_no: form.pan_vat_no.trim(),
+        payment_terms: form.payment_terms.trim() || null
       }).eq('id', editing)
       if (error) { setError(error.message); setSaving(false); return false }
     } else {
@@ -75,7 +77,8 @@ export default function Vendors() {
         contact_person: form.contact_person.trim(),
         phone: form.phone.trim(),
         address: form.address.trim(),
-        pan_vat_no: form.pan_vat_no.trim()
+        pan_vat_no: form.pan_vat_no.trim(),
+        payment_terms: form.payment_terms.trim() || null
       })
       if (error) { setError(error.message); setSaving(false); return false }
     }
@@ -194,6 +197,16 @@ export default function Vendors() {
               />
             </div>
           </div>
+          <div className="form-grid form-grid-3" style={{ marginTop: 18 }}>
+            <div className="form-field">
+              <label><Tip text="Standard credit period or payment arrangement agreed with this supplier, e.g. 'Net 30', 'COD', '50% Advance'. Shown on Outstanding Payables for reference.">Payment Terms</Tip></label>
+              <input
+                value={form.payment_terms}
+                onChange={e => setForm({ ...form, payment_terms: e.target.value })}
+                placeholder="e.g. Net 30, COD"
+              />
+            </div>
+          </div>
           {error && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
           <div className="form-actions" style={{ justifyContent: 'space-between' }}>
             {editing ? (() => {
@@ -255,6 +268,7 @@ export default function Vendors() {
                   <th>Contact Person</th>
                   <th>Phone</th>
                   <th><Tip text="Supplier's PAN or VAT registration number — needed for VAT invoice reconciliation." width={260}>PAN/VAT No.</Tip></th>
+                  <th>Payment Terms</th>
                   <th>Address</th>
                   <th><Tip text="Active vendors appear in purchase entry dropdowns. Inactive vendors are hidden but their purchase history is preserved." width={280}>Status</Tip></th>
                   <th></th>
@@ -270,6 +284,7 @@ export default function Vendors() {
                     <td>{v.contact_person || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                     <td>{v.phone || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                     <td>{v.pan_vat_no || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                    <td>{v.payment_terms || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                     <td style={{ maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {v.address || <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                     </td>
