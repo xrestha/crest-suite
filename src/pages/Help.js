@@ -238,7 +238,7 @@ const IMS_FEATURE_TIERS = [
       {
         icon: '✎', name: 'Vendor Balance Confirmation',
         guide: 'Printable per-vendor balance confirmation letter for a BS fiscal year — Opening Balance, Purchases, Payments/Returns, and Closing Balance, with a supporting bill-by-bill schedule showing the running balance. Matches Nepal IRD Annexure 13 (अनुसूची १३) reconciliation practice and NSA 17 external-confirmation audit evidence: sign, stamp, and return within 7 days. Reach it from Reports → Menu & Vendors, or via the "Confirm Balance" link on a vendor\'s row in Vendors.',
-        tips: ['Opening Balance is computed as of the fiscal year\'s start date (Shrawan 1), not a live "today" snapshot', 'Cash/FonePay bills appear in the schedule for full-turnover visibility but never carry a balance', 'A negative Closing Balance is labelled Advance/Credit Balance rather than Amount Payable']
+        tips: ['Opening Balance is computed as of the fiscal year\'s start date (Shrawan 1), not a live "today" snapshot', 'Cash/FonePay bills appear in the schedule for full-turnover visibility but never carry a balance', 'A negative Closing Balance is labelled Advance/Credit Balance rather than Amount Payable', '"Share via WhatsApp" pre-fills the Opening/Purchases/Payments/Returns summary and closing balance as a text message — the printed letter is still the document to actually sign']
       },
       {
         icon: '◫', name: 'Supplier Price Tracker',

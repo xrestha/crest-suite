@@ -150,6 +150,12 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S513 — 2026-08-03 — Vendor Balance Confirmation: Share via WhatsApp button
+
+Added a "Share via WhatsApp" button next to Print — pre-fills a `wa.me` text message (no phone number, so WhatsApp opens its own contact/group picker) with the letter's Opening Balance, Purchases/Payments/Returns (FY), and Closing Balance summary, same convention as Reorder Report's existing WhatsApp share. The printed/PDF letter remains the actual document to sign; this is just a faster way to hand the vendor the headline number.
+
+**Files:** `src/modules/ims/reports/VendorBalanceConfirmation.js`, `src/pages/Help.js`
+
 ### S512 — 2026-08-03 — Outstanding Payables: Payment History dates displayed in AD instead of BS
 
 Found live: the user noticed a Payment History row's date read "2026-07-24" instead of a Bikram Sambat date — every other date in the app, including the identical `payable_payments.paid_at` value shown on the Vendor Balance Confirmation letter for the same row, displays as BS ("8 Shrawan 2083"). `paid_at` is stored as a plain AD `date` column (Postgres has no BS type) and every other reader already converts it for display — this page's own Payment History row date, "Settled On" column, and "Last Settlement" stat card were the one place still rendering the raw AD string untouched. Fixed with a small `fmtBsDate()` helper (`adToBs()` + this file's existing `BS_MONTHS`) applied at all three spots; the date actually used for input/storage (the `BsCalendarPicker` in the pay forms) was never affected, since it already displayed BS correctly.

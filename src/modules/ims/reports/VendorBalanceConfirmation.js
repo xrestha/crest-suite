@@ -4,7 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import { getBsFiscalYear, getBsFiscalYearStart } from '../../../utils/bsCalendar'
+import { getBsFiscalYear, getBsFiscalYearStart, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { printWithTitle } from '../../../utils/printTitle'
 import { getFiscalYearAdRange, computeVendorBalance } from './vendorBalanceHelpers'
 import Tip from '../../../components/Tip'
@@ -117,6 +117,36 @@ export default function VendorBalanceConfirmation() {
   const vendor = vendors.find(v => v.id === selectedVendorId)
   const isEmpty = !result || (result.schedule.length <= 1 && Math.abs(result.openingBalance) < 0.01)
 
+  const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const fmtBs = date => { const { year, month, day } = adToBs(date); return `${day} ${BS_MONTHS[month - 1]} ${year}` }
+
+  // Plain text, WhatsApp's own markdown (*bold*) — no HTML, matches ReorderReport.js's convention.
+  // Mirrors the letter's own "Opening + Purchases − Payments − Returns = Balance" sentence rather
+  // than the full line-by-line schedule, since that's the one number a vendor actually needs on
+  // a phone screen; the printed/PDF letter remains the authoritative document for signing.
+  function buildWhatsAppText() {
+    const isAdvance = result.closingBalance < -0.01
+    const balanceLabel = isAdvance ? 'Advance / Credit Balance' : 'Balance Payable'
+    return [
+      `*Vendor Balance Confirmation*`,
+      `${businessName} → ${vendor?.name}`,
+      `FY ${selectedFy} (as of ${fmtBs(result.fyEnd)} BS)`,
+      '',
+      `Opening Balance: NPR ${fmt(result.openingBalance)}`,
+      `Purchases (FY): NPR ${fmt(result.totals.totalPurchasesFy)}`,
+      `Payments (FY): NPR ${fmt(result.totals.totalPaymentsFy)}`,
+      `Returns (FY): NPR ${fmt(result.totals.totalReturnsFy)}`,
+      '',
+      `*${balanceLabel}: NPR ${fmt(Math.abs(result.closingBalance))}*`,
+    ].join('\n')
+  }
+
+  // No phone number in the wa.me URL — general "share to whoever" action (WhatsApp opens its own
+  // contact/group picker), same convention as ReorderReport.js's shareReorderListWhatsApp.
+  function shareWhatsApp() {
+    window.open(`https://wa.me/?text=${encodeURIComponent(buildWhatsAppText())}`, '_blank', 'noopener,noreferrer')
+  }
+
   return (
     <div>
       <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
@@ -125,9 +155,14 @@ export default function VendorBalanceConfirmation() {
           <p className="page-subtitle">Printable yearly balance letter for IRD Annexure 13 reconciliation with a vendor</p>
         </div>
         {vendor && result && !isEmpty && (
-          <button className="btn btn-primary" onClick={() => printWithTitle(`Balance Confirmation - ${vendor.name} - FY ${selectedFy}`)}>
-            Print
-          </button>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <Tip text="Opens WhatsApp with the Opening/Purchases/Payments/Returns summary and closing balance pre-filled as a text message — pick a contact or group to send it to. The printed letter remains the document to actually sign." width={280}>
+              <button className="btn btn-ghost" onClick={shareWhatsApp}>📱 Share via WhatsApp</button>
+            </Tip>
+            <button className="btn btn-primary" onClick={() => printWithTitle(`Balance Confirmation - ${vendor.name} - FY ${selectedFy}`)}>
+              Print
+            </button>
+          </div>
         )}
       </div>
 
