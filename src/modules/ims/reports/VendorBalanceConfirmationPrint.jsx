@@ -127,7 +127,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
                 {e.note && <div style={{ fontSize: 9.5, marginTop: e.ref ? 2 : 0 }}>{e.note}</div>}
                 {!e.ref && !e.note && '—'}
               </td>
-              <td style={{ padding: '5px 6px' }}>{e.type === 'bill' ? e.method : '—'}</td>
+              <td style={{ padding: '5px 6px' }}>{e.type === 'bill' ? e.method : e.type === 'payment' ? (e.paymentMode || '—') : '—'}</td>
               <td style={{ padding: '5px 6px', textAlign: 'right' }}>
                 {e.signedAmount === null ? '—' : fmtSigned(e.signedAmount)}
               </td>

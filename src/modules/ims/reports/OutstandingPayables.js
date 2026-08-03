@@ -12,6 +12,9 @@ import { Navigate } from 'react-router-dom'
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const TODAY = new Date().toISOString().split('T')[0]
 const EPS = 0.001
+// How a Credit bill's settlement was actually paid — distinct from purchase_entries.payment_method
+// (Cash/Credit/FonePay), which describes the ORIGINAL purchase, not its later settlement.
+const PAYMENT_MODES = ['Cash', 'FonePay', 'Bank Transfer', 'Cheque']
 
 const INPUT = {
   background: 'var(--theme-input-bg, var(--theme-card))',
@@ -34,13 +37,13 @@ export default function OutstandingPayables() {
   const [filterPeriod, setFilterPeriod] = useState('all')
   const [activeTab, setActiveTab]       = useState('outstanding')
   const [expandedBill, setExpandedBill] = useState(null)
-  const [payForm, setPayForm]           = useState({ amount: '', paid_at: TODAY, note: '' })
+  const [payForm, setPayForm]           = useState({ amount: '', paid_at: TODAY, note: '', payment_mode: 'Cash' })
   const [savingPayment, setSavingPayment] = useState(false)
   const [payError, setPayError]           = useState('')
 
   // Bulk "pay several bills at once" — for a monthly credit run across many invoices.
   const [selectedBills, setSelectedBills] = useState(new Set())
-  const [bulkForm, setBulkForm]           = useState({ paid_at: TODAY, note: '' })
+  const [bulkForm, setBulkForm]           = useState({ paid_at: TODAY, note: '', payment_mode: 'Cash' })
   const [bulkSaving, setBulkSaving]       = useState(false)
   const [bulkError, setBulkError]         = useState('')
 
@@ -173,10 +176,22 @@ export default function OutstandingPayables() {
         lines.map(l => ({ qty: 1, rate: l.netLine, vat_inclusive: l.vat_inclusive })),
         billDiscount
       )
+      // Rounded to currency precision immediately — a per-line rate can carry 3+ decimals (e.g.
+      // NPR/gram costing), so the bill's true net total can land sub-paisa (e.g. NPR 1400.00175)
+      // even though every displayed figure shows only 2dp. Left unrounded, "Pay in full" (which
+      // pre-fills the editable amount via `.toFixed(2)`) silently truncates that fraction, and
+      // Math.min(amount, bill.remaining) then caps the actual payment a hair below the unrounded
+      // bill.remaining — the shortfall lands entirely on whichever line allocatePayment() processes
+      // last, since its written amount still rounds to a clean figure but the RAW allocation used
+      // for the settle check falls just short of e.value, so that line quietly never gets marked
+      // paid_at despite showing "fully paid" in the Payment History. Found live (S510): a 5-line
+      // bill with two 3-decimal rates left its last line (a clean NPR 120) stuck unsettled after a
+      // "Pay in full" that should have closed it. Same fix vendorBalanceHelpers.js's
+      // billGrandTotal() already applies for the identical root cause.
       const netSum = lines.reduce((s, l) => s + l.netLine, 0)
       lines.forEach(l => {
-        l.value = netSum > 0 ? l.netLine * (grandTotal / netSum) : 0
-        l.remaining = Math.max(0, l.value - l.paidTotal)
+        l.value = netSum > 0 ? Math.round(l.netLine * (grandTotal / netSum) * 100) / 100 : 0
+        l.remaining = Math.max(0, Math.round((l.value - l.paidTotal) * 100) / 100)
       })
     })
     setEntries(enriched)
@@ -187,7 +202,7 @@ export default function OutstandingPayables() {
 
   function toggleBill(key) {
     setExpandedBill(prev => prev === key ? null : key)
-    setPayForm({ amount: '', paid_at: TODAY, note: '' })
+    setPayForm({ amount: '', paid_at: TODAY, note: '', payment_mode: 'Cash' })
     setPayError('')
   }
 
@@ -199,7 +214,7 @@ export default function OutstandingPayables() {
   // permanently uncollectable NPR 0.01 balance the UI has no way to ever fully clear. This
   // guarantees the inserted rows always sum to exactly the rounded payment amount. Shared by
   // payBill() and paySelectedBills() (bulk pay) so the two can't independently drift on this.
-  function allocatePayment(entries, amount, date, note) {
+  function allocatePayment(entries, amount, date, note, paymentMode) {
     let left = amount
     let rawAllocatedSoFar = 0
     let roundedAllocatedSoFar = 0
@@ -215,10 +230,25 @@ export default function OutstandingPayables() {
       roundedAllocatedSoFar = cumulativeRounded
       left -= rawAlloc
       if (alloc <= 0) continue
-      rows.push({ purchase_entry_id: e.id, amount: alloc, paid_at: date, note })
+      rows.push({ purchase_entry_id: e.id, amount: alloc, paid_at: date, note, payment_mode: paymentMode || null })
       if (e.paidTotal + rawAlloc >= e.value - EPS) settleIds.push(e.id)
     }
     return { rows, settleIds }
+  }
+
+  // payment_mode may not exist on payable_payments yet if this client's DB predates the migration
+  // (this project applies schema changes by hand in the dashboard) — retry once without it rather
+  // than letting the whole Save fail, same tolerance persistSalesDay.js uses for its own RPC.
+  // PostgREST validates INSERT columns against its own schema cache and reports a missing one as
+  // PGRST204 ("Could not find the 'x' column ... in the schema cache"), NOT the raw Postgres 42703
+  // undefined_column code — 42703 only surfaces on a SELECT that reaches Postgres itself. Confirmed
+  // live: catching only 42703 here let this exact error reach the user instead of falling back.
+  async function insertPayments(rows) {
+    let { error } = await scopedInsert('payable_payments', rows)
+    if (error?.code === 'PGRST204') {
+      ;({ error } = await scopedInsert('payable_payments', rows.map(({ payment_mode, ...r }) => r)))
+    }
+    return { error }
   }
 
   // One payment for a whole bill — distributed across its unpaid line items (oldest first).
@@ -232,10 +262,10 @@ export default function OutstandingPayables() {
     const date = payForm.paid_at || TODAY
     const note = payForm.note || null
 
-    const { rows, settleIds } = allocatePayment(bill.entries, amount, date, note)
+    const { rows, settleIds } = allocatePayment(bill.entries, amount, date, note, payForm.payment_mode)
     if (rows.length === 0) { setSavingPayment(false); return }
 
-    const { error: insErr } = await scopedInsert('payable_payments', rows)
+    const { error: insErr } = await insertPayments(rows)
     if (insErr) { setPayError(insErr.message || 'Failed to save payment.'); setSavingPayment(false); return }
     if (settleIds.length > 0) {
       await supabase.from('purchase_entries').update({ paid_at: date }).in('id', settleIds)
@@ -376,19 +406,19 @@ export default function OutstandingPayables() {
     const rows = []
     const settleIds = []
     targets.forEach(bill => {
-      const alloc = allocatePayment(bill.entries, bill.remaining, date, note)
+      const alloc = allocatePayment(bill.entries, bill.remaining, date, note, bulkForm.payment_mode)
       rows.push(...alloc.rows)
       settleIds.push(...alloc.settleIds)
     })
     if (rows.length === 0) { setBulkSaving(false); return }
 
-    const { error: insErr } = await scopedInsert('payable_payments', rows)
+    const { error: insErr } = await insertPayments(rows)
     if (insErr) { setBulkError(insErr.message || 'Failed to save payments.'); setBulkSaving(false); return }
     if (settleIds.length > 0) {
       await supabase.from('purchase_entries').update({ paid_at: date }).in('id', settleIds)
     }
     setBulkSaving(false)
-    setBulkForm({ paid_at: TODAY, note: '' })
+    setBulkForm({ paid_at: TODAY, note: '', payment_mode: 'Cash' })
     load(activeTab)
   }
 
@@ -545,6 +575,13 @@ export default function OutstandingPayables() {
           <div>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Payment Date</div>
             <BsCalendarPicker value={bulkForm.paid_at} onChange={v => setBulkForm(f => ({ ...f, paid_at: v }))} placeholder="Pick date" />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Payment Mode</div>
+            <select className="form-select" style={{ ...INPUT }}
+              value={bulkForm.payment_mode} onChange={ev => setBulkForm(f => ({ ...f, payment_mode: ev.target.value }))}>
+              {PAYMENT_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
           </div>
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Note (optional)</div>
@@ -783,6 +820,15 @@ export default function OutstandingPayables() {
                                                 onChange={v => setPayForm(f => ({ ...f, paid_at: v }))}
                                                 placeholder="Pick date" />
                                             </div>
+                                          </div>
+                                          <div>
+                                            <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Payment Mode</div>
+                                            <select className="form-select" style={{ ...INPUT }}
+                                              value={payForm.payment_mode}
+                                              onChange={ev => setPayForm(f => ({ ...f, payment_mode: ev.target.value }))}
+                                              onClick={ev => ev.stopPropagation()}>
+                                              {PAYMENT_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                                            </select>
                                           </div>
                                           <div style={{ flex: 1, minWidth: 180 }}>
                                             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Note (optional)</div>

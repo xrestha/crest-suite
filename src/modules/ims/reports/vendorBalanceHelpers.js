@@ -170,10 +170,12 @@ export function buildFySchedule({ creditEntries, cashEntries, payments, returns,
 
   // Payments allocate per LINE, not per bill (see CLAUDE.md's payable_payments note) — settling a
   // multi-line bill in one action writes one payable_payments row per line, all sharing the same
-  // paid_at/note. Grouped back into one ledger line per (bill, date, note) so the letter shows
-  // what actually happened — one settlement — rather than an internal allocation detail the
-  // vendor has no reason to see. Payments during the FY against ANY Credit bill (whether the bill
-  // itself is pre-FY or in-FY) always reduce what's owed.
+  // paid_at/note/payment_mode. Grouped back into one ledger line per (bill, date, note,
+  // payment_mode) so the letter shows what actually happened — one settlement — rather than an
+  // internal allocation detail the vendor has no reason to see; payment_mode is folded into the
+  // group key alongside note so rows genuinely paid differently (e.g. split Cash + Cheque on the
+  // same day) still show as separate lines instead of silently merging. Payments during the FY
+  // against ANY Credit bill (whether the bill itself is pre-FY or in-FY) always reduce what's owed.
   const invoiceRefByEntryId = {}
   creditEntries.forEach(e => { invoiceRefByEntryId[e.id] = e.invoice_ref })
 
@@ -183,14 +185,14 @@ export function buildFySchedule({ creditEntries, cashEntries, payments, returns,
     if (!withinRange(d, fyStart, fyEnd)) return
     const bill = billByEntryId[p.purchase_entry_id] || rawPreFyBills.find(b => b.lines.some(l => l.id === p.purchase_entry_id))
     const billKey = bill?.billKey || p.purchase_entry_id
-    const groupKey = `${billKey}|${p.paid_at}|${p.note || ''}`
+    const groupKey = `${billKey}|${p.paid_at}|${p.note || ''}|${p.payment_mode || ''}`
     if (!paymentGroups[groupKey]) {
-      paymentGroups[groupKey] = { date: d, amount: 0, purchaseEntryId: p.purchase_entry_id, note: p.note || null }
+      paymentGroups[groupKey] = { date: d, amount: 0, purchaseEntryId: p.purchase_entry_id, note: p.note || null, paymentMode: p.payment_mode || null }
     }
     paymentGroups[groupKey].amount += parseFloat(p.amount)
   })
   Object.values(paymentGroups).forEach(g => {
-    events.push({ type: 'payment', date: g.date, ref: invoiceRefByEntryId[g.purchaseEntryId] || null, note: g.note, amount: g.amount, purchaseEntryId: g.purchaseEntryId })
+    events.push({ type: 'payment', date: g.date, ref: invoiceRefByEntryId[g.purchaseEntryId] || null, note: g.note, paymentMode: g.paymentMode, amount: g.amount, purchaseEntryId: g.purchaseEntryId })
   })
 
   // Returns: walk EVERY touched bill's own returns from its gross total, chronologically, so each
