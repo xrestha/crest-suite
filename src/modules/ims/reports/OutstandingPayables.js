@@ -272,30 +272,6 @@ export default function OutstandingPayables() {
     setEditingTermsVendor(null)
   }
 
-  // Removes a mis-entered payment — there was previously no way to correct one anywhere in the
-  // app (only "add", never "delete"/"edit"). Found live: a vendor's payment history contained the
-  // bill's raw pre-discount/pre-VAT line amounts instead of what was actually paid, inflating the
-  // bill's paid total well past its real value with no way to fix it short of writing SQL by hand.
-  async function deletePayment(payment) {
-    if (!window.confirm(`Delete this payment of ${fmt(payment.amount)} dated ${payment.paid_at}? This cannot be undone.`)) return
-    const { error } = await scopedDelete('payable_payments').eq('id', payment.id)
-    if (error) { alert(error.message || 'Failed to delete payment.'); return }
-    // If this payment had settled its line (purchase_entries.paid_at stamped by payBill's
-    // settleIds logic above), always clear paid_at rather than re-checking against entry.value —
-    // that field is a proportional split of the bill's grand total across whichever lines are
-    // CURRENTLY still marked paid, which becomes unreliable (even negative) once a bill-level
-    // fixed discount is left dividing an ever-shrinking subset of lines mid-cleanup. Found live:
-    // deleting one of several payments on a line left it stuck "paid" with zero payments recorded
-    // against it, because the stale comparison against a distorted entry.value never triggered.
-    // A false "still fully paid" after this is always safe to re-settle with Pay Bill; silently
-    // leaving a $0-paid line marked paid is not.
-    const entry = entries.find(e => e.id === payment.purchase_entry_id)
-    if (entry?.paid_at) {
-      await supabase.from('purchase_entries').update({ paid_at: null }).eq('id', payment.purchase_entry_id)
-    }
-    load(activeTab)
-  }
-
   function toggleSelectPayment(id) {
     setSelectedPayments(prev => {
       const next = new Set(prev)
@@ -313,8 +289,13 @@ export default function OutstandingPayables() {
     })
   }
 
-  // Same one-payment logic as deletePayment(), batched — one confirm dialog and one DELETE call
-  // for however many rows are checked, instead of one round trip per row.
+  // Removes whichever payment rows are checked — the only delete path now (the old per-row
+  // "Delete" button was dropped once bulk-select could already handle a single row via the same
+  // one confirm dialog + one DELETE call this uses, so keeping both was pure duplication).
+  // Previously there was no way to correct a mis-entered payment anywhere in the app at all.
+  // Found live: a vendor's payment history contained the bill's raw pre-discount/pre-VAT line
+  // amounts instead of what was actually paid, inflating the bill's paid total well past its real
+  // value with no way to fix it short of writing SQL by hand.
   async function deleteSelectedPayments(bill) {
     const toDelete = bill.payments.filter(p => selectedPayments.has(p.id))
     if (toDelete.length === 0) return
@@ -323,6 +304,12 @@ export default function OutstandingPayables() {
     const ids = toDelete.map(p => p.id)
     const { error } = await scopedDelete('payable_payments').in('id', ids)
     if (error) { alert(error.message || 'Failed to delete payments.'); return }
+    // Always clear paid_at on any affected line rather than re-checking against entry.value —
+    // that field is a proportional split of the bill's grand total across whichever lines are
+    // CURRENTLY still marked paid, which becomes unreliable (even negative) once a bill-level
+    // fixed discount is left dividing an ever-shrinking subset of lines mid-cleanup. A false
+    // "still fully paid" after this is always safe to re-settle with Pay Bill; silently leaving a
+    // $0-paid line marked paid is not.
     const affectedEntryIds = [...new Set(toDelete.map(p => p.purchase_entry_id))]
       .filter(id => entries.find(e => e.id === id)?.paid_at)
     if (affectedEntryIds.length > 0) {
@@ -745,7 +732,7 @@ export default function OutstandingPayables() {
                                                   onChange={ev => { ev.stopPropagation(); toggleSelectPayments(paymentIds) }}
                                                   onClick={ev => ev.stopPropagation()} title="Select all payments in this bill" />
                                               </th>
-                                              <th /><th /><th /><th />
+                                              <th /><th /><th />
                                             </tr>
                                           </thead>
                                           <tbody>
@@ -758,20 +745,13 @@ export default function OutstandingPayables() {
                                                 </td>
                                                 <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green)' }}>{p.paid_at}</td>
                                                 <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(p.amount)}</td>
-                                                <td style={{ padding: '5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
-                                                <td style={{ padding: '5px 0 5px 16px' }}>
-                                                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--theme-red)' }}
-                                                    onClick={ev => { ev.stopPropagation(); deletePayment(p) }} title="Delete this payment">
-                                                    Delete
-                                                  </button>
-                                                </td>
+                                                <td style={{ padding: '5px 0 5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
                                               </tr>
                                             ))}
                                             <tr style={{ borderTop: '1px solid var(--theme-border)' }}>
                                               <td />
                                               <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
                                               <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)' }}>{fmt(b.paid)}</td>
-                                              <td />
                                               <td />
                                             </tr>
                                           </tbody>

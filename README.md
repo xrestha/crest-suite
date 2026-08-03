@@ -150,6 +150,12 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S509 — 2026-08-03 — Outstanding Payables: drop the redundant per-row Delete button
+
+Follow-up to S508: once checking a row activates "Delete Selected (N)" at any count including 1, the per-row "Delete" button on every Payment History row was pure duplication — same action, two places, and with several rows per bill (a 9-row split payment renders 9 red buttons) the redundancy was real visual noise. Dropped the per-row button and the now-fully-superseded `deletePayment()` single-row function entirely (bulk delete already covers the single-row case with the same one confirm + one DELETE call). Payment History rows are now checkbox → date → amount → note, no trailing action column.
+
+**Files:** `src/modules/ims/reports/OutstandingPayables.js`
+
 ### S508 — 2026-08-03 — Outstanding Payables: bulk-edit note across checked Payment History rows
 
 Paid History previously had no way to add or correct a payment's note after the fact (only "Delete"). Added an "Edit Note" button next to "Delete Selected" in a bill's Payment History block — appears when at least one row is checked, opens a modal, and overwrites the note on every checked row with one value (checkbox-scoped, not "all rows for the bill" automatically — a deliberate choice: a bill's Payment History can in principle hold rows from genuinely separate settlement events, and forcing every row to share one note regardless of selection would be wrong for that case).
