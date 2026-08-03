@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S512 — 2026-08-03 — Outstanding Payables: Payment History dates displayed in AD instead of BS
+
+Found live: the user noticed a Payment History row's date read "2026-07-24" instead of a Bikram Sambat date — every other date in the app, including the identical `payable_payments.paid_at` value shown on the Vendor Balance Confirmation letter for the same row, displays as BS ("8 Shrawan 2083"). `paid_at` is stored as a plain AD `date` column (Postgres has no BS type) and every other reader already converts it for display — this page's own Payment History row date, "Settled On" column, and "Last Settlement" stat card were the one place still rendering the raw AD string untouched. Fixed with a small `fmtBsDate()` helper (`adToBs()` + this file's existing `BS_MONTHS`) applied at all three spots; the date actually used for input/storage (the `BsCalendarPicker` in the pay forms) was never affected, since it already displayed BS correctly.
+
+**Files:** `src/modules/ims/reports/OutstandingPayables.js`
+
+### S511 — 2026-08-03 — Outstanding Payables: retroactive "Edit Payment Mode" for historical settlements
+
+Follow-up to S510's Payment Mode dropdown: that only covers *new* payments going forward, leaving every pre-existing settlement with a blank Payment Mode. Added an "Edit Payment Mode" bulk action to Paid History (same checkbox-selection + modal pattern as the existing "Edit Note", added next to it) so historical payments can be tagged after the fact — useful in particular for rows whose *note* already documents the method in free text (e.g. "Fonepay on 8th Shrawan 2083") but never had the structured column set, since that column didn't exist yet when they were recorded. Also added a Payment Mode column to the Payment History table itself so tagged/untagged rows are visible without opening the modal. Verified live: bulk-set a 9-row historical Mahalaxmi Store settlement to FonePay and confirmed it now shows correctly on the Vendor Balance Confirmation letter.
+
+**Files:** `src/modules/ims/reports/OutstandingPayables.js`
+
 ### S510 — 2026-08-03 — Payment Mode dropdown for bill settlements; found + fixed a real line-value rounding bug live
 
 Added a Payment Mode dropdown (Cash / FonePay / Bank Transfer / Cheque) to both "Pay this bill" and the bulk-pay form in Outstanding Payables — distinct from `purchase_entries.payment_method` (Cash/Credit/FonePay), which describes the *original purchase*, not how a Credit bill's *settlement* was later paid. New `payable_payments.payment_mode` column (`20260803100000_payable_payments_payment_mode.sql`); the Vendor Balance Confirmation letter's "Payment Mode" column (previously blank on every Payment row) now shows it. `vendorBalanceHelpers.js`'s payment-grouping key folds `payment_mode` in alongside date/note so genuinely different settlements on the same day don't silently merge. Insert goes through a small `insertPayments()` wrapper that retries once without `payment_mode` on a `PGRST204` ("column not found in schema cache") response, so Save never breaks for a client whose DB predates the migration — note this is a **different** error code than the `42703` this file's existing `paid_at` setup-check uses: `42703` is a raw Postgres code that only surfaces on a SELECT reaching the database; an INSERT with an unrecognized column is rejected by PostgREST's own schema-cache validation before that, as `PGRST204`. Confirmed live via a smoke test against the (pre-migration) DB that the fallback actually engages rather than surfacing the raw error.

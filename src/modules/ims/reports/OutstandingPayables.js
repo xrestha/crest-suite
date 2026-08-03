@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import { bsToAd } from '../../../utils/bsCalendar'
+import { bsToAd, adToBs } from '../../../utils/bsCalendar'
 import { calcBillTotals, billKeyOf, aging } from '../purchases/purchasesHelpers'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -12,6 +12,18 @@ import { Navigate } from 'react-router-dom'
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const TODAY = new Date().toISOString().split('T')[0]
 const EPS = 0.001
+
+// paid_at is stored as a plain AD `date` column (Postgres has no BS type), but every date shown
+// to the user elsewhere in the app is BS — this page's own Payment History/Settled On columns were
+// the one place still rendering the raw AD string. Found live (S511): a payment made on 2026-07-24
+// displayed as "2026-07-24" here while the exact same paid_at showed correctly as "8 Shrawan 2083"
+// on the Vendor Balance Confirmation letter, an inconsistency the user caught only by noticing the
+// figures didn't look like the BS dates used everywhere else in the app.
+function fmtBsDate(adIso) {
+  if (!adIso) return null
+  const { year, month, day } = adToBs(new Date(adIso))
+  return `${day} ${BS_MONTHS[month - 1]} ${year}`
+}
 // How a Credit bill's settlement was actually paid — distinct from purchase_entries.payment_method
 // (Cash/Credit/FonePay), which describes the ORIGINAL purchase, not its later settlement.
 const PAYMENT_MODES = ['Cash', 'FonePay', 'Bank Transfer', 'Cheque']
@@ -70,6 +82,14 @@ export default function OutstandingPayables() {
   const [noteForm, setNoteForm]     = useState('')
   const [noteSaving, setNoteSaving] = useState(false)
   const [noteError, setNoteError]   = useState('')
+
+  // Same pattern as the note bulk-edit above, for payment_mode — mainly for tagging historical
+  // payments recorded before this column existed, so past bills can also show a real Payment Mode
+  // on the Vendor Balance Confirmation letter instead of a blank one.
+  const [editingModePayments, setEditingModePayments] = useState(null)
+  const [modeForm, setModeForm]     = useState(PAYMENT_MODES[0])
+  const [modeSaving, setModeSaving] = useState(false)
+  const [modeError, setModeError]   = useState('')
 
   useEffect(() => { if (!authLoading && effectiveClientId) load(activeTab) }, [effectiveClientId]) // eslint-disable-line
 
@@ -374,6 +394,30 @@ export default function OutstandingPayables() {
     load(activeTab)
   }
 
+  // Bulk-set one Payment Mode across whichever payment rows are checked — same shape as
+  // openEditNote()/saveNoteForSelected() above, mainly for tagging historical settlements that
+  // predate the payment_mode column so they show a real value on the Vendor Balance Confirmation
+  // letter instead of a blank Payment Mode cell.
+  function openEditMode(bill) {
+    const targets = bill.payments.filter(p => selectedPayments.has(p.id))
+    if (targets.length === 0) return
+    setEditingModePayments({ ids: targets.map(p => p.id), count: targets.length })
+    setModeForm(targets[0].payment_mode || PAYMENT_MODES[0])
+    setModeError('')
+  }
+
+  async function saveModeForSelected() {
+    if (!editingModePayments) return
+    setModeSaving(true)
+    setModeError('')
+    const { error } = await scopedUpdate('payable_payments', { payment_mode: modeForm }).in('id', editingModePayments.ids)
+    setModeSaving(false)
+    if (error) { setModeError(error.message || 'Failed to save payment mode.'); return }
+    setEditingModePayments(null)
+    setSelectedPayments(new Set())
+    load(activeTab)
+  }
+
   function toggleSelectBill(key) {
     setSelectedBills(prev => {
       const next = new Set(prev)
@@ -530,7 +574,7 @@ export default function OutstandingPayables() {
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Most recently settled bill date." width={200}>Last Settlement</Tip></div>
-            <div className="stat-value" style={{ fontSize: 14 }}>{filteredBills.length > 0 ? (filteredBills[0].settledOn || '—') : '—'}</div>
+            <div className="stat-value" style={{ fontSize: 14 }}>{filteredBills.length > 0 ? (fmtBsDate(filteredBills[0].settledOn) || '—') : '—'}</div>
             <div className="stat-sub">{filteredBills.length > 0 ? filteredBills[0].vendorName : ''}</div>
           </div>
         </>)}
@@ -709,7 +753,7 @@ export default function OutstandingPayables() {
                                 </td>
                                 <td style={{ color: 'var(--theme-accent)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Close' : '＋ Pay Bill'}</td>
                               </>) : (<>
-                                <td style={{ color: 'var(--theme-green)', fontWeight: 600, fontSize: 13 }}>{b.settledOn || '—'}</td>
+                                <td style={{ color: 'var(--theme-green)', fontWeight: 600, fontSize: 13 }}>{fmtBsDate(b.settledOn) || '—'}</td>
                                 <td style={{ color: 'var(--theme-text3)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : '▼ Details'}</td>
                               </>)}
                             </tr>
@@ -752,6 +796,10 @@ export default function OutstandingPayables() {
                                           <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Payment History</div>
                                           {selectedHere.length > 0 && (<>
                                             <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 10px' }}
+                                              onClick={ev => { ev.stopPropagation(); openEditMode(b) }}>
+                                              Edit Payment Mode ({selectedHere.length})
+                                            </button>
+                                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 10px' }}
                                               onClick={ev => { ev.stopPropagation(); openEditNote(b) }}>
                                               Edit Note ({selectedHere.length})
                                             </button>
@@ -769,7 +817,7 @@ export default function OutstandingPayables() {
                                                   onChange={ev => { ev.stopPropagation(); toggleSelectPayments(paymentIds) }}
                                                   onClick={ev => ev.stopPropagation()} title="Select all payments in this bill" />
                                               </th>
-                                              <th /><th /><th />
+                                              <th /><th /><th /><th />
                                             </tr>
                                           </thead>
                                           <tbody>
@@ -780,8 +828,9 @@ export default function OutstandingPayables() {
                                                     onChange={ev => { ev.stopPropagation(); toggleSelectPayment(p.id) }}
                                                     onClick={ev => ev.stopPropagation()} />
                                                 </td>
-                                                <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green)' }}>{p.paid_at}</td>
+                                                <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green)' }}>{fmtBsDate(p.paid_at)}</td>
                                                 <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(p.amount)}</td>
+                                                <td style={{ padding: '5px 16px', color: 'var(--theme-text3)' }}>{p.payment_mode || '—'}</td>
                                                 <td style={{ padding: '5px 0 5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
                                               </tr>
                                             ))}
@@ -789,6 +838,7 @@ export default function OutstandingPayables() {
                                               <td />
                                               <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
                                               <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)' }}>{fmt(b.paid)}</td>
+                                              <td />
                                               <td />
                                             </tr>
                                           </tbody>
@@ -922,6 +972,28 @@ export default function OutstandingPayables() {
             <button className="btn btn-ghost" onClick={() => setEditingNotePayments(null)}>Cancel</button>
             <button className="btn btn-primary" onClick={saveNoteForSelected} disabled={noteSaving}>
               {noteSaving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {editingModePayments && (
+        <Modal onClose={() => setEditingModePayments(null)} title={`Edit Payment Mode — ${editingModePayments.count} payment${editingModePayments.count === 1 ? '' : 's'}`}>
+          <div className="form-field">
+            <label>Payment Mode</label>
+            <select className="form-select" style={{ ...INPUT, width: '100%' }}
+              value={modeForm} onChange={e => setModeForm(e.target.value)}>
+              {PAYMENT_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '10px 0 0' }}>
+            Sets the Payment Mode on all {editingModePayments.count} selected row{editingModePayments.count === 1 ? '' : 's'} — useful for tagging historical settlements recorded before this column existed, so they show a real value on the Vendor Balance Confirmation letter.
+          </p>
+          {modeError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{modeError}</p>}
+          <div className="form-actions">
+            <button className="btn btn-ghost" onClick={() => setEditingModePayments(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={saveModeForSelected} disabled={modeSaving}>
+              {modeSaving ? 'Saving…' : 'Save'}
             </button>
           </div>
         </Modal>
