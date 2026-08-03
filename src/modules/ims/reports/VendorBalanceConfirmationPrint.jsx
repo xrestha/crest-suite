@@ -5,7 +5,9 @@ import { numberToWordsNpr } from '../../../utils/numberToWords'
 // (Nepal Standard on Auditing 17, adapting ISA 505 External Confirmations) and feeding Nepal IRD
 // VAT/income-tax Annexure 13 (अनुसूची १३) disclosure, which requires Opening/Purchases/Payments/
 // Closing balance + counterparty PAN whenever any figure exceeds NPR 1,00,000 in a fiscal year.
-// Same Georgia-serif print voucher family as PurchaseBillPrint.jsx, extended with a letter/
+// Uses the app's own body font (Poppins, per DESIGN.md) rather than PurchaseBillPrint.jsx's
+// Georgia-serif voucher look — a signed confirmation letter reads better in the same face as the
+// rest of the app than as a deliberately old-fashioned printed document. Extended with a letter/
 // salutation section and a running-balance schedule instead of a single itemized bill.
 function fmtBs(date) {
   const { year, month, day } = adToBs(date)
@@ -13,6 +15,9 @@ function fmtBs(date) {
 }
 
 const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// Same "− " (en dash + space) convention used everywhere a negative can appear in this letter —
+// a bare locale minus sign reads inconsistently next to the styled amounts around it.
+const fmtSigned = n => `${n < -0.005 ? '− ' : ''}${fmt(Math.abs(n))}`
 
 const EVENT_LABEL = { opening: 'Opening Balance', bill: 'Purchase', payment: 'Payment', return: 'Return' }
 
@@ -20,6 +25,22 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
   const isAdvance = closingBalance < -0.01
   const balanceLabel = isAdvance ? 'Advance / Credit Balance' : 'Balance Payable'
   const todayStr = fmtBs(new Date())
+  // numberToWordsNpr() only spells out whole rupees (it rounds internally) — stating it next to
+  // the exact 2-decimal figure elsewhere in the letter made the two disagree by up to a rupee
+  // (e.g. "NPR 97,823.77" read out as "...Twenty-Four", not "...Twenty-Three"). The one sentence
+  // that pairs a figure with its words below states both as this same rounded whole rupee amount;
+  // every other figure in the letter (headline boxes, schedule) keeps full paisa precision.
+  const roundedClosingAbs = Math.round(Math.abs(closingBalance))
+
+  // The Amount column shows each transaction's own value — a Cash/FonePay purchase is still a
+  // real purchase for NPR X, even though it has zero NET EFFECT on the running balance (that's a
+  // separate fact, reflected in the Balance column). Computed once here so the body rows and the
+  // footer's Amount total agree by construction rather than two independent calculations drifting.
+  const rows = schedule.map(e => ({
+    ...e,
+    signedAmount: e.type === 'opening' ? null : e.type === 'bill' ? e.amount : -e.amount,
+  }))
+  const amountTotal = rows.reduce((s, e) => s + (e.signedAmount || 0), 0)
 
   return (
     // White "paper" background — this renders as a persistent on-screen preview (not just at
@@ -28,7 +49,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
     // for that on-screen preview only — Layout.css strips it under @media print, same as every
     // other .card on paper (S498).
     <div className="vbc-paper" style={{ background: '#fff', borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
-    <div style={{ fontFamily: 'Georgia, serif', color: '#000', padding: '20px 24px', maxWidth: 760, margin: '0 auto' }}>
+    <div style={{ fontFamily: "'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif", color: '#000', padding: '20px 24px', maxWidth: 760, margin: '0 auto' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: 10, marginBottom: 14 }}>
         <div>
@@ -53,7 +74,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
         <p style={{ margin: '0 0 10px' }}>Dear Sir/Madam,</p>
         <p style={{ margin: '0 0 10px' }}>
           As per our books of accounts, your {isAdvance ? 'advance / credit balance' : 'balance payable'} as of{' '}
-          <strong>{fmtBs(fyEnd)} (BS)</strong> is <strong>NPR {fmt(Math.abs(closingBalance))}</strong> ({numberToWordsNpr(Math.abs(closingBalance))} only).
+          <strong>{fmtBs(fyEnd)} (BS)</strong> is <strong>NPR {roundedClosingAbs.toLocaleString('en-NP')}</strong> ({numberToWordsNpr(roundedClosingAbs)} only).
         </p>
         <p style={{ margin: '0 0 10px' }}>
           Opening Balance NPR {fmt(openingBalance)} + Purchases NPR {fmt(totals.totalPurchasesFy)} − Payments/Returns NPR {fmt(totals.totalPaymentsFy + totals.totalReturnsFy)} = {balanceLabel} NPR {fmt(Math.abs(closingBalance))}.
@@ -85,37 +106,55 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
         <thead>
           <tr style={{ borderBottom: '1px solid #000' }}>
-            {['Date', 'Particulars', 'Ref', 'Method', 'Amount (NPR)', 'Balance (NPR)'].map((h, i) => (
+            {['Date', 'Particulars', 'Ref', 'Payment Mode', 'Amount (NPR)', 'Balance (NPR)'].map((h, i) => (
               <th key={h} style={{ textAlign: i >= 4 ? 'right' : 'left', padding: '4px 6px', fontWeight: 700, fontSize: 10, color: '#000', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {schedule.map((e, idx) => {
-            const signedAmount = e.type === 'opening' ? null
-              : e.type === 'bill' && e.method === 'Credit' ? e.amount
-              : e.type === 'bill' ? 0
-              : -e.amount
-            return (
-              <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
-                <td style={{ padding: '5px 6px 5px 0' }}>{fmtBs(e.date)}</td>
-                <td style={{ padding: '5px 6px' }}>
-                  {EVENT_LABEL[e.type]}{e.type === 'bill' && e.method !== 'Credit' ? ` (${e.method})` : ''}
-                </td>
-                <td style={{ padding: '5px 6px' }}>{e.ref || '—'}</td>
-                <td style={{ padding: '5px 6px' }}>{e.type === 'bill' ? e.method : '—'}</td>
-                <td style={{ padding: '5px 6px', textAlign: 'right' }}>
-                  {signedAmount === null ? '—' : `${signedAmount < 0 ? '− ' : ''}${fmt(Math.abs(signedAmount))}`}
-                </td>
-                <td style={{ padding: '5px 0 5px 6px', textAlign: 'right', fontWeight: 600 }}>{fmt(e.runningBalance)}</td>
-              </tr>
-            )
-          })}
+          {rows.map((e, idx) => (
+            <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
+              <td style={{ padding: '5px 6px 5px 0' }}>{fmtBs(e.date)}</td>
+              <td style={{ padding: '5px 6px' }}>
+                {EVENT_LABEL[e.type]}{e.type === 'bill' && e.method !== 'Credit' ? ` (${e.method})` : ''}
+              </td>
+              <td style={{ padding: '5px 6px' }}>
+                {/* Invoice number bolded on its own line — a free-text payment note (e.g. "Fonepay
+                    via Siddhartha Bank on 22 July 2026") used to be concatenated inline with it
+                    ("3 — Fonepay via..."), which buried the actual invoice reference. */}
+                {e.ref && <div style={{ fontWeight: 700 }}>{e.ref}</div>}
+                {e.note && <div style={{ fontSize: 9.5, marginTop: e.ref ? 2 : 0 }}>{e.note}</div>}
+                {!e.ref && !e.note && '—'}
+              </td>
+              <td style={{ padding: '5px 6px' }}>{e.type === 'bill' ? e.method : '—'}</td>
+              <td style={{ padding: '5px 6px', textAlign: 'right' }}>
+                {e.signedAmount === null ? '—' : fmtSigned(e.signedAmount)}
+              </td>
+              <td style={{ padding: '5px 0 5px 6px', textAlign: 'right', fontWeight: 600 }}>{fmtSigned(e.runningBalance)}</td>
+            </tr>
+          ))}
         </tbody>
         <tfoot>
+          {/* Both label cells span the same 4 columns (Date–Method) so "Total" and "Closing
+              Balance" line up on the left, and each row's own figure lands in ITS column (Amount
+              vs Balance) with the other column left blank — instead of the two labels landing at
+              different right edges, which read as staggered/misaligned. */}
           <tr>
-            <td colSpan={5} style={{ padding: '8px 6px 0', textAlign: 'right', fontWeight: 700 }}>Closing Balance</td>
-            <td style={{ padding: '8px 0 0 6px', textAlign: 'right', fontWeight: 700, borderTop: '1px solid #000' }}>NPR {fmt(closingBalance)}</td>
+            <td colSpan={4} style={{ padding: '10px 6px 0', textAlign: 'right', fontWeight: 700, borderTop: '1px solid #000' }}>Total</td>
+            <td style={{ padding: '10px 6px 0', textAlign: 'right', fontWeight: 700, borderTop: '1px solid #000' }}>
+              {fmtSigned(amountTotal)}
+            </td>
+            <td style={{ padding: '10px 0 0 6px', borderTop: '1px solid #000' }} />
+          </tr>
+          <tr>
+            {/* A negative closing balance carries the same "Advance / Credit" framing here as the
+                letter body and headline box above — a bare "-17,602.53" with no context read as a
+                formatting error sitting right below a box that had already explained it. */}
+            <td colSpan={4} style={{ padding: '6px 6px 0', textAlign: 'right', fontWeight: 700 }}>
+              {isAdvance ? 'Closing Balance (Advance / Credit)' : 'Closing Balance'}
+            </td>
+            <td style={{ padding: '6px 6px 0' }} />
+            <td style={{ padding: '6px 0 0 6px', textAlign: 'right', fontWeight: 700 }}>NPR {fmtSigned(closingBalance)}</td>
           </tr>
         </tfoot>
       </table>

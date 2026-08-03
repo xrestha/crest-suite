@@ -22,24 +22,13 @@ function billDateOf(e) {
   return bsToAd(p.bs_year, p.bs_month, e.bs_day || 1)
 }
 
-function withinRange(date, start, end) {
-  return date >= start && date <= end
+function returnDateOf(r) {
+  const p = r.monthly_periods
+  return bsToAd(p.bs_year, p.bs_month, r.bs_day || 1)
 }
 
-// qty*rate (pre-VAT) of goods returned per purchase_entry_id. Pass `beforeDate` to only count
-// returns dated before a cutoff (used for Opening Balance, which must not net a return that
-// hasn't happened yet as of the fiscal year's start).
-function sumReturnsByEntry(returns, beforeDate = null) {
-  const map = {}
-  returns.forEach(r => {
-    if (beforeDate) {
-      const p = r.monthly_periods
-      const returnDate = bsToAd(p.bs_year, p.bs_month, r.bs_day || 1)
-      if (!(returnDate < beforeDate)) return
-    }
-    map[r.purchase_entry_id] = (map[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0)
-  })
-  return map
+function withinRange(date, start, end) {
+  return date >= start && date <= end
 }
 
 function paymentsByEntryMap(payments) {
@@ -52,12 +41,14 @@ function sumPayments(paymentsList, beforeDate) {
   return paymentsList.reduce((s, p) => (new Date(p.paid_at) < beforeDate ? s + parseFloat(p.amount) : s), 0)
 }
 
-// Groups purchase_entries rows (already joined to monthly_periods) into bills and computes each
-// bill's VAT-correct grand total via calcBillTotals — same pattern as OutstandingPayables.js's
-// load(), generalized to any payment_method so Cash/FonePay bills can appear in the schedule too.
-// `returnedByEntry` decides which returns get netted into the total — the caller controls this so
-// pre-FY bills (Opening Balance) and in-FY bills (the schedule) can apply different cutoffs.
-function groupIntoBills(entries, returnedByEntry) {
+// Groups purchase_entries rows (already joined to monthly_periods) into bills, keeping each
+// line's RAW qty/rate — deliberately not netting returns here. Returns get their own ledger line
+// with their own VAT/discount-adjusted value (see walkBillReturns below) instead of being baked
+// invisibly into the bill's total, which used to hide the return from the printed schedule
+// entirely and made the headline "Purchases − Payments/Returns" arithmetic not actually add up
+// (Purchases was silently already net-of-return, so subtracting the return again double-counted
+// it in the displayed formula even though the final balance itself was computed correctly).
+function groupRawBills(entries) {
   const byBill = {}
   entries.forEach(e => {
     const period = e.monthly_periods
@@ -69,88 +60,147 @@ function groupIntoBills(entries, returnedByEntry) {
         paymentMethod: e.payment_method,
         invoiceRef: e.invoice_ref,
         billDate: billDateOf(e),
-        entryIds: [],
         lines: [],
       }
     }
-    const netLine = Math.max(0, parseFloat(e.qty) * parseFloat(e.rate) - (returnedByEntry[e.id] || 0))
-    byBill[key].entryIds.push(e.id)
     byBill[key].lines.push({
-      netLine,
+      id: e.id,
+      qty: parseFloat(e.qty) || 0,
+      rate: parseFloat(e.rate) || 0,
       vat_inclusive: e.vat_inclusive,
       discount_amount: e.discount_amount,
       purchase_group_id: e.purchase_group_id,
-      id: e.id,
     })
   })
-  return Object.values(byBill).map(bill => {
-    const discountByGroup = {}
-    bill.lines.forEach(l => { discountByGroup[l.purchase_group_id || l.id] = parseFloat(l.discount_amount || 0) })
-    const billDiscount = Object.values(discountByGroup).reduce((s, d) => s + d, 0)
-    const { grandTotal } = calcBillTotals(
-      bill.lines.map(l => ({ qty: 1, rate: l.netLine, vat_inclusive: l.vat_inclusive })),
-      billDiscount
-    )
-    return { ...bill, grandTotal }
+  return Object.values(byBill)
+}
+
+// discount_amount is stored on every line of a bill but represents ONE bill-level discount —
+// deduped per purchase_group_id before summing, same convention as VendorReport.js.
+function billDiscountOf(lines) {
+  const discountByGroup = {}
+  lines.forEach(l => { discountByGroup[l.purchase_group_id || l.id] = parseFloat(l.discount_amount || 0) })
+  return Object.values(discountByGroup).reduce((s, d) => s + d, 0)
+}
+
+// VAT-correct grand total for a bill's lines via calcBillTotals. `netByEntry` (optional) nets a
+// qty*rate return amount out of each line first — omit it (or pass an empty map) for the bill's
+// GROSS total as originally billed.
+function billGrandTotal(lines, netByEntry) {
+  const discount = billDiscountOf(lines)
+  const calcLines = lines.map(l => ({
+    qty: 1,
+    rate: Math.max(0, l.qty * l.rate - (netByEntry?.[l.id] || 0)),
+    vat_inclusive: l.vat_inclusive,
+  }))
+  return calcBillTotals(calcLines, discount).grandTotal
+}
+
+// Walks a bill's returns in date order, computing each one's own VAT/discount-adjusted impact —
+// NOT a flat qty*rate figure, since VAT recalculates on the shrinking post-return base each time.
+// Returns an array of { returnRow, date, effectiveValue }, one per return, in chronological order.
+// Starting from the bill's GROSS total means the returned array's effectiveValues always sum to
+// exactly (grossTotal − finalNetTotal), so "Purchase" (gross) and "Return" (effective) lines shown
+// separately in a ledger always reconcile to the same net figure a single netted line would have.
+function walkBillReturns(bill, billReturns) {
+  const sorted = [...billReturns].sort((a, b) => returnDateOf(a) - returnDateOf(b))
+  const returnedSoFar = {}
+  let runningTotal = billGrandTotal(bill.lines, null)
+  return sorted.map(r => {
+    returnedSoFar[r.purchase_entry_id] = (returnedSoFar[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0)
+    const newTotal = billGrandTotal(bill.lines, returnedSoFar)
+    const effectiveValue = runningTotal - newTotal
+    runningTotal = newTotal
+    return { returnRow: r, date: returnDateOf(r), effectiveValue }
   })
 }
 
 // Balance owed to this vendor as of the fiscal year's start date — the amount every Credit bill
 // dated before fyStart still had outstanding once payments made before fyStart are subtracted.
 // Cannot reuse OutstandingPayables.js's `remaining` field: that nets against ALL payments ever
-// made (a live "today" snapshot), not a historical as-of-fyStart cutoff.
+// made (a live "today" snapshot), not a historical as-of-fyStart cutoff. This is a single carried-
+// forward lump sum (no separate display), so returns before the cutoff are netted directly here —
+// unlike the FY schedule itself, there's no "Balance b/f" breakdown to preserve.
 export function computeOpeningBalance(creditEntries, payments, returns, fyStart) {
   const preFyEntries = creditEntries.filter(e => billDateOf(e) < fyStart)
   if (preFyEntries.length === 0) return 0
-  const returnedBeforeFy = sumReturnsByEntry(returns, fyStart)
-  const bills = groupIntoBills(preFyEntries, returnedBeforeFy)
+  const bills = groupRawBills(preFyEntries)
   const pmtMap = paymentsByEntryMap(payments)
   return bills.reduce((total, bill) => {
-    const paidBeforeFy = bill.entryIds.reduce((s, id) => s + sumPayments(pmtMap[id] || [], fyStart), 0)
-    return total + Math.max(0, bill.grandTotal - paidBeforeFy)
+    const billEntryIds = new Set(bill.lines.map(l => l.id))
+    const billReturns = returns.filter(r => billEntryIds.has(r.purchase_entry_id) && returnDateOf(r) < fyStart)
+    const returnedBeforeFy = {}
+    billReturns.forEach(r => { returnedBeforeFy[r.purchase_entry_id] = (returnedBeforeFy[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0) })
+    const grandTotal = billGrandTotal(bill.lines, returnedBeforeFy)
+    const paidBeforeFy = bill.lines.reduce((s, l) => s + sumPayments(pmtMap[l.id] || [], fyStart), 0)
+    return total + Math.max(0, grandTotal - paidBeforeFy)
   }, 0)
 }
 
 // Chronological Dr/Cr ledger for the fiscal year: an opening-balance row, then every bill/payment/
 // return dated within the FY, each carrying the running balance after it. Credit bills add to the
-// balance; payments and returns-against-a-pre-FY-Credit-bill subtract. Cash/FonePay bills are
-// listed (full-turnover visibility, per Annexure 13) but net to zero — they're simultaneously a
-// purchase and an instant settlement.
+// balance; payments and returns-against-a-Credit-bill subtract. Cash/FonePay bills (and any return
+// against one) are listed for full-turnover visibility per Annexure 13, but never touch the
+// running balance — they're simultaneously a purchase and an instant settlement.
 export function buildFySchedule({ creditEntries, cashEntries, payments, returns, fyStart, fyEnd, openingBalance }) {
-  const allReturnedByEntry = sumReturnsByEntry(returns) // unconditional — bakes into each FY bill's own total
   const inFyCredit = creditEntries.filter(e => withinRange(billDateOf(e), fyStart, fyEnd))
-  const preFyCreditIds = new Set(
-    creditEntries.filter(e => billDateOf(e) < fyStart).map(e => e.id)
-  )
+  const preFyCredit = creditEntries.filter(e => billDateOf(e) < fyStart)
 
-  const fyBills = groupIntoBills([...inFyCredit, ...cashEntries], allReturnedByEntry)
+  const rawInFyBills = groupRawBills([...inFyCredit, ...cashEntries])
+  const rawPreFyBills = groupRawBills(preFyCredit) // lookup only — never shown as a 'bill' event; needed to correctly compute a return posted this FY against a bill from before it
+
+  const billByEntryId = {}
+  rawInFyBills.forEach(bill => bill.lines.forEach(l => { billByEntryId[l.id] = bill }))
 
   const events = [{ type: 'opening', date: fyStart, amount: openingBalance }]
 
-  fyBills.forEach(bill => {
-    events.push({ type: 'bill', date: bill.billDate, ref: bill.invoiceRef, method: bill.paymentMethod, amount: bill.grandTotal, billKey: bill.billKey })
+  // Bill events at GROSS value — any return against it prints as its own line below, rather than
+  // silently pre-netting it into a single figure that hides the return from the visible ledger.
+  rawInFyBills.forEach(bill => {
+    const grossGrandTotal = billGrandTotal(bill.lines, null)
+    events.push({ type: 'bill', date: bill.billDate, ref: bill.invoiceRef, method: bill.paymentMethod, amount: grossGrandTotal, billKey: bill.billKey })
   })
 
-  // Payments during the FY against ANY Credit bill (whether the bill itself is pre-FY or in-FY)
-  // always reduce what's owed.
+  // Payments allocate per LINE, not per bill (see CLAUDE.md's payable_payments note) — settling a
+  // multi-line bill in one action writes one payable_payments row per line, all sharing the same
+  // paid_at/note. Grouped back into one ledger line per (bill, date, note) so the letter shows
+  // what actually happened — one settlement — rather than an internal allocation detail the
+  // vendor has no reason to see. Payments during the FY against ANY Credit bill (whether the bill
+  // itself is pre-FY or in-FY) always reduce what's owed.
+  const invoiceRefByEntryId = {}
+  creditEntries.forEach(e => { invoiceRefByEntryId[e.id] = e.invoice_ref })
+
+  const paymentGroups = {}
   payments.forEach(p => {
     const d = new Date(p.paid_at)
-    if (withinRange(d, fyStart, fyEnd)) {
-      events.push({ type: 'payment', date: d, ref: p.note || '', amount: parseFloat(p.amount), purchaseEntryId: p.purchase_entry_id })
+    if (!withinRange(d, fyStart, fyEnd)) return
+    const bill = billByEntryId[p.purchase_entry_id] || rawPreFyBills.find(b => b.lines.some(l => l.id === p.purchase_entry_id))
+    const billKey = bill?.billKey || p.purchase_entry_id
+    const groupKey = `${billKey}|${p.paid_at}|${p.note || ''}`
+    if (!paymentGroups[groupKey]) {
+      paymentGroups[groupKey] = { date: d, amount: 0, purchaseEntryId: p.purchase_entry_id, note: p.note || null }
     }
+    paymentGroups[groupKey].amount += parseFloat(p.amount)
+  })
+  Object.values(paymentGroups).forEach(g => {
+    events.push({ type: 'payment', date: g.date, ref: invoiceRefByEntryId[g.purchaseEntryId] || null, note: g.note, amount: g.amount, purchaseEntryId: g.purchaseEntryId })
   })
 
-  // Returns during the FY against a PRE-FY Credit bill: not netted into Opening Balance (which
-  // only counts returns dated before fyStart) and the bill itself isn't in this FY's schedule to
-  // net it into — so it needs its own ledger line. Returns against an in-FY bill are already
-  // baked into that bill's grandTotal above and must NOT also appear here (double-count).
-  returns.forEach(r => {
-    if (!preFyCreditIds.has(r.purchase_entry_id)) return
-    const p = r.monthly_periods
-    const d = bsToAd(p.bs_year, p.bs_month, r.bs_day || 1)
-    if (withinRange(d, fyStart, fyEnd)) {
-      events.push({ type: 'return', date: d, amount: parseFloat(r.qty || 0) * parseFloat(r.rate || 0), purchaseEntryId: r.purchase_entry_id })
-    }
+  // Returns: walk EVERY touched bill's own returns from its gross total, chronologically, so each
+  // return's ledger amount is that specific return's true VAT/discount-adjusted impact. For a
+  // pre-FY bill, the walk still processes returns dated before fyStart (needed to reach the
+  // correct starting balance for one landing inside the FY) but only emits events for the ones
+  // actually dated within [fyStart, fyEnd] — anything earlier is already folded into Opening
+  // Balance.
+  const allBillsToWalk = [...rawInFyBills, ...rawPreFyBills]
+  allBillsToWalk.forEach(bill => {
+    const billEntryIds = new Set(bill.lines.map(l => l.id))
+    const billReturns = returns.filter(r => billEntryIds.has(r.purchase_entry_id))
+    if (billReturns.length === 0) return
+    walkBillReturns(bill, billReturns).forEach(({ returnRow, date, effectiveValue }) => {
+      if (!withinRange(date, fyStart, fyEnd)) return
+      events.push({ type: 'return', date, ref: bill.invoiceRef, method: bill.paymentMethod, amount: effectiveValue, purchaseEntryId: returnRow.purchase_entry_id })
+    })
   })
 
   events.sort((a, b) => a.date - b.date)
@@ -159,28 +209,34 @@ export function buildFySchedule({ creditEntries, cashEntries, payments, returns,
   const schedule = events.map(e => {
     if (e.type === 'bill' && e.method === 'Credit') balance += e.amount
     if (e.type === 'payment') balance -= e.amount
-    if (e.type === 'return') balance -= e.amount
+    if (e.type === 'return' && e.method === 'Credit') balance -= e.amount
     return { ...e, runningBalance: balance }
   })
   const closingBalance = balance
 
-  const totalPurchasesFy = fyBills.reduce((s, b) => s + b.grandTotal, 0)
-  const totalPaymentsFy = events.filter(e => e.type === 'payment').reduce((s, e) => s + e.amount, 0)
-    + fyBills.filter(b => b.paymentMethod !== 'Credit').reduce((s, b) => s + b.grandTotal, 0)
-  const totalReturnsFy = returns.reduce((s, r) => {
-    const p = r.monthly_periods
-    const d = bsToAd(p.bs_year, p.bs_month, r.bs_day || 1)
-    return withinRange(d, fyStart, fyEnd) ? s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0) : s
-  }, 0)
+  // Purchases/Returns are both GROSS-basis now, so "Opening + Purchases − Payments/Returns" in the
+  // printed letter actually reconciles to the shown Closing Balance — previously Purchases was
+  // silently net-of-return already, so subtracting the return again double-counted it on screen.
+  const totalPurchasesFy = rawInFyBills.reduce((s, b) => s + billGrandTotal(b.lines, null), 0)
+  const totalReturnsFy = schedule.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0)
+  const totalPaymentsFy = schedule.filter(e => e.type === 'payment').reduce((s, e) => s + e.amount, 0)
+    + rawInFyBills.filter(b => b.paymentMethod !== 'Credit').reduce((s, b) => {
+      const billEntryIds = new Set(b.lines.map(l => l.id))
+      const netByEntry = {}
+      returns.filter(r => billEntryIds.has(r.purchase_entry_id)).forEach(r => {
+        netByEntry[r.purchase_entry_id] = (netByEntry[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0)
+      })
+      return s + billGrandTotal(b.lines, netByEntry) // net settlement — what actually left the register after its own return(s)
+    }, 0)
 
   if (process.env.NODE_ENV !== 'production') {
-    // Independent reconciliation check: opening + this-FY Credit purchases − this-FY payments −
-    // this-FY returns-against-pre-FY-bills should equal the walk's own closing figure. Catches a
+    // Independent reconciliation check: opening + this-FY Credit bill (gross) totals − this-FY
+    // payments − this-FY Credit-bill returns should equal the walk's own closing figure. Catches a
     // stray filter/typo in the walk above without relying on the walk to grade itself.
-    const creditBillSum = fyBills.filter(b => b.paymentMethod === 'Credit').reduce((s, b) => s + b.grandTotal, 0)
-    const paymentSum = events.filter(e => e.type === 'payment').reduce((s, e) => s + e.amount, 0)
-    const returnSum = events.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0)
-    const expected = openingBalance + creditBillSum - paymentSum - returnSum
+    const creditBillSum = rawInFyBills.filter(b => b.paymentMethod === 'Credit').reduce((s, b) => s + billGrandTotal(b.lines, null), 0)
+    const paymentSum = schedule.filter(e => e.type === 'payment').reduce((s, e) => s + e.amount, 0)
+    const creditReturnSum = schedule.filter(e => e.type === 'return' && e.method === 'Credit').reduce((s, e) => s + e.amount, 0)
+    const expected = openingBalance + creditBillSum - paymentSum - creditReturnSum
     console.assert(Math.abs(expected - closingBalance) < 0.01,
       'Vendor Balance Confirmation: closing balance reconciliation mismatch', { expected, closingBalance })
   }

@@ -22,7 +22,7 @@ const INPUT = {
 export default function OutstandingPayables() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
-  const { scopedFrom, scopedInsert } = useScopedDb()
+  const { scopedFrom, scopedInsert, scopedDelete } = useScopedDb()
 
   const [entries, setEntries]           = useState([])
   const [paymentsMap, setPaymentsMap]   = useState({})
@@ -183,6 +183,30 @@ export default function OutstandingPayables() {
       await supabase.from('purchase_entries').update({ paid_at: date }).in('id', settleIds)
     }
     setSavingPayment(false)
+    load(activeTab)
+  }
+
+  // Removes a mis-entered payment — there was previously no way to correct one anywhere in the
+  // app (only "add", never "delete"/"edit"). Found live: a vendor's payment history contained the
+  // bill's raw pre-discount/pre-VAT line amounts instead of what was actually paid, inflating the
+  // bill's paid total well past its real value with no way to fix it short of writing SQL by hand.
+  async function deletePayment(payment) {
+    if (!window.confirm(`Delete this payment of ${fmt(payment.amount)} dated ${payment.paid_at}? This cannot be undone.`)) return
+    const { error } = await scopedDelete('payable_payments').eq('id', payment.id)
+    if (error) { alert(error.message || 'Failed to delete payment.'); return }
+    // If this payment had settled its line (purchase_entries.paid_at stamped by payBill's
+    // settleIds logic above), always clear paid_at rather than re-checking against entry.value —
+    // that field is a proportional split of the bill's grand total across whichever lines are
+    // CURRENTLY still marked paid, which becomes unreliable (even negative) once a bill-level
+    // fixed discount is left dividing an ever-shrinking subset of lines mid-cleanup. Found live:
+    // deleting one of several payments on a line left it stuck "paid" with zero payments recorded
+    // against it, because the stale comparison against a distorted entry.value never triggered.
+    // A false "still fully paid" after this is always safe to re-settle with Pay Bill; silently
+    // leaving a $0-paid line marked paid is not.
+    const entry = entries.find(e => e.id === payment.purchase_entry_id)
+    if (entry?.paid_at) {
+      await supabase.from('purchase_entries').update({ paid_at: null }).eq('id', payment.purchase_entry_id)
+    }
     load(activeTab)
   }
 
@@ -549,12 +573,19 @@ export default function OutstandingPayables() {
                                               <tr key={p.id}>
                                                 <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green)' }}>{p.paid_at}</td>
                                                 <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(p.amount)}</td>
-                                                <td style={{ padding: '5px 0 5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
+                                                <td style={{ padding: '5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
+                                                <td style={{ padding: '5px 0 5px 16px' }}>
+                                                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--theme-red)' }}
+                                                    onClick={ev => { ev.stopPropagation(); deletePayment(p) }} title="Delete this payment">
+                                                    Delete
+                                                  </button>
+                                                </td>
                                               </tr>
                                             ))}
                                             <tr style={{ borderTop: '1px solid var(--theme-border)' }}>
                                               <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
                                               <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)' }}>{fmt(b.paid)}</td>
+                                              <td />
                                               <td />
                                             </tr>
                                           </tbody>
