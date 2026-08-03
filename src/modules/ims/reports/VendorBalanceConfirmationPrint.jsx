@@ -77,7 +77,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
           <strong>{fmtBs(fyEnd)} (BS)</strong> is <strong>NPR {roundedClosingAbs.toLocaleString('en-NP')}</strong> ({numberToWordsNpr(roundedClosingAbs)} only).
         </p>
         <p style={{ margin: '0 0 10px' }}>
-          Opening Balance NPR {fmt(openingBalance)} + Purchases NPR {fmt(totals.totalPurchasesFy)} − Payments/Returns NPR {fmt(totals.totalPaymentsFy + totals.totalReturnsFy)} = {balanceLabel} NPR {fmt(Math.abs(closingBalance))}.
+          Opening Balance NPR {fmt(openingBalance)} + Purchases NPR {fmt(totals.totalPurchasesFy)} − Payments NPR {fmt(totals.totalPaymentsFy)} − Returns NPR {fmt(totals.totalReturnsFy)} = {balanceLabel} NPR {fmt(Math.abs(closingBalance))}.
         </p>
         <p style={{ margin: 0 }}>
           Kindly confirm the above balance by signing and returning a copy of this letter within 7 days. Please inform us in writing of any discrepancy.
@@ -85,11 +85,12 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
       </div>
 
       {/* Headline figures */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 18, fontSize: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 18, fontSize: 12 }}>
         {[
           ['Opening Balance', openingBalance],
           ['Purchases (FY)', totals.totalPurchasesFy],
-          ['Payments + Returns (FY)', totals.totalPaymentsFy + totals.totalReturnsFy],
+          ['Payments (FY)', totals.totalPaymentsFy],
+          ['Returns (FY)', totals.totalReturnsFy],
           [balanceLabel, Math.abs(closingBalance)],
         ].map(([label, val]) => (
           <div key={label} style={{ border: '1px solid #ccc', borderRadius: 4, padding: '8px 10px' }}>

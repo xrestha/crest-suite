@@ -150,6 +150,12 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S506 — 2026-08-03 — Vendor Balance Confirmation: show Payments and Returns as two separate headline figures
+
+Follow-up UI request: the combined "Payments + Returns (FY)" headline box blended two different figures into one number, even though the supporting schedule below it already listed Payment and Return line items separately. Split into two boxes — "Payments (FY)" and "Returns (FY)" — using the exact same `totals.totalPaymentsFy`/`totals.totalReturnsFy` values already computed in `vendorBalanceHelpers.js` (no computation change, display only), and updated the letter's opening-balance sentence to match: "Opening Balance + Purchases − Payments − Returns = Balance Payable" instead of "− Payments/Returns". Headline grid went from 4 to 5 columns.
+
+**Files:** `src/modules/ims/reports/VendorBalanceConfirmationPrint.jsx`
+
 ### S505 — 2026-08-03 — Outstanding Payables: fix a rounding-remainder bug in payment allocation; bulk-select-and-delete for Payment History; re-enter Gourmet Bites' real payment
 
 Follow-up to S503's cleanup. After deleting Gourmet Bites' 10 bad payment rows, the plan was to re-enter its one real payment (NPR 97,823.77 in full, paid 30 Ashadh 2083) via the normal "Pay in full" button — which surfaced a second, unrelated bug in the allocation logic itself: `payBill()`/`paySelectedBills()` computed each line's proportional share as a raw float (`Math.min(e.remaining, left)`) and let each of the 10 inserted `payable_payments.amount` values round independently to 2dp on write. Rounding 10 shares independently can each round in a different direction and lose fractions of a paisa in aggregate — verified live: the resulting rows summed to NPR 97,823.76, one paisa short of the real NPR 97,823.77, leaving a permanently uncollectable phantom balance with no way to ever fully clear it (the same failure family as S504, but in the allocation math itself, not the display layer — confirmed distinct by re-deriving from first principles rather than assuming the earlier fix covered it, since an initial rounding tweak to `vendorBalanceHelpers.js`'s `billGrandTotal()` did *not* resolve this when checked live).
