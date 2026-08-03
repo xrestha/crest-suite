@@ -150,6 +150,12 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S502 — 2026-08-03 — Vendor Balance Confirmation: on-screen preview fixes + print polish
+
+Follow-up to S501, from live testing of the printed output. The letter's on-screen preview is always-visible (not `.print-only`-hidden, so the user sees exactly what will print) but its text used print-page colors (`#000`/`#555`/`#777`) with no light backdrop behind them — invisible against the app's dark theme. Fixed by wrapping the letter in a white "paper" background (`.vbc-paper`) and changing the remaining grey (`#555`/`#777`) labels to plain black to match. That wrapper's drop-shadow/rounded corners are an on-screen-only affordance (it reads as a floating page against the dark UI) — added a `@media print` rule stripping them on actual paper/PDF output, same pattern S498 already uses for `.card`/`.stat-card`. Also increased the signature strip's `marginTop` (64px → 110px) to leave room for a physical company stamp above each signature line, not just a pen signature.
+
+**Files:** `src/modules/ims/reports/VendorBalanceConfirmationPrint.jsx`, `src/components/Layout.css`
+
 ### S501 — 2026-08-03 — Vendor Balance Confirmation report (Nepal IRD Annexure 13)
 
 New Pro-tier report (`/vendor-balance-confirmation`, Reports → Menu & Vendors) generating a printable per-vendor, per-BS-fiscal-year balance confirmation letter — Opening Balance, Purchases, Payments/Returns, and Closing Balance, plus a supporting bill-by-bill schedule with a running balance, matching how Nepal IRD Annexure 13 (अनुसूची १३) reconciliation and NSA 17 external-confirmation audit evidence are actually done: sign, stamp, and return within 7 days. Reachable from the new page's own vendor/fiscal-year pickers, or via a "Confirm Balance" link added to each row on the Vendors page (`?vendor=<id>` preselects it, same `useSearchParams` pattern Stock Movements already uses for its own preselect link).

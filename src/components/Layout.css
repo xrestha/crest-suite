@@ -1259,6 +1259,9 @@ textarea:focus-visible {
   .card { border: 1px solid #ccc !important; background: white !important; border-radius: 0 !important; box-shadow: none !important; }
   .page-title { color: black !important; }
   .stat-card { border: 1px solid #ccc !important; background: white !important; border-radius: 0 !important; box-shadow: none !important; }
+  /* Vendor Balance Confirmation's on-screen "paper" preview wrapper — no drop-shadow/rounded
+     corners once actually printed, same reasoning as .card/.stat-card above. */
+  .vbc-paper { box-shadow: none !important; border-radius: 0 !important; }
   table { border-collapse: collapse !important; }
   /* One standard size for every cell, overriding whatever smaller/inline size a page used on
      screen (10-11px labels, etc.) — printed tables should read as one consistent document. */

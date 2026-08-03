@@ -24,8 +24,10 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
   return (
     // White "paper" background — this renders as a persistent on-screen preview (not just at
     // print time), and the letter's black text below vanishes against the app's dark theme
-    // without an explicit light backdrop behind it.
-    <div style={{ background: '#fff', borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
+    // without an explicit light backdrop behind it. The shadow/rounded-corner "card" look is
+    // for that on-screen preview only — Layout.css strips it under @media print, same as every
+    // other .card on paper (S498).
+    <div className="vbc-paper" style={{ background: '#fff', borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
     <div style={{ fontFamily: 'Georgia, serif', color: '#000', padding: '20px 24px', maxWidth: 760, margin: '0 auto' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: 10, marginBottom: 14 }}>
@@ -118,8 +120,10 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
         </tfoot>
       </table>
 
-      {/* Signature strip — 2-party confirmation, not the 3-role internal-approval strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, marginTop: 64, fontSize: 11 }}>
+      {/* Signature strip — 2-party confirmation, not the 3-role internal-approval strip. Extra
+          marginTop (vs. PurchaseBillPrint.jsx's 64) leaves room for a physical company stamp
+          above each line, not just a pen signature. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, marginTop: 110, fontSize: 11 }}>
         {[`For ${bizInfo?.name || 'us'}`, `For ${vendor?.name || 'vendor'} (Signature & Stamp)`].map(label => (
           <div key={label} style={{ textAlign: 'center' }}>
             <div style={{ borderTop: '1px solid #000', paddingTop: 4, color: '#000' }}>{label}</div>
