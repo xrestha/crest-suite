@@ -4,7 +4,7 @@ import { useSettings } from '../../context/SettingsContext'
 // null = no override (plan decides), true = explicit grant, false = explicit revoke
 const DEFAULT_FLAGS = {
   sales_entry: null, monthly_summary: null, payment_summary: null,
-  vendor_report: null, variance_report: null, fifo_report: null,
+  vendor_report: null, vendor_balance_confirmation: null, variance_report: null, fifo_report: null,
   reorder_report: null, price_tracker: null, recipe_costing: null,
   menu_engineering: null, overheads: null, budget_vs_actual: null,
   best_sellers: null, vat_report: null, non_vat_report: null,
@@ -66,6 +66,7 @@ const FEATURE_GROUPS = [
     { key: 'menu_engineering',     label: 'Menu Engineering' },
     { key: 'overheads',            label: 'Overheads' },
     { key: 'vendor_report',        label: 'Vendor Report' },
+    { key: 'vendor_balance_confirmation', label: 'Vendor Balance Confirmation' },
     { key: 'fifo_report',          label: 'FIFO / Expiry' },
     { key: 'price_tracker',        label: 'Price Tracker' },
     { key: 'theoretical_variance', label: 'Theoretical Variance' },

@@ -109,6 +109,13 @@ export function getBsFiscalYear(bsYear, bsMonth) {
   return `${start % 100}/${end % 100}`
 }
 
+// 4-digit BS year a fiscal year (Shrawan->Ashadh) starting from this bs_year/bs_month belongs to.
+// Companion to getBsFiscalYear() (which only returns the short "82/83" label) — this returns the
+// actual year integer needed for date-range math (e.g. bsToAd cutoffs).
+export function getBsFiscalYearStart(bsYear, bsMonth) {
+  return bsMonth >= 4 ? bsYear : bsYear - 1
+}
+
 /** Format a JS Date as YYYY-MM-DD for <input type="date"> values. */
 export function formatAd(date) {
   const y = date.getFullYear()

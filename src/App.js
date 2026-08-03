@@ -33,6 +33,7 @@ const FifoReport = lazy(() => import('./modules/ims/reports/FifoReport'))
 const PaymentReport = lazy(() => import('./modules/ims/reports/PaymentReport'))
 const Help = lazy(() => import('./pages/Help'))
 const VendorReport = lazy(() => import('./modules/ims/reports/VendorReport'))
+const VendorBalanceConfirmation = lazy(() => import('./modules/ims/reports/VendorBalanceConfirmation'))
 const ReorderReport = lazy(() => import('./modules/ims/stockcount/ReorderReport'))
 const StockMovements = lazy(() => import('./modules/ims/stockcount/StockMovements'))
 const SupplierPriceTracker = lazy(() => import('./modules/ims/purchases/SupplierPriceTracker'))
@@ -200,6 +201,8 @@ export default function App() {
                 element={<ModuleGate module="ims"><PremiumGate featureKey="fifo_report" minPlan="pro"><FifoReport /></PremiumGate></ModuleGate>} />
               <Route path="/vendors-report"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="vendor_report" minPlan="pro"><VendorReport /></PremiumGate></ModuleGate>} />
+              <Route path="/vendor-balance-confirmation"
+                element={<ModuleGate module="ims"><PremiumGate featureKey="vendor_balance_confirmation" minPlan="pro"><VendorBalanceConfirmation /></PremiumGate></ModuleGate>} />
               <Route path="/supplier-prices"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="price_tracker" minPlan="pro"><SupplierPriceTracker /></PremiumGate></ModuleGate>} />
               <Route path="/overheads"

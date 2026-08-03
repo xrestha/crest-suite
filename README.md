@@ -37,7 +37,7 @@ Works natively in Bikram Sambat (BS) calendar · NPR currency · FonePay payment
 | --- | --- | --- | --- |
 | Starter | NPR 5,000 | NPR 3,750 | Dashboard, Items, Vendors, Periods, Purchases, Stock, Help + Sales Entry, Payment Summary, Monthly Summary, Annual Summary, Reorder Report, Stock Movements, VAT Report, Non-VAT Report, Wastage Report, Settings, Stock Report, Menu Pricing |
 | Growth | NPR 8,000 | NPR 6,000 | + Recipes, Variance, Budget vs Actual, Best Sellers, Purchase Orders, Requisitions, Dead Stock, Recipe Margin, Outstanding Payables, Staff Meals, Menu Repricing |
-| Pro | NPR 12,000 | NPR 9,000 | + Menu Engineering, FIFO, Vendor Report, Supplier Price Tracker, Overheads, Period Comparison, Theoretical Variance, Shrinkage Report |
+| Pro | NPR 12,000 | NPR 9,000 | + Menu Engineering, FIFO, Vendor Report, Vendor Balance Confirmation, Supplier Price Tracker, Overheads, Period Comparison, Theoretical Variance, Shrinkage Report |
 
 Starter: 1-month free trial. Annual = 25% off monthly.
 
@@ -149,6 +149,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 ---
 
 ## Session Log
+
+### S501 — 2026-08-03 — Vendor Balance Confirmation report (Nepal IRD Annexure 13)
+
+New Pro-tier report (`/vendor-balance-confirmation`, Reports → Menu & Vendors) generating a printable per-vendor, per-BS-fiscal-year balance confirmation letter — Opening Balance, Purchases, Payments/Returns, and Closing Balance, plus a supporting bill-by-bill schedule with a running balance, matching how Nepal IRD Annexure 13 (अनुसूची १३) reconciliation and NSA 17 external-confirmation audit evidence are actually done: sign, stamp, and return within 7 days. Reachable from the new page's own vendor/fiscal-year pickers, or via a "Confirm Balance" link added to each row on the Vendors page (`?vendor=<id>` preselects it, same `useSearchParams` pattern Stock Movements already uses for its own preselect link).
+
+Opening Balance — the balance as of the fiscal year's start date (Shrawan 1) — is new logic with no prior analog in the codebase: every other balance figure in the app (Outstanding Payables' `remaining`) is a live "today" snapshot, not a historical as-of-a-past-date one, so it nets only payments/returns dated before the cutoff rather than all of them. The bill-total math itself reuses `calcBillTotals()` (VAT-correct, same function the Purchases voucher and Outstanding Payables use) — deliberately *not* Vendor Report's own `allBills` builder, which skips that function and reads ~13% low on VAT-inclusive bills. `billKeyOf`/`aging`, previously duplicated across Vendor Report and Outstanding Payables with two genuinely different shapes, were centralized into `purchasesHelpers.js` in the cross-period-safe (`purchase_group_id`-first) form and Outstanding Payables now imports them; Vendor Report's single-period-scoped version was left alone since reusing it here would silently misgroup bills across period boundaries.
+
+**Files:** `src/modules/ims/reports/VendorBalanceConfirmation.js`, `src/modules/ims/reports/VendorBalanceConfirmationPrint.jsx`, `src/modules/ims/reports/vendorBalanceHelpers.js` (new); `src/modules/ims/purchases/purchasesHelpers.js`, `src/modules/ims/reports/OutstandingPayables.js`, `src/modules/ims/vendors/Vendors.js`, `src/utils/bsCalendar.js`, `src/App.js`, `src/components/Layout.js`, `src/context/AuthContext.js`, `src/context/SettingsContext.js`, `src/pages/adminClients/FeatureAccessModal.js`, `src/pages/Help.js`
 
 ### S500 — 2026-08-03 — Purchases table: single-item bills collapse into one row instead of a redundant header + item-row pair
 

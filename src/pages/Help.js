@@ -236,6 +236,11 @@ const IMS_FEATURE_TIERS = [
         tips: ['Sort by Net to find your top suppliers — good candidates for negotiating credit terms', '% of Net shows vendor concentration risk', 'Click the vendor name for a bill-by-bill breakdown with payment status', 'Select a vendor in the search box, then click a day in Daily Breakdown to open that day\'s bill directly']
       },
       {
+        icon: '✎', name: 'Vendor Balance Confirmation',
+        guide: 'Printable per-vendor balance confirmation letter for a BS fiscal year — Opening Balance, Purchases, Payments/Returns, and Closing Balance, with a supporting bill-by-bill schedule showing the running balance. Matches Nepal IRD Annexure 13 (अनुसूची १३) reconciliation practice and NSA 17 external-confirmation audit evidence: sign, stamp, and return within 7 days. Reach it from Reports → Menu & Vendors, or via the "Confirm Balance" link on a vendor\'s row in Vendors.',
+        tips: ['Opening Balance is computed as of the fiscal year\'s start date (Shrawan 1), not a live "today" snapshot', 'Cash/FonePay bills appear in the schedule for full-turnover visibility but never carry a balance', 'A negative Closing Balance is labelled Advance/Credit Balance rather than Amount Payable']
+      },
+      {
         icon: '◫', name: 'Supplier Price Tracker',
         guide: 'Shows rate history per item per vendor with trend arrows (↑↓→). "Update Rate" syncs the item master to the latest purchase rate. Warns (⚠) if the master rate differs >5% from the last purchase.',
         tips: ['Run this monthly after entering purchases — catch price creep early', '"Update Rate" overwrites the item master rate, which affects all future recipe costs']

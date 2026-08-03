@@ -19,3 +19,20 @@ export function calcBillTotals(lines, discountAmt) {
   const grandTotal  = subTotal - discount + vatTotal
   return { taxableBase, nonTaxableBase, subTotal, discount, vatTotal, grandTotal }
 }
+
+// One bill = one vendor's invoice on one day of one period. Prefers purchase_group_id; falls back
+// to a vendor+invoice+date composite for older rows written before that column existed. Needs
+// `period` (not just the row) because cross-period call sites (Outstanding Payables, Vendor
+// Balance Confirmation) can't disambiguate bills across months/years from bs_day alone.
+export function billKeyOf(e, period) {
+  return e.purchase_group_id
+    || `${e.vendor_id || e.vendors?.name || 'unknown'}|${e.invoice_ref || 'noinv'}|${period.bs_year}-${period.bs_month}-${e.bs_day || 0}`
+}
+
+// Aging bucket for a Credit bill's remaining balance, by calendar days since the bill date.
+export function aging(days) {
+  if (days <= 30) return { label: 'Current',    color: 'var(--theme-green)' }
+  if (days <= 60) return { label: '31–60 days', color: 'var(--theme-accent)' }
+  if (days <= 90) return { label: '61–90 days', color: 'var(--theme-amber)' }
+  return                 { label: '90+ days',   color: 'var(--theme-red)' }
+}

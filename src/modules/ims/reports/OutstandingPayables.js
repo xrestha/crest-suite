@@ -3,7 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd } from '../../../utils/bsCalendar'
-import { calcBillTotals } from '../purchases/purchasesHelpers'
+import { calcBillTotals, billKeyOf, aging } from '../purchases/purchasesHelpers'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { Navigate } from 'react-router-dom'
@@ -17,21 +17,6 @@ const INPUT = {
   border: '1px solid var(--theme-border, var(--theme-border))',
   borderRadius: 6, padding: '7px 10px', fontSize: 13,
   color: 'var(--theme-text, var(--theme-text1))', outline: 'none',
-}
-
-// One bill = one vendor's invoice on one day of one period. Defined once and stamped onto each
-// entry at load time, because the totals pass and the render-time grouping MUST agree on what a
-// bill is — the bill's grand total is computed in the first and displayed by the second.
-function billKeyOf(e, period) {
-  const vName = e.vendors?.name || 'Unknown'
-  return `${vName}|${e.invoice_ref || 'noinv'}|${period.bs_year}-${period.bs_month}-${e.bs_day || 0}`
-}
-
-function aging(days) {
-  if (days <= 30) return { label: 'Current',    color: 'var(--theme-green)' }
-  if (days <= 60) return { label: '31–60 days', color: 'var(--theme-accent)' }
-  if (days <= 90) return { label: '61–90 days', color: 'var(--theme-amber)' }
-  return                 { label: '90+ days',   color: 'var(--theme-red)' }
 }
 
 export default function OutstandingPayables() {

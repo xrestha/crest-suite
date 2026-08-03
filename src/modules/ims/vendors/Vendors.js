@@ -6,7 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
-import { Navigate } from 'react-router-dom'
+import { Navigate, Link } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
 
 const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '' }
@@ -279,6 +279,11 @@ export default function Vendors() {
                       </span>
                     </td>
                     <td style={{ textAlign: 'right', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <Link className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }}
+                        to={`/vendor-balance-confirmation?vendor=${v.id}`}
+                        title="Generate a printable balance confirmation letter for IRD Annexure 13 reconciliation with this vendor.">
+                        Confirm Balance
+                      </Link>
                       <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }}
                         onClick={() => openEdit(v)}>
                         Edit
