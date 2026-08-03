@@ -61,6 +61,13 @@ export default function OutstandingPayables() {
   const [termsSaving, setTermsSaving]         = useState(false)
   const [termsError, setTermsError]           = useState('')
 
+  // Bulk-edit a note across selected Payment History rows (Paid History tab) — see
+  // openEditNote()/saveNoteForSelected() below for why this only overwrites checked rows.
+  const [editingNotePayments, setEditingNotePayments] = useState(null)
+  const [noteForm, setNoteForm]     = useState('')
+  const [noteSaving, setNoteSaving] = useState(false)
+  const [noteError, setNoteError]   = useState('')
+
   useEffect(() => { if (!authLoading && effectiveClientId) load(activeTab) }, [effectiveClientId]) // eslint-disable-line
 
   async function load(tab = activeTab) {
@@ -321,6 +328,31 @@ export default function OutstandingPayables() {
     if (affectedEntryIds.length > 0) {
       await supabase.from('purchase_entries').update({ paid_at: null }).in('id', affectedEntryIds)
     }
+    setSelectedPayments(new Set())
+    load(activeTab)
+  }
+
+  // Bulk-set one note across whichever payment rows are checked — lets a settlement that was
+  // recorded without a note (or with the wrong one) be corrected after the fact so it reads
+  // cleanly on the Vendor Balance Confirmation letter, which groups payments into one ledger line
+  // per (bill, date, note) and only merges rows that share the same note.
+  function openEditNote(bill) {
+    const targets = bill.payments.filter(p => selectedPayments.has(p.id))
+    if (targets.length === 0) return
+    setEditingNotePayments({ ids: targets.map(p => p.id), count: targets.length })
+    setNoteForm(targets[0].note || '')
+    setNoteError('')
+  }
+
+  async function saveNoteForSelected() {
+    if (!editingNotePayments) return
+    setNoteSaving(true)
+    setNoteError('')
+    const trimmed = noteForm.trim() || null
+    const { error } = await scopedUpdate('payable_payments', { note: trimmed }).in('id', editingNotePayments.ids)
+    setNoteSaving(false)
+    if (error) { setNoteError(error.message || 'Failed to save note.'); return }
+    setEditingNotePayments(null)
     setSelectedPayments(new Set())
     load(activeTab)
   }
@@ -694,12 +726,16 @@ export default function OutstandingPayables() {
                                       <div style={{ marginBottom: activeTab === 'outstanding' ? 20 : 0 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                                           <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Payment History</div>
-                                          {selectedHere.length > 0 && (
+                                          {selectedHere.length > 0 && (<>
+                                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 10px' }}
+                                              onClick={ev => { ev.stopPropagation(); openEditNote(b) }}>
+                                              Edit Note ({selectedHere.length})
+                                            </button>
                                             <button className="btn btn-danger" style={{ fontSize: 11, padding: '2px 10px' }}
                                               onClick={ev => { ev.stopPropagation(); deleteSelectedPayments(b) }}>
                                               Delete Selected ({selectedHere.length})
                                             </button>
-                                          )}
+                                          </>)}
                                         </div>
                                         <table style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: 400 }}>
                                           <thead>
@@ -835,6 +871,31 @@ export default function OutstandingPayables() {
             <button className="btn btn-ghost" onClick={() => setEditingTermsVendor(null)}>Cancel</button>
             <button className="btn btn-primary" onClick={saveTerms} disabled={termsSaving}>
               {termsSaving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {editingNotePayments && (
+        <Modal onClose={() => setEditingNotePayments(null)} title={`Edit Note — ${editingNotePayments.count} payment${editingNotePayments.count === 1 ? '' : 's'}`}>
+          <div className="form-field">
+            <label>Note</label>
+            <input
+              value={noteForm}
+              onChange={e => setNoteForm(e.target.value)}
+              placeholder="e.g. Cheque #1234, Siddhartha Bank"
+              autoFocus
+              style={{ ...INPUT, width: '100%' }}
+            />
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '10px 0 0' }}>
+            Replaces the note on all {editingNotePayments.count} selected row{editingNotePayments.count === 1 ? '' : 's'} — rows sharing the same note merge into one line on the Vendor Balance Confirmation letter.
+          </p>
+          {noteError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{noteError}</p>}
+          <div className="form-actions">
+            <button className="btn btn-ghost" onClick={() => setEditingNotePayments(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={saveNoteForSelected} disabled={noteSaving}>
+              {noteSaving ? 'Saving…' : 'Save'}
             </button>
           </div>
         </Modal>

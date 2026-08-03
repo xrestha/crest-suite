@@ -150,6 +150,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S508 — 2026-08-03 — Outstanding Payables: bulk-edit note across checked Payment History rows
+
+Paid History previously had no way to add or correct a payment's note after the fact (only "Delete"). Added an "Edit Note" button next to "Delete Selected" in a bill's Payment History block — appears when at least one row is checked, opens a modal, and overwrites the note on every checked row with one value (checkbox-scoped, not "all rows for the bill" automatically — a deliberate choice: a bill's Payment History can in principle hold rows from genuinely separate settlement events, and forcing every row to share one note regardless of selection would be wrong for that case).
+
+This closes a real gap the Vendor Balance Confirmation letter already depended on: it groups payments into one ledger line per (bill, date, note), so rows that were saved with different notes render as separate "Payment" lines even when they were really one settlement, and rows saved with no note at all never showed the settlement method the vendor letter is supposed to convey. Verified live: selected all 9 of a Mahalaxmi Store bill's split payment rows, set one note, and confirmed both the Payment History table (all 9 rows now show it) and the Vendor Balance Confirmation schedule (rows merged into a single "Payment" line with the note beneath the ref) picked it up correctly.
+
+**Files:** `src/modules/ims/reports/OutstandingPayables.js`
+
 ### S507 — 2026-08-03 — Vendors: payment terms field, quick-editable from Outstanding Payables
 
 New `vendors.payment_terms` free-text column (e.g. "Net 30", "COD", "50% Advance") — manageable from the Vendors page (new form field + table column) and, per direct request, quick-editable right from Outstanding Payables' vendor group header row via an "Edit Terms" button next to the vendor name, without navigating away.
