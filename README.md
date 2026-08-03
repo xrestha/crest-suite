@@ -150,6 +150,30 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S500 — 2026-08-03 — Purchases table: single-item bills collapse into one row instead of a redundant header + item-row pair
+
+Every bill rendered as a bill-header row (Day/Vendor/Total/Payment/Actions) followed by one row per line item — correct for a multi-item bill, but for a single-item bill (the majority of this client's data: Mega Mart, Horizon Mart, Three Star Foods, etc. are mostly "1 item") it meant two rows to show one fact, with the header row's Item cell and the item row's Day/Vendor cells always blank. Added a branch in the day/group render loop: when `groupEntries.length === 1`, the bill-level fields and the single line item's fields render together in one row (Day · Item+Category · Vendor+invoice · Qty · UOM · Rate · Total-with-VAT/discount · Expiry · Payment+Actions) with no blank cells; multi-item bills keep the existing header-row + item-sub-rows layout unchanged, since collapsing those would lose the per-item Qty/Rate breakdown. The day-number cell and the payment/actions cell (identical in both row shapes) were pulled into local `dayCell`/`actionsCell` variables built once per group so the two branches don't duplicate that JSX.
+
+**Files:** `src/modules/ims/purchases/Purchases.js`
+
+### S499 — 2026-08-03 — Purchases table: fixed a real Vendor-column misalignment bug, merged Category into Item, renamed Invoice/Expiry
+
+A user report ("the Vendor column doesn't make sense — it's blank on every row") traced to a real bug: the bill-header row's vendor name/invoice-ref/item-count lived in a `colSpan={3}` cell that started under the **Item** column (merging Item+Category+Vendor into one), not under the Vendor header itself — so scrolled or narrowed to just Vendor/Qty/UOM/Rate, the vendor text sat off-screen to the left and the Vendor column read as empty on every line. Fixed by splitting that merged cell into three real cells (Item and Category left blank on the header row, vendor content moved into the actual Vendor column). While re-reviewing the resulting layout, also merged the separate Category column into the Item column (badge shown inline next to the item name instead of its own mostly-empty column) and renamed "Invoice / Expiry" to plain "Expiry" — the invoice ref was already shown next to the vendor name, so that column only ever held an expiry date (usually a dash).
+
+**Files:** `src/modules/ims/purchases/Purchases.js`
+
+### S498 — 2026-08-03 — Print buttons for Item Master, Vendors, Purchases; shared print stylesheet made plain
+
+None of Item Master, Vendors, or Purchases had a Print button, unlike most IMS report pages. Added one to each (`printWithTitle()`, same helper every other print button in the app already uses), plus the standard `print-only`/`no-print` split — a plain heading prints instead of the interactive header, and filters/tabs/stat cards/search are hidden so only the title and data table print. Also found the shared print stylesheet (`@media print` in `Layout.css`) only neutralized `.card`/`.stat-card`/`.badge` colors, not their `border-radius`/`box-shadow` — so every printed table still carried the on-screen rounded-corner, drop-shadow "card" look, and category badges still printed as rounded pills. Added `border-radius: 0 !important; box-shadow: none !important` to `.card`/`.stat-card` and `border-radius: 0` to `.badge` so print output reads as a plain rectangular box, and forced `th, td { font-size: 12px !important }` so every printed table cell is one consistent size regardless of whatever smaller inline size (10–11px) a page used on screen — this is a shared-stylesheet fix, so it applies to every page's print output, not just these three.
+
+**Files:** `src/modules/ims/items/Items.js`, `src/modules/ims/vendors/Vendors.js`, `src/modules/ims/purchases/Purchases.js`, `src/components/Layout.css`
+
+### S497 — 2026-08-03 — Purchases gets a Vendor filter + typeable Item/Vendor selects, day pills wrap instead of scrolling
+
+Purchases.js's filter row only let you narrow by Day and Item. Added a matching `filterVendor` state (defaults `'all'`, reset alongside Day/Item on period change and Clear Filters) and folded it into the existing `filtered` predicate; when a specific vendor is selected, a `vendorTotal` figure (period-wide, not day-filtered) renders inline next to the dropdown so "how much have we bought from X this period" is a one-click answer instead of manual addition. Both the Item and new Vendor dropdowns were then swapped from a plain `<select>` to the existing `SearchableSelect` combobox (type-to-filter, arrow-key navigation) — the Item list especially gets long per client. Separately, the Day pill strip (one pill per purchase day, e.g. "D14 · 3 bills") was `overflow-x: auto` (silently scrollable, no visual hint) — changed to `flexWrap: 'wrap'` with tighter padding/font-size so days that don't fit drop to a second row instead of running off-screen.
+
+**Files:** `src/modules/ims/purchases/Purchases.js`
+
 ### S496 — 2026-07-30 — Stock Movements gets a Day filter
 
 Added a From/To Day range filter to `StockMovements.js`, alongside the existing item search and Source filter. Since the page's data is period+`bs_day`-scoped (no stored calendar date), the filter is two plain day-number `<select>`s bounded by `daysInBsMonth()` for whichever period is selected, not a date picker — a `Tip` clarifies it filters Day within the period above, not a calendar date. Resets to unfiltered whenever the period dropdown changes, since a day bound from a 32-day month would otherwise silently over-filter a 29-day one. A "✕ Clear" button appears only once either bound is set.

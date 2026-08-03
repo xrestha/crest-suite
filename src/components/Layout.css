@@ -1255,12 +1255,15 @@ textarea:focus-visible {
   .main-content { margin-left: 0 !important; padding: 0 !important; }
   .btn, button { display: none !important; }
   body { background: white !important; color: black !important; }
-  .card { border: 1px solid #ccc !important; background: white !important; }
+  /* Plain rectangular box — no rounded corners/drop-shadow "card" look on paper. */
+  .card { border: 1px solid #ccc !important; background: white !important; border-radius: 0 !important; box-shadow: none !important; }
   .page-title { color: black !important; }
-  .stat-card { border: 1px solid #ccc !important; background: white !important; }
+  .stat-card { border: 1px solid #ccc !important; background: white !important; border-radius: 0 !important; box-shadow: none !important; }
   table { border-collapse: collapse !important; }
-  th, td { border: 1px solid #ccc !important; color: black !important; padding: 6px 10px !important; background: white !important; }
-  .badge { border: 1px solid #ccc !important; color: black !important; background: white !important; }
+  /* One standard size for every cell, overriding whatever smaller/inline size a page used on
+     screen (10-11px labels, etc.) — printed tables should read as one consistent document. */
+  th, td { border: 1px solid #ccc !important; color: black !important; padding: 6px 10px !important; background: white !important; font-size: 12px !important; }
+  .badge { border: 1px solid #ccc !important; color: black !important; background: white !important; border-radius: 0 !important; }
   input { background: white !important; color: black !important; border: 1px solid #ccc !important; }
   .no-print { display: none !important; }
   /* Row-level checkbox selection (Recipe Costing, Reorder Report) — when at least one row is

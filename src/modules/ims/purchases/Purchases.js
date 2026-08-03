@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
+import SearchableSelect from '../../../components/SearchableSelect'
 import * as XLSX from 'xlsx'
 import { getCf } from './purchasesHelpers'
 import PurchaseBillModal from './PurchaseBillModal'
@@ -48,6 +49,7 @@ export default function Purchases() {
   const [showForm, setShowForm]             = useState(false)
   const [filterDay, setFilterDay]           = useState('all')
   const [filterItem, setFilterItem]         = useState('all')
+  const [filterVendor, setFilterVendor]     = useState('all')
   const [editingGroupId, setEditingGroupId] = useState(null)
   const [rateUpdateItems, setRateUpdateItems]       = useState([])
   const [rateUpdateSelected, setRateUpdateSelected] = useState(new Set())
@@ -122,6 +124,7 @@ export default function Purchases() {
     setSelectedPeriod(p)
     setFilterDay('all')
     setFilterItem('all')
+    setFilterVendor('all')
     await Promise.all([loadPurchases(periodId), loadReturns(periodId)])
   }
 
@@ -236,12 +239,25 @@ export default function Purchases() {
     () => items.map(i => ({ value: i.id, label: `${i.name}${i.categories?.name ? ` (${i.categories.name})` : ''}` })),
     [items]
   )
+  const itemFilterOptions = useMemo(
+    () => [{ value: 'all', label: 'All Items' }, ...itemOptions],
+    [itemOptions]
+  )
+  const vendorFilterOptions = useMemo(
+    () => [{ value: 'all', label: 'All Vendors' }, ...vendors.map(v => ({ value: v.id, label: v.name }))],
+    [vendors]
+  )
 
   const filtered = purchases.filter(p => {
-    const matchDay  = filterDay  === 'all' || p.bs_day === parseInt(filterDay)
-    const matchItem = filterItem === 'all' || p.item_id === filterItem
-    return matchDay && matchItem
+    const matchDay    = filterDay    === 'all' || p.bs_day === parseInt(filterDay)
+    const matchItem   = filterItem   === 'all' || p.item_id === filterItem
+    const matchVendor = filterVendor === 'all' || p.vendor_id === filterVendor
+    return matchDay && matchItem && matchVendor
   })
+
+  const vendorTotal = filterVendor === 'all' ? 0 : purchases
+    .filter(p => p.vendor_id === filterVendor)
+    .reduce((s, p) => s + p.qty * p.rate, 0)
 
   const grossTotal  = purchases.reduce((s, p) => s + p.qty * p.rate, 0)
   const returnTotal = returns.reduce((s, r) => s + r.qty * r.rate, 0)
@@ -375,8 +391,13 @@ export default function Purchases() {
         </div>
       )}
 
+      {/* Print-only header */}
+      <div className="print-only" style={{ marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>Purchases — {periodLabel}</h2>
+      </div>
+
       {/* Header */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title">Purchases</h1>
           <p className="page-subtitle">Daily ingredient purchases & returns — {periodLabel}</p>
@@ -387,11 +408,12 @@ export default function Purchases() {
               <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>
             ))}
           </select>
+          <button className="btn btn-ghost" onClick={() => printWithTitle(`Purchases - ${periodLabel}`)}>Print</button>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: 20 }}>
+      <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">Total Entries</div>
           <div className="stat-value">{purchases.length}</div>
@@ -420,7 +442,7 @@ export default function Purchases() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--theme-border)', marginBottom: 24 }}>
+      <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--theme-border)', marginBottom: 24 }}>
         <div style={{ display: 'flex', gap: 4 }}>
           {[
             { id: 'purchases', label: `Purchases (${purchases.length})` },
@@ -468,12 +490,13 @@ export default function Purchases() {
           )}
 
           {/* Filters */}
-          <div style={{ marginBottom: 16 }}>
-            {/* Day pill strip */}
-            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 10 }}>
+          <div className="no-print" style={{ marginBottom: 16 }}>
+            {/* Day pill strip — wraps to additional rows instead of scrolling off-screen */}
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
               <button
                 className={`tab-btn${filterDay === 'all' ? ' tab-btn--active' : ''}`}
                 onClick={() => setFilterDay('all')}
+                style={{ padding: '2px 7px', fontSize: 11 }}
               >
                 All Days
               </button>
@@ -482,11 +505,11 @@ export default function Purchases() {
                   key={d}
                   className={`tab-btn${filterDay === String(d) ? ' tab-btn--active' : ''}`}
                   onClick={() => setFilterDay(String(d))}
-                  style={{ whiteSpace: 'nowrap' }}
+                  style={{ whiteSpace: 'nowrap', padding: '2px 7px', fontSize: 11 }}
                 >
                   D{d}
                   {billCountPerDay[d] > 0 && (
-                    <span style={{ marginLeft: 5, fontSize: 10, opacity: 0.65 }}>
+                    <span style={{ marginLeft: 4, fontSize: 9, opacity: 0.65 }}>
                       · {billCountPerDay[d]} {billCountPerDay[d] === 1 ? 'bill' : 'bills'}
                     </span>
                   )}
@@ -495,12 +518,25 @@ export default function Purchases() {
             </div>
             {/* Item filter + count */}
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <select className="form-select" value={filterItem} onChange={e => setFilterItem(e.target.value)}>
-                <option value="all">All Items</option>
-                {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-              </select>
-              {(filterDay !== 'all' || filterItem !== 'all') && (
-                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => { setFilterDay('all'); setFilterItem('all') }}>Clear Filters</button>
+              <SearchableSelect
+                value={filterItem}
+                onChange={setFilterItem}
+                options={itemFilterOptions}
+                style={{ minWidth: 220 }}
+              />
+              <SearchableSelect
+                value={filterVendor}
+                onChange={setFilterVendor}
+                options={vendorFilterOptions}
+                style={{ minWidth: 220 }}
+              />
+              {filterVendor !== 'all' && (
+                <span style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600 }}>
+                  Vendor Total: NPR {vendorTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              )}
+              {(filterDay !== 'all' || filterItem !== 'all' || filterVendor !== 'all') && (
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => { setFilterDay('all'); setFilterItem('all'); setFilterVendor('all') }}>Clear Filters</button>
               )}
               <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} entr{filtered.length !== 1 ? 'ies' : 'y'}</span>
             </div>
@@ -522,11 +558,11 @@ export default function Purchases() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Day</th><th>Item</th><th>Category</th><th>Vendor</th>
+                      <th>Day</th><th>Item</th><th>Vendor</th>
                       <th style={{ textAlign: 'right' }}>Qty</th><th>UOM</th>
                       <th style={{ textAlign: 'right' }}>Rate</th>
                       <th style={{ textAlign: 'right' }}>Total</th>
-                      <th>Invoice / Expiry</th><th></th>
+                      <th>Expiry</th><th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -542,25 +578,89 @@ export default function Purchases() {
                         const vatTaxableG   = groupTotal > 0 ? vatSubtotalG * (1 - discountAmt / groupTotal) : 0
                         const vatAmount     = vatTaxableG * 0.13
                         const groupGrand    = (groupTotal - discountAmt) + vatAmount
+
+                        const dayCell = (
+                          <td style={{ fontWeight: 700, color: 'var(--theme-accent)', fontSize: 14, borderRight: '1px solid var(--theme-border)', verticalAlign: 'middle', paddingTop: 10, paddingBottom: 10 }}>
+                            {gIdx === 0 ? (
+                              <>
+                                {day}
+                                {selectedPeriod && (
+                                  <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--theme-text3)', marginTop: 2 }}>
+                                    {formatAd(bsToAd(selectedPeriod.bs_year, selectedPeriod.bs_month, parseInt(day)))}
+                                  </div>
+                                )}
+                              </>
+                            ) : null}
+                          </td>
+                        )
+                        const actionsCell = (
+                          <td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
+                              <span className={`badge ${first.payment_method === 'Cash' ? 'badge-green' : first.payment_method === 'Credit' ? 'badge-red' : 'badge-yellow'}`}>
+                                {first.payment_method || 'Cash'}
+                              </span>
+                              {!isLocked && <>
+                                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => openEditGroup(gid)}>Edit</button>
+                                <button className="btn btn-danger" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => deleteGroup(gid)}>Del</button>
+                              </>}
+                            </div>
+                          </td>
+                        )
+
+                        // A single-item bill has nothing left to say on a second row — the bill-level
+                        // fields (vendor/total/payment/actions) and the one line item's fields (item/
+                        // qty/rate) collapse into one row instead of leaving every other cell blank
+                        // on two separate rows.
+                        if (groupEntries.length === 1) {
+                          const entry = groupEntries[0]
+                          const cf = getCf(entry.items)
+                          const displayQty  = cf > 1 ? entry.qty / cf : entry.qty
+                          const displayUnit = cf > 1 ? entry.items.purchase_unit : entry.items?.uom
+                          const displayRate = cf > 1 ? entry.rate * cf : entry.rate
+                          return [
+                            <tr key={`gh-${gid}`} style={{ background: 'rgba(201,168,76,0.04)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
+                              {dayCell}
+                              <td style={{ fontWeight: 500, color: 'var(--theme-text1)', fontSize: 13 }}>
+                                {entry.items?.name}
+                                {entry.items?.categories?.name && (
+                                  <span className="badge badge-yellow" style={{ marginLeft: 8 }}>{entry.items.categories.name}</span>
+                                )}
+                              </td>
+                              <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{first.vendors?.name || <span style={{ color: 'var(--theme-text2)' }}>No Vendor</span>}</span>
+                                {first.invoice_ref && <span style={{ color: 'var(--theme-text2)', fontSize: 12, marginLeft: 10 }}>#{first.invoice_ref}</span>}
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                {Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
+                                {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString()} {entry.items?.uom}</div>}
+                              </td>
+                              <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
+                              <td style={{ textAlign: 'right' }}>
+                                {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 13, verticalAlign: 'middle' }}>
+                                {groupGrand.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {vatAmount > 0 && <div style={{ fontSize: 10, color: 'var(--theme-amber)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                                {discountAmt > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              </td>
+                              <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                                {entry.expiry_date ? <span style={{ color: 'var(--theme-accent)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
+                              </td>
+                              {actionsCell}
+                            </tr>
+                          ]
+                        }
+
                         return [
                           // Group header row
                           <tr key={`gh-${gid}`} style={{ background: 'rgba(201,168,76,0.04)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
-                            <td style={{ fontWeight: 700, color: 'var(--theme-accent)', fontSize: 14, borderRight: '1px solid var(--theme-border)', verticalAlign: 'middle', paddingTop: 10, paddingBottom: 10 }}>
-                              {gIdx === 0 ? (
-                                <>
-                                  {day}
-                                  {selectedPeriod && (
-                                    <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--theme-text3)', marginTop: 2 }}>
-                                      {formatAd(bsToAd(selectedPeriod.bs_year, selectedPeriod.bs_month, parseInt(day)))}
-                                    </div>
-                                  )}
-                                </>
-                              ) : null}
-                            </td>
-                            <td colSpan={3} style={{ verticalAlign: 'middle' }}>
+                            {dayCell}
+                            <td></td>
+                            <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                               <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{first.vendors?.name || <span style={{ color: 'var(--theme-text2)' }}>No Vendor</span>}</span>
                               {first.invoice_ref && <span style={{ color: 'var(--theme-text2)', fontSize: 12, marginLeft: 10 }}>#{first.invoice_ref}</span>}
-                              <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 10 }}>{groupEntries.length} item{groupEntries.length !== 1 ? 's' : ''}</span>
+                              <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 10 }}>{groupEntries.length} items</span>
                             </td>
                             <td colSpan={3}></td>
                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 13, verticalAlign: 'middle' }}>
@@ -569,24 +669,18 @@ export default function Purchases() {
                               {discountAmt > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                             </td>
                             <td></td>
-                            <td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
-                              <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
-                                <span className={`badge ${first.payment_method === 'Cash' ? 'badge-green' : first.payment_method === 'Credit' ? 'badge-red' : 'badge-yellow'}`}>
-                                  {first.payment_method || 'Cash'}
-                                </span>
-                                {!isLocked && <>
-                                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => openEditGroup(gid)}>Edit</button>
-                                  <button className="btn btn-danger" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => deleteGroup(gid)}>Del</button>
-                                </>}
-                              </div>
-                            </td>
+                            {actionsCell}
                           </tr>,
                           // Item sub-rows
                           ...groupEntries.map(entry => (
                             <tr key={entry.id} style={{ background: 'rgba(0,0,0,0.12)', borderBottom: '1px solid var(--theme-card)' }}>
                               <td></td>
-                              <td style={{ fontWeight: 500, color: 'var(--theme-text2)', paddingLeft: 20, fontSize: 13 }}>{entry.items?.name}</td>
-                              <td>{entry.items?.categories?.name ? <span className="badge badge-yellow">{entry.items.categories.name}</span> : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                              <td style={{ fontWeight: 500, color: 'var(--theme-text2)', paddingLeft: 20, fontSize: 13 }}>
+                                {entry.items?.name}
+                                {entry.items?.categories?.name && (
+                                  <span className="badge badge-yellow" style={{ marginLeft: 8 }}>{entry.items.categories.name}</span>
+                                )}
+                              </td>
                               <td></td>
                               {(() => {
                                 const cf = getCf(entry.items)

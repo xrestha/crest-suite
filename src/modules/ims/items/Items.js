@@ -7,6 +7,7 @@ import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import { Navigate } from 'react-router-dom'
+import { printWithTitle } from '../../../utils/printTitle'
 
 const DEFAULT_CATEGORIES = [
   'Dairy & Bakery',
@@ -363,7 +364,12 @@ export default function Items() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      {/* Print-only header */}
+      <div className="print-only" style={{ marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>Item Master</h2>
+      </div>
+
+      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title">Item Master</h1>
           <p className="page-subtitle">{items.length} ingredients across {categories.length} categories</p>
@@ -383,6 +389,7 @@ export default function Items() {
               ✕ Clear All Conversions
             </button>
           )}
+          <button className="btn btn-ghost" onClick={() => printWithTitle('Item Master')}>Print</button>
         </div>
       </div>
 
@@ -611,7 +618,7 @@ export default function Items() {
       )}
 
       {/* Search + filters */}
-      <div style={{ marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div className="no-print" style={{ marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <input
           style={{
             background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6,
@@ -652,7 +659,7 @@ export default function Items() {
       </div>
 
       {/* Category tabs */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--theme-border)', marginBottom: 0, flexWrap: 'wrap' }}>
+      <div className="no-print" style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--theme-border)', marginBottom: 0, flexWrap: 'wrap' }}>
         {[{ id: 'all', name: 'All Items' }, ...catsWithItems].map(tab => {
           const count = items.filter(i => {
             const matchCat = tab.id === 'all' || i.category_id === tab.id

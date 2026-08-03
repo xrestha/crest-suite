@@ -7,6 +7,7 @@ import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import { Navigate } from 'react-router-dom'
+import { printWithTitle } from '../../../utils/printTitle'
 
 const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '' }
 
@@ -133,11 +134,17 @@ export default function Vendors() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      {/* Print-only header */}
+      <div className="print-only" style={{ marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>Vendors</h2>
+      </div>
+
+      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title">Vendors</h1>
           <p className="page-subtitle">Manage your supplier list — linked to daily purchase entries</p>
         </div>
+        <button className="btn btn-ghost" onClick={() => printWithTitle('Vendors')}>Print</button>
       </div>
 
       {showForm && (
@@ -213,7 +220,7 @@ export default function Vendors() {
         </Modal>
       )}
 
-      <div style={{ marginBottom: 16 }}>
+      <div className="no-print" style={{ marginBottom: 16 }}>
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
