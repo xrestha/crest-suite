@@ -1293,19 +1293,30 @@ textarea:focus-visible {
   /* Purchases print (an internal working sheet, not a client-facing document) — the on-screen
      category badge is a boxed/colored chip, which reads as "beautification" on paper. Strip it
      down to plain inline text so the printed page is a flat Excel-style grid: just column/row
-     borders, no pills. Scoped to this one table's badges only, not every printed badge app-wide. */
+     borders, no pills. Scoped to this one table's badges only, not every printed badge app-wide.
+     `white-space: nowrap` keeps "Veg & Fruits" etc. on the same line as the item name instead of
+     wrapping onto a second line — that wrap was what was inflating every row to ~2x height and
+     reading as an oversized "box" per item, more than the badge chip itself did. */
   .purchases-print-plain .badge {
     display: inline !important;
     border: none !important;
     background: none !important;
     padding: 0 !important;
     border-radius: 0 !important;
-    font-size: 12px !important;
+    font-size: 9.5px !important;
     font-weight: 400 !important;
     color: #333 !important;
+    white-space: nowrap !important;
   }
+  .purchases-print-plain,
   .purchases-print-plain th,
-  .purchases-print-plain td { padding: 4px 8px !important; }
+  .purchases-print-plain td { font-size: 9.5px !important; line-height: 1.25 !important; }
+  .purchases-print-plain th,
+  .purchases-print-plain td { padding: 2px 5px !important; }
+  /* The on-screen group divider (a 2px border in a --theme-card dark tone) prints as a heavy
+     near-black bar. Every cell already carries the standard 1px #ccc grid border above, so the
+     divider is redundant weight on top of it — drop it and let the plain grid do the job. */
+  .purchases-print-plain tr { border-top: none !important; border-bottom: none !important; }
   .print-sheet-table thead { display: table-header-group; }
   .print-sheet-table tr { page-break-inside: avoid; break-inside: avoid; }
 

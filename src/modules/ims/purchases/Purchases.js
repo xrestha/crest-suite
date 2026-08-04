@@ -392,6 +392,11 @@ export default function Purchases() {
       )}
 
       {/* Print-only header */}
+      <style>{`
+        @media print {
+          @page { size: A4 portrait; margin: 10mm; }
+        }
+      `}</style>
       <div className="print-only" style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Purchases — {periodLabel}</h2>
       </div>
