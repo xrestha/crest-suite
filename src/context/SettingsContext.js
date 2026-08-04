@@ -24,6 +24,8 @@ const DEFAULT_SETTINGS = {
   // fallback for a client_id-null settings row that predates that tab or never had it touched.
   // See AdminDashboardOverview.jsx's clientMRR for how this feeds the Admin Dashboard's MRR/ARR.
   plan_prices: DEFAULT_PLAN_PRICES,
+  block_negative_stock: false,
+  warn_below_cost_pricing: true,
 }
 
 export const DEFAULT_RECIPE_CATS = ['Food', 'Beverage', 'Dessert', 'Snack', 'Other']

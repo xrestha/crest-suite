@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
+import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
@@ -27,6 +28,7 @@ function dispPurch(baseQty, item) {
 
 export default function Stock() {
   const { clientId, profile, loading: authLoading, isAdmin, hasFeature, hasImsAccess } = useAuth()
+  const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods] = useState([])
@@ -314,8 +316,29 @@ export default function Stock() {
   }
 
   async function saveAll() {
-    setSaveAllLoading(true)
     const visibleItems = filteredItems()
+
+    // Same "used" calculation already driving the red highlight in the Summary tab — if it's
+    // negative, more was used/wasted/counted-out than was ever bought or on hand, which is a real
+    // data problem, not just a display quirk. Gated behind a client-level setting (off by default).
+    if (settings.block_negative_stock) {
+      const negativeItems = visibleItems.filter(item => {
+        const row = stockData[item.id] || {}
+        const hasData = row.opening !== '' || row.closing !== '' || purchases[item.id]
+        return hasData && getUsed(item.id) < 0
+      })
+      if (negativeItems.length > 0) {
+        const names = negativeItems.map(i => i.name).join(', ')
+        if (isAdmin) {
+          if (!window.confirm(`${negativeItems.length} item(s) show negative usage (more used than was ever bought or on hand): ${names}.\n\nSave anyway?`)) return
+        } else {
+          alert(`Can't save — ${negativeItems.length} item(s) show negative usage (more used than was ever bought or on hand): ${names}.\n\nFix the counts before saving.`)
+          return
+        }
+      }
+    }
+
+    setSaveAllLoading(true)
     for (const item of visibleItems) { await saveRow(item.id) }
     setSaveAllLoading(false)
     setSaved(true)

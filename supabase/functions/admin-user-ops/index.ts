@@ -248,7 +248,7 @@ Deno.serve(async (req) => {
 
     // ── Update a POS staff member's role ─────────────────────────────────────
     if (action === 'update_pos_role') {
-      const { userId, pos_role, pos_job_title, pos_team } = params
+      const { userId, pos_role, pos_job_title, pos_team, pos_discount_limit, pos_allow_void } = params
       if (!userId) return json({ error: 'userId is required' }, 400)
 
       const validRoles = ['staff', 'supervisor', 'manager']
@@ -257,19 +257,39 @@ Deno.serve(async (req) => {
       const validTeams = ['foh', 'kitchen', 'bar']
       if (pos_team && !validTeams.includes(pos_team)) return json({ error: 'Invalid pos_team' }, 400)
 
+      if (pos_discount_limit !== undefined && pos_discount_limit !== null &&
+          (typeof pos_discount_limit !== 'number' || pos_discount_limit < 0 || pos_discount_limit > 100)) {
+        return json({ error: 'Invalid pos_discount_limit' }, 400)
+      }
+
+      if (pos_allow_void !== undefined && typeof pos_allow_void !== 'boolean') {
+        return json({ error: 'Invalid pos_allow_void' }, 400)
+      }
+
       if (!isCallerAdmin) {
         const { data: targetProfile } = await admin
           .from('profiles').select('client_id').eq('id', userId).single()
         if (targetProfile?.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
       }
 
-      // pos_team is only written when the caller actually sent it — PosStaff.jsx's silent
-      // mismatched-role auto-fix loop (init()) calls this action with just { pos_role,
-      // pos_job_title } on every page load; if pos_team were unconditionally included as
-      // `pos_team || null`, that background sync would silently reset every kitchen/bar account
-      // back to null (and then the NOT NULL/CHECK constraint's own default 'foh') on next load.
-      const updatePayload = { pos_role: pos_role || null, pos_job_title: pos_job_title || null }
+      // Every field here is only written when the caller actually sent it. updateTeam/
+      // updateDiscountLimit/updateAllowVoid each call this action with only their one field set
+      // (e.g. { pos_team } alone) — pos_role was previously unconditional (`pos_role || null`),
+      // which meant any one of those team/discount/void-only calls silently wiped the staff
+      // member's role to "No Access" on every use, not just on page load. Found live (S517)
+      // testing the new Discount Limit field: setting a limit on a Staff-role account reset their
+      // role to null on the very next page load. Symmetric with the reverse case this function
+      // already guarded against — PosStaff.jsx's silent mismatched-role auto-fix loop (init())
+      // calls this action with just { pos_role, pos_job_title }, which is why pos_team's own
+      // conditional write was added first (S431) but pos_role's wasn't.
+      const updatePayload = {}
+      if (pos_role !== undefined) updatePayload.pos_role = pos_role || null
+      if (pos_job_title !== undefined) updatePayload.pos_job_title = pos_job_title || null
       if (pos_team !== undefined) updatePayload.pos_team = pos_team || 'foh'
+      if (pos_discount_limit !== undefined) updatePayload.pos_discount_limit = pos_discount_limit
+      if (pos_allow_void !== undefined) updatePayload.pos_allow_void = pos_allow_void
+
+      if (Object.keys(updatePayload).length === 0) return json({ error: 'No fields to update' }, 400)
 
       const { error: updateErr } = await admin.from('profiles')
         .update(updatePayload)

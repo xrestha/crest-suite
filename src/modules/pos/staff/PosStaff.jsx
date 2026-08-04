@@ -266,6 +266,42 @@ export default function PosStaff() {
     setSaving(s => ({ ...s, [profileId]: false }))
   }
 
+  // ── Discount limit update ────────────────────────────────────────────────────
+  // null = unlimited (current behavior). Committed on blur, not per keystroke.
+  async function updateDiscountLimit(profileId, rawValue) {
+    const trimmed = (rawValue ?? '').toString().trim()
+    const limit = trimmed === '' ? null : Math.min(100, Math.max(0, parseFloat(trimmed)))
+    if (trimmed !== '' && Number.isNaN(limit)) return
+    setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
+    const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+      body: { action: 'update_pos_role', userId: profileId, pos_discount_limit: limit },
+    })
+    if (error || data?.error) {
+      let detail = data?.error || error?.message || 'Failed to update discount limit'
+      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
+      setMsg('Error: ' + detail)
+    } else {
+      setStaff(prev => prev.map(p => p.id === profileId ? { ...p, pos_discount_limit: limit } : p))
+    }
+    setSaving(s => ({ ...s, [profileId]: false }))
+  }
+
+  // ── Allow Void update ────────────────────────────────────────────────────────
+  async function updateAllowVoid(profileId, allow) {
+    setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
+    const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+      body: { action: 'update_pos_role', userId: profileId, pos_allow_void: allow },
+    })
+    if (error || data?.error) {
+      let detail = data?.error || error?.message || 'Failed to update void permission'
+      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
+      setMsg('Error: ' + detail)
+    } else {
+      setStaff(prev => prev.map(p => p.id === profileId ? { ...p, pos_allow_void: allow } : p))
+    }
+    setSaving(s => ({ ...s, [profileId]: false }))
+  }
+
   if (!hasPosAccess('manager')) return <Navigate to="/pos/tables" replace />
 
   const inputStyle = {
@@ -276,7 +312,7 @@ export default function PosStaff() {
   const labelStyle = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block' }
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 900 }}>
+    <div style={{ padding: '24px 28px', maxWidth: 1350 }}>
 
       {/* Header */}
       <div style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
@@ -323,6 +359,8 @@ export default function PosStaff() {
                 <th><Tip text="Custom role name defined for this team (e.g. Cashier, Bartender).">Role</Tip></th>
                 <th><Tip text="Permission level this role maps to — controls which screens they can access.">Access Level</Tip></th>
                 <th><Tip text="Which station this login works. Kitchen/Bar accounts see only the ticket display, locked to their own queue — everything front-of-house (Orders, Tables, Customers, Shifts) is hidden regardless of Access Level.">Team</Tip></th>
+                <th><Tip text="Maximum discount % this login can apply at billing. Leave blank for unlimited.">Discount %</Tip></th>
+                <th><Tip text="Lets this login void a bill themselves, without needing the Owner/Admin.">Void</Tip></th>
                 <th><Tip text="Last time this user was active in the app">Last Seen</Tip></th>
                 <th style={{ width: 200 }}>Actions</th>
               </tr>
@@ -377,6 +415,35 @@ export default function PosStaff() {
                           <option key={t.value} value={t.value}>{t.label}</option>
                         ))}
                       </select>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={1}
+                          className="form-select"
+                          style={{ width: 70 }}
+                          placeholder="No limit"
+                          disabled={saving[p.id]}
+                          defaultValue={p.pos_discount_limit ?? ''}
+                          key={`${p.id}-${p.pos_discount_limit ?? 'none'}`}
+                          onBlur={e => {
+                            if (e.target.value === (p.pos_discount_limit ?? '').toString()) return
+                            updateDiscountLimit(p.id, e.target.value)
+                          }}
+                        />
+                        <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>%</span>
+                      </div>
+                    </td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={!!p.pos_allow_void}
+                        disabled={saving[p.id]}
+                        onChange={e => updateAllowVoid(p.id, e.target.checked)}
+                      />
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
                       {p.last_seen_at

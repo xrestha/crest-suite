@@ -1100,6 +1100,11 @@ export default function Recipes() {
                           {liveVat > 0 ? 'Ex-VAT stored' : 'Stored'}: NPR {parseFloat(recipeForm.selling_price).toFixed(2)}
                         </div>
                       )}
+                      {settings.warn_below_cost_pricing && liveCost > 0 && livePrice > 0 && liveCost > livePrice && (
+                        <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 4 }}>
+                          ⚠ This price is below cost (NPR {liveCost.toFixed(2)} to make) — Food Cost {liveFcPct?.toFixed(0)}%. Check ingredient costs, or this may be intentional (e.g. a loss-leader).
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="form-field">

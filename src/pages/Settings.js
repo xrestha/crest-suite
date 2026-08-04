@@ -386,6 +386,24 @@ export default function Settings() {
                 <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>{f.hint}</span>
               </div>
             ))}
+            {[
+              { key: 'block_negative_stock', label: 'Block negative stock on save', def: false,
+                tip: 'When on, Stock Count refuses to save if any item\'s computed usage goes negative (more used than was ever bought or on hand) — the item(s) must be fixed first. Admin can still override with a confirmation. Off by default.',
+                onText: 'Yes — blocks Save All until fixed', offText: 'No — save anyway, just highlighted red (current behavior)' },
+              { key: 'warn_below_cost_pricing', label: 'Warn when menu price is below cost', def: true,
+                tip: 'When on, Recipes shows a warning if a menu item\'s selling price is set below its computed ingredient cost. Doesn\'t block saving — just a heads-up in case it wasn\'t intentional.',
+                onText: 'Yes — shows a warning', offText: 'No — no warning' },
+            ].map(f => (
+              <div key={f.key} className="form-field">
+                <label><Tip text={f.tip} width={280}>{f.label}</Tip></label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 34 }}>
+                  <input type="checkbox" checked={form[f.key] ?? f.def}
+                    onChange={e => update(f.key, e.target.checked)}
+                    style={{ width: 16, height: 16, padding: 0, margin: 0, flexShrink: 0, background: 'none', border: 'none', accentColor: 'var(--theme-accent)', cursor: 'pointer' }} />
+                  <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{(form[f.key] ?? f.def) ? f.onText : f.offText}</span>
+                </label>
+              </div>
+            ))}
           </div>
         </div>
       )}

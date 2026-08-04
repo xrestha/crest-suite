@@ -331,10 +331,21 @@ export default function PosOrders() {
 
   // Discount reduces the pre-VAT taxable base, then VAT is recalculated on the discounted amount
   // (same rule as purchase_entries.discount_amount in Purchases.js) — not a flat subtraction off total.
+  // Non-admin/owner logins with a manager-set discount cap (`profile.pos_discount_limit`, a %,
+  // null = unlimited) can never exceed it here regardless of whether they typed a flat ₨ amount or
+  // a %, so the two entry modes stay consistent.
+  const discountCapPct = (!isAdmin && !isOwner) ? profile?.pos_discount_limit : null
   const discountAmt = (() => {
     const v = parseFloat(discountStr) || 0
     if (v <= 0 || paySubEx <= 0) return 0
-    return discountMode === 'percent' ? Math.min(paySubEx, paySubEx * v / 100) : Math.min(paySubEx, v)
+    const raw = discountMode === 'percent' ? Math.min(paySubEx, paySubEx * v / 100) : Math.min(paySubEx, v)
+    if (discountCapPct == null) return raw
+    return Math.min(raw, paySubEx * (discountCapPct / 100))
+  })()
+  const discountClamped = discountCapPct != null && paySubEx > 0 && (() => {
+    const v = parseFloat(discountStr) || 0
+    const effectivePct = discountMode === 'percent' ? v : (v / paySubEx * 100)
+    return effectivePct > discountCapPct
   })()
   const discRatio = paySubEx > 0 ? discountAmt / paySubEx : 0
   const payVatAmt = payVatAmtRaw * (1 - discRatio)
@@ -2177,7 +2188,7 @@ export default function PosOrders() {
 
             <div className="tab-bar" style={{ marginBottom: 16 }}>
               <button className={`tab-btn${billingTab === 'pay' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('pay'); setCloseMsg('') }}>Pay</button>
-              {(isAdmin || isOwner) && (
+              {(isAdmin || isOwner || profile?.pos_allow_void) && (
                 <button className={`tab-btn${billingTab === 'void' ? ' tab-btn--active' : ''}`} onClick={() => { setBillingTab('void'); setCloseMsg('') }}>Void</button>
               )}
               {hasPosAccess('supervisor') && (
@@ -2381,6 +2392,11 @@ export default function PosOrders() {
                     <span style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>≈ {fmtNpr(discountAmt)}</span>
                   )}
                 </div>
+                {discountClamped && (
+                  <p style={{ fontSize: 11, color: 'var(--theme-amber)', margin: '2px 0 8px' }}>
+                    Capped at your {discountCapPct}% discount limit ({fmtNpr(discountAmt)}).
+                  </p>
+                )}
                 {discountAmt > 0 && (
                   <div style={{ marginBottom: 12 }}>
                     <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Discount Reason</label>
