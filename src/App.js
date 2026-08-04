@@ -15,6 +15,7 @@ import ModuleGate from './components/ModuleGate'
 import RouteFallback from './components/RouteFallback'
 import './components/Layout.css'
 const Login = lazy(() => import('./pages/Login'))
+const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const OwnerDashboard = lazy(() => import('./pages/dashboard/OwnerDashboard'))
 const MonthlyOwnerReport = lazy(() => import('./pages/dashboard/MonthlyOwnerReport'))
@@ -115,6 +116,7 @@ export default function App() {
           <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/login"     element={<Login />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/pricing"   element={<Pricing />} />
             <Route path="/pos/login" element={<PosLogin />} />
             <Route path="/pos/menu/:tableId" element={<GuestMenu />} />

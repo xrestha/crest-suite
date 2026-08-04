@@ -39,6 +39,7 @@ export default function PosStaff() {
   const [loading,     setLoading]     = useState(true)
   const [saving,      setSaving]      = useState({})
   const [msg,         setMsg]         = useState('')
+  const [search,      setSearch]      = useState('')
 
   // Custom roles
   const [customRoles, setCustomRoles] = useState([])
@@ -322,7 +323,11 @@ export default function PosStaff() {
             Assign roles to your team. Staff log in with their name and PIN.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
+          <input
+            type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search staff…" className="form-select" style={{ maxWidth: 180 }}
+          />
           <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setRolesModal(true)}>
             Manage Roles
           </button>
@@ -366,7 +371,10 @@ export default function PosStaff() {
               </tr>
             </thead>
             <tbody>
-              {staff.map(p => {
+              {staff.filter(p => !search.trim() || (p.full_name || '').toLowerCase().includes(search.trim().toLowerCase())).length === 0 && (
+                <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>No staff match "{search}".</td></tr>
+              )}
+              {staff.filter(p => !search.trim() || (p.full_name || '').toLowerCase().includes(search.trim().toLowerCase())).map(p => {
                 const displayTitle = p.pos_job_title || effectiveRoles.find(r => r.level === p.pos_role)?.label || ''
                 return (
                   <tr key={p.id}>

@@ -39,6 +39,13 @@ export default function Login() {
   const [error, setError]               = useState('')
   const [loading, setLoading]           = useState(false)
 
+  // Forgot-password state
+  const [forgotMode, setForgotMode]     = useState(false)
+  const [forgotEmail, setForgotEmail]   = useState('')
+  const [forgotError, setForgotError]   = useState('')
+  const [forgotLoading, setForgotLoading] = useState(false)
+  const [forgotSent, setForgotSent]     = useState(false)
+
   // Trial signup state
   const [tBiz, setTBiz]         = useState('')
   const [tName, setTName]       = useState('')
@@ -65,6 +72,21 @@ export default function Login() {
     } else {
       navigate('/dashboard')
     }
+  }
+
+  async function handleForgotPassword(e) {
+    e.preventDefault()
+    setForgotError('')
+    setForgotLoading(true)
+    // Supabase itself returns success (no error) even for an unregistered email, specifically to
+    // prevent using this form to enumerate which addresses have accounts — so surfacing `error`
+    // here doesn't reopen that hole, it only ever fires for genuine failures (rate limit, etc.).
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+    setForgotLoading(false)
+    if (error) { setForgotError(error.message || 'Could not send reset email. Please try again.'); return }
+    setForgotSent(true)
   }
 
   async function handleTrialSignup(e) {
@@ -141,34 +163,67 @@ export default function Login() {
 
           {/* ── Right: Sign in ── */}
           <div className="login-right">
-            <h1 className="login-heading">Welcome back</h1>
-            <p className="login-sub">Sign in to your account</p>
-            <form onSubmit={handleSignIn} className="login-form">
-              <div className="login-field">
-                <label htmlFor="signin-email">Email</label>
-                <input id="signin-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus={!startOnTrial} />
-              </div>
-              <div className="login-field">
-                <label htmlFor="signin-password">Password</label>
-                <input
-                  id="signin-password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
-                  value={password} onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••" required />
-                <label className="login-show-pw">
-                  <input type="checkbox" checked={showPassword} onChange={e => setShowPassword(e.target.checked)} />
-                  Show password
-                </label>
-              </div>
-              {error && <p className="login-error">{error}</p>}
-              <button type="submit" className="login-btn" disabled={loading}>
-                {loading ? 'Signing in…' : 'Sign in'}
-              </button>
-            </form>
-            <button type="button" className="login-staff-btn" onClick={() => navigate('/pos/login')}>
-              Staff Login →
-            </button>
+            {forgotMode ? (
+              <>
+                <h1 className="login-heading">Reset password</h1>
+                <p className="login-sub">We'll email you a link to set a new one</p>
+                {forgotSent ? (
+                  <div style={{ padding: '16px', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--theme-green)', lineHeight: 1.6 }}>
+                    If an account exists for that email, a reset link is on its way. Check your inbox.
+                  </div>
+                ) : (
+                  <form onSubmit={handleForgotPassword} className="login-form">
+                    <div className="login-field">
+                      <label htmlFor="forgot-email">Email</label>
+                      <input id="forgot-email" type="email" autoComplete="username" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus />
+                    </div>
+                    {forgotError && <p className="login-error">{forgotError}</p>}
+                    <button type="submit" className="login-btn" disabled={forgotLoading}>
+                      {forgotLoading ? 'Sending…' : 'Send Reset Link'}
+                    </button>
+                  </form>
+                )}
+                <button type="button" className="login-staff-btn" onClick={() => { setForgotMode(false); setForgotSent(false); setForgotError('') }}>
+                  ← Back to sign in
+                </button>
+              </>
+            ) : (
+              <>
+                <h1 className="login-heading">Welcome back</h1>
+                <p className="login-sub">Sign in to your account</p>
+                <form onSubmit={handleSignIn} className="login-form">
+                  <div className="login-field">
+                    <label htmlFor="signin-email">Email</label>
+                    <input id="signin-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus={!startOnTrial} />
+                  </div>
+                  <div className="login-field">
+                    <label htmlFor="signin-password">Password</label>
+                    <input
+                      id="signin-password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      value={password} onChange={e => setPassword(e.target.value)}
+                      placeholder="••••••••" required />
+                    <label className="login-show-pw">
+                      <input type="checkbox" checked={showPassword} onChange={e => setShowPassword(e.target.checked)} />
+                      Show password
+                    </label>
+                  </div>
+                  <button
+                    type="button" onClick={() => { setForgotMode(true); setForgotEmail(email) }}
+                    style={{ background: 'none', border: 'none', padding: 0, fontSize: 12, color: 'var(--theme-accent)', cursor: 'pointer', alignSelf: 'flex-end', textDecoration: 'underline' }}>
+                    Forgot password?
+                  </button>
+                  {error && <p className="login-error">{error}</p>}
+                  <button type="submit" className="login-btn" disabled={loading}>
+                    {loading ? 'Signing in…' : 'Sign in'}
+                  </button>
+                </form>
+                <button type="button" className="login-staff-btn" onClick={() => navigate('/pos/login')}>
+                  Staff Login →
+                </button>
+              </>
+            )}
           </div>
         </div>
 

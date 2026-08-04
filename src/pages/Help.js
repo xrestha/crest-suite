@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
@@ -17,8 +17,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '◆', name: 'Owner Dashboard',
-        guide: 'A single cross-module view for owners — Revenue, Food Cost %, Labor Cost %, Prime Cost % (Food Cost % + Labor Cost %), and True Net Margin % (Revenue − Food Cost − Labor Cost − Overhead), plus Wastage Value, Items Below Par, and Overdue Payables. All figures are Month-to-Date against the current open period, same scoping as Monthly Summary. Requires both Crest IMS and Crest HR enabled, plus a Crest Suite Growth subscription or above — a separate bundle tier from the individual module plans, set from the Billing tab in Manage Clients.',
-        tips: ['Labor Cost % is a prorated estimate (scaled to days elapsed this month) — it refines to the exact figure once Payroll Run is finalized for the month', 'Prime Cost % is the number most operators benchmark against directly — industry standard is roughly 60–65% of revenue', 'Items Below Par is a live inventory position, not a monthly total', 'A locked padlock means Crest Suite needs upgrading — contact your consultant']
+        guide: 'A single cross-module view for owners — Revenue, Food Cost %, Labor Cost %, Prime Cost % (Food Cost % + Labor Cost %), and True Net Margin % (Revenue − Food Cost − Labor Cost − Overhead), plus Wastage Value, Items Below Par, and Overdue Payables. All figures are Month-to-Date against the current open period, same scoping as Monthly Summary. Below the KPI cards, a Cost & Margin Trend chart plots Food Cost %, Labor Cost %, Prime Cost %, and Net Margin % across your last 12 closed periods, sourced from each period\'s frozen Monthly Owner Report snapshot. Requires both Crest IMS and Crest HR enabled, plus a Crest Suite Growth subscription or above — a separate bundle tier from the individual module plans, set from the Billing tab in Manage Clients.',
+        tips: ['Labor Cost % is a prorated estimate (scaled to days elapsed this month) — it refines to the exact figure once Payroll Run is finalized for the month', 'Prime Cost % is the number most operators benchmark against directly — industry standard is roughly 60–65% of revenue', 'Items Below Par is a live inventory position, not a monthly total', 'A locked padlock means Crest Suite needs upgrading — contact your consultant', 'The trend chart only plots periods that already have a Monthly Owner Report — a brand-new property with no closed periods yet won\'t show it until one exists']
       },
       {
         icon: '▤', name: 'Monthly Owner/Manager Report',
@@ -431,6 +431,256 @@ function isTierUnlocked(tier, plan, isAdmin) {
 }
 
 // ── Glossary ──────────────────────────────────────────────────────────────────
+const POS_FEATURES = [
+                {
+                  icon: '🔐', name: 'POS Login', path: '/pos/login',
+                  desc: 'The PIN entry screen that POS staff see when opening the system. Each staff tile shows a colorful initials avatar (like Slack/Gmail) so staff can spot their own tile at a glance on a shared device, without needing to read every name. Staff tap their tile and enter their 4–6 digit PIN to access the POS. The Owner button (top-right) lets the property owner log in with their full email + password for manager-level access. Only staff with a POS role assigned appear on the screen.',
+                  tips: [
+                    'PINs are set or reset in POS → Staff — staff cannot change their own PIN',
+                    'Only staff with a POS role assigned appear on the login screen; users without a role see nothing',
+                    'Forgotten PIN? Go to POS → Staff → Reset PIN beside the staff member\'s name',
+                    'The Owner login gives full access — share it only with trusted management',
+                    'Avatar colors are assigned automatically and stay fixed per staff member — they don\'t change when other staff are added or removed',
+                  ],
+                },
+                {
+                  icon: '🖨', name: 'Silent Printing Setup',
+                  desc: 'By default, every print in Crest POS (KOT/BOT tickets, bills, Complimentary Slips, Shift Opening/Cash Settlement slips) opens your browser\'s normal print dialog. On a dedicated till, you can skip that dialog entirely — the browser sends the job straight to the printer the moment Print fires. This is a one-time setup on each POS device, not something toggled inside the app.',
+                  tips: [
+                    'First, set your receipt/thermal printer as the Windows default printer (Settings → Printers & scanners) — silent printing always targets whatever the OS considers default, not whatever\'s selected inside Chrome',
+                    'Close every open Chrome window on the till, then edit (or recreate) the desktop shortcut used to launch Crest POS — right-click → Properties → Target — and append a `--kiosk-printing` flag after the .exe, e.g. "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing https://your-crest-url.com',
+                    'Optional: add `--kiosk` as well for a full-screen locked-down till (no address bar, no tabs) — not required just for silent printing, but common on dedicated POS terminals',
+                    'Microsoft Edge works the same way — same `--kiosk-printing` flag, launched from msedge.exe instead of chrome.exe',
+                    'Always launch the till from this shortcut, never a normal browser icon — a normal window still shows the print dialog even with the printer set as default',
+                    'This is a browser/OS setting, not a Crest feature — there is no in-app switch for it, and it cannot be configured remotely by Crest Admin',
+                  ],
+                },
+                {
+                  icon: '₨', name: 'Menu Pricing', path: '/menu-pricing',
+                  desc: 'Build your menu directly here — no Item Master or IMS setup needed on a POS-only plan. + Add Item takes a name, category, VAT status, menu price, and an optional Cost Price (what you pay to buy/produce it). Use the On POS toggle to control what shows on the order screen without deleting the item.',
+                  tips: [
+                    'Cost Price is optional but recommended — on a POS-only plan there\'s no Item Master to link an ingredient to, so this is the only food-cost figure the system can ever have. It values the Complimentary Slip and the Comp column on Sales Exceptions instead of showing NPR 0',
+                    'Click Edit next to any item to change its name, category, VAT, menu price, or Cost Price — same modal as Add Item, just pre-filled with the current values',
+                    'Turn off On POS for seasonal or discontinued items — the item and its history are preserved, it just disappears from the order screen',
+                    'Pair sets which items appear as quick "pair with" suggestions when staff tap this item while taking an order',
+                  ],
+                },
+                {
+                  icon: '⊞', name: 'Table Management', path: '/pos/tables',
+                  desc: 'Set up your restaurant floor plan — create tables, assign them to sections (Main Hall, Bar, Outdoor), set capacity, and track status (Available / Occupied / Reserved / Inactive). The Ticket Routing tab lets you assign each recipe category to KOT (kitchen) or BOT (bar) so tickets print at the right station automatically. Requires Supervisor role or above.',
+                  tips: [
+                    'Click a status badge directly on the floor grid to cycle it — no need to open the editor',
+                    'Use sections to group tables by area; the section filter tabs appear automatically once you have more than one section',
+                    'Sort Order controls the display sequence within a section — use multiples of 10 (10, 20, 30) to leave room for reordering',
+                    'Inactive status removes a table from active service without deleting it — useful for tables under repair or seasonal areas',
+                    '▦ QR on each table card generates that table\'s guest-facing digital menu — a page a customer sees after scanning it on their own phone, no login needed. Print it and place it on the table. Add a description, photo URL, and Veg/Non-Veg tag per dish in Recipes to make it richer; nutrition facts appear automatically if your plan has Nutrition Facts enabled. Once a table\'s order is sent to the kitchen/bar, the guest also sees a live Sent / Being prepared / Ready to serve badge on their phone — the same status Order Taking and Kitchen Display show staff, no extra setup needed. Once kitchen/bar staff enter an estimated prep time on Start (Kitchen Display), the guest\'s "Being prepared" badge also shows "about X min left"',
+                    'The guest menu has a ⚙ Filters button whenever any dish has a Veg/Non-Veg tag or allergen info set — lets the guest show vegetarian-only, or hide items containing a specific allergen, without you having to do anything extra. It only appears if that data exists on at least one dish',
+                    'Guest QR self-ordering (Pro plan): with this enabled, the guest menu also lets the customer add items, pick how many are dining, and submit their own order — it never goes straight to the kitchen. It lands as a request a staff member must Accept (or Dismiss) from Order Taking first, so nothing gets cooked without a human check. The guest sees a status card with exactly what they ordered, tracking through Placed → Confirmed → Sent to Kitchen → Preparing → Ready as staff progresses it, with a small chime on their own phone each time it moves to the next stage — and once the kitchen/bar has actually started (an estimate was entered on Start), the Preparing stage shows "about X min left" instead of just "Being prepared"',
+                    'Ticket Routing: go to the Ticket Routing tab to set which categories print at the kitchen (KOT) vs the bar (BOT). Default is Beverage → BOT, everything else → KOT',
+                    'Quick Notes: add preset instruction chips (e.g. "No onion", "Extra spicy") in the Quick Notes tab — staff can tap them instead of typing when adding a note to an order item',
+                    'HSC Codes: set an optional Harmonized System Code per item in the HSC Codes tab — only needed for items that are imported goods sold as-is (e.g. imported bottled drinks). Leave blank for freshly prepared dishes; prints on the bill if set',
+                    'Discounts: customize the list of reasons staff can pick when applying a discount at Charge, in the Discounts tab — comes preloaded with common reasons (Loyalty customer, Manager goodwill, etc.), fully editable',
+                    'Delivery Partners: the Delivery Partners tab is a fully editable list of aggregators (comes preloaded with Foodmandu and Pathao, but add, rename, or remove platforms as those partnerships change) — each with its own Commission % and Buyer Phone. Commission % is just a starting suggestion used when you settle that platform\'s bill in Customers → Outstanding Credit, not something applied automatically at Charge (the platform doesn\'t pay you at the counter, so there\'s nothing to calculate yet when the bill closes). Buyer Phone is a placeholder number the Credit quick-select fills in at Charge so every order from that platform groups under one customer record — change it to a real account/reference number if you have one. No live order sync with any platform (that needs a real API partnership)',
+                  ],
+                },
+                {
+                  icon: '🍽', name: 'Order Taking', path: '/pos/orders',
+                  desc: 'Full-screen order entry. Tap a table from the floor plan to open it — enter covers, browse the menu by category, and tap items to add them. Pressing Send Order saves the order and automatically fires KOT and BOT tickets to their respective stations in one tap. For additions to an existing order, add the item (an amber +N badge shows the new quantity), then press KOT or BOT when ready to send just the additions.',
+                  tips: [
+                    'Send Order (new table) = save + auto-print KOT and BOT in one tap — no extra button presses needed',
+                    'Update Order (existing table) = save only; use KOT/BOT buttons to send additions to the kitchen or bar',
+                    'The amber +N badge on an item means that many extra have been added since the last ticket was sent',
+                    'The green ✓ KOT / ✓ BOT badge means the ticket for that item has already been sent to the station',
+                    'KOT and BOT badges on the buttons show how many unsent items are waiting to be sent',
+                    'Configure which categories go to KOT vs BOT in Table Management → Ticket Routing',
+                    'Use the search box above the category tabs to find an item by name — filters within whatever category tab is currently active',
+                    'Every order gets a sequential order number (#1, #2, …) shown in the top bar and printed on each KOT/BOT ticket — kitchen, bar and bill all reference the same number',
+                    'Printed tickets carry your outlet name and who took the order (Taken by), so the station knows who to call with questions',
+                    'Ticket dates print in the Bikram Sambat (BS) calendar, matching the rest of the app',
+                    'Tap "+ Add note" under any order item to send a special instruction (e.g. "no onion") to the kitchen/bar — it prints indented under that item on the ticket. Preset chips from Table Management → Quick Notes appear while you type',
+                    'Editing or adding a note after a ticket was already sent clears its ✓ sent badge — press KOT/BOT again to send the update to the station',
+                    'Tapping an item may show quick-add suggestion chips underneath it — what you get depends on your plan: Starter shows a simple nudge toward a category you haven\'t ordered from yet (e.g. no drink yet); Growth adds manually-configured pairings (a gold "PAIRED" chip, set up in Menu Pricing → Pair for POS-only clients); Growth with Crest IMS also adds real "frequently ordered together" suggestions from your own sales history; Pro with Crest IMS adds the full Menu Engineering-driven ranking, including an amber "CHEF\'S PICK" chip for Puzzle items worth pushing',
+                    'The floor view shows an amber "⚠ pending" pill and per-table badge for any table with items added but not yet sent to the kitchen/bar — a quick way to catch orders that were never fired',
+                    'Charge → closes the table — Supervisor role or above only, hidden entirely for Staff. Pay collects Cash/Card/eSewa/Khalti/FonePay and prints a Tax Invoice or Bill; Complimentary closes a walkout or comp — ₨0 is collected but it still counts against food-cost/inventory reporting; Void cancels a mistake with no revenue impact and is only visible to the owner/admin login by default — a manager can grant "Allow Void" to a specific trusted staff member in POS Staff so they can void without waiting for the owner',
+                    'Discount on the Pay tab can be capped per staff member — set a Discount Limit (%) for a login in POS Staff and their entered discount is automatically capped at that %, however they type it (flat NPR or percent). Leave it blank for unlimited (the default, and always the case for the owner/admin login)',
+                    'Foodmandu/Pathao orders close as Credit, not their own payment method — the platform doesn\'t pay you at the counter, it remits later minus commission, same as any other unpaid balance. Select Credit, then tap the Foodmandu or Pathao chip that appears (auto-fills the buyer) to mark which platform it\'s for. Track and settle it from Customers → Outstanding Credit — that\'s where the actual commission gets entered, once you know what the platform really withheld',
+                    'Complimentary prints an internal Complimentary Slip, not a Tax Invoice or PAN Bill — its own sequential NC-01 style number (separate from Tax Invoice/Bill numbers), each line valued at food cost (not menu price) so comps don\'t distort your P&L',
+                    'To comp just one dish instead of the whole table, stay on the Pay tab — an Items list (Supervisor+ only) lets you comp individual items with +/− qty steppers, down to part of a line\'s quantity (e.g. 1 of 3 Veg Momo) — the comped qty is removed from this bill and printed on its own mini Complimentary Slip (same NC-series numbering), while the remaining qty on that line and everything else still bills and prints normally, one Tax Invoice/Bill for the table',
+                    'Both the Charge modal\'s total and item list switch to food-cost values while the Complimentary tab is open, and a live preview of the actual bill/slip layout appears in the modal as you fill in the fields — it always matches exactly what will print',
+                    'Whether the printed bill says "TAX INVOICE" (with a VAT breakdown) or plain "BILL" (PAN only, no VAT) depends on the VAT Registered toggle an admin sets per client — see Settings below',
+                    'Buyer Name/Address/PAN/Phone on the Charge screen are optional — IRD allows omitting them for bills up to NPR 10,000, but fill them in if a customer requests a full invoice',
+                    'Discount on the Pay tab supports a flat NPR amount or a percentage (toggle between ₨/%) — it reduces the pre-VAT taxable amount, with VAT recalculated on the discounted base, not just subtracted off the total',
+                    'Applying any discount makes buyer Name and Phone compulsory (not just optional) and requires picking a Discount Reason — gives an identifiable, audited record of who received it. Customize the reason list in Table Management → Discounts',
+                    'Credit (red button, Supervisor role or above) closes the bill normally — it counts as a sale and consumes a Tax Invoice/Bill number — but no payment is collected now; the customer owes the amount. Buyer Name and Phone are compulsory, same as a discount. Collect it later from Customers → Outstanding Credit. The printed bill adds a Customer Signature/Date line, same as the Complimentary Slip, so there\'s a signed record of the debt',
+                    'Split Payment: toggle from Single Payment to Split Payment on the Pay tab to collect one bill using more than one payment method (e.g. part eSewa, part cash) — add each tender\'s amount and method one at a time; a running Remaining balance tracks what\'s left, and cash change is calculated against that remaining balance, not the full bill. It\'s still one bill and one Tax Invoice/Bill number — only the collection is split, not the invoice. Not available with Credit. Only the most recent tender can be undone; to fix an earlier one, void the order and re-ring it',
+                    'Each split tender can print its own small courtesy slip (🖨 next to the tender) — proof of that person\'s payment while the table is still settling up. It is not the Tax Invoice/PAN Bill, which still only prints once, at the very end, listing every tender',
+                    '📄 Recent Bills (floor view) lists everything closed today and lets you reprint a bill — the first print carries no extra label (it is the original), every print after that is marked "COPY OF ORIGINAL - (N)" where N counts the copy itself (the 2nd print overall is copy 1, the 5th print overall is copy 4)',
+                    'Scan-to-pay QR: once your admin pastes the outlet\'s merchant QR payload in Manage Clients → this client → QR tab, every bill carries a dynamic QR with that bill\'s exact amount pre-filled — the customer can\'t mistype it. The QR also appears in the Charge modal when eSewa/Khalti/FonePay is selected, updating live as discounts change. Payment confirmation is still manual — confirm once you see it land on your merchant app',
+                    'Works offline for order-taking: if the connection drops, you can still open tables you\'ve already viewed this session, add items, and send KOT/BOT (an "📵 Offline" pill and a per-table "not yet synced" dot show what\'s queued) — everything uploads automatically once you reconnect and gets its real order number. A brand-new table opened offline shows "#— (pending)" until it syncs. A table whose order was never loaded on this device stays blocked offline rather than risk overwriting items you can\'t see. Charge/Payment always requires a live connection — Nepal\'s sequential invoice numbering can\'t be assigned offline',
+                    'Guest QR self-ordering (Pro plan): if enabled for your restaurant, a pulsing 🔔 banner (with a one-time chime) appears at the top of the floor view the moment a guest submits an order from their phone — and the table itself glows so it stands out even if you\'re not looking at the banner. Tapping the banner or the table opens it straight to the order screen, with covers already filled in from what the guest entered (no re-typing on a numpad). A banner on that screen lists exactly what they ordered — Accept adds those items straight into your cart at the quantities they chose (adjust or add more before sending), Dismiss discards the request with no effect on the order. Nothing reaches the kitchen until you actually press Send Order/KOT, same as any item you add yourself. Enable it per client in Admin → Manage Clients → Features',
+                  ],
+                },
+                {
+                  icon: '▥', name: 'Kitchen Display', path: '/pos/kds',
+                  desc: 'An on-screen ticket board for the kitchen/bar, running alongside printed KOT/BOT tickets — sending a KOT/BOT from Order Taking still prints exactly as before; this just mirrors it live on a screen. Switch between Kitchen (KOT) and Bar (BOT) at the top — pick whichever this device sits at, it remembers your choice. Each ticket moves New → In Progress → Ready with a tap.',
+                  tips: [
+                    'Tapping Start opens a calculator-style popup to enter the estimated prep time in minutes — required before the ticket can move to In Progress, with quick 5/10/15/20-minute preset buttons alongside the number pad',
+                    'Once started, the ticket shows a live "~X min left" countdown (turning red if it runs over), and once Ready, "Done in Xm (est. Ym)" so staff can see at a glance how the estimate held up',
+                    'The estimate also shows on the floor view in Order Taking (the Started badge on each table gains a "~X min" ETA), and feeds the Prep (Est/Actual) column in POS Reports → KOT Log → Register',
+                    'An addition to an already-fired order shows up as its own new ticket, same as the second small paper ticket that prints for just the new items — not a change to the original ticket',
+                    'A ticket\'s time-since-sent label turns amber after 8 minutes and red after 15 — a quick way to spot what\'s falling behind during a rush',
+                    'Ready tickets stay visible for 10 minutes so staff can confirm pickup, then drop off the board on their own — they\'re never deleted, and still count in KOT Register/Reconciliation reports',
+                    'Mount this on a tablet or spare screen at the pass — anyone with Staff role or above can open it, same PIN login as Order Taking',
+                    'Printing is not replaced — if a client doesn\'t have a screen at a station yet, paper tickets keep working exactly as they do today',
+                  ],
+                },
+                {
+                  icon: '🅿', name: 'Parking Slips', path: '/pos/parking',
+                  desc: 'Issue a printable parking token for a customer\'s vehicle — no order or table required, so a walk-in can get one before ordering. Enter the vehicle number (required), plus optional vehicle type, customer name, a linked bill, and notes. Requires Supervisor role or above to issue/print; any staff can view the log and mark a slip Exited once the vehicle is retrieved.',
+                  tips: [
+                    'Prints an 80mm thermal token with the vehicle number in large text — the single detail a valet reads back to reunite car with customer',
+                    'Vehicle Type is a quick Two Wheeler / Four Wheeler toggle, not free text',
+                    'Bill Number optionally links the slip to a bill already issued today (e.g. to honor a "free parking with purchase" policy) — only today\'s bills are listed, since a past day\'s bill is never the right one to link. Click the bill number in the log to view it',
+                    'The Open tab shows only vehicles still parked; switch to All to see the full history',
+                    'Mark Exited as soon as the vehicle is retrieved — it closes the slip and records who closed it',
+                    'Reprint is available to any staff if the original token is lost',
+                    'A slip left open past its day auto-closes the next time this page is opened, showing "Auto-Closed" instead of "Closed" — the record is kept, but it means staff never confirmed the vehicle actually left',
+                  ],
+                },
+                {
+                  icon: '👤', name: 'Customers', path: '/pos/customers',
+                  desc: 'Customer book built automatically from billed orders — every bill closed with buyer Name + Phone (required for any discount or Credit sale) adds or updates a customer, keyed by phone number. The Outstanding Credit tab lists Credit bills awaiting collection with a one-tap Settle action. Requires Supervisor role or above.',
+                  tips: [
+                    'No manual data entry — the book fills itself as bills are closed with buyer details. Repeat customers are matched by phone number, so their name/address/PAN stay up to date automatically',
+                    'Click any customer row to see their full order history — every billed order under that phone number, including payment method and any outstanding Credit',
+                    'Outstanding Credit tab: when a customer comes back to pay, hit Settle and pick the method they actually used (Cash/Card/eSewa/Khalti/FonePay, or Cheque/Bank Transfer — the usual way a delivery platform or corporate account remits) — the bill is marked collected with who recorded it and when',
+                    'A bill tagged Foodmandu or Pathao (an amber badge next to the customer name) shows a Commission % field when you Settle it — pre-filled from Table Management → Delivery Partners as a starting suggestion, confirm or adjust it to match what the platform actually remitted before picking the settlement method',
+                    'The Age column shows how long each credit bill has been outstanding — chase the old ones first',
+                    'Settling is Supervisor+ (routine cashier work); issuing credit at Charge stays Manager+ only',
+                  ],
+                },
+                {
+                  icon: '⚠', name: 'Sales Exceptions', path: '/pos/exceptions',
+                  desc: 'Every discount, void, and complimentary in one report — revenue that leaked, filterable by BS date range, exception type, and staff member. Discounts show the amount knocked off; Voids show the menu value forgone (incl. VAT); Comps show food cost, matching the Complimentary Slip, plus a separate Potential Sales Value column showing what the comped item(s) would have sold for at menu price. Includes both whole-order Complimentary and individually item-comped bills (see Order Taking). Requires Manager role or above.',
+                  tips: [
+                    'The By Staff Member table is the report\'s real job — one cashier discounting far more than everyone else is worth a conversation (training gap or permission creep)',
+                    'A quiet report is a healthy one — a sudden spike in voids usually means order-entry mistakes, not fraud',
+                    'Amounts mean different things per type: Discount = NPR knocked off the bill, Void = full menu value that was cancelled, Comp = ingredient cost of what was served free (see Potential Sales Value for what it would have sold for instead)',
+                    'Click any row to view the actual bill/slip in a new tab — same layout that printed, view-only (won\'t trigger your printer)',
+                    'Use the ⬇ Excel button to hand the filtered list to your accountant — includes both AD date and BS Miti columns',
+                    'Defaults to the current BS month — widen the range for a quarterly or fiscal-year view',
+                  ],
+                },
+                {
+                  icon: '↩', name: 'Credit Notes', path: '/pos/credit-notes',
+                  desc: 'Formally correct an already-billed order — required by Nepal VAT Rules 2053, Rule 20 whenever the value of billed goods/services changes (billing errors, price corrections, tax corrections). Issue New searches past bills by BS date range or invoice number; Credit Note Book is the running register every Credit Note ever issued, as required by Rule 20(2). Requires Manager role or above.',
+                  tips: [
+                    'A Credit Note reduces this month\'s revenue (sales_entries) so Monthly Summary/Recipe Margin/Best Sellers stay accurate — it does not reverse stock/ingredient depletion, since the food was already served. This is a billing/tax correction, not a returned-food event',
+                    'Only bills closed as Pay (not Complimentary or Void) can get a Credit Note — a Complimentary is already a ₨0 internal document, and a Void never had revenue to correct',
+                    'Each bill can only be credited once — the Credit Note button disappears from a bill once one has been issued against it',
+                    'The Credit Note prints with all 8 fields Rule 20 requires: serial number, date, your business details, the buyer\'s details, the original invoice number + date, item details, credited amount, and credited VAT',
+                    'Reprints relabel automatically — no label the first time, then "COPY OF ORIGINAL - (N)" after that, same convention as the Tax Invoice',
+                  ],
+                },
+                {
+                  icon: '▤', name: 'Sales Report', path: '/pos/sales-report',
+                  desc: 'Ten views of the same POS sales data, one page: Daily (day-by-day totals), Hourly (revenue by time of day), Bill Register (every individual voucher — payment mode, remarks, who closed it), Comped Bills (every bill that had an item comped out of it, cross-referenced to its NC number), Payment Summary (revenue by Cash/Card/eSewa/Khalti/FonePay/Credit), Delivery Partners (every Foodmandu/Pathao bill from Credit through settlement), Category Wise and Item Wise (what drives revenue), Customer Wise (who\'s buying and how much), and 1L+ Report (Nepal VAT Annexure 13 — parties whose cumulative transactions exceed NPR 1,00,000 in a fiscal year). Requires Manager role or above.',
+                  tips: [
+                    'Daily/Hourly/Bill Register/Comped Bills/Payment Summary/Delivery Partners/Category/Item/Customer share one BS date-range filter; 1L+ Report uses its own Fiscal Year selector instead, since Annexure 13 is a whole-year compliance check, not an arbitrary range',
+                    'Payment Summary groups the same VAT-ready Gross/Discount/Taxable/Net breakdown by how the bill was paid, so it reconciles against Daily and Bill Register totals for the same range — click a row to see just that method\'s bills in Bill Register',
+                    'Delivery Partners lists every Foodmandu/Pathao bill (these close as Credit, not their own payment method — see Order Taking) with its settlement status; Outstanding rows have no commission/net figure yet since that\'s only entered when you Settle it in Customers → Outstanding Credit',
+                    'Daily excludes bills that later got a Credit Note entirely — the revenue correction posts on the day the Credit Note is issued, not retroactively into the original bill\'s day. Bill Register instead lists every voucher and flags the ones later credited with a badge',
+                    'Click any row on Bill Register to view that bill\'s actual Tax Invoice/PAN Bill in a new tab — the same layout that printed, view-only (won\'t trigger your printer). A bill with an item comped out of it also shows a "Comped (NC-xx)" badge right there',
+                    'Comped Bills lists every item-level comp with the paid bill it came out of, valued both at food cost and at menu-price "Potential Value" — click a row to view that comp\'s own mini Complimentary Slip. Whole-order Complimentary orders don\'t appear here (they have no separate paid bill to cross-reference) — see Sales Exceptions for those',
+                    'Category Wise and Item Wise both treat a credited bill\'s full quantity as "Return" (Crest has no partial/line-level returns) — a bill\'s discount is allocated proportionally so totals reconcile',
+                    'Customer Wise groups walk-ins with no buyer details under CASH SALES',
+                    '⚠ Missing PAN on the 1L+ tab means a party crossed NPR 1,00,000 without ever having their PAN recorded — worth asking for it on their next visit',
+                    '⬇ Excel exports whichever tab is currently open',
+                  ],
+                },
+                {
+                  icon: '🍽', name: 'Covers Report', path: '/pos/covers-report',
+                  desc: 'Guest-traffic analytics built from the covers number entered when a table is opened: average party size, revenue per guest (not per bill), how long tables actually turn over by party size, when covers peak through the day, and each server\'s covers/revenue. Requires Manager role or above.',
+                  tips: [
+                    'Revenue/Cover is the standard restaurant "average check per guest" metric — different from Sales Report\'s per-bill averages, since a bill for 6 people should read differently than a bill for 1',
+                    'Turnover Time is bucketed by party size (1–2, 3–4, 5–6, 7+) because a 2-top and an 8-top have very different expected dine times — one blended average wouldn\'t mean much',
+                    'Peak Hours buckets by when the table was opened (guests seated), not when the bill was paid — that\'s the number that tells you when to add floor staff',
+                    'RevPASH (Revenue Per Available Seat-Hour) needs your Operating Hours set on the Overview tab first — without it, the card just prompts you to set them',
+                    'By Server ranks staff by covers served, not bills — a server who takes fewer but larger tables can still lead here',
+                  ],
+                },
+                {
+                  icon: '🧾', name: 'KOT Log', path: '/pos/kot-log',
+                  desc: 'Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was actually sent to the kitchen against what\'s currently on each order — the anti-fraud check that catches food cooked and served but quietly reduced, removed, or never billed. Bill Trail shows every paid/voided bill with its complete KOT/BOT history in one expandable view, including bills that never sent anything to the kitchen at all. Requires Manager role or above.',
+                  tips: [
+                    'Reconciliation only shows flagged rows — a quiet report is a healthy one, same philosophy as Sales Exceptions',
+                    'A row flags when an item\'s total sent-to-kitchen quantity is more than what\'s currently on the order (cooked, then reduced or removed before billing)',
+                    'Any KOT/BOT send on an order that ends up Voided is always flagged, regardless of quantity — the kitchen made food but zero revenue was ever recorded for it',
+                    'Bill Trail is the complete picture — click a bill to expand its full ticket history. An amber "No KOT" badge means that bill never sent anything to the kitchen (could be a legitimate self-serve tab, or worth a second look); a red "Discrepancy" badge means the same issue Reconciliation flags',
+                    'The Register only goes back as far as this feature was added — sends from before that date were never logged',
+                  ],
+                },
+                {
+                  icon: '⏱', name: 'Shifts', path: '/pos/shifts',
+                  desc: 'Open a shift with a starting cash count, watch live sales totals as the shift runs (X-report), and reconcile the drawer against expected cash when it ends (Z-report). Requires Supervisor role or above.',
+                  tips: [
+                    'Open Shift and Close Shift both count each note/coin (₨1000 down to ₨1) rather than a single total — more accurate, and matches how cash is actually counted',
+                    'Current Shift is the X-report — a live, repeatable snapshot. Nothing about it is final; check it anytime during the shift without affecting anything',
+                    'Close Shift produces the Z-report — a one-time, final reconciliation. Expected Cash = opening count + cash sales during the shift; Variance = what was actually counted minus that expectation',
+                    'A Balanced badge means the drawer matched exactly; red means short, amber means over — chase down shortages the same day while it\'s easy to remember why',
+                    'You can run several shifts in a day (e.g. a morning cashier closes with a Z-report, an evening cashier opens a new one) — only one shift can be open at a time',
+                    'Orders closed while no shift is open still bill normally — a missing shift never blocks Charge, it just means that order won\'t show up in any shift\'s totals',
+                    'Shift History lists every past shift — click one to see its full frozen Z-report',
+                  ],
+                },
+                {
+                  icon: '👥', name: 'POS Staff', path: '/pos/staff',
+                  desc: 'Assign POS roles to your team. Only staff with a role assigned can see POS screens. Roles: Staff (order-taking only), Supervisor (+ table setup, billing/Charge, Complimentary, Credit), Manager (+ Sales Exceptions report, role assignment). Void is owner/admin-only by default — grant "Allow Void" on a specific staff member here to delegate it. Requires Manager role or above.',
+                  tips: [
+                    'Start by assigning the owner/manager account the Manager role — they can then assign roles to the rest of the team',
+                    'Staff role = waiters who take orders only. They cannot access Table Management or reports',
+                    'Supervisor role is ideal for head waiters and floor captains who need to set table status and manage the floor',
+                    'Users with no role assigned cannot see any POS screens — the POS section is hidden from their sidebar',
+                    'If Crest HR is also enabled, + Add Staff defaults to picking an existing HR Employee instead of typing a fresh name — the POS login is linked to that employee record (shown with a 🔗 HR tag) so the name never drifts out of sync. Switch to POS-only Staff for someone who isn\'t in HR (e.g. a casual/part-time role).',
+                    'Discount Limit caps how much % discount that login can give at billing — leave it blank for unlimited. Allow Void lets that login void a bill themselves instead of needing the owner/admin. Both default to unrestricted-off, i.e. unlimited discount and no void access, until set here.',
+                  ],
+                },
+]
+
+const ADMIN_FEATURES = [
+                {
+                  icon: '📱', name: 'Guest Menu Preview',
+                  guide: 'Preview the currently-viewed client\'s guest QR menu without needing a printed QR code or asking the client for one. Pick a client in the sidebar switcher first, then pick one of that client\'s tables — the page embeds the exact live page a guest sees after scanning that table\'s QR (GuestMenu.jsx), including guest ordering if the client has that Pro-tier feature enabled.',
+                  tips: [
+                    'This is the real, live guest page, not a mockup — if guest ordering is on and you place an order, it creates a genuine pending order the client\'s own staff will see in POS Orders',
+                    'Copy Link or Open in New Tab if you want to test on an actual phone instead of the embedded preview',
+                    'If the client has no tables set up yet, add one in Tables first',
+                  ],
+                },
+                {
+                  icon: '◷', name: 'Audit Log',
+                  guide: 'A full event log of every significant action in the system — creates, updates, deletes, period opens/closes, payroll runs, POS order voids/discounts/invoices, and admin client/feature changes. Every changed field is shown as old value → new value automatically, not just a hand-picked few, so a newly added field is covered the moment it exists. Filter by client, area, time range, or user, or search free text across all of those plus record IDs.',
+                  tips: [
+                    'Click a row\'s Details cell to expand every field that changed, not just the first three shown inline',
+                    'Filter by "Area" to narrow down to IMS, HR, POS, or Admin actions',
+                    'Filter by "User" or type into the search box to trace all actions by a specific person',
+                    'A POS Order only logs meaningful transitions — void, discount, close, invoice — not every item added while the bill is still open',
+                    '⬇ Export downloads the currently filtered rows as an Excel file',
+                    'Admin can permanently delete matching entries with "Clear Logs" — this is not reversible, so audit history is only as durable as the last time someone chooses to keep it',
+                  ],
+                },
+                {
+                  icon: '🧾', name: 'POS Billing Setup',
+                  guide: 'Per-client invoice settings, set in Manage Clients → a client → Settings tab. VAT Registered controls whether POS bills print as a Tax Invoice with a VAT breakdown or a plain Bill with PAN only. Invoice Prefix is the short client code used in invoice numbers (e.g. TI2238-CAC-82/83) — auto-suggested from the property name, editable. The client\'s scan-to-pay merchant QR payload is a separate QR tab in the same drawer.',
+                  tips: [
+                    'Turn VAT Registered off for clients billing on PAN only (not yet VAT-registered with IRD) — the bill header switches from "TAX INVOICE" to "BILL" and drops the VAT line',
+                    'Invoice numbers reset to 1 at the start of each Nepal fiscal year (Shrawan) automatically — no manual reset needed',
+                    'Payment QR: paste the client\'s raw merchant QR text (scanned off their physical FonePay/NepalPay/eSewa standee with any QR-reader app) into the QR tab — it live-validates and previews before saving, and every POS bill then carries a dynamic per-bill QR with the exact amount pre-filled',
+                    'Invoice Prefix is uppercased automatically; keep it short (3–5 letters) so it fits the 80mm receipt width',
+                  ],
+                },
+]
+
 const GLOSSARY = [
   { term: 'Food Cost %',      def: 'Cost of ingredients used ÷ Revenue × 100. The primary profitability metric for F&B operations. Industry benchmark: 28–35%.' },
   { term: 'COGS',             def: 'Cost of Goods Sold. Opening Stock + Purchases − Wastage − Staff Meals − Closing Stock. The actual cost of ingredients consumed in the period.' },
@@ -547,6 +797,7 @@ export default function Help() {
   const [expandedModule, setExpandedModule]       = useState(null)
   const [expandedFaq, setExpandedFaq]             = useState(null)
   const [pricingAnnual, setPricingAnnual]         = useState(false)
+  const [searchQuery, setSearchQuery]             = useState('')
   const { settings } = useSettings()
   const navigate = useNavigate()
   const phone   = settings?.contact_phone   || ''
@@ -623,6 +874,36 @@ export default function Help() {
     )
   }
 
+  // Flat, searchable index built once from the same data every tab already renders from — a
+  // module guide feature is covered by search the moment it exists in IMS_FEATURE_TIERS /
+  // HR_FEATURES / POS_FEATURES / ADMIN_FEATURES, with no separate list to keep in sync. Tier
+  // locking is deliberately not applied here (unlike the Module Guide tab's LockedRow) — showing
+  // a locked feature's full guide text in a search result is closer to how Pricing already
+  // advertises locked features openly than something that needs gating.
+  const searchIndex = useMemo(() => {
+    const items = []
+    IMS_FEATURE_TIERS.forEach(g => g.features.forEach(f => items.push({ feat: f, moduleKey: 'ims', module: 'IMS' })))
+    HR_FEATURES.forEach(f => items.push({ feat: f, moduleKey: 'hr', module: 'HR' }))
+    POS_FEATURES.forEach(f => items.push({ feat: f, moduleKey: 'pos', module: 'POS' }))
+    ADMIN_FEATURES.forEach(f => items.push({ feat: f, moduleKey: 'admin', module: 'Admin' }))
+    return items
+  }, [])
+
+  const searchQ = searchQuery.trim().toLowerCase()
+  const searching = searchQ.length > 0
+  const matchedFeatures = searching ? searchIndex.filter(({ feat }) =>
+    feat.name.toLowerCase().includes(searchQ) ||
+    (feat.guide || feat.desc || '').toLowerCase().includes(searchQ) ||
+    (feat.tips || []).some(t => t.toLowerCase().includes(searchQ))
+  ) : []
+  const matchedGlossary = searching ? GLOSSARY.filter(g =>
+    g.term.toLowerCase().includes(searchQ) || g.def.toLowerCase().includes(searchQ)
+  ) : []
+  const matchedFaq = searching ? FAQ.filter(f =>
+    f.q.toLowerCase().includes(searchQ) || f.a.toLowerCase().includes(searchQ)
+  ) : []
+  const searchResultCount = matchedFeatures.length + matchedGlossary.length + matchedFaq.length
+
   // Locked feature row — compact, non-expandable
   function LockedRow({ feat }) {
     return (
@@ -662,6 +943,67 @@ export default function Help() {
           }}>{s.label}</button>
         ))}
       </div>
+
+      {/* Search — spans every tab's content (Module Guide, Glossary, FAQ) from one box, since
+          a client has no way to know which of 5 tabs an answer lives in otherwise. */}
+      <div style={{ marginBottom: 24 }}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search features, glossary terms, and FAQs…"
+          className="form-select"
+          style={{ width: '100%', maxWidth: 480 }}
+        />
+      </div>
+
+      {searching && (
+        <div style={{ marginBottom: 28 }}>
+          <p style={{ fontSize: 13, color: 'var(--theme-text2)', marginBottom: 16 }}>
+            {searchResultCount} result{searchResultCount === 1 ? '' : 's'} for "{searchQuery}"
+          </p>
+          {matchedFeatures.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Module Guide</p>
+              {matchedFeatures.map(({ feat, moduleKey, module }) => (
+                <div key={`${moduleKey}:${feat.name}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent)', width: 34, flexShrink: 0, marginTop: 14, textTransform: 'uppercase' }}>{module}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <FeatureCard feat={feat} moduleKey={`search-${moduleKey}`} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {matchedGlossary.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Glossary</p>
+              {matchedGlossary.map(g => (
+                <div key={g.term} className="card" style={{ padding: '12px 18px', marginBottom: 6 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 4 }}>{g.term}</div>
+                  <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{g.def}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {matchedFaq.length > 0 && (
+            <div>
+              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>FAQ</p>
+              {matchedFaq.map((item, i) => (
+                <div key={i} className="card" style={{ padding: '12px 18px', marginBottom: 6 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 4 }}>{item.q}</div>
+                  <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{item.a}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {searchResultCount === 0 && (
+            <div className="empty-state">No results for "{searchQuery}". Try a different term, or clear the search to browse the tabs above.</div>
+          )}
+        </div>
+      )}
+
+      {!searching && <>
 
       {/* GETTING STARTED */}
       {activeSection === 'guide' && (
@@ -1035,220 +1377,7 @@ export default function Help() {
                   <div style={{ marginBottom: 8 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Point of Sale</span>
                   </div>
-                  {[
-                {
-                  icon: '🔐', name: 'POS Login', path: '/pos/login',
-                  desc: 'The PIN entry screen that POS staff see when opening the system. Each staff tile shows a colorful initials avatar (like Slack/Gmail) so staff can spot their own tile at a glance on a shared device, without needing to read every name. Staff tap their tile and enter their 4–6 digit PIN to access the POS. The Owner button (top-right) lets the property owner log in with their full email + password for manager-level access. Only staff with a POS role assigned appear on the screen.',
-                  tips: [
-                    'PINs are set or reset in POS → Staff — staff cannot change their own PIN',
-                    'Only staff with a POS role assigned appear on the login screen; users without a role see nothing',
-                    'Forgotten PIN? Go to POS → Staff → Reset PIN beside the staff member\'s name',
-                    'The Owner login gives full access — share it only with trusted management',
-                    'Avatar colors are assigned automatically and stay fixed per staff member — they don\'t change when other staff are added or removed',
-                  ],
-                },
-                {
-                  icon: '🖨', name: 'Silent Printing Setup',
-                  desc: 'By default, every print in Crest POS (KOT/BOT tickets, bills, Complimentary Slips, Shift Opening/Cash Settlement slips) opens your browser\'s normal print dialog. On a dedicated till, you can skip that dialog entirely — the browser sends the job straight to the printer the moment Print fires. This is a one-time setup on each POS device, not something toggled inside the app.',
-                  tips: [
-                    'First, set your receipt/thermal printer as the Windows default printer (Settings → Printers & scanners) — silent printing always targets whatever the OS considers default, not whatever\'s selected inside Chrome',
-                    'Close every open Chrome window on the till, then edit (or recreate) the desktop shortcut used to launch Crest POS — right-click → Properties → Target — and append a `--kiosk-printing` flag after the .exe, e.g. "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing https://your-crest-url.com',
-                    'Optional: add `--kiosk` as well for a full-screen locked-down till (no address bar, no tabs) — not required just for silent printing, but common on dedicated POS terminals',
-                    'Microsoft Edge works the same way — same `--kiosk-printing` flag, launched from msedge.exe instead of chrome.exe',
-                    'Always launch the till from this shortcut, never a normal browser icon — a normal window still shows the print dialog even with the printer set as default',
-                    'This is a browser/OS setting, not a Crest feature — there is no in-app switch for it, and it cannot be configured remotely by Crest Admin',
-                  ],
-                },
-                {
-                  icon: '₨', name: 'Menu Pricing', path: '/menu-pricing',
-                  desc: 'Build your menu directly here — no Item Master or IMS setup needed on a POS-only plan. + Add Item takes a name, category, VAT status, menu price, and an optional Cost Price (what you pay to buy/produce it). Use the On POS toggle to control what shows on the order screen without deleting the item.',
-                  tips: [
-                    'Cost Price is optional but recommended — on a POS-only plan there\'s no Item Master to link an ingredient to, so this is the only food-cost figure the system can ever have. It values the Complimentary Slip and the Comp column on Sales Exceptions instead of showing NPR 0',
-                    'Click Edit next to any item to change its name, category, VAT, menu price, or Cost Price — same modal as Add Item, just pre-filled with the current values',
-                    'Turn off On POS for seasonal or discontinued items — the item and its history are preserved, it just disappears from the order screen',
-                    'Pair sets which items appear as quick "pair with" suggestions when staff tap this item while taking an order',
-                  ],
-                },
-                {
-                  icon: '⊞', name: 'Table Management', path: '/pos/tables',
-                  desc: 'Set up your restaurant floor plan — create tables, assign them to sections (Main Hall, Bar, Outdoor), set capacity, and track status (Available / Occupied / Reserved / Inactive). The Ticket Routing tab lets you assign each recipe category to KOT (kitchen) or BOT (bar) so tickets print at the right station automatically. Requires Supervisor role or above.',
-                  tips: [
-                    'Click a status badge directly on the floor grid to cycle it — no need to open the editor',
-                    'Use sections to group tables by area; the section filter tabs appear automatically once you have more than one section',
-                    'Sort Order controls the display sequence within a section — use multiples of 10 (10, 20, 30) to leave room for reordering',
-                    'Inactive status removes a table from active service without deleting it — useful for tables under repair or seasonal areas',
-                    '▦ QR on each table card generates that table\'s guest-facing digital menu — a page a customer sees after scanning it on their own phone, no login needed. Print it and place it on the table. Add a description, photo URL, and Veg/Non-Veg tag per dish in Recipes to make it richer; nutrition facts appear automatically if your plan has Nutrition Facts enabled. Once a table\'s order is sent to the kitchen/bar, the guest also sees a live Sent / Being prepared / Ready to serve badge on their phone — the same status Order Taking and Kitchen Display show staff, no extra setup needed. Once kitchen/bar staff enter an estimated prep time on Start (Kitchen Display), the guest\'s "Being prepared" badge also shows "about X min left"',
-                    'Guest QR self-ordering (Pro plan): with this enabled, the guest menu also lets the customer add items, pick how many are dining, and submit their own order — it never goes straight to the kitchen. It lands as a request a staff member must Accept (or Dismiss) from Order Taking first, so nothing gets cooked without a human check. The guest sees a status card with exactly what they ordered, tracking through Placed → Confirmed → Sent to Kitchen → Preparing → Ready as staff progresses it, with a small chime on their own phone each time it moves to the next stage — and once the kitchen/bar has actually started (an estimate was entered on Start), the Preparing stage shows "about X min left" instead of just "Being prepared"',
-                    'Ticket Routing: go to the Ticket Routing tab to set which categories print at the kitchen (KOT) vs the bar (BOT). Default is Beverage → BOT, everything else → KOT',
-                    'Quick Notes: add preset instruction chips (e.g. "No onion", "Extra spicy") in the Quick Notes tab — staff can tap them instead of typing when adding a note to an order item',
-                    'HSC Codes: set an optional Harmonized System Code per item in the HSC Codes tab — only needed for items that are imported goods sold as-is (e.g. imported bottled drinks). Leave blank for freshly prepared dishes; prints on the bill if set',
-                    'Discounts: customize the list of reasons staff can pick when applying a discount at Charge, in the Discounts tab — comes preloaded with common reasons (Loyalty customer, Manager goodwill, etc.), fully editable',
-                    'Delivery Partners: the Delivery Partners tab is a fully editable list of aggregators (comes preloaded with Foodmandu and Pathao, but add, rename, or remove platforms as those partnerships change) — each with its own Commission % and Buyer Phone. Commission % is just a starting suggestion used when you settle that platform\'s bill in Customers → Outstanding Credit, not something applied automatically at Charge (the platform doesn\'t pay you at the counter, so there\'s nothing to calculate yet when the bill closes). Buyer Phone is a placeholder number the Credit quick-select fills in at Charge so every order from that platform groups under one customer record — change it to a real account/reference number if you have one. No live order sync with any platform (that needs a real API partnership)',
-                  ],
-                },
-                {
-                  icon: '🍽', name: 'Order Taking', path: '/pos/orders',
-                  desc: 'Full-screen order entry. Tap a table from the floor plan to open it — enter covers, browse the menu by category, and tap items to add them. Pressing Send Order saves the order and automatically fires KOT and BOT tickets to their respective stations in one tap. For additions to an existing order, add the item (an amber +N badge shows the new quantity), then press KOT or BOT when ready to send just the additions.',
-                  tips: [
-                    'Send Order (new table) = save + auto-print KOT and BOT in one tap — no extra button presses needed',
-                    'Update Order (existing table) = save only; use KOT/BOT buttons to send additions to the kitchen or bar',
-                    'The amber +N badge on an item means that many extra have been added since the last ticket was sent',
-                    'The green ✓ KOT / ✓ BOT badge means the ticket for that item has already been sent to the station',
-                    'KOT and BOT badges on the buttons show how many unsent items are waiting to be sent',
-                    'Configure which categories go to KOT vs BOT in Table Management → Ticket Routing',
-                    'Use the search box above the category tabs to find an item by name — filters within whatever category tab is currently active',
-                    'Every order gets a sequential order number (#1, #2, …) shown in the top bar and printed on each KOT/BOT ticket — kitchen, bar and bill all reference the same number',
-                    'Printed tickets carry your outlet name and who took the order (Taken by), so the station knows who to call with questions',
-                    'Ticket dates print in the Bikram Sambat (BS) calendar, matching the rest of the app',
-                    'Tap "+ Add note" under any order item to send a special instruction (e.g. "no onion") to the kitchen/bar — it prints indented under that item on the ticket. Preset chips from Table Management → Quick Notes appear while you type',
-                    'Editing or adding a note after a ticket was already sent clears its ✓ sent badge — press KOT/BOT again to send the update to the station',
-                    'Tapping an item may show quick-add suggestion chips underneath it — what you get depends on your plan: Starter shows a simple nudge toward a category you haven\'t ordered from yet (e.g. no drink yet); Growth adds manually-configured pairings (a gold "PAIRED" chip, set up in Menu Pricing → Pair for POS-only clients); Growth with Crest IMS also adds real "frequently ordered together" suggestions from your own sales history; Pro with Crest IMS adds the full Menu Engineering-driven ranking, including an amber "CHEF\'S PICK" chip for Puzzle items worth pushing',
-                    'The floor view shows an amber "⚠ pending" pill and per-table badge for any table with items added but not yet sent to the kitchen/bar — a quick way to catch orders that were never fired',
-                    'Charge → closes the table — Supervisor role or above only, hidden entirely for Staff. Pay collects Cash/Card/eSewa/Khalti/FonePay and prints a Tax Invoice or Bill; Complimentary closes a walkout or comp — ₨0 is collected but it still counts against food-cost/inventory reporting; Void cancels a mistake with no revenue impact and is only visible to the owner/admin login by default — a manager can grant "Allow Void" to a specific trusted staff member in POS Staff so they can void without waiting for the owner',
-                    'Discount on the Pay tab can be capped per staff member — set a Discount Limit (%) for a login in POS Staff and their entered discount is automatically capped at that %, however they type it (flat NPR or percent). Leave it blank for unlimited (the default, and always the case for the owner/admin login)',
-                    'Foodmandu/Pathao orders close as Credit, not their own payment method — the platform doesn\'t pay you at the counter, it remits later minus commission, same as any other unpaid balance. Select Credit, then tap the Foodmandu or Pathao chip that appears (auto-fills the buyer) to mark which platform it\'s for. Track and settle it from Customers → Outstanding Credit — that\'s where the actual commission gets entered, once you know what the platform really withheld',
-                    'Complimentary prints an internal Complimentary Slip, not a Tax Invoice or PAN Bill — its own sequential NC-01 style number (separate from Tax Invoice/Bill numbers), each line valued at food cost (not menu price) so comps don\'t distort your P&L',
-                    'To comp just one dish instead of the whole table, stay on the Pay tab — an Items list (Supervisor+ only) lets you comp individual items with +/− qty steppers, down to part of a line\'s quantity (e.g. 1 of 3 Veg Momo) — the comped qty is removed from this bill and printed on its own mini Complimentary Slip (same NC-series numbering), while the remaining qty on that line and everything else still bills and prints normally, one Tax Invoice/Bill for the table',
-                    'Both the Charge modal\'s total and item list switch to food-cost values while the Complimentary tab is open, and a live preview of the actual bill/slip layout appears in the modal as you fill in the fields — it always matches exactly what will print',
-                    'Whether the printed bill says "TAX INVOICE" (with a VAT breakdown) or plain "BILL" (PAN only, no VAT) depends on the VAT Registered toggle an admin sets per client — see Settings below',
-                    'Buyer Name/Address/PAN/Phone on the Charge screen are optional — IRD allows omitting them for bills up to NPR 10,000, but fill them in if a customer requests a full invoice',
-                    'Discount on the Pay tab supports a flat NPR amount or a percentage (toggle between ₨/%) — it reduces the pre-VAT taxable amount, with VAT recalculated on the discounted base, not just subtracted off the total',
-                    'Applying any discount makes buyer Name and Phone compulsory (not just optional) and requires picking a Discount Reason — gives an identifiable, audited record of who received it. Customize the reason list in Table Management → Discounts',
-                    'Credit (red button, Supervisor role or above) closes the bill normally — it counts as a sale and consumes a Tax Invoice/Bill number — but no payment is collected now; the customer owes the amount. Buyer Name and Phone are compulsory, same as a discount. Collect it later from Customers → Outstanding Credit. The printed bill adds a Customer Signature/Date line, same as the Complimentary Slip, so there\'s a signed record of the debt',
-                    'Split Payment: toggle from Single Payment to Split Payment on the Pay tab to collect one bill using more than one payment method (e.g. part eSewa, part cash) — add each tender\'s amount and method one at a time; a running Remaining balance tracks what\'s left, and cash change is calculated against that remaining balance, not the full bill. It\'s still one bill and one Tax Invoice/Bill number — only the collection is split, not the invoice. Not available with Credit. Only the most recent tender can be undone; to fix an earlier one, void the order and re-ring it',
-                    'Each split tender can print its own small courtesy slip (🖨 next to the tender) — proof of that person\'s payment while the table is still settling up. It is not the Tax Invoice/PAN Bill, which still only prints once, at the very end, listing every tender',
-                    '📄 Recent Bills (floor view) lists everything closed today and lets you reprint a bill — the first print carries no extra label (it is the original), every print after that is marked "COPY OF ORIGINAL - (N)" where N counts the copy itself (the 2nd print overall is copy 1, the 5th print overall is copy 4)',
-                    'Scan-to-pay QR: once your admin pastes the outlet\'s merchant QR payload in Manage Clients → this client → QR tab, every bill carries a dynamic QR with that bill\'s exact amount pre-filled — the customer can\'t mistype it. The QR also appears in the Charge modal when eSewa/Khalti/FonePay is selected, updating live as discounts change. Payment confirmation is still manual — confirm once you see it land on your merchant app',
-                    'Works offline for order-taking: if the connection drops, you can still open tables you\'ve already viewed this session, add items, and send KOT/BOT (an "📵 Offline" pill and a per-table "not yet synced" dot show what\'s queued) — everything uploads automatically once you reconnect and gets its real order number. A brand-new table opened offline shows "#— (pending)" until it syncs. A table whose order was never loaded on this device stays blocked offline rather than risk overwriting items you can\'t see. Charge/Payment always requires a live connection — Nepal\'s sequential invoice numbering can\'t be assigned offline',
-                    'Guest QR self-ordering (Pro plan): if enabled for your restaurant, a pulsing 🔔 banner (with a one-time chime) appears at the top of the floor view the moment a guest submits an order from their phone — and the table itself glows so it stands out even if you\'re not looking at the banner. Tapping the banner or the table opens it straight to the order screen, with covers already filled in from what the guest entered (no re-typing on a numpad). A banner on that screen lists exactly what they ordered — Accept adds those items straight into your cart at the quantities they chose (adjust or add more before sending), Dismiss discards the request with no effect on the order. Nothing reaches the kitchen until you actually press Send Order/KOT, same as any item you add yourself. Enable it per client in Admin → Manage Clients → Features',
-                  ],
-                },
-                {
-                  icon: '▥', name: 'Kitchen Display', path: '/pos/kds',
-                  desc: 'An on-screen ticket board for the kitchen/bar, running alongside printed KOT/BOT tickets — sending a KOT/BOT from Order Taking still prints exactly as before; this just mirrors it live on a screen. Switch between Kitchen (KOT) and Bar (BOT) at the top — pick whichever this device sits at, it remembers your choice. Each ticket moves New → In Progress → Ready with a tap.',
-                  tips: [
-                    'Tapping Start opens a calculator-style popup to enter the estimated prep time in minutes — required before the ticket can move to In Progress, with quick 5/10/15/20-minute preset buttons alongside the number pad',
-                    'Once started, the ticket shows a live "~X min left" countdown (turning red if it runs over), and once Ready, "Done in Xm (est. Ym)" so staff can see at a glance how the estimate held up',
-                    'The estimate also shows on the floor view in Order Taking (the Started badge on each table gains a "~X min" ETA), and feeds the Prep (Est/Actual) column in POS Reports → KOT Log → Register',
-                    'An addition to an already-fired order shows up as its own new ticket, same as the second small paper ticket that prints for just the new items — not a change to the original ticket',
-                    'A ticket\'s time-since-sent label turns amber after 8 minutes and red after 15 — a quick way to spot what\'s falling behind during a rush',
-                    'Ready tickets stay visible for 10 minutes so staff can confirm pickup, then drop off the board on their own — they\'re never deleted, and still count in KOT Register/Reconciliation reports',
-                    'Mount this on a tablet or spare screen at the pass — anyone with Staff role or above can open it, same PIN login as Order Taking',
-                    'Printing is not replaced — if a client doesn\'t have a screen at a station yet, paper tickets keep working exactly as they do today',
-                  ],
-                },
-                {
-                  icon: '🅿', name: 'Parking Slips', path: '/pos/parking',
-                  desc: 'Issue a printable parking token for a customer\'s vehicle — no order or table required, so a walk-in can get one before ordering. Enter the vehicle number (required), plus optional vehicle type, customer name, a linked bill, and notes. Requires Supervisor role or above to issue/print; any staff can view the log and mark a slip Exited once the vehicle is retrieved.',
-                  tips: [
-                    'Prints an 80mm thermal token with the vehicle number in large text — the single detail a valet reads back to reunite car with customer',
-                    'Vehicle Type is a quick Two Wheeler / Four Wheeler toggle, not free text',
-                    'Bill Number optionally links the slip to a bill already issued today (e.g. to honor a "free parking with purchase" policy) — only today\'s bills are listed, since a past day\'s bill is never the right one to link. Click the bill number in the log to view it',
-                    'The Open tab shows only vehicles still parked; switch to All to see the full history',
-                    'Mark Exited as soon as the vehicle is retrieved — it closes the slip and records who closed it',
-                    'Reprint is available to any staff if the original token is lost',
-                    'A slip left open past its day auto-closes the next time this page is opened, showing "Auto-Closed" instead of "Closed" — the record is kept, but it means staff never confirmed the vehicle actually left',
-                  ],
-                },
-                {
-                  icon: '👤', name: 'Customers', path: '/pos/customers',
-                  desc: 'Customer book built automatically from billed orders — every bill closed with buyer Name + Phone (required for any discount or Credit sale) adds or updates a customer, keyed by phone number. The Outstanding Credit tab lists Credit bills awaiting collection with a one-tap Settle action. Requires Supervisor role or above.',
-                  tips: [
-                    'No manual data entry — the book fills itself as bills are closed with buyer details. Repeat customers are matched by phone number, so their name/address/PAN stay up to date automatically',
-                    'Click any customer row to see their full order history — every billed order under that phone number, including payment method and any outstanding Credit',
-                    'Outstanding Credit tab: when a customer comes back to pay, hit Settle and pick the method they actually used (Cash/Card/eSewa/Khalti/FonePay, or Cheque/Bank Transfer — the usual way a delivery platform or corporate account remits) — the bill is marked collected with who recorded it and when',
-                    'A bill tagged Foodmandu or Pathao (an amber badge next to the customer name) shows a Commission % field when you Settle it — pre-filled from Table Management → Delivery Partners as a starting suggestion, confirm or adjust it to match what the platform actually remitted before picking the settlement method',
-                    'The Age column shows how long each credit bill has been outstanding — chase the old ones first',
-                    'Settling is Supervisor+ (routine cashier work); issuing credit at Charge stays Manager+ only',
-                  ],
-                },
-                {
-                  icon: '⚠', name: 'Sales Exceptions', path: '/pos/exceptions',
-                  desc: 'Every discount, void, and complimentary in one report — revenue that leaked, filterable by BS date range, exception type, and staff member. Discounts show the amount knocked off; Voids show the menu value forgone (incl. VAT); Comps show food cost, matching the Complimentary Slip, plus a separate Potential Sales Value column showing what the comped item(s) would have sold for at menu price. Includes both whole-order Complimentary and individually item-comped bills (see Order Taking). Requires Manager role or above.',
-                  tips: [
-                    'The By Staff Member table is the report\'s real job — one cashier discounting far more than everyone else is worth a conversation (training gap or permission creep)',
-                    'A quiet report is a healthy one — a sudden spike in voids usually means order-entry mistakes, not fraud',
-                    'Amounts mean different things per type: Discount = NPR knocked off the bill, Void = full menu value that was cancelled, Comp = ingredient cost of what was served free (see Potential Sales Value for what it would have sold for instead)',
-                    'Click any row to view the actual bill/slip in a new tab — same layout that printed, view-only (won\'t trigger your printer)',
-                    'Use the ⬇ Excel button to hand the filtered list to your accountant — includes both AD date and BS Miti columns',
-                    'Defaults to the current BS month — widen the range for a quarterly or fiscal-year view',
-                  ],
-                },
-                {
-                  icon: '↩', name: 'Credit Notes', path: '/pos/credit-notes',
-                  desc: 'Formally correct an already-billed order — required by Nepal VAT Rules 2053, Rule 20 whenever the value of billed goods/services changes (billing errors, price corrections, tax corrections). Issue New searches past bills by BS date range or invoice number; Credit Note Book is the running register every Credit Note ever issued, as required by Rule 20(2). Requires Manager role or above.',
-                  tips: [
-                    'A Credit Note reduces this month\'s revenue (sales_entries) so Monthly Summary/Recipe Margin/Best Sellers stay accurate — it does not reverse stock/ingredient depletion, since the food was already served. This is a billing/tax correction, not a returned-food event',
-                    'Only bills closed as Pay (not Complimentary or Void) can get a Credit Note — a Complimentary is already a ₨0 internal document, and a Void never had revenue to correct',
-                    'Each bill can only be credited once — the Credit Note button disappears from a bill once one has been issued against it',
-                    'The Credit Note prints with all 8 fields Rule 20 requires: serial number, date, your business details, the buyer\'s details, the original invoice number + date, item details, credited amount, and credited VAT',
-                    'Reprints relabel automatically — no label the first time, then "COPY OF ORIGINAL - (N)" after that, same convention as the Tax Invoice',
-                  ],
-                },
-                {
-                  icon: '▤', name: 'Sales Report', path: '/pos/sales-report',
-                  desc: 'Ten views of the same POS sales data, one page: Daily (day-by-day totals), Hourly (revenue by time of day), Bill Register (every individual voucher — payment mode, remarks, who closed it), Comped Bills (every bill that had an item comped out of it, cross-referenced to its NC number), Payment Summary (revenue by Cash/Card/eSewa/Khalti/FonePay/Credit), Delivery Partners (every Foodmandu/Pathao bill from Credit through settlement), Category Wise and Item Wise (what drives revenue), Customer Wise (who\'s buying and how much), and 1L+ Report (Nepal VAT Annexure 13 — parties whose cumulative transactions exceed NPR 1,00,000 in a fiscal year). Requires Manager role or above.',
-                  tips: [
-                    'Daily/Hourly/Bill Register/Comped Bills/Payment Summary/Delivery Partners/Category/Item/Customer share one BS date-range filter; 1L+ Report uses its own Fiscal Year selector instead, since Annexure 13 is a whole-year compliance check, not an arbitrary range',
-                    'Payment Summary groups the same VAT-ready Gross/Discount/Taxable/Net breakdown by how the bill was paid, so it reconciles against Daily and Bill Register totals for the same range — click a row to see just that method\'s bills in Bill Register',
-                    'Delivery Partners lists every Foodmandu/Pathao bill (these close as Credit, not their own payment method — see Order Taking) with its settlement status; Outstanding rows have no commission/net figure yet since that\'s only entered when you Settle it in Customers → Outstanding Credit',
-                    'Daily excludes bills that later got a Credit Note entirely — the revenue correction posts on the day the Credit Note is issued, not retroactively into the original bill\'s day. Bill Register instead lists every voucher and flags the ones later credited with a badge',
-                    'Click any row on Bill Register to view that bill\'s actual Tax Invoice/PAN Bill in a new tab — the same layout that printed, view-only (won\'t trigger your printer). A bill with an item comped out of it also shows a "Comped (NC-xx)" badge right there',
-                    'Comped Bills lists every item-level comp with the paid bill it came out of, valued both at food cost and at menu-price "Potential Value" — click a row to view that comp\'s own mini Complimentary Slip. Whole-order Complimentary orders don\'t appear here (they have no separate paid bill to cross-reference) — see Sales Exceptions for those',
-                    'Category Wise and Item Wise both treat a credited bill\'s full quantity as "Return" (Crest has no partial/line-level returns) — a bill\'s discount is allocated proportionally so totals reconcile',
-                    'Customer Wise groups walk-ins with no buyer details under CASH SALES',
-                    '⚠ Missing PAN on the 1L+ tab means a party crossed NPR 1,00,000 without ever having their PAN recorded — worth asking for it on their next visit',
-                    '⬇ Excel exports whichever tab is currently open',
-                  ],
-                },
-                {
-                  icon: '🍽', name: 'Covers Report', path: '/pos/covers-report',
-                  desc: 'Guest-traffic analytics built from the covers number entered when a table is opened: average party size, revenue per guest (not per bill), how long tables actually turn over by party size, when covers peak through the day, and each server\'s covers/revenue. Requires Manager role or above.',
-                  tips: [
-                    'Revenue/Cover is the standard restaurant "average check per guest" metric — different from Sales Report\'s per-bill averages, since a bill for 6 people should read differently than a bill for 1',
-                    'Turnover Time is bucketed by party size (1–2, 3–4, 5–6, 7+) because a 2-top and an 8-top have very different expected dine times — one blended average wouldn\'t mean much',
-                    'Peak Hours buckets by when the table was opened (guests seated), not when the bill was paid — that\'s the number that tells you when to add floor staff',
-                    'RevPASH (Revenue Per Available Seat-Hour) needs your Operating Hours set on the Overview tab first — without it, the card just prompts you to set them',
-                    'By Server ranks staff by covers served, not bills — a server who takes fewer but larger tables can still lead here',
-                  ],
-                },
-                {
-                  icon: '🧾', name: 'KOT Log', path: '/pos/kot-log',
-                  desc: 'Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was actually sent to the kitchen against what\'s currently on each order — the anti-fraud check that catches food cooked and served but quietly reduced, removed, or never billed. Bill Trail shows every paid/voided bill with its complete KOT/BOT history in one expandable view, including bills that never sent anything to the kitchen at all. Requires Manager role or above.',
-                  tips: [
-                    'Reconciliation only shows flagged rows — a quiet report is a healthy one, same philosophy as Sales Exceptions',
-                    'A row flags when an item\'s total sent-to-kitchen quantity is more than what\'s currently on the order (cooked, then reduced or removed before billing)',
-                    'Any KOT/BOT send on an order that ends up Voided is always flagged, regardless of quantity — the kitchen made food but zero revenue was ever recorded for it',
-                    'Bill Trail is the complete picture — click a bill to expand its full ticket history. An amber "No KOT" badge means that bill never sent anything to the kitchen (could be a legitimate self-serve tab, or worth a second look); a red "Discrepancy" badge means the same issue Reconciliation flags',
-                    'The Register only goes back as far as this feature was added — sends from before that date were never logged',
-                  ],
-                },
-                {
-                  icon: '⏱', name: 'Shifts', path: '/pos/shifts',
-                  desc: 'Open a shift with a starting cash count, watch live sales totals as the shift runs (X-report), and reconcile the drawer against expected cash when it ends (Z-report). Requires Supervisor role or above.',
-                  tips: [
-                    'Open Shift and Close Shift both count each note/coin (₨1000 down to ₨1) rather than a single total — more accurate, and matches how cash is actually counted',
-                    'Current Shift is the X-report — a live, repeatable snapshot. Nothing about it is final; check it anytime during the shift without affecting anything',
-                    'Close Shift produces the Z-report — a one-time, final reconciliation. Expected Cash = opening count + cash sales during the shift; Variance = what was actually counted minus that expectation',
-                    'A Balanced badge means the drawer matched exactly; red means short, amber means over — chase down shortages the same day while it\'s easy to remember why',
-                    'You can run several shifts in a day (e.g. a morning cashier closes with a Z-report, an evening cashier opens a new one) — only one shift can be open at a time',
-                    'Orders closed while no shift is open still bill normally — a missing shift never blocks Charge, it just means that order won\'t show up in any shift\'s totals',
-                    'Shift History lists every past shift — click one to see its full frozen Z-report',
-                  ],
-                },
-                {
-                  icon: '👥', name: 'POS Staff', path: '/pos/staff',
-                  desc: 'Assign POS roles to your team. Only staff with a role assigned can see POS screens. Roles: Staff (order-taking only), Supervisor (+ table setup, billing/Charge, Complimentary, Credit), Manager (+ Sales Exceptions report, role assignment). Void is owner/admin-only by default — grant "Allow Void" on a specific staff member here to delegate it. Requires Manager role or above.',
-                  tips: [
-                    'Start by assigning the owner/manager account the Manager role — they can then assign roles to the rest of the team',
-                    'Staff role = waiters who take orders only. They cannot access Table Management or reports',
-                    'Supervisor role is ideal for head waiters and floor captains who need to set table status and manage the floor',
-                    'Users with no role assigned cannot see any POS screens — the POS section is hidden from their sidebar',
-                    'If Crest HR is also enabled, + Add Staff defaults to picking an existing HR Employee instead of typing a fresh name — the POS login is linked to that employee record (shown with a 🔗 HR tag) so the name never drifts out of sync. Switch to POS-only Staff for someone who isn\'t in HR (e.g. a casual/part-time role).',
-                    'Discount Limit caps how much % discount that login can give at billing — leave it blank for unlimited. Allow Void lets that login void a bill themselves instead of needing the owner/admin. Both default to unrestricted-off, i.e. unlimited discount and no void access, until set here.',
-                  ],
-                },
-              ].map(feat => (
+                  {POS_FEATURES.map(feat => (
                 <FeatureCard key={feat.name} feat={feat} moduleKey="pos" />
                   ))}
                 </>
@@ -1264,39 +1393,7 @@ export default function Help() {
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Admin Tools</span>
                 <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-red)', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', padding: '2px 8px', borderRadius: 10 }}>Crest Admin Only</span>
               </div>
-              {[
-                {
-                  icon: '📱', name: 'Guest Menu Preview',
-                  guide: 'Preview the currently-viewed client\'s guest QR menu without needing a printed QR code or asking the client for one. Pick a client in the sidebar switcher first, then pick one of that client\'s tables — the page embeds the exact live page a guest sees after scanning that table\'s QR (GuestMenu.jsx), including guest ordering if the client has that Pro-tier feature enabled.',
-                  tips: [
-                    'This is the real, live guest page, not a mockup — if guest ordering is on and you place an order, it creates a genuine pending order the client\'s own staff will see in POS Orders',
-                    'Copy Link or Open in New Tab if you want to test on an actual phone instead of the embedded preview',
-                    'If the client has no tables set up yet, add one in Tables first',
-                  ],
-                },
-                {
-                  icon: '◷', name: 'Audit Log',
-                  guide: 'A full event log of every significant action in the system — creates, updates, deletes, period opens/closes, payroll runs, POS order voids/discounts/invoices, and admin client/feature changes. Every changed field is shown as old value → new value automatically, not just a hand-picked few, so a newly added field is covered the moment it exists. Filter by client, area, time range, or user, or search free text across all of those plus record IDs.',
-                  tips: [
-                    'Click a row\'s Details cell to expand every field that changed, not just the first three shown inline',
-                    'Filter by "Area" to narrow down to IMS, HR, POS, or Admin actions',
-                    'Filter by "User" or type into the search box to trace all actions by a specific person',
-                    'A POS Order only logs meaningful transitions — void, discount, close, invoice — not every item added while the bill is still open',
-                    '⬇ Export downloads the currently filtered rows as an Excel file',
-                    'Admin can permanently delete matching entries with "Clear Logs" — this is not reversible, so audit history is only as durable as the last time someone chooses to keep it',
-                  ],
-                },
-                {
-                  icon: '🧾', name: 'POS Billing Setup',
-                  guide: 'Per-client invoice settings, set in Manage Clients → a client → Settings tab. VAT Registered controls whether POS bills print as a Tax Invoice with a VAT breakdown or a plain Bill with PAN only. Invoice Prefix is the short client code used in invoice numbers (e.g. TI2238-CAC-82/83) — auto-suggested from the property name, editable. The client\'s scan-to-pay merchant QR payload is a separate QR tab in the same drawer.',
-                  tips: [
-                    'Turn VAT Registered off for clients billing on PAN only (not yet VAT-registered with IRD) — the bill header switches from "TAX INVOICE" to "BILL" and drops the VAT line',
-                    'Invoice numbers reset to 1 at the start of each Nepal fiscal year (Shrawan) automatically — no manual reset needed',
-                    'Payment QR: paste the client\'s raw merchant QR text (scanned off their physical FonePay/NepalPay/eSewa standee with any QR-reader app) into the QR tab — it live-validates and previews before saving, and every POS bill then carries a dynamic per-bill QR with the exact amount pre-filled',
-                    'Invoice Prefix is uppercased automatically; keep it short (3–5 letters) so it fits the 80mm receipt width',
-                  ],
-                },
-              ].map(feat => (
+              {ADMIN_FEATURES.map(feat => (
                 <FeatureCard key={feat.name} feat={feat} moduleKey="admin" />
               ))}
             </div>
@@ -1495,6 +1592,8 @@ export default function Help() {
           ))}
         </div>
       )}
+
+      </>}
     </div>
   )
 }

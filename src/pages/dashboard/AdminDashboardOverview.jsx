@@ -20,6 +20,7 @@ export default function AdminDashboardOverview() {
   const [clientPeriods, setClientPeriods] = useState({})
   const [adminLoading, setAdminLoading]   = useState(true)
   const [activeTodayClients, setActiveTodayClients] = useState([])
+  const [search, setSearch]               = useState('')
 
   useEffect(() => { loadAdminStats() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -134,6 +135,10 @@ export default function AdminDashboardOverview() {
     ...active.filter(c => !needsAttention.has(c.id)),
     ...inactive,
   ]
+  const searchQ = search.trim().toLowerCase()
+  const visibleSorted = searchQ
+    ? sorted.filter(c => c.name.toLowerCase().includes(searchQ) || (c.location || '').toLowerCase().includes(searchQ))
+    : sorted
 
   const statCard = (borderColor) => ({
     background: 'var(--theme-card)', border: `1px solid ${borderColor || 'var(--theme-border)'}`,
@@ -245,8 +250,13 @@ export default function AdminDashboardOverview() {
 
           {/* ── Single merged "All Properties" table ── */}
           <div className="card" style={{ padding: 0 }}>
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>All Properties</span>
+              <input
+                type="text" value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Search by name or location…"
+                className="form-select" style={{ fontSize: 12, maxWidth: 220 }}
+              />
               <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
                 MRR: <span style={{ color: 'var(--theme-accent)', fontWeight: 700 }}>NPR {estMRR.toLocaleString('en-NP')}</span>
                 {' '}· {payingCount} paying
@@ -270,7 +280,10 @@ export default function AdminDashboardOverview() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map(c => {
+                  {visibleSorted.length === 0 && (
+                    <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>No properties match "{search}".</td></tr>
+                  )}
+                  {visibleSorted.map(c => {
                     const mrr     = clientMRR(c)
                     const endDate = c.ims_ends_at || c.subscription_ends_at
                     // IMS-specific status, matching this column's own tooltip ("IMS subscription

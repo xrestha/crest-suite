@@ -267,7 +267,12 @@ export default function Pricing() {
           const sumMonthly = imsTier.monthly + HR_PRICING.monthly + POS_PRICING.monthly
           const sumPrice = annual ? Math.round((imsTier.annual + HR_PRICING.annual + POS_PRICING.annual)) : sumMonthly
           return (
-            <div key={bundle.key} style={{ background: CARD, border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 14, padding: '30px 24px', textAlign: 'center' }}>
+            <div key={bundle.key} style={{ background: CARD, border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 14, padding: '30px 24px', textAlign: 'center', position: 'relative' }}>
+              {i === 1 && (
+                <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', background: GOLD, color: '#0b0b0b', fontSize: 10, fontWeight: 800, padding: '4px 14px', borderRadius: 10, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                  Most Popular
+                </div>
+              )}
               <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 12 }}>{bundle.label}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', textDecoration: 'line-through', marginBottom: 2 }}>NPR {sumPrice.toLocaleString()}/mo separately</div>
               <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>

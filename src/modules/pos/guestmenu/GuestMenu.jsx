@@ -126,6 +126,14 @@ export default function GuestMenu() {
   const [activeCategory, setActiveCategory] = useState(null)
   const categoryRefs = useRef({}) // category name -> section DOM node, populated during render
 
+  // Veg-only + allergen-exclusion filters — Veg/Non-Veg is the primary dietary distinction in
+  // this market (already tagged per-item via is_veg for the veg/non-veg dot), and allergens are
+  // already collected per item for the info line below each dish; this just turns both into an
+  // actual filter instead of read-only display text.
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [vegOnly, setVegOnly] = useState(false)
+  const [excludedAllergens, setExcludedAllergens] = useState([])
+
   // requestId/requestSnapshot above are only seeded once, via a lazy useState initializer that
   // runs on mount — if tableId changes without a full remount (client-side back/forward between
   // two different tables' QR links in the same tab, or a shared kiosk device reused across guest
@@ -229,9 +237,19 @@ export default function GuestMenu() {
   // fallback) so the category-nav effect right below — a hook, which can't follow a conditional
   // early return — has something stable to key off of.
   const byRecipe = Object.fromEntries((rows || []).map(r => [r.recipe_id, r]))
+
+  // Every distinct allergen across the whole menu (not just the currently-filtered view) so the
+  // filter sheet's checklist doesn't shrink as items get excluded.
+  const allAllergens = Array.from(new Set((rows || []).flatMap(r => r.allergens || []))).sort()
+  const filteredRows = (rows || []).filter(r =>
+    (!vegOnly || r.is_veg) &&
+    (excludedAllergens.length === 0 || !(r.allergens || []).some(a => excludedAllergens.includes(a)))
+  )
+  const activeFilterCount = (vegOnly ? 1 : 0) + excludedAllergens.length
+
   const categories = []
   const byCategory = {}
-  for (const r of (rows || [])) {
+  for (const r of filteredRows) {
     const cat = r.category || 'Other'
     if (!byCategory[cat]) { byCategory[cat] = []; categories.push(cat) }
     byCategory[cat].push(r)
@@ -269,6 +287,14 @@ export default function GuestMenu() {
     setActiveCategory(cat)
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     categoryRefs.current[cat]?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+  }
+
+  function toggleAllergen(a) {
+    setExcludedAllergens(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a])
+  }
+  function clearFilters() {
+    setVegOnly(false)
+    setExcludedAllergens([])
   }
 
   if (rows === null) {
@@ -359,6 +385,18 @@ export default function GuestMenu() {
           <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>{tableName}</p>
         </div>
 
+        {(rows.some(r => r.is_veg != null) || allAllergens.length > 0) && (
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
+            <button
+              type="button" onClick={() => setFiltersOpen(true)}
+              className="btn btn-ghost"
+              style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              ⚙ Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+            </button>
+          </div>
+        )}
+
         {categories.length > 1 && (
           <div
             className="tab-bar tab-bar--scroll"
@@ -401,6 +439,13 @@ export default function GuestMenu() {
           </div>
         )}
 
+        {categories.length === 0 && activeFilterCount > 0 && (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--theme-text3)', fontSize: 13 }}>
+            <p style={{ margin: '0 0 10px' }}>No items match your filters.</p>
+            <button type="button" className="btn btn-ghost" style={{ fontSize: 12.5 }} onClick={clearFilters}>Clear filters</button>
+          </div>
+        )}
+
         {categories.map(cat => (
           <div
             key={cat} ref={el => { categoryRefs.current[cat] = el }}
@@ -439,6 +484,45 @@ export default function GuestMenu() {
           <span>{cartCount} item{cartCount > 1 ? 's' : ''} · {fmtNpr(cartTotal)}</span>
           <span>View Order →</span>
         </button>
+      )}
+
+      {filtersOpen && (
+        <Modal title="Filter Menu" onClose={() => setFiltersOpen(false)} maxWidth={420}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {rows.some(r => r.is_veg != null) && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, cursor: 'pointer' }}>
+                <input type="checkbox" checked={vegOnly} onChange={e => setVegOnly(e.target.checked)} />
+                Vegetarian only
+              </label>
+            )}
+            {allAllergens.length > 0 && (
+              <div>
+                <p style={{ margin: '0 0 8px', fontSize: 12.5, color: 'var(--theme-text2)' }}>Hide items containing:</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {allAllergens.map(a => (
+                    <button
+                      key={a} type="button" onClick={() => toggleAllergen(a)}
+                      style={{
+                        padding: '6px 12px', borderRadius: 20, fontSize: 12.5, textTransform: 'capitalize', cursor: 'pointer',
+                        border: `1px solid ${excludedAllergens.includes(a) ? 'var(--theme-red)' : 'var(--theme-border)'}`,
+                        background: excludedAllergens.includes(a) ? 'rgba(248,113,113,0.12)' : 'var(--theme-input-bg)',
+                        color: excludedAllergens.includes(a) ? 'var(--theme-red)' : 'var(--theme-text2)',
+                      }}
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+              <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={clearFilters}>Clear</button>
+              <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => setFiltersOpen(false)}>
+                Show {filteredRows.length} item{filteredRows.length === 1 ? '' : 's'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {reviewOpen && (

@@ -48,6 +48,7 @@ export default function AdminClients() {
   const [featureModalClient, setFeatureModalClient] = useState(null)
   const [lastSeenMap, setLastSeenMap] = useState({})
   const [lastUserMap, setLastUserMap] = useState({})
+  const [search, setSearch]           = useState('')
 
   useEffect(() => { loadClients(); loadLastSeen() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -173,7 +174,13 @@ export default function AdminClients() {
           <h1 className="page-title">Clients</h1>
           <p className="page-subtitle">{clients.length} propert{clients.length !== 1 ? 'ies' : 'y'} on the platform</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setShowNewForm(true); setFormError('') }}>+ New Client</button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input
+            type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search clients…" className="form-select" style={{ maxWidth: 220 }}
+          />
+          <button className="btn btn-primary" onClick={() => { setShowNewForm(true); setFormError('') }}>+ New Client</button>
+        </div>
       </div>
 
       {/* New client form */}
@@ -331,9 +338,26 @@ export default function AdminClients() {
             <p className="empty-state-text">No clients yet. Create your first property to get started.</p>
           </div>
         </div>
-      ) : (
+      ) : (() => {
+        const searchQ = search.trim().toLowerCase()
+        const visibleClients = clients.filter(c => !c.is_trial).filter(c =>
+          !searchQ ||
+          c.name.toLowerCase().includes(searchQ) ||
+          (c.location || '').toLowerCase().includes(searchQ) ||
+          (c.contact_person || '').toLowerCase().includes(searchQ)
+        )
+        if (visibleClients.length === 0) {
+          return (
+            <div className="card">
+              <div className="empty-state">
+                <p className="empty-state-text">No clients match "{search}".</p>
+              </div>
+            </div>
+          )
+        }
+        return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {clients.filter(c => !c.is_trial).map(c => {
+          {visibleClients.map(c => {
             const rel      = relativeTime(lastSeenMap[c.id])
             const isRecent = lastSeenMap[c.id] && Date.now() - new Date(lastSeenMap[c.id]).getTime() < 86400000
             const lastUser = lastUserMap[c.id]
@@ -426,7 +450,8 @@ export default function AdminClients() {
             )
           })}
         </div>
-      )}
+        )
+      })()}
 
       {/* Slide-over drawer */}
       {activeDrawer && (

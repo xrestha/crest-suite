@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TriangleAlert } from 'lucide-react'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
+} from 'recharts'
 import { useAuth } from '../../context/AuthContext'
+import { useTheme } from '../../context/ThemeContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { getBsToday, BS_MONTHS, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import Tip from '../../components/Tip'
 import SuiteGate from '../../components/SuiteGate'
+import ChartCard from '../../components/ChartCard'
 import { calcAmount, hourlyRateOf } from '../../modules/hr/payroll/payrollCompute'
 import {
   SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY,
@@ -24,6 +29,7 @@ export default function OwnerDashboard() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const navigate = useNavigate()
+  const { colors } = useTheme()
 
   const [loading, setLoading] = useState(true)
   const [activePeriod, setActivePeriod] = useState(null)
@@ -31,6 +37,11 @@ export default function OwnerDashboard() {
   const [reorderStats, setReorderStats] = useState(null)
   const [payablesStats, setPayablesStats] = useState(null)
   const [laborCostTotal, setLaborCostTotal] = useState(null)
+  // Historical trend, sourced from the already-frozen monthly_owner_reports snapshots (one per
+  // closed period) rather than re-deriving figures live — cheap (no new queries beyond this one),
+  // and matches how the report page's own Trend section already reads prior snapshots directly.
+  const [trendReports, setTrendReports] = useState([])
+  const [trendLoading, setTrendLoading] = useState(true)
   // Every sub-loader used to destructure only { data } and silently discard { error } — a failed
   // query zeroed out its stat, indistinguishable from "this figure is genuinely zero," on the one
   // dashboard whose whole purpose is making these numbers trustworthy enough to act on. Keyed per
@@ -43,12 +54,27 @@ export default function OwnerDashboard() {
     else if (section === 'reorder') loadReorderStats(activePeriod)
     else if (section === 'payables') loadOverduePayables()
     else if (section === 'labor' && activePeriod) loadLaborCost(activePeriod)
+    else if (section === 'trend') loadTrend()
   }
 
   useEffect(() => {
     if (authLoading || !effectiveClientId) return
-    if (clientModules.ims && clientModules.hr) loadAll(); else setLoading(false)
+    if (clientModules.ims && clientModules.hr) { loadAll(); loadTrend() } else { setLoading(false); setTrendLoading(false) }
   }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Last 12 closed periods' frozen combined metrics (Food/Labor/Prime Cost %, Net Margin %) —
+  // same 'combined' shape computeMonthlyReport.js already writes, read directly rather than
+  // re-derived, so this trend can never disagree with what the Monthly Owner Report itself shows
+  // for the same periods.
+  async function loadTrend() {
+    setTrendLoading(true)
+    const { data, error } = await scopedFrom('monthly_owner_reports', 'bs_year, bs_month, snapshot')
+      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+      .limit(12)
+    setLoadErrors(prev => ({ ...prev, trend: error ? 'Trend chart failed to load — may be incomplete or stale.' : '' }))
+    setTrendReports((data || []).slice().reverse())
+    setTrendLoading(false)
+  }
 
   async function loadAll() {
     setLoading(true)
@@ -307,6 +333,18 @@ export default function OwnerDashboard() {
   const periodLabel = activePeriod ? `${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}` : '—'
   const fmt = n => `NPR ${Math.round(n || 0).toLocaleString('en-NP')}`
 
+  const trendChartData = trendReports.map(r => {
+    const c = r.snapshot?.combined || {}
+    return {
+      label: `${BS_MONTHS[r.bs_month - 1].slice(0, 3)} ${r.bs_year}`,
+      fc: c.foodCostPct != null ? Number(c.foodCostPct.toFixed(1)) : null,
+      labor: c.laborCostPct != null ? Number(c.laborCostPct.toFixed(1)) : null,
+      prime: c.primeCostPct != null ? Number(c.primeCostPct.toFixed(1)) : null,
+      margin: c.netMarginPct != null ? Number(c.netMarginPct.toFixed(1)) : null,
+    }
+  })
+  const hasTrendData = trendChartData.some(d => d.prime != null || d.margin != null)
+
   // Shared mini card style — matches ClientDashboard.jsx's kpiCard() convention exactly (this
   // page does not use stat-grid/badge-* despite those classes existing, same as ClientDashboard).
   // Returns a spreadable props object (style + role/tabIndex/onKeyDown when clickable) so every
@@ -497,6 +535,43 @@ export default function OwnerDashboard() {
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Cash / Credit →</div>
           </div>
         </div>
+
+        {trendLoading ? (
+          <div className="card" style={{ padding: '14px 16px', marginBottom: 20 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Cost &amp; Margin — Trend</div>
+            <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
+          </div>
+        ) : hasTrendData && (
+          <ChartCard
+            title="Cost & Margin — Trend"
+            cardStyle={{ marginBottom: 20 }}
+            legend={<>
+              <span style={{ color: colors.accent }}>● Food Cost %</span>
+              <span style={{ color: colors.purple }}>● Labor Cost %</span>
+              <span style={{ color: colors.red }}>● Prime Cost %</span>
+              <span style={{ color: colors.green }}>● Net Margin %</span>
+            </>}
+            footer={<p className="sr-only">Trend of Food Cost %, Labor Cost %, Prime Cost %, and Net Margin % across the last {trendChartData.length} closed periods, sourced from each period's frozen Monthly Owner Report snapshot.</p>}
+            renderChart={h => (
+              <ResponsiveContainer width="100%" height={h}>
+                <LineChart data={trendChartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                  <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
+                  <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={40} />
+                  <RTooltip
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
+                    labelStyle={{ color: 'var(--theme-text1)' }}
+                    formatter={(v, name) => [v != null ? `${v}%` : '—', name]}
+                  />
+                  <Line type="monotone" dataKey="fc" name="Food Cost %" stroke={colors.accent} strokeWidth={2} connectNulls dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="labor" name="Labor Cost %" stroke={colors.purple} strokeWidth={2} connectNulls dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="prime" name="Prime Cost %" stroke={colors.red} strokeWidth={2.5} connectNulls dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="margin" name="Net Margin %" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          />
+        )}
       </SuiteGate>
     </div>
   )
