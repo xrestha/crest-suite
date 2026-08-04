@@ -212,8 +212,14 @@ const IMS_FEATURE_TIERS = [
     features: [
       {
         icon: '≋', name: 'Period Comparison',
-        guide: 'Compare key metrics across multiple periods. Shows Net Purchases, Wastage, COGS, Revenue, and FC% per period with vs-previous trend arrows (↑↓). Select last 6, 12, 24, or all periods.',
-        tips: ['Look for seasonal FC% spikes — often signals menu pricing hasn\'t kept up with ingredient costs', 'Use the 12-period view for annual budget planning']
+        guide: 'Compare key metrics across multiple periods. Shows Net Purchases, Wastage, COGS, Revenue, and FC% per period, each with a small % change line vs the previous period (and vs the same month last year when that toggle is on). Two trend charts (Revenue vs Net Purchases, and Food Cost %) plus a Revenue by Category chart sit above the table. Select last 6, 12, 24, or all periods.',
+        tips: [
+          'Look for seasonal FC% spikes — often signals menu pricing hasn\'t kept up with ingredient costs',
+          'Use the 12-period view for annual budget planning',
+          'Turn on "Compare vs last year" to tell a real seasonal swing (festival month, tourist season) apart from genuine month-to-month drift',
+          '"Highest Revenue Period" and "Highest Purchases Period" stat cards call out your peak months at a glance',
+          'Export Excel includes a second sheet with the Revenue by Category breakdown, not just the main comparison table',
+        ]
       },
       {
         icon: '⊕', name: 'Shrinkage Report',

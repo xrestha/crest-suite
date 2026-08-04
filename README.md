@@ -150,6 +150,26 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S519 — 2026-08-04 — Period Comparison: growth/YoY deltas, trend charts, revenue-by-category breakdown
+
+Prompted by a request to check `PeriodComparison.js` (`src/modules/ims/reports/PeriodComparison.js`, Pro, IMS Supervisor+) against industry references (QuickBooks/Xero P&L comparison reports, restaurant food-cost tools MarketMan/Apicbase) before extending it. The gap: the page's only period-over-period delta was FC%'s pp change — Net Purchases and Revenue, the two figures a "sales vs purchase comparison" is actually about, had no growth indicator at all, and the page had zero chart despite `ChartCard` being an established convention on every comparable report page (Dashboard, Menu Engineering, Best Sellers, Covers Report, Sales Report).
+
+**Inline % change lines** — `DeltaRow`/`PpDeltaRow` render a small "↑ 12.3% vs prev" line under the Net Purchases, Revenue, and FC% cells (`pctDelta()`/existing pp-diff logic), colored by whether an increase is good (Revenue: green-up), neutral (Net Purchases: more spend isn't inherently bad), or FC%'s existing down-is-good convention. No new table columns — kept the existing 7-column layout, enriched cell *contents* instead.
+
+**Year-over-year toggle** — "Compare vs last year" checkbox adds an italic "vs LY" delta line to the same three cells, comparing against the same BS month one year back (`findYoy()`, matched against the full unsliced `periods` list so a period outside the current 6/12/24 window is still found). `fetchData()` now always fetches each shown period's YoY twin's stats too (folded into the same bulk `.in('period_id', ids)` queries, no extra round trips) so toggling the checkbox never needs a re-fetch.
+
+**Two new trend charts**, `ChartCard`-wrapped to match every other report page: "Revenue vs Net Purchases" (a `ComposedChart` Area/Line combo, deliberately the same visual language as `ClientDashboard.jsx`'s existing daily Purchases-vs-Sales chart — accent for purchases, green for revenue) and "Food Cost % — Period Trend" (`LineChart` with 30%/38% reference lines matching this page's own `fcColor()` thresholds, not `ClientDashboard`'s different 35%/45% cutoffs — stayed consistent with this page's own established convention rather than copying the other page's numbers). Both show `StatPill` summary rows only in the expanded/modal view, the same big-vs-small split every other `ChartCard` consumer uses.
+
+**Revenue by Category** — a new stacked-bar trend chart reusing the exact `recipes.category` taxonomy and color convention (`Food`=green, `Beverage`=purple, fallback hex rotation) `FoodBeverageSplit.jsx` already established for the Dashboard's Sales Mix pie, excluding `'Sub-Recipe'` rows the same way. No new query — the existing bulk `sales_entries` fetch already joins `recipes`, so this only widened that one select to also pull `category`. Deliberately scoped to revenue only, not purchases — items (raw ingredients) use a separate, unrelated `categories` taxonomy from recipes' Food/Beverage/Dessert/Snack/Other, and there's no existing per-item-to-recipe-category mapping to build a comparable purchases-by-category view from without a much larger new feature (that's what Menu Engineering's per-recipe costing is for).
+
+**New stat cards**: Highest Revenue Period and Highest Purchases Period, alongside the existing Best FC% Period — same "call out the standout period, don't make the reader scan the table" pattern.
+
+**Excel export** gained `Δ% vs Prev` columns for Purchases/Revenue (and the YoY equivalents when the toggle is on) plus a second sheet, "Revenue by Category" — a period × category pivot, not just the main comparison table.
+
+**Files:** `src/modules/ims/reports/PeriodComparison.js`, `src/pages/Help.js`
+
+---
+
 ### S518 — 2026-08-04 — Audit Log: generic field-level diff, POS/client/feature-flag coverage, search/export/pagination
 
 Prompted by a screenshot showing several "Updated / [name]" rows with zero detail — traced to `AuditLog.js`'s `getSummary()` being a hand-written `switch` that only diffs the specific fields someone remembered to add per table, so every `profiles` column added since (`pos_team`, `pos_discount_limit`, `pos_allow_void`, `pos_job_title`, `ims_role`, `hr_role`) changed silently with no summary text. Researched industry references (OWASP Logging Cheat Sheet, WorkOS/Okta/Auth0's actor-target-action-context schema, GitHub's org audit log old_value/new_value export) before redesigning.
