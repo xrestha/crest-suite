@@ -555,7 +555,7 @@ export default function Purchases() {
               <div className="empty-state"><p className="empty-state-text">No entries match your filters.</p></div>
             ) : (
               <div className="table-wrap table-wrap--fab-clear">
-                <table className="data-table">
+                <table className="data-table purchases-print-plain">
                   <thead>
                     <tr>
                       <th>Day</th><th>Item</th><th>Vendor</th>

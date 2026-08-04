@@ -1289,6 +1289,23 @@ textarea:focus-visible {
      reads correctly. */
   .print-sheet-section { page-break-inside: auto; break-inside: auto; }
   .print-sheet-cat { page-break-after: avoid; break-after: avoid-page; }
+
+  /* Purchases print (an internal working sheet, not a client-facing document) — the on-screen
+     category badge is a boxed/colored chip, which reads as "beautification" on paper. Strip it
+     down to plain inline text so the printed page is a flat Excel-style grid: just column/row
+     borders, no pills. Scoped to this one table's badges only, not every printed badge app-wide. */
+  .purchases-print-plain .badge {
+    display: inline !important;
+    border: none !important;
+    background: none !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    color: #333 !important;
+  }
+  .purchases-print-plain th,
+  .purchases-print-plain td { padding: 4px 8px !important; }
   .print-sheet-table thead { display: table-header-group; }
   .print-sheet-table tr { page-break-inside: avoid; break-inside: avoid; }
 
