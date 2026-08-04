@@ -1270,12 +1270,14 @@ export default function Help() {
                 },
                 {
                   icon: '◷', name: 'Audit Log',
-                  guide: 'A full event log of every significant action in the system — creates, updates, deletes, period opens/closes, payroll runs, and admin operations. Each row shows the timestamp, client, user, action type, module area, and a plain-English summary of what changed. Filter by area (IMS, HR, POS, Admin) or search by user. Useful for investigating data discrepancies or tracking who changed what.',
+                  guide: 'A full event log of every significant action in the system — creates, updates, deletes, period opens/closes, payroll runs, POS order voids/discounts/invoices, and admin client/feature changes. Every changed field is shown as old value → new value automatically, not just a hand-picked few, so a newly added field is covered the moment it exists. Filter by client, area, time range, or user, or search free text across all of those plus record IDs.',
                   tips: [
+                    'Click a row\'s Details cell to expand every field that changed, not just the first three shown inline',
                     'Filter by "Area" to narrow down to IMS, HR, POS, or Admin actions',
-                    'Search by user name or email to trace all actions by a specific person',
-                    'The Summary column shows a human-readable description — e.g. "Updated selling price on Chicken Momo to NPR 300"',
-                    'Audit entries cannot be edited or deleted — they are the permanent record',
+                    'Filter by "User" or type into the search box to trace all actions by a specific person',
+                    'A POS Order only logs meaningful transitions — void, discount, close, invoice — not every item added while the bill is still open',
+                    '⬇ Export downloads the currently filtered rows as an Excel file',
+                    'Admin can permanently delete matching entries with "Clear Logs" — this is not reversible, so audit history is only as durable as the last time someone chooses to keep it',
                   ],
                 },
                 {
