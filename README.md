@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S516 — 2026-08-04 — Audited page indexing/caching + Security Advisor findings; fixed a missing command-palette entry
+
+Two verification passes, no user-facing feature work:
+
+**Code-splitting + page-revisit caching audit**: cross-checked every route-level component in `App.js` against its `lazy()` const (all 93 resolve correctly, only `Layout`/`RootRedirect` are intentionally eager) and confirmed no CSS import sits below the lazy-const block (would fail CI's `import/first`). Checked all 5 pages using `sessionDataCache.js` (`Sales.js`, `Purchases.js`, `Recipes.js`, `dashboardCache.js`, and the new `AssetRegisterTab.js`) against the documented "never cache a save-time baseline a bulk save trusts" rule — all correctly scoped (e.g. `Sales.js` caches only `periods`/`recipes`, never the sales grid; `Stock.js` still has zero caching, exactly as documented). Also confirmed `Ctrl+K` has no separate static search index to maintain — it reads directly off `Layout.js`'s `NAV`/`REPORTS`/`HR_GROUPS`/`POS_GROUPS` arrays.
+
+**Supabase Security Advisor findings reviewed**: went through every `SECURITY DEFINER` function flagged as `anon`/`authenticated`-executable (re-derived the full list from `supabase/migrations/*.sql` directly rather than trust a partial/truncated dashboard export). Zero new gaps — every function is either a zero-arg helper safe by construction, a trigger-only function immune to direct RPC abuse, a genuinely pre-auth function with real internal authorization (device secret, table→client resolution), a `get_my_*`/`submit_my_*` function correctly deriving identity from `auth.uid()`, or a `p_client_id`-taking function with the standard `is_admin() OR own-client` guard. The only two real gaps this class of scan has ever found (`admin_clear_audit_logs`, `get_cooccurrence`) were already fixed in S293.
+
+**Real gap found and fixed**: Admin's **Guest Menu** page (`/admin/guest-menu`) — a real, clickable sidebar link for every admin login — was missing from `paletteItems`, the array that feeds `Ctrl+K` search, so it was reachable but not searchable. It was hand-rolled directly in the admin sidebar block (`renderNavItem({ to: '/admin/guest-menu', ... })`) rather than sourced from `NAV`/`REPORTS`/a `*_GROUPS` array, which is why it fell through the palette's otherwise-automatic `.flatMap()`/spread coverage. Added it to the admin-only block in `paletteItems` alongside Clients and Audit Log.
+
+**Files:** `src/components/Layout.js`
+
 ### S515 — 2026-08-04 — Fixed Asset Register hardening, plain-language Tax Pool UX, app-wide tooltip audit, IMS Guide gaps
 
 Follow-up session on S514's Fixed Asset Register, smoke-tested live against production (Casa Acai Cafe) via Playwright: found and fixed a reload-unmount bug in `FixedAssets.js` (`load()` always called `setLoading(true)`, collapsing every child tab's local state on each reload — gated to first-mount-only via a `hasLoadedOnce` ref) and a missing `assets_register.disposal_reason` column (migration `20260804010000_assets_register_disposal_reason.sql`) that 400'd on disposal.
@@ -675,7 +687,6 @@ Confirmed no other frontend code read `get_hr_self_service_staff`'s old shape (`
 `hr-selfservice-login` was deployed directly from this machine (`supabase functions deploy hr-selfservice-login` — the CLI here is already authenticated and linked, `supabase projects list` works with no login step, and Docker's absence only blocks `db pull`/`db dump`, not function deploys) and live-verified with two `curl` calls against the deployed URL: an empty body correctly returned `{"error":"staff_id and pin are required"}`, and a well-formed-but-bogus `staff_id`+`pin` correctly returned the generic `{"error":"Invalid credentials"}` with no crash and no distinguishing signal between "no such staff_id" and "wrong pin." A real employee login end-to-end is the one thing not yet confirmed as of this entry.
 
 **Files:** `supabase/functions/hr-selfservice-login/index.ts` (new), `supabase/migrations/20260728100000_hr_self_service_staff_drop_email.sql` (new), `SelfServiceLogin.jsx`, `CLAUDE.md`
-
 
 ### S463 — 2026-07-27 — Smoke-tested the S462 IMS audit live, found and fixed the real cause of the reported page-loading slowness
 

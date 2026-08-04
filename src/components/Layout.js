@@ -419,6 +419,7 @@ export default function Layout() {
       ...(posVisible ? POS_GROUPS.flatMap(g => g.items) : []),
       ...(isAdmin ? [
         { to: '/admin/clients', label: 'Clients', icon: Building2 },
+        { to: '/admin/guest-menu', label: 'Guest Menu', icon: QrCode },
         { to: '/admin/audit', label: 'Audit Log', icon: History },
       ] : []),
       { to: '/settings', label: 'Settings', icon: Settings, minImsRole: 'manager' },
