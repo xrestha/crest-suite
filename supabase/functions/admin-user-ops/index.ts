@@ -565,6 +565,29 @@ Deno.serve(async (req) => {
     // ── All remaining actions require admin role ──────────────────────────────
     if (profile?.role !== 'admin') return json({ error: 'Forbidden' }, 403)
 
+    // ── Delete a single fixed asset, admin-only — never exposed to any client
+    // login (including Owner-rank), even though hasImsAccess('manager') would
+    // normally be enough to post/edit within this module. A posted asset's
+    // assets_depreciation_schedule rows are blocked by the immutability trigger
+    // (enforce_asset_schedule_immutable) for every authenticated session — only
+    // this function's service-role client (auth.uid() IS NULL) can clear them,
+    // same mechanism Danger Zone already relies on. assets_repair_expenses.asset_id
+    // is ON DELETE SET NULL so it needs no explicit cleanup here.
+    if (action === 'deleteAsset') {
+      const { clientId, assetId } = params
+      if (!clientId || !assetId) return json({ error: 'clientId and assetId are required' }, 400)
+
+      const { error: scheduleErr } = await admin
+        .from('assets_depreciation_schedule').delete().eq('client_id', clientId).eq('asset_id', assetId)
+      if (scheduleErr) return json({ error: `Failed to delete depreciation history: ${scheduleErr.message}` }, 400)
+
+      const { error: assetErr } = await admin
+        .from('assets_register').delete().eq('client_id', clientId).eq('id', assetId)
+      if (assetErr) return json({ error: `Failed to delete asset: ${assetErr.message}` }, 400)
+
+      return json({ success: true })
+    }
+
     if (action === 'getUser') {
       const result = await admin.auth.admin.getUserById(params.userId)
       return json(result)
@@ -639,6 +662,15 @@ Deno.serve(async (req) => {
         await del(admin.from('demand_forecast_daily').delete().eq('client_id', clientId), 'demand_forecast_daily')
         await del(admin.from('demand_forecast_run_log').delete().eq('client_id', clientId), 'demand_forecast_run_log')
         await del(admin.from('ims_gate_passes').delete().eq('client_id', clientId), 'ims_gate_passes')
+        // Fixed Assets — schedule/pool-lines before their parent runs (no cascade on asset_id/
+        // category_id, so register/categories must go last too, in that order).
+        await del(admin.from('assets_depreciation_schedule').delete().eq('client_id', clientId), 'assets_depreciation_schedule')
+        await del(admin.from('assets_depreciation_runs').delete().eq('client_id', clientId), 'assets_depreciation_runs')
+        await del(admin.from('assets_tax_pool_lines').delete().eq('client_id', clientId), 'assets_tax_pool_lines')
+        await del(admin.from('assets_tax_pool_runs').delete().eq('client_id', clientId), 'assets_tax_pool_runs')
+        await del(admin.from('assets_repair_expenses').delete().eq('client_id', clientId), 'assets_repair_expenses')
+        await del(admin.from('assets_register').delete().eq('client_id', clientId), 'assets_register')
+        await del(admin.from('assets_categories').delete().eq('client_id', clientId), 'assets_categories')
         // monthly_periods are intentionally KEPT — HR attendance/payroll reference the same periods
         return json({ success: true })
       }
@@ -803,6 +835,13 @@ Deno.serve(async (req) => {
       await del(admin.from('recipes').delete().eq('client_id', clientId), 'recipes')
       await del(admin.from('items').delete().eq('client_id', clientId), 'items')
       await del(admin.from('ims_gate_passes').delete().eq('client_id', clientId), 'ims_gate_passes')
+      await del(admin.from('assets_depreciation_schedule').delete().eq('client_id', clientId), 'assets_depreciation_schedule')
+      await del(admin.from('assets_depreciation_runs').delete().eq('client_id', clientId), 'assets_depreciation_runs')
+      await del(admin.from('assets_tax_pool_lines').delete().eq('client_id', clientId), 'assets_tax_pool_lines')
+      await del(admin.from('assets_tax_pool_runs').delete().eq('client_id', clientId), 'assets_tax_pool_runs')
+      await del(admin.from('assets_repair_expenses').delete().eq('client_id', clientId), 'assets_repair_expenses')
+      await del(admin.from('assets_register').delete().eq('client_id', clientId), 'assets_register')
+      await del(admin.from('assets_categories').delete().eq('client_id', clientId), 'assets_categories')
       await del(admin.from('vendors').delete().eq('client_id', clientId), 'vendors')
       await del(admin.from('categories').delete().eq('client_id', clientId), 'categories')
 

@@ -50,6 +50,7 @@ const DEFAULT_FLAGS = {
   owner_dashboard: false,
   monthly_owner_report: false,
   stock_movement_log: false,
+  fixed_asset_register: false,
 }
 
 export function SettingsProvider({ children }) {

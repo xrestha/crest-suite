@@ -23,7 +23,7 @@ import {
   ShieldCheck, Warehouse, Store,
   HelpCircle, PanelLeftClose, PanelLeftOpen, LogOut,
   Crown, History, QrCode, Hexagon, Search, ChevronDown,
-  ParkingSquare, IdCardLanyard,
+  ParkingSquare, IdCardLanyard, Landmark,
 } from 'lucide-react'
 import './Layout.css'
 
@@ -51,6 +51,7 @@ const NAV = [
   { to: '/menu-pricing',     label: 'Menu Pricing',      icon: Tag, featureKey: 'menu_pricing',    minPlan: 'starter', minImsRole: 'manager' },
   { to: '/menu-engineering', label: 'Menu Engineering',  icon: PieChart, featureKey: 'menu_engineering',minPlan: 'pro', minImsRole: 'manager' },
   { to: '/overheads',        label: 'Overheads',         icon: Receipt, featureKey: 'overheads',       minPlan: 'pro', minImsRole: 'manager' },
+  { to: '/fixed-assets',     label: 'Fixed Assets',      icon: Landmark, featureKey: 'fixed_asset_register', minPlan: 'pro', minImsRole: 'supervisor' },
 ]
 
 // cat: which characteristic report-group the item renders under in the sidebar

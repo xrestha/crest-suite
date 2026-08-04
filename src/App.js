@@ -42,6 +42,7 @@ const AdminClients = lazy(() => import('./pages/AdminClients'))
 const AuditLog = lazy(() => import('./pages/AuditLog'))
 const AdminGuestMenu = lazy(() => import('./pages/AdminGuestMenu'))
 const Overheads = lazy(() => import('./modules/ims/reports/Overheads'))
+const FixedAssets = lazy(() => import('./modules/ims/assets/FixedAssets'))
 const BudgetVsActual = lazy(() => import('./modules/ims/reports/BudgetVsActual'))
 const BestSellers = lazy(() => import('./modules/ims/reports/BestSellers'))
 const VatReport = lazy(() => import('./modules/ims/reports/VatReport'))
@@ -207,6 +208,8 @@ export default function App() {
                 element={<ModuleGate module="ims"><PremiumGate featureKey="price_tracker" minPlan="pro"><SupplierPriceTracker /></PremiumGate></ModuleGate>} />
               <Route path="/overheads"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="overheads" minPlan="pro"><Overheads /></PremiumGate></ModuleGate>} />
+              <Route path="/fixed-assets"
+                element={<ModuleGate module="ims"><PremiumGate featureKey="fixed_asset_register" minPlan="pro"><FixedAssets /></PremiumGate></ModuleGate>} />
               <Route path="/theoretical-variance"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="theoretical_variance" minPlan="pro"><TheoreticalVariance /></PremiumGate></ModuleGate>} />
               <Route path="/ims/staff" element={<ModuleGate module="ims"><ImsStaff /></ModuleGate>} />

@@ -60,7 +60,7 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint 
           neg
         />
       )}
-      {slip.ssf_employee > 0 && <Row label="SSF Employee (11%)" value={slip.ssf_employee} neg />}
+      {slip.ssf_employee > 0 && <Row label="SSF — Social Security Fund (11%)" value={slip.ssf_employee} neg />}
       {slip.other_deductions > 0 && <Row label="Other Deductions" value={slip.other_deductions} neg />}
       {(slip.advance_deduction || 0) > 0 && <Row label="Advance / Loan Recovery" value={slip.advance_deduction} neg />}
       {slip.tds > 0 && <Row label="TDS (income tax)" value={slip.tds} neg />}
@@ -71,7 +71,7 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint 
       {(slip.tada_amount || 0) > 0 && (
         <>
           <div style={{ fontSize: 10, color: c1, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '12px 0 4px' }}>Reimbursement</div>
-          <Row label="TADA (non-taxable)" value={slip.tada_amount} />
+          <Row label="TADA — Travel & Daily Allowance (non-taxable)" value={slip.tada_amount} />
         </>
       )}
 
@@ -87,7 +87,7 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint 
       </div>
       {slip.ssf_employer > 0 && (
         <div style={{ marginTop: 8, fontSize: 11, color: c1 }}>
-          Employer SSF (20%, paid by company): {fmtn(slip.ssf_employer)}
+          Employer SSF — Social Security Fund (20%, paid by company): {fmtn(slip.ssf_employer)}
         </div>
       )}
     </div>

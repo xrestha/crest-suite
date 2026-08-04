@@ -251,6 +251,11 @@ const IMS_FEATURE_TIERS = [
         tips: ['Opening a period with nothing entered yet auto-fills the most recent prior period\'s saved amounts as an editable draft — nothing is written to the database until you hit Save, so revise any line that\'s changed (a raise, a new lease rate) before saving', 'Update overheads monthly — fixed costs rarely change but labour does', 'Cost per Cover requires accurate cover count — enter it in the overhead form']
       },
       {
+        icon: '🏛', name: 'Fixed Assets', path: '/fixed-assets',
+        guide: 'Register of tangible fixed assets (equipment, furniture, vehicles, kitchen machinery) — separate from Item Master\'s stock/inventory tracking. Five tabs: Register (add/edit assets, categories set default useful life & Nepal tax pool), Depreciation Runs (straight-line book depreciation — Preview computes nothing, Post writes and locks the schedule), Valuation Report (portfolio cost/NBV as of any posted period, by category), Disposal Report (disposed/written-off assets with gain/loss), and Tax Depreciation (IRD) — Nepal\'s statutory pooled written-down-value method (Income Tax Act 2058), a separate system from book depreciation that\'s expected to show a different number.',
+        tips: ['Staff/Supervisor IMS roles can view the register and run a Preview; only Manager/Owner can Post — this matches the payroll Finalize pattern', 'Once a depreciation run is Posted it is permanently locked — a correction is a new adjustment run, never an edit to the old one', 'The Tax Depreciation tab carries its own on-screen disclaimer — verify current pool rates and the repair-expense cap with your accountant before relying on it for an actual filing', 'Personal Use % on an asset excludes it from the default Valuation Report view — apportioned depreciation for a non-zero value isn\'t calculated in v1']
+      },
+      {
         icon: '△', name: 'Theoretical Variance',
         guide: 'Advanced variance analysis that isolates theoretical food cost vs actual, broken down by category. Deeper drill-down than the standard Variance Report. Compare against budget for a complete financial picture.',
         tips: ['Items with both high theoretical and high actual usage → recipe portion sizes may need revision', 'Use alongside Budget vs Actual for the most complete picture']

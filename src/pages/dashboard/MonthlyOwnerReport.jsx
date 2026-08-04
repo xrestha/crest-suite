@@ -389,10 +389,13 @@ export default function MonthlyOwnerReport() {
                       tip="Independently derived from the Bill Register — will not tie out to the penny with Revenue above, which comes from Sales Entries instead. Different discount/VAT rounding basis, same underlying bills." />
                     <Row label="Bills / Qty Sold" value={`${num(snapshot.pos.billCount)} / ${num(snapshot.pos.totalQty)}`} />
                     <Row label="Discount Given" value={fmt(snapshot.pos.totalDiscount)} />
-                    <Row label="Comped Bills" value={`${num(snapshot.pos.compedBillsTotal?.count)} — ${fmt(snapshot.pos.compedBillsTotal?.potentialValue)} potential value`} />
+                    <Row label="Comped Bills" value={`${num(snapshot.pos.compedBillsTotal?.count)} — ${fmt(snapshot.pos.compedBillsTotal?.potentialValue)} potential value`}
+                      tip="Bills given away free (staff meals, goodwill, promo) — 'potential value' is what they would have cost the guest at full price." />
                     <Row label="Voids / Write-offs" value={`${num(snapshot.pos.voidsWriteoffsTotal?.count)} — ${fmt(snapshot.pos.voidsWriteoffsTotal?.amount)}`}
-                      color={snapshot.pos.voidsWriteoffsTotal?.count > 0 ? 'var(--theme-red)' : undefined} />
-                    <Row label="Avg Check / Cover" value={fmt(snapshot.pos.covers?.avgCheckPerCover)} />
+                      color={snapshot.pos.voidsWriteoffsTotal?.count > 0 ? 'var(--theme-red)' : undefined}
+                      tip="Void = cancelled before payment (e.g. a wrong order). Write-off = billed but never collected. Both are lost potential revenue." />
+                    <Row label="Avg Check / Cover" value={fmt(snapshot.pos.covers?.avgCheckPerCover)}
+                      tip="Average spend per guest ('cover' = one seated diner), not per bill — a table of 4 sharing one bill counts as 4 covers." />
                     <Row label="Avg Bill Value" value={fmt(snapshot.pos.covers?.avgBillValue)} />
                   </tbody></table>
                 </div>
@@ -498,7 +501,8 @@ export default function MonthlyOwnerReport() {
                       <table className="data-table owner-report-table"><tbody>
                         <Row label="Inventory Turnover Ratio (this period)" value={inv.turnover.turnoverRatio != null ? inv.turnover.turnoverRatio.toFixed(2) : '—'}
                           tip="Value used ÷ average inventory value this period. Higher means stock is moving faster." />
-                        <Row label="Days on Hand" value={inv.turnover.daysOnHand != null ? `${inv.turnover.daysOnHand.toFixed(1)} days` : '—'} />
+                        <Row label="Days on Hand" value={inv.turnover.daysOnHand != null ? `${inv.turnover.daysOnHand.toFixed(1)} days` : '—'}
+                          tip="How many days your average inventory would last at this period's usage rate. Lower means you're restocking more often." />
                         <Row label="Average Inventory Value" value={fmt(inv.turnover.avgInventoryValue)} />
                       </tbody></table>
                     </div>

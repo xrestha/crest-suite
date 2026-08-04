@@ -19,6 +19,13 @@ export const CLIENT_SCOPED_TABLES = [
   'overheads', 'purchase_orders', 'vendor_returns', 'feature_flags',
   'par_levels', 'payable_payments', 'recipe_suggestions',
   'demand_forecast_daily', 'demand_forecast_run_log', 'stock_movements', 'ims_gate_passes',
+  // Fixed Assets — assets_depreciation_schedule/assets_tax_pool_lines get their own direct
+  // client_id (denormalized from their parent run) rather than following the parent-scoped
+  // precedent (recipe_ingredients) below, because each is independently queried three different
+  // ways (by client_id for a report, by asset_id/pool for a detail view, by run_id for one run's
+  // lines) — a direct column keeps scopedDb usage uniform across all three.
+  'assets_categories', 'assets_register', 'assets_depreciation_runs', 'assets_depreciation_schedule',
+  'assets_tax_pool_runs', 'assets_tax_pool_lines', 'assets_repair_expenses',
   // HR
   'hr_employees', 'hr_attendance', 'hr_advances', 'hr_advance_repayments',
   'hr_leave_requests', 'hr_leave_types', 'hr_holiday_calendar', 'hr_festival_allowances',

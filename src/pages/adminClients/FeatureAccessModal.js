@@ -22,6 +22,7 @@ const DEFAULT_FLAGS = {
   owner_dashboard: null,
   monthly_owner_report: null,
   stock_movement_log: null,
+  fixed_asset_register: null,
 }
 
 const FEATURE_GROUPS = [
@@ -73,6 +74,7 @@ const FEATURE_GROUPS = [
     { key: 'period_comparison',    label: 'Period Comparison' },
     { key: 'shrinkage_report',     label: 'Shrinkage Report' },
     { key: 'demand_forecast',      label: 'Demand Forecast' },
+    { key: 'fixed_asset_register', label: 'Fixed Asset Register' },
     // A POS feature, not an IMS one — its "included in plan" check below uses client.pos_plan,
     // not clientPlan (the IMS plan), so it doesn't incorrectly key off IMS/POS plan mismatches.
     { key: 'guest_ordering',       label: 'Guest QR Self-Ordering', planSource: 'pos' },

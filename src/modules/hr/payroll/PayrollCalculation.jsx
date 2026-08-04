@@ -370,12 +370,12 @@ export default function PayrollCalculation() {
                     <th style={{ width: 32 }} />
                     <th>Employee</th>
                     <th style={{ textAlign: 'right' }}>Gross</th>
-                    <th style={{ textAlign: 'right' }}>OT</th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Overtime pay this period — from the attendance sheet plus approved Overtime entries combined." width={260}>OT</Tip></th>
                     <th style={{ textAlign: 'right' }}>Absence</th>
-                    <th style={{ textAlign: 'right' }}>SSF</th>
-                    <th style={{ textAlign: 'right' }}>TDS</th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Social Security Fund — the employee's 11% mandatory contribution, deducted from pay." width={260}>SSF</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Tax Deducted at Source — income tax withheld this month based on the employee's projected yearly earnings." width={280}>TDS</Tip></th>
                     <th style={{ textAlign: 'right' }}>Advance</th>
-                    <th style={{ textAlign: 'right' }}>TADA</th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Travel & Daily Allowance — non-taxable trip expense reimbursement added to this payslip." width={270}>TADA</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>Net Pay (live)</th>
                     <th>Payroll Page</th>
                   </tr>

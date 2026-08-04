@@ -509,7 +509,7 @@ export default function SelfServiceHome() {
         {tab === 'tada' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="card" style={{ padding: 16, paddingBottom: 0 }}>
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Submit TADA Claim</h3>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>Submit TADA Claim <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)' }}>(Travel & Daily Allowance — trip expense reimbursement)</span></h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Trip Details</div>
                 <div style={{ display: 'flex', gap: 10 }}>
