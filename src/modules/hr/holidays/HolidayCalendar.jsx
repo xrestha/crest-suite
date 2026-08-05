@@ -151,8 +151,7 @@ export default function HolidayCalendar() {
           <h1 className="page-title">Holiday Calendar</h1>
           <p className="page-subtitle">Nepal public and optional holidays per fiscal year — used for OT rate and attendance reference</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{msg.split(':').slice(1).join(':')}</span>}
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
           <select
             className="form-select"
             value={fyYear}
@@ -160,14 +159,17 @@ export default function HolidayCalendar() {
           >
             {fyYears.map(y => <option key={y} value={y}>{fyLabel(y)}</option>)}
           </select>
-          <Tip text="Adds 5 fixed-date Nepal gazetted holidays for this FY: Constitution Day (Ashwin 3), Prithvi Narayan Shah's Birthday (Poush 27), Martyrs' Day (Magh 5), Democracy Day (Falgun 7), Republic Day (Jestha 15). Movable holidays (Dashain, Tihar, Holi, etc.) must be added manually each year." width={340}>
-            <button className="btn btn-ghost" onClick={seedFixed} disabled={busy} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-              ＋ Seed Fixed
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Tip text="Adds 5 fixed-date Nepal gazetted holidays for this FY: Constitution Day (Ashwin 3), Prithvi Narayan Shah's Birthday (Poush 27), Martyrs' Day (Magh 5), Democracy Day (Falgun 7), Republic Day (Jestha 15). Movable holidays (Dashain, Tihar, Holi, etc.) must be added manually each year." width={340}>
+              <button className="btn btn-ghost" onClick={seedFixed} disabled={busy} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                ＋ Seed Fixed
+              </button>
+            </Tip>
+            <button className="btn btn-primary" onClick={openAdd} style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
+              + Add Holiday
             </button>
-          </Tip>
-          <button className="btn btn-primary" onClick={openAdd} style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
-            + Add Holiday
-          </button>
+          </div>
+          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
       </div>
 
@@ -188,7 +190,7 @@ export default function HolidayCalendar() {
               Optional Holidays
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: '#818cf8' }}>{optionalCount}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-purple)' }}>{optionalCount}</div>
           <div className="stat-sub">{fyLabel(fyYear)}</div>
         </div>
         <div className="stat-card">

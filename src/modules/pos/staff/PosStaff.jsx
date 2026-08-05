@@ -323,17 +323,19 @@ export default function PosStaff() {
             Assign roles to your team. Staff log in with their name and PIN.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexShrink: 0, flexWrap: 'wrap' }}>
           <input
             type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search staff…" className="form-select" style={{ maxWidth: 180 }}
           />
-          <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setRolesModal(true)}>
-            Manage Roles
-          </button>
-          <button className="btn btn-primary" style={{ whiteSpace: 'nowrap' }} onClick={openAdd}>
-            + Add Staff
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setRolesModal(true)}>
+              Manage Roles
+            </button>
+            <button className="btn btn-primary" style={{ whiteSpace: 'nowrap' }} onClick={openAdd}>
+              + Add Staff
+            </button>
+          </div>
         </div>
       </div>
 

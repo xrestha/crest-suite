@@ -347,15 +347,19 @@ export default function PayrollRun() {
               {run && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green)' : 'var(--theme-accent)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{msg.split(':').slice(1).join(':')}</span>}
+          <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
             <select className="form-select" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
               {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
             </select>
-            {run && <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>⬇ Export</button>}
-            {run && !finalized && <button className="btn btn-ghost" onClick={regenerate} disabled={busy} style={{ fontSize: 12 }}>↻ Regenerate</button>}
-            {run && !finalized && <button className="btn btn-primary" onClick={finalize} disabled={busy} style={{ fontSize: 12 }}>Finalize</button>}
-            {run && finalized && isAdmin && <button className="btn btn-ghost" onClick={reopen} disabled={busy} style={{ fontSize: 12 }}>Reopen</button>}
+            {run && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>⬇ Export</button>
+                {!finalized && <button className="btn btn-ghost" onClick={regenerate} disabled={busy} style={{ fontSize: 12 }}>↻ Regenerate</button>}
+                {!finalized && <button className="btn btn-primary" onClick={finalize} disabled={busy} style={{ fontSize: 12 }}>Finalize</button>}
+                {finalized && isAdmin && <button className="btn btn-ghost" onClick={reopen} disabled={busy} style={{ fontSize: 12 }}>Reopen</button>}
+              </div>
+            )}
+            {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
           </div>
         </div>
 

@@ -196,7 +196,7 @@ export default function MonthlyOwnerReport() {
       </div>
 
       <SuiteGate minTier="growth" featureKey="monthly_owner_report" featureLabel="Monthly Owner/Manager Report" requireModules={['ims']}>
-        <div className="no-print card" style={{ marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="no-print card" style={{ marginBottom: 16, display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <select
             className="form-select" style={{ maxWidth: 220 }}
             value={selectedPeriodId || ''} onChange={e => setSelectedPeriodId(e.target.value)}
@@ -209,7 +209,7 @@ export default function MonthlyOwnerReport() {
             ))}
           </select>
           {report && (
-            <>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn btn-ghost" onClick={async () => {
                 const { exportMonthlyReportExcel } = await import('../../modules/ownerReport/monthlyReportExcel')
                 exportMonthlyReportExcel(report, bizInfo)
@@ -225,7 +225,7 @@ export default function MonthlyOwnerReport() {
                   {regenerating ? 'Regenerating…' : 'Regenerate Snapshot'}
                 </button>
               )}
-            </>
+            </div>
           )}
         </div>
 

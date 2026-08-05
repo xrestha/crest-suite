@@ -212,21 +212,23 @@ export default function IncentiveRun() {
             )}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }} className="no-print">
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{msg.split(':').slice(1).join(':')}</span>}
+        <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }} className="no-print">
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select className="form-select" value={configId} onChange={e => {
+              setConfigId(e.target.value)
+              const cfg = configs.find(c => c.id === e.target.value)
+              if (cfg && !runLabel) setRunLabel(cfg.name)
+            }}>
+              <option value="">— Ad-hoc (manual) —</option>
+              {activeConfigs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <input style={{ ...inp, width: 150 }} value={runLabel} onChange={e => setRunLabel(e.target.value)} placeholder="Run label, e.g. Q1 Sales Bonus" />
+            <select className="form-select" value={bsYear} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
+              {years.map(y => <option key={y} value={y}>BS {y}</option>)}
+            </select>
+          </div>
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowConfigs(true)}>⚙ Manage Types</button>
-          <select className="form-select" value={configId} onChange={e => {
-            setConfigId(e.target.value)
-            const cfg = configs.find(c => c.id === e.target.value)
-            if (cfg && !runLabel) setRunLabel(cfg.name)
-          }}>
-            <option value="">— Ad-hoc (manual) —</option>
-            {activeConfigs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <input style={{ ...inp, width: 150 }} value={runLabel} onChange={e => setRunLabel(e.target.value)} placeholder="Run label, e.g. Q1 Sales Bonus" />
-          <select className="form-select" value={bsYear} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
-            {years.map(y => <option key={y} value={y}>BS {y}</option>)}
-          </select>
+          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
       </div>
 

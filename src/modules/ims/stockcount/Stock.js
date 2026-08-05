@@ -997,19 +997,21 @@ export default function Stock() {
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {activeTab === 'opening' && (
-                    <button
-                      className="btn btn-ghost"
-                      title="Copies last month's counted closing stock into this period's opening — 'this month's closing IS next month's opening'. Existing opening entries for those items are overwritten."
-                      style={{ color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.35)' }}
-                      onClick={pullFromLastMonthClosing}
-                      disabled={saveAllLoading || isLocked}
-                    >
-                      ↩ Pull from last month
-                    </button>
-                  )}
-                  <button className="btn btn-ghost" style={{ color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }} onClick={clearAll} disabled={saveAllLoading || isLocked}>Clear All</button>
+                <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {activeTab === 'opening' && (
+                      <button
+                        className="btn btn-ghost"
+                        title="Copies last month's counted closing stock into this period's opening — 'this month's closing IS next month's opening'. Existing opening entries for those items are overwritten."
+                        style={{ color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.35)' }}
+                        onClick={pullFromLastMonthClosing}
+                        disabled={saveAllLoading || isLocked}
+                      >
+                        ↩ Pull from last month
+                      </button>
+                    )}
+                    <button className="btn btn-ghost" style={{ color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }} onClick={clearAll} disabled={saveAllLoading || isLocked}>Clear All</button>
+                  </div>
                   <button className="btn btn-primary" onClick={saveAll} disabled={saveAllLoading || isLocked}>
                     {saveAllLoading ? 'Saving…' : saved ? '✓ Saved' : 'Save All'}
                   </button>

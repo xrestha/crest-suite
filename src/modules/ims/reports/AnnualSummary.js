@@ -175,24 +175,28 @@ export default function AnnualSummary() {
           <h1 className="page-title">Annual Summary</h1>
           <p className="page-subtitle">Full-year rollup — {selectedLabel}</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, overflow: 'hidden' }}>
-            {[false, true].map(fm => (
-              <button key={String(fm)} onClick={() => setFiscalMode(fm)}
-                style={{ padding: '7px 14px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
-                  background: fiscalMode === fm ? 'rgba(201,168,76,0.15)' : 'transparent',
-                  color: fiscalMode === fm ? 'var(--theme-accent)' : 'var(--theme-text2)' }}>
-                {fm ? 'Fiscal Year' : 'Calendar Year'}
-              </button>
-            ))}
+        <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, overflow: 'hidden' }}>
+              {[false, true].map(fm => (
+                <button key={String(fm)} onClick={() => setFiscalMode(fm)}
+                  style={{ padding: '7px 14px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
+                    background: fiscalMode === fm ? 'rgba(201,168,76,0.15)' : 'transparent',
+                    color: fiscalMode === fm ? 'var(--theme-accent)' : 'var(--theme-text2)' }}>
+                  {fm ? 'Fiscal Year' : 'Calendar Year'}
+                </button>
+              ))}
+            </div>
+            <select className="form-select" value={selectedYear ?? ''} onChange={e => setSelectedYear(Number(e.target.value))}>
+              {yearOptions.map(y => <option key={y.value} value={y.value}>{y.label}</option>)}
+            </select>
           </div>
-          <select className="form-select" value={selectedYear ?? ''} onChange={e => setSelectedYear(Number(e.target.value))}>
-            {yearOptions.map(y => <option key={y.value} value={y.value}>{y.label}</option>)}
-          </select>
-          {report && <>
-            <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => printWithTitle(`Annual Summary - ${selectedLabel}`)}>⎙ Print</button>
-            <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={exportExcel}>↓ Excel</button>
-          </>}
+          {report && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => printWithTitle(`Annual Summary - ${selectedLabel}`)}>⎙ Print</button>
+              <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={exportExcel}>↓ Excel</button>
+            </div>
+          )}
         </div>
       </div>
 

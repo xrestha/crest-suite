@@ -120,19 +120,21 @@ export default function DemandForecast() {
         </p>
       </div>
 
-      <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
+      <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', marginBottom: 20 }}>
         <div className="tab-bar">
           <button className={`tab-btn${horizon === 7 ? ' tab-btn--active' : ''}`} onClick={() => setHorizon(7)}>Next 7 Days</button>
           <button className={`tab-btn${horizon === 30 ? ' tab-btn--active' : ''}`} onClick={() => setHorizon(30)}>Next 30 Days</button>
         </div>
-        <Tip text="Rebuilds the forecast from your latest sales data. Run this whenever you want an up-to-date prediction — it does not run automatically.">
-          <button className="btn btn-primary" onClick={handleRecompute} disabled={recomputing}>
-            {recomputing ? 'Recomputing…' : '↻ Recompute Forecast'}
-          </button>
-        </Tip>
-        <button className="btn btn-ghost" onClick={handlePrint} disabled={forecast.length === 0}>🖨 Print</button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <Tip text="Rebuilds the forecast from your latest sales data. Run this whenever you want an up-to-date prediction — it does not run automatically.">
+            <button className="btn btn-primary" onClick={handleRecompute} disabled={recomputing}>
+              {recomputing ? 'Recomputing…' : '↻ Recompute Forecast'}
+            </button>
+          </Tip>
+          <button className="btn btn-ghost" onClick={handlePrint} disabled={forecast.length === 0}>🖨 Print</button>
+        </div>
         {lastRun && (
-          <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+          <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 'auto' }}>
             Last run: {new Date(lastRun.run_at).toLocaleString()}
             {lastRun.error ? <span style={{ color: 'var(--theme-red)' }}> — failed: {lastRun.error}</span> : ` (${lastRun.rows_written} rows)`}
           </span>

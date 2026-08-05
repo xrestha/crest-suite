@@ -777,23 +777,25 @@ export default function Recipes() {
       {view === 'list' && (
         <div className={printRecipe ? 'no-print' : ''}>
           {/* Search bar */}
-          <div className="no-print" style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
+          <div className="no-print" style={{ display: 'flex', gap: 20, marginBottom: 16, alignItems: 'center' }}>
             <input
               style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} />
-            <RecipeImportButton items={items} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedInsert={scopedInsert} onImported={init} isAdmin={isAdmin} />
-            <Tip text="Prints just the checked recipes in this tab, if any are checked — otherwise the whole tab, same as before." width={260}>
-              <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)} disabled={printShareRows.length === 0}>🖶 Print</button>
-            </Tip>
-            <Tip text="Opens WhatsApp with this tab's recipe list (name, food cost, FC%) pre-filled as a text message — check specific rows first to share just those, or leave none checked to share the whole tab. Pick a contact or group to send it to." width={290}>
-              <button className="btn btn-ghost" onClick={shareRecipesWhatsApp} disabled={printShareRows.length === 0}>📱 Share via WhatsApp</button>
-            </Tip>
-            {selectedIds.size > 0 && (
-              <span style={{ fontSize: 12, color: 'var(--theme-accent)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                {selectedIds.size} selected
-                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
-              </span>
-            )}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <RecipeImportButton items={items} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedInsert={scopedInsert} onImported={init} isAdmin={isAdmin} />
+              <Tip text="Prints just the checked recipes in this tab, if any are checked — otherwise the whole tab, same as before." width={260}>
+                <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)} disabled={printShareRows.length === 0}>🖶 Print</button>
+              </Tip>
+              <Tip text="Opens WhatsApp with this tab's recipe list (name, food cost, FC%) pre-filled as a text message — check specific rows first to share just those, or leave none checked to share the whole tab. Pick a contact or group to send it to." width={290}>
+                <button className="btn btn-ghost" onClick={shareRecipesWhatsApp} disabled={printShareRows.length === 0}>📱 Share via WhatsApp</button>
+              </Tip>
+              {selectedIds.size > 0 && (
+                <span style={{ fontSize: 12, color: 'var(--theme-accent)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {selectedIds.size} selected
+                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
+                </span>
+              )}
+            </div>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Tip text="Find every recipe that uses an ingredient — e.g. type 'milk' to list all dishes containing it. Also matches ingredients hidden inside sub-recipes (e.g. 'coffee' finds a Flat White via its Doppio)." width={300}>
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>ⓘ</span>

@@ -172,9 +172,9 @@ export default function AdminDashboardOverview() {
               <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>{active.length}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>{inactive.length} inactive · {adminClients.length} total</div>
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(96,165,250,0.10)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.2)' }}>IMS {imsCount}</span>
-                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(52,211,153,0.08)', color: '#34d399', border: '1px solid rgba(52,211,153,0.18)' }}>HR {hrCount}</span>
-                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(167,139,250,0.10)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}>POS {posCount}</span>
+                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS {imsCount}</span>
+                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green)', border: '1px solid rgba(52,211,153,0.18)' }}>HR {hrCount}</span>
+                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple)', border: '1px solid rgba(167,139,250,0.2)' }}>POS {posCount}</span>
               </div>
             </div>
 
@@ -340,13 +340,13 @@ export default function AdminDashboardOverview() {
                         <td>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                             {c.ims_enabled !== false && (
-                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(96,165,250,0.10)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.2)' }}>IMS</span>
+                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS</span>
                             )}
                             {c.hr_enabled && (
-                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(52,211,153,0.08)', color: '#34d399', border: '1px solid rgba(52,211,153,0.18)' }}>HR</span>
+                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green)', border: '1px solid rgba(52,211,153,0.18)' }}>HR</span>
                             )}
                             {c.pos_enabled && (
-                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(167,139,250,0.10)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}>POS</span>
+                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple)', border: '1px solid rgba(167,139,250,0.2)' }}>POS</span>
                             )}
                           </div>
                         </td>

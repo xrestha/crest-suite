@@ -618,32 +618,34 @@ export default function Items() {
       )}
 
       {/* Search + filters */}
-      <div className="no-print" style={{ marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input
-          style={{
-            background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6,
-            padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260
-          }}
-          placeholder="Search by name or code…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-        {/* Used-In filter chips */}
-        {[
-          { key: 'all',    label: 'All' },
-          { key: 'R',      label: '🍽 Recipes' },
-          { key: 'P',      label: '📦 Purchases' },
-          { key: 'stock',  label: '📊 Stock' },
-          { key: 'unused', label: '○ Unused' },
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setFilterUsage(key)}
-            className={filterUsage === key ? 'tab-btn tab-btn--active' : 'tab-btn'}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="no-print" style={{ marginBottom: 16, display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            style={{
+              background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6,
+              padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260
+            }}
+            placeholder="Search by name or code…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          {/* Used-In filter chips */}
+          {[
+            { key: 'all',    label: 'All' },
+            { key: 'R',      label: '🍽 Recipes' },
+            { key: 'P',      label: '📦 Purchases' },
+            { key: 'stock',  label: '📊 Stock' },
+            { key: 'unused', label: '○ Unused' },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setFilterUsage(key)}
+              className={filterUsage === key ? 'tab-btn tab-btn--active' : 'tab-btn'}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() => setSortConvFirst(v => !v)}
           style={{

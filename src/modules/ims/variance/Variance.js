@@ -226,20 +226,22 @@ export default function Variance() {
         <span style={{ color: 'var(--theme-accent)' }}> Under variance</span> = less used than expected (under-portioning or data gap).
       </div>
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select className="form-select"
-          value={filterCat} onChange={e => setFilterCat(e.target.value)}>
-          <option value="all">All Categories</option>
-          {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-        </select>
-        <select className="form-select"
-          value={filterFlag} onChange={e => setFilterFlag(e.target.value)}>
-          <option value="all">All Items</option>
-          <option value="over">Over variance only</option>
-          <option value="under">Under variance only</option>
-          <option value="ok">OK only</option>
-        </select>
-        <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} items</span>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select className="form-select"
+            value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+            <option value="all">All Categories</option>
+            {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+          <select className="form-select"
+            value={filterFlag} onChange={e => setFilterFlag(e.target.value)}>
+            <option value="all">All Items</option>
+            <option value="over">Over variance only</option>
+            <option value="under">Under variance only</option>
+            <option value="ok">OK only</option>
+          </select>
+        </div>
+        <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 'auto' }}>{filtered.length} items</span>
       </div>
 
       <div className="card">

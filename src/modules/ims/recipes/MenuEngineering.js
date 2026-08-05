@@ -287,7 +287,7 @@ export default function MenuEngineering() {
           <option value="All">All Quadrants</option>
           {Object.keys(QUADRANTS).map(q => <option key={q} value={q}>{q}</option>)}
         </select>
-        <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+        <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 'auto' }}>
           {filtered.length} item{filtered.length !== 1 ? 's' : ''} · Revenue: NPR {totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Qty: {totalQty.toLocaleString()}
         </span>
       </div>

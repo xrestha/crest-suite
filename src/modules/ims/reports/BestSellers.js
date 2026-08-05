@@ -29,6 +29,7 @@ export default function BestSellers() {
   const [selectedPeriod, setSelected] = useState(null)
   const [rows, setRows]               = useState([])
   const [sortBy, setSortBy]           = useState('revenue') // 'revenue' | 'qty' | 'margin'
+  const [categoryFilter, setCategoryFilter] = useState('all')
   const [loading, setLoading]         = useState(false)
 
   useEffect(() => {
@@ -43,6 +44,7 @@ export default function BestSellers() {
 
   useEffect(() => {
     if (selectedPeriod) fetchData(selectedPeriod.id)
+    setCategoryFilter('all')
   }, [selectedPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchData(periodId) {
@@ -92,7 +94,10 @@ export default function BestSellers() {
     setLoading(false)
   }
 
-  const sorted = [...rows].sort((a, b) => b[sortBy] - a[sortBy])
+  const categories = [...new Set(rows.map(r => r.category).filter(Boolean))].sort()
+  const filteredRows = categoryFilter === 'all' ? rows : rows.filter(r => r.category === categoryFilter)
+
+  const sorted = [...filteredRows].sort((a, b) => b[sortBy] - a[sortBy])
   const top10  = sorted.slice(0, 10)
   const bot10  = [...sorted].reverse().slice(0, 10)
 
@@ -108,12 +113,12 @@ export default function BestSellers() {
   // compare to everything" context (otherwise only in the page-level Summary strip below) survives
   // when the chart is expanded full-screen. What it shows adapts to the active sort, since summing
   // margin % across items isn't meaningful the way summing revenue/qty is.
-  const totalRevenueAll = rows.reduce((s, r) => s + r.revenue, 0)
-  const totalQtyAll = rows.reduce((s, r) => s + r.qty, 0)
+  const totalRevenueAll = filteredRows.reduce((s, r) => s + r.revenue, 0)
+  const totalQtyAll = filteredRows.reduce((s, r) => s + r.qty, 0)
   const top10Revenue = top10.reduce((s, r) => s + r.revenue, 0)
   const top10Qty = top10.reduce((s, r) => s + r.qty, 0)
   const top10AvgMargin = top10.length > 0 ? top10.reduce((s, r) => s + r.margin, 0) / top10.length : 0
-  const overallAvgMargin = rows.length > 0 ? rows.reduce((s, r) => s + r.margin, 0) / rows.length : 0
+  const overallAvgMargin = filteredRows.length > 0 ? filteredRows.reduce((s, r) => s + r.margin, 0) / filteredRows.length : 0
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
@@ -127,17 +132,25 @@ export default function BestSellers() {
       </div>
 
       {/* Filters */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>
-          {periods.map(p => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
-        </select>
+      <div style={{ display: 'flex', gap: 20, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>
+            {periods.map(p => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
+          </select>
+          {categories.length > 0 && (
+            <select className="form-select" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
+              <option value="all">All Categories</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+        </div>
         <div className="tab-bar">
           <button className={`tab-btn${sortBy === 'revenue' ? ' tab-btn--active' : ''}`} onClick={() => setSortBy('revenue')}>By Revenue</button>
           <button className={`tab-btn${sortBy === 'qty'     ? ' tab-btn--active' : ''}`} onClick={() => setSortBy('qty')}>By Volume</button>
           <button className={`tab-btn${sortBy === 'margin'  ? ' tab-btn--active' : ''}`} onClick={() => setSortBy('margin')}>By Margin %</button>
         </div>
-        {!loading && rows.length > 0 && (
-          <span style={{ fontSize: 13, color: MUTED }}>{rows.length} items sold this period</span>
+        {!loading && filteredRows.length > 0 && (
+          <span style={{ fontSize: 13, color: MUTED, marginLeft: 'auto' }}>{filteredRows.length} items sold this period</span>
         )}
       </div>
 
@@ -148,6 +161,13 @@ export default function BestSellers() {
           <div className="empty-state">
             <div className="empty-state-icon">◈</div>
             <p className="empty-state-text">No sales data for this period.</p>
+          </div>
+        </div>
+      ) : filteredRows.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <div className="empty-state-icon">◈</div>
+            <p className="empty-state-text">No sales in this category for this period.</p>
           </div>
         </div>
       ) : (
@@ -263,11 +283,11 @@ export default function BestSellers() {
           {/* Summary strip */}
           <div className="card" style={{ marginTop: 20, display: 'flex', gap: 32, flexWrap: 'wrap' }}>
             {[
-              { label: 'Total Revenue',   val: fmt(rows.reduce((s, r) => s + r.revenue, 0)),  color: GREEN },
-              { label: 'Total COGS',      val: fmt(rows.reduce((s, r) => s + r.cogs,    0)),  color: RED },
-              { label: 'Gross Profit',    val: fmt(rows.reduce((s, r) => s + r.profit,  0)),  color: GOLD },
-              { label: 'Overall Margin',  val: (() => { const rev = rows.reduce((s, r) => s + r.revenue, 0); const prof = rows.reduce((s, r) => s + r.profit, 0); return rev > 0 ? `${((prof/rev)*100).toFixed(1)}%` : '—' })(), color: GOLD },
-              { label: 'Items Sold',      val: rows.length,                                   color: MUTED },
+              { label: 'Total Revenue',   val: fmt(filteredRows.reduce((s, r) => s + r.revenue, 0)),  color: GREEN },
+              { label: 'Total COGS',      val: fmt(filteredRows.reduce((s, r) => s + r.cogs,    0)),  color: RED },
+              { label: 'Gross Profit',    val: fmt(filteredRows.reduce((s, r) => s + r.profit,  0)),  color: GOLD },
+              { label: 'Overall Margin',  val: (() => { const rev = filteredRows.reduce((s, r) => s + r.revenue, 0); const prof = filteredRows.reduce((s, r) => s + r.profit, 0); return rev > 0 ? `${((prof/rev)*100).toFixed(1)}%` : '—' })(), color: GOLD },
+              { label: 'Items Sold',      val: filteredRows.length,                                   color: MUTED },
             ].map(s => (
               <div key={s.label}>
                 <div style={{ fontSize: 11, color: MUTED, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{s.label}</div>

@@ -253,17 +253,19 @@ export default function ShrinkageReport() {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
-          <option value="all">All Categories</option>
-          {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-        </select>
-        <select className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          <option value="flagged">Flagged items only</option>
-          <option value="consistent">Consistent only</option>
-          <option value="all">All tracked items</option>
-        </select>
-        <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} items</span>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+            <option value="all">All Categories</option>
+            {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+          <select className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+            <option value="flagged">Flagged items only</option>
+            <option value="consistent">Consistent only</option>
+            <option value="all">All tracked items</option>
+          </select>
+        </div>
+        <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 'auto' }}>{filtered.length} items</span>
       </div>
 
       <div className="card">

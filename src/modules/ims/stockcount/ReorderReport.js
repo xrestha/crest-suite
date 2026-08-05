@@ -309,26 +309,30 @@ export default function ReorderReport() {
           <h1 className="page-title">Reorder Report</h1>
           <p className="page-subtitle">Items below par level — auto purchase list — {periodLabel}</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Tip text="Prints the actual purchase list — items at/below par, grouped by category, with qty to order and estimated value (respects the Category/Search filters above, always Reorder-only regardless of the Status filter). Check specific rows in the table below first to print just those." width={280}>
-            <button className="btn btn-ghost" onClick={printReorderList} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>🖨 Print Reorder List</button>
-          </Tip>
-          <Tip text="Opens WhatsApp with the same purchase list pre-filled as a text message — pick a contact or group to send it to. Respects the same row checkboxes as Print Reorder List." width={270}>
-            <button className="btn btn-ghost" onClick={shareReorderListWhatsApp} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>📱 Share via WhatsApp</button>
-          </Tip>
-          <Tip text="Prints a blank par-level sheet (grouped by category, respecting the Category/Search filters above) for staff to fill in by hand — enter the values back into the Par Level column here afterward. Not affected by row checkboxes — always the full filtered list." width={280}>
-            <button className="btn btn-ghost" onClick={() => { setPrintMode('par'); setTimeout(() => { printWithTitle(`Par Level Sheet - ${periodLabel}`); setPrintMode(null) }, 80) }} style={{ fontSize: 12 }}>🖨 Print Par Sheet</button>
-          </Tip>
-          <Tip text="Exports the current Category/Status/Search view to Excel — or just the checked rows, if any are checked." width={260}>
-            <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
-          </Tip>
-          {selectedIds.size > 0 && (
-            <span style={{ fontSize: 12, color: 'var(--theme-accent)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              {selectedIds.size} selected
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
-            </span>
-          )}
-          <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Tip text="Prints the actual purchase list — items at/below par, grouped by category, with qty to order and estimated value (respects the Category/Search filters above, always Reorder-only regardless of the Status filter). Check specific rows in the table below first to print just those." width={280}>
+              <button className="btn btn-ghost" onClick={printReorderList} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>🖨 Print Reorder List</button>
+            </Tip>
+            <Tip text="Opens WhatsApp with the same purchase list pre-filled as a text message — pick a contact or group to send it to. Respects the same row checkboxes as Print Reorder List." width={270}>
+              <button className="btn btn-ghost" onClick={shareReorderListWhatsApp} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>📱 Share via WhatsApp</button>
+            </Tip>
+            {selectedIds.size > 0 && (
+              <span style={{ fontSize: 12, color: 'var(--theme-accent)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {selectedIds.size} selected
+                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Tip text="Prints a blank par-level sheet (grouped by category, respecting the Category/Search filters above) for staff to fill in by hand — enter the values back into the Par Level column here afterward. Not affected by row checkboxes — always the full filtered list." width={280}>
+              <button className="btn btn-ghost" onClick={() => { setPrintMode('par'); setTimeout(() => { printWithTitle(`Par Level Sheet - ${periodLabel}`); setPrintMode(null) }, 80) }} style={{ fontSize: 12 }}>🖨 Print Par Sheet</button>
+            </Tip>
+            <Tip text="Exports the current Category/Status/Search view to Excel — or just the checked rows, if any are checked." width={260}>
+              <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
+            </Tip>
+          </div>
+          <select className="form-select" style={{ marginLeft: 'auto' }} value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>)}
           </select>
         </div>

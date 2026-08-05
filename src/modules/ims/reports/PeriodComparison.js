@@ -290,21 +290,25 @@ export default function PeriodComparison() {
           <h1 className="page-title">Period-over-Period Comparison</h1>
           <p className="page-subtitle">Net Purchases, Wastage, COGS, Revenue and FC% across all BS periods</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--theme-text2)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={showYoy} onChange={e => setShowYoy(e.target.checked)} />
-            <Tip text="Adds an italic 'vs LY' line under each figure, comparing this period to the same BS month one year earlier — useful for spotting festival/seasonal swings a plain month-to-month view can't tell apart from real drift." width={280}>
-              Compare vs last year
-            </Tip>
-          </label>
-          <select className="form-select" value={limit} onChange={e => setLimit(Number(e.target.value))}>
-            <option value={6}>Last 6 periods</option>
-            <option value={12}>Last 12 periods</option>
-            <option value={24}>Last 24 periods</option>
-            <option value={9999}>All periods</option>
-          </select>
-          <button className="btn btn-ghost" onClick={() => printWithTitle('Period-over-Period Comparison')}>Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={!shown.length}>Export Excel</button>
+        <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--theme-text2)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={showYoy} onChange={e => setShowYoy(e.target.checked)} />
+              <Tip text="Adds an italic 'vs LY' line under each figure, comparing this period to the same BS month one year earlier — useful for spotting festival/seasonal swings a plain month-to-month view can't tell apart from real drift." width={280}>
+                Compare vs last year
+              </Tip>
+            </label>
+            <select className="form-select" value={limit} onChange={e => setLimit(Number(e.target.value))}>
+              <option value={6}>Last 6 periods</option>
+              <option value={12}>Last 12 periods</option>
+              <option value={24}>Last 24 periods</option>
+              <option value={9999}>All periods</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-ghost" onClick={() => printWithTitle('Period-over-Period Comparison')}>Print</button>
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={!shown.length}>Export Excel</button>
+          </div>
         </div>
       </div>
 

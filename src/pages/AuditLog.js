@@ -378,7 +378,7 @@ export default function AuditLog() {
           onChange={e => setSearch(e.target.value)}
           style={{ minWidth: 220 }}
         />
-        <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
+        <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 'auto' }}>
           {loading ? 'Loading…' : `${visibleLogs.length}${visibleLogs.length !== logs.length ? ` of ${logs.length}` : ''} entries${hasMore ? '+' : ''}`}
         </span>
       </div>

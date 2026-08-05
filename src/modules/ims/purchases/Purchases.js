@@ -542,7 +542,7 @@ export default function Purchases() {
               {(filterDay !== 'all' || filterItem !== 'all' || filterVendor !== 'all') && (
                 <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => { setFilterDay('all'); setFilterItem('all'); setFilterVendor('all') }}>Clear Filters</button>
               )}
-              <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} entr{filtered.length !== 1 ? 'ies' : 'y'}</span>
+              <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 'auto' }}>{filtered.length} entr{filtered.length !== 1 ? 'ies' : 'y'}</span>
             </div>
           </div>
 

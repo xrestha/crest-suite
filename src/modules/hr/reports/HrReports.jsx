@@ -234,26 +234,28 @@ export default function HrReports() {
           {/* ── TDS CERTIFICATE (independent of any period/run) ── */}
           {tab === 'cert' && (
             <div>
-              <div className="card no-print" style={{ padding: '16px 20px', marginBottom: 16, display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Fiscal Year</div>
-                  <select className="form-select" value={certFy?.fyStart || ''} onChange={e => {
-                    const opt = fyOptions.find(f => f.fyStart === parseInt(e.target.value))
-                    setCertFy(opt || null); setCertSlips([])
-                  }}>
-                    <option value="">Select FY…</option>
-                    {fyOptions.map(f => <option key={f.fyStart} value={f.fyStart}>FY {f.label} (B.S.)</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Employee</div>
-                  <select className="form-select" value={certEmpId} onChange={e => { setCertEmpId(e.target.value); setCertSlips([]) }}>
-                    <option value="">Select employee…</option>
-                    {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}{e.employee_code ? ` (${e.employee_code})` : ''}</option>)}
-                  </select>
+              <div className="card no-print" style={{ padding: '16px 20px', marginBottom: 16, display: 'flex', gap: 20, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Fiscal Year</div>
+                    <select className="form-select" value={certFy?.fyStart || ''} onChange={e => {
+                      const opt = fyOptions.find(f => f.fyStart === parseInt(e.target.value))
+                      setCertFy(opt || null); setCertSlips([])
+                    }}>
+                      <option value="">Select FY…</option>
+                      {fyOptions.map(f => <option key={f.fyStart} value={f.fyStart}>FY {f.label} (B.S.)</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Employee</div>
+                    <select className="form-select" value={certEmpId} onChange={e => { setCertEmpId(e.target.value); setCertSlips([]) }}>
+                      <option value="">Select employee…</option>
+                      {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}{e.employee_code ? ` (${e.employee_code})` : ''}</option>)}
+                    </select>
+                  </div>
                 </div>
                 {certSlips.length > 0 && (
-                  <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => printWithTitle(`TDS Certificate - ${empMap[certEmpId]?.full_name || ''} - FY ${certFy.label}`)}>🖨 Print Certificate</button>
+                  <button className="btn btn-primary" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => printWithTitle(`TDS Certificate - ${empMap[certEmpId]?.full_name || ''} - FY ${certFy.label}`)}>🖨 Print Certificate</button>
                 )}
               </div>
               {(!certFy || !certEmpId) ? (

@@ -580,28 +580,32 @@ export default function OutstandingPayables() {
         </>)}
       </div>
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select className="form-select" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
-          <option value="all">All Vendors</option>
-          {vendors.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
-        </select>
-        {activeTab === 'outstanding' && (
-          <select className="form-select" value={filterAging} onChange={e => setFilterAging(e.target.value)}>
-            <option value="all">All Ages</option>
-            {AGING_LABELS.map(a => <option key={a} value={a}>{a}</option>)}
+      <div style={{ display: 'flex', gap: 20, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select className="form-select" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
+            <option value="all">All Vendors</option>
+            {vendors.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
           </select>
-        )}
-        <select className="form-select" value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
-          <option value="all">All Months</option>
-          {periodOptions.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
-        </select>
-        <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => load(activeTab)}>↻ Refresh</button>
-        {activeTab === 'outstanding' && filteredBills.length > 0 && (
-          <button className="btn btn-ghost" style={{ fontSize: 13 }}
-            onClick={() => toggleSelectKeys(filteredBills.map(b => b.key))}>
-            {filteredBills.every(b => selectedBills.has(b.key)) ? 'Deselect All Filtered' : `Select All Filtered (${filteredBills.length})`}
-          </button>
-        )}
+          {activeTab === 'outstanding' && (
+            <select className="form-select" value={filterAging} onChange={e => setFilterAging(e.target.value)}>
+              <option value="all">All Ages</option>
+              {AGING_LABELS.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          )}
+          <select className="form-select" value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+            <option value="all">All Months</option>
+            {periodOptions.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => load(activeTab)}>↻ Refresh</button>
+          {activeTab === 'outstanding' && filteredBills.length > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: 13 }}
+              onClick={() => toggleSelectKeys(filteredBills.map(b => b.key))}>
+              {filteredBills.every(b => selectedBills.has(b.key)) ? 'Deselect All Filtered' : `Select All Filtered (${filteredBills.length})`}
+            </button>
+          )}
+        </div>
       </div>
 
       {activeTab === 'outstanding' && selectedBills.size > 0 && (

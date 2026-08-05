@@ -150,12 +150,14 @@ export default function NonVatReport() {
           <h1 className="page-title">Non-VAT Report</h1>
           <p className="page-subtitle">Purchases without VAT this period — {periodLabel(selectedPeriod)}</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>
             {periods.map(p => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
           </select>
-          <button className="btn btn-ghost" onClick={() => printWithTitle(`Non-VAT Report - ${periodLabel(selectedPeriod)}`)}>Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={!entries.length}>Export Excel</button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-ghost" onClick={() => printWithTitle(`Non-VAT Report - ${periodLabel(selectedPeriod)}`)}>Print</button>
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={!entries.length}>Export Excel</button>
+          </div>
         </div>
       </div>
 

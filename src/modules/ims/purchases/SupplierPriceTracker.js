@@ -300,7 +300,7 @@ export default function SupplierPriceTracker() {
           <option value="nodata">No Data</option>
         </select>
 
-        <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 4 }}>
+        <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 'auto' }}>
           {filteredKeys.length} item{filteredKeys.length !== 1 ? 's' : ''}
           {risingCount > 0 && <span style={{ color: 'var(--theme-red)', marginLeft: 8 }}>· {risingCount} ↑ rising</span>}
         </span>

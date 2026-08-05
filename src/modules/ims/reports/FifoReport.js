@@ -218,12 +218,14 @@ export default function FifoReport() {
         </div>
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 16, alignItems: 'center' }}>
-        {['all', 'expired', 'warning', 'ok'].map(f => (
-          <button key={f} onClick={() => setFilterFlag(f)} className={`tab-btn${filterFlag === f ? ' tab-btn--active' : ''}`}>
-            {f === 'all' ? 'All' : f === 'warning' ? 'Expiring Soon' : f.charAt(0).toUpperCase() + f.slice(1)}
-          </button>
-        ))}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="tab-bar">
+          {['all', 'expired', 'warning', 'ok'].map(f => (
+            <button key={f} onClick={() => setFilterFlag(f)} className={`tab-btn${filterFlag === f ? ' tab-btn--active' : ''}`}>
+              {f === 'all' ? 'All' : f === 'warning' ? 'Expiring Soon' : f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
         <select className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
           <option value="all">All Categories</option>
           {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}

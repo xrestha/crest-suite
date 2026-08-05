@@ -564,40 +564,42 @@ export default function Roster() {
           </div>
 
           {/* Controls */}
-          <div className="no-print" style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="no-print" style={{ display: 'flex', gap: 20, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
 
-            {/* View mode */}
-            <div className="tab-bar">
-              <button className={`tab-btn${viewMode === 'weekly'  ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('weekly')}>Weekly</button>
-              <button className={`tab-btn${viewMode === 'monthly' ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('monthly')}>Monthly</button>
+            {/* View mode + date navigation — one temporal-control cluster, kept tight since
+                picking a mode and stepping through it are the same action-in-progress. */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div className="tab-bar">
+                <button className={`tab-btn${viewMode === 'weekly'  ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('weekly')}>Weekly</button>
+                <button className={`tab-btn${viewMode === 'monthly' ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('monthly')}>Monthly</button>
+              </div>
+
+              {viewMode === 'weekly' ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                    onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d) }}>‹</button>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 210, textAlign: 'center' }}>
+                    {weekLabel}
+                  </span>
+                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                    onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d) }}>›</button>
+                  <button className="btn btn-ghost" style={{ fontSize: 11 }}
+                    onClick={() => setWeekStart(weekSunday(new Date()))}>Today</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                    onClick={() => { if (bsMonth === 1) { setBsYear(y => y - 1); setBsMonth(12) } else setBsMonth(m => m - 1) }}>‹</button>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 150, textAlign: 'center' }}>
+                    {BS_MONTHS[bsMonth - 1]} {bsYear}
+                  </span>
+                  <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
+                    onClick={() => { if (bsMonth === 12) { setBsYear(y => y + 1); setBsMonth(1) } else setBsMonth(m => m + 1) }}>›</button>
+                  <button className="btn btn-ghost" style={{ fontSize: 11 }}
+                    onClick={() => { setBsYear(today.year); setBsMonth(today.month) }}>This Month</button>
+                </div>
+              )}
             </div>
-
-            {/* Navigation */}
-            {viewMode === 'weekly' ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
-                  onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d) }}>‹</button>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 210, textAlign: 'center' }}>
-                  {weekLabel}
-                </span>
-                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
-                  onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d) }}>›</button>
-                <button className="btn btn-ghost" style={{ fontSize: 11 }}
-                  onClick={() => setWeekStart(weekSunday(new Date()))}>Today</button>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
-                  onClick={() => { if (bsMonth === 1) { setBsYear(y => y - 1); setBsMonth(12) } else setBsMonth(m => m - 1) }}>‹</button>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 150, textAlign: 'center' }}>
-                  {BS_MONTHS[bsMonth - 1]} {bsYear}
-                </span>
-                <button className="btn btn-ghost" style={{ padding: '4px 10px' }}
-                  onClick={() => { if (bsMonth === 12) { setBsYear(y => y + 1); setBsMonth(1) } else setBsMonth(m => m + 1) }}>›</button>
-                <button className="btn btn-ghost" style={{ fontSize: 11 }}
-                  onClick={() => { setBsYear(today.year); setBsMonth(today.month) }}>This Month</button>
-              </div>
-            )}
 
             {/* Department filter */}
             {depts.length > 2 && (
