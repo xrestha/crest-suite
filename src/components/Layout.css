@@ -913,6 +913,11 @@ textarea:focus-visible {
   color: var(--theme-amber);
 }
 
+.badge-purple {
+  background: rgba(167,139,250,0.12);
+  color: var(--theme-purple);
+}
+
 .badge-red {
   background: rgba(248,113,113,0.10);
   color: var(--theme-red);

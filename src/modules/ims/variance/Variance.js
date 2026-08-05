@@ -160,7 +160,7 @@ export default function Variance() {
 
   function flagBadge(flag) {
     if (flag === 'over') return <span className="badge badge-red">Over</span>
-    if (flag === 'under') return <span className="badge badge-yellow">Under</span>
+    if (flag === 'under') return <span className="badge badge-amber">Under</span>
     return <span className="badge badge-green">OK</span>
   }
 
@@ -213,7 +213,7 @@ export default function Variance() {
               <Tip text="Whether sales data is linked. Without sales, theoretical usage can't be calculated and variance won't be meaningful." width={240}>Data Coverage</Tip>
             </div>
             <div className="stat-value" style={{ fontSize: 16 }}>
-              {summary.totalTheoretical > 0 ? <span className="badge badge-green">Sales linked</span> : <span className="badge badge-yellow">No sales data</span>}
+              {summary.totalTheoretical > 0 ? <span className="badge badge-green">Sales linked</span> : <span className="badge badge-amber">No sales data</span>}
             </div>
             <div className="stat-sub">{summary.totalTheoretical > 0 ? 'Theoretical usage calculated' : 'Add sales entries to compare'}</div>
           </div>
@@ -223,7 +223,7 @@ export default function Variance() {
       <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         <strong style={{ color: 'var(--theme-accent)' }}>How to read this:</strong> Theoretical = what should have been used based on sales × recipe qty. Actual = Opening + Net Purchases (after returns) − Closing − Wastage.
         <span style={{ color: 'var(--theme-red)' }}> Over variance</span> = more used than sold (waste, theft, over-portioning).
-        <span style={{ color: 'var(--theme-accent)' }}> Under variance</span> = less used than expected (under-portioning or data gap).
+        <span style={{ color: 'var(--theme-amber)' }}> Under variance</span> = less used than expected (under-portioning or data gap).
       </div>
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -274,7 +274,7 @@ export default function Variance() {
               </thead>
               <tbody>
                 {filtered.sort((a, b) => Math.abs(b.value) - Math.abs(a.value)).map(row => {
-                  const varColor = row.variance > 0 ? 'var(--theme-red)' : row.variance < 0 ? 'var(--theme-accent)' : 'var(--theme-text2)'
+                  const varColor = row.variance > 0 ? 'var(--theme-red)' : row.variance < 0 ? 'var(--theme-amber)' : 'var(--theme-text2)'
                   return (
                     <tr key={row.item.id} style={{ background: row.flag === 'over' ? 'rgba(248,113,113,0.03)' : 'transparent' }}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.item.name}</td>

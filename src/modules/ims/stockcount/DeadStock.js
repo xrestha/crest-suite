@@ -259,7 +259,7 @@ export default function DeadStock() {
               {filtered.map(r => (
                 <tr key={r.id} style={{ opacity: r.status === 'Dead' ? 1 : 0.85 }}>
                   <td><strong>{r.name}</strong></td>
-                  <td>{r.category}</td>
+                  <td><span className="badge badge-yellow">{r.category}</span></td>
                   <td>{r.uom}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.opening)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.purchased - r.returned)}</td>

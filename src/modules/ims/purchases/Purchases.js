@@ -600,7 +600,7 @@ export default function Purchases() {
                         const actionsCell = (
                           <td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
-                              <span className={`badge ${first.payment_method === 'Cash' ? 'badge-green' : first.payment_method === 'Credit' ? 'badge-red' : 'badge-yellow'}`}>
+                              <span className={`badge ${first.payment_method === 'Cash' ? 'badge-green' : first.payment_method === 'Credit' ? 'badge-red' : 'badge-purple'}`}>
                                 {first.payment_method || 'Cash'}
                               </span>
                               {!isLocked && <>

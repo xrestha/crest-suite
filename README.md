@@ -150,6 +150,27 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S524 — 2026-08-05 — Modal focus-steal bug fix; `/impeccable colorize` pass on IMS
+
+**Modal focus-trap bug (affected all 19+ create/edit modals app-wide, not just one page).** User reported "can't edit, type" in the Vendors "Edit Vendor" modal — typing in any field but the first kept getting interrupted. Root cause was in the shared `Modal.js`, not `Vendors.js`: its focus-trap `useEffect` depended on `[onClose]`, but every caller passes a fresh inline arrow function (`onClose={() => setShowForm(false)}`) on every render. Each keystroke in a controlled form field triggers a parent re-render → new `onClose` reference → effect re-runs → cleanup yanks focus back to the button that opened the modal → effect re-fires and refocuses the panel's *first* focusable field, regardless of which field the user was actually typing in. Fixed by tracking the latest `onClose` in a ref and making the effect mount-only (`[]` deps), so it no longer re-arms on every parent re-render. Confirmed fixed live.
+
+**`/impeccable colorize` pass on the IMS module.** The module was already extensively color-coded (55/61 files reference the semantic tokens), so this was an audit for genuine gaps against DESIGN.md's own rules rather than a from-scratch color pass:
+
+- **Warning states wrongly rendered in brand gold (`.badge-yellow`/`var(--theme-accent)`) instead of amber**, diluting the "needs-attention" signal DESIGN.md already reserves for amber: `Variance.js`'s "Under" variance badge + variance-direction text/number color + legend text, `StockReport.js`'s "Low" stock badge + two matching numeric-cell colors, `Requisitions.js`'s "Draft" status badge (2 call sites), `FifoReport.js`'s "Expiring soon" badge/color.
+- **A second brand color riding on accent gold instead of the rationed purple slot** (a real One Accent Rule violation): `PaymentReport.js`'s FonePay legend/chart color, and the non-Cash/Credit payment-method badge in `Purchases.js` + `ReturnsTab.jsx`. Added a `.badge-purple` class to `Layout.css` for this (formalizes a pattern `AuditLog.js` already used inline).
+- **A real cross-theme bug in `MenuEngineering.js`**: its scatter/bar charts hardcoded Dark-preset-only grid/axis hex (`#2d3240`, `#6b7280`, `#4b5563`, `#9ca3af`), effectively invisible against the five light presets — switched to the `useTheme()`-resolved `colors` object, matching how `PeriodComparison.js` (same directory) already does it. Also fixed a Recharts tooltip cursor fill (`rgba(255,255,255,0.04)`) to `colors.tableHover`, DESIGN.md's own named trap for exactly this pattern.
+- **A 6th occurrence of the tracked `#60a5fa` undocumented-indigo bug** (see DESIGN.md Named Rules, first found S521): `MenuEngineering.js`'s `Q_HEX.Plowhorse` scatter-dot color was `#60a5fa` (blue) while the same quadrant's legend/badge already correctly used `var(--theme-purple)` — the dot and its own legend swatch disagreed. Fixed to `#a78bfa` (theme-purple's actual hex).
+- Minor consistency fix: `DeadStock.js`'s category cell was plain text where every sibling stockcount/variance table wraps it in the category badge.
+- DESIGN.md updated in place with two new notes (the badge-yellow/badge-amber distinction, and the 6th `#60a5fa` recurrence) — matches this project's existing habit of recording these incidents inline rather than just fixing silently.
+
+**Follow-up UX request:** Menu Engineering's "Plowhorse" quadrant icon changed from a plain black square (`⬛`) to `🐴` (horse emoji) — matches the icon convention used in menu-engineering matrix visualizations elsewhere online; the category is literally named after a plow horse.
+
+Production build verified clean (`CI=true npm run build`, exit 0) after all edits.
+
+**Files:** `src/components/Modal.js`, `src/components/Layout.css`, `src/modules/ims/variance/Variance.js`, `src/modules/ims/stockcount/StockReport.js`, `src/modules/ims/stockcount/DeadStock.js`, `src/modules/ims/sales/Requisitions.js`, `src/modules/ims/reports/FifoReport.js`, `src/modules/ims/reports/PaymentReport.js`, `src/modules/ims/purchases/Purchases.js`, `src/modules/ims/purchases/ReturnsTab.jsx`, `src/modules/ims/recipes/MenuEngineering.js`, `DESIGN.md`
+
+---
+
 ### S523 — 2026-08-05 — Category filter on Best & Worst Sellers; full-app `/impeccable layout` audit; two more `#60a5fa`/`#818cf8` recurrences fixed
 
 Started from a small ask (`BestSellers.js` had no way to narrow the Top/Bottom 10 tables to one recipe category) and grew into a full-app pass once the layout fix on that one filter row surfaced a repeatable pattern worth checking everywhere. Category filter itself: a plain `<select>` populated from the categories actually present in the selected period's sales data (not the client's full category list, so an unused category never shows), defaulting to "All Categories," resetting on period change, filtering the chart/top10/bottom10/summary strip together. Verified live against a real client's Shrawan 2083 data (74 items, Food/Beverage/Other categories) via Playwright, read-only — no data mutated.

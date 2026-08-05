@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../../../context/AuthContext'
+import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
@@ -14,7 +15,7 @@ import { Navigate } from 'react-router-dom'
 
 const QUADRANTS = {
   Star:      { color: 'var(--theme-green)', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.30)', icon: '★', desc: 'High profit · High popularity' },
-  Plowhorse: { color: 'var(--theme-purple)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)', icon: '⬛', desc: 'High profit · Low popularity' },
+  Plowhorse: { color: 'var(--theme-purple)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)', icon: '🐴', desc: 'High profit · Low popularity' },
   Puzzle:    { color: 'var(--theme-amber)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)',  icon: '?', desc: 'Low profit · High popularity' },
   Dog:       { color: 'var(--theme-red)', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.30)', icon: '✕', desc: 'Low profit · Low popularity' },
 }
@@ -22,7 +23,7 @@ const QUADRANTS = {
 const FC_CUTOFF = 35 // %
 
 // Hex colors for Recharts SVG (CSS vars don't resolve inside SVG presentation attributes)
-const Q_HEX = { Star: '#34d399', Plowhorse: '#60a5fa', Puzzle: '#f59e0b', Dog: '#f87171' }
+const Q_HEX = { Star: '#34d399', Plowhorse: '#a78bfa', Puzzle: '#f59e0b', Dog: '#f87171' }
 
 function ScatterDot({ cx, cy, payload }) {
   const color = Q_HEX[payload.quadrant] || '#888'
@@ -77,6 +78,7 @@ export default function MenuEngineering() {
   const { profile, clientId: authClientId, loading: authLoading, hasImsAccess } = useAuth()
   const clientId = authClientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
+  const { colors } = useTheme()
 
   const [periods, setPeriods]     = useState([])
   const [periodId, setPeriodId]   = useState('')
@@ -346,11 +348,11 @@ export default function MenuEngineering() {
             renderChart={h => (
               <ResponsiveContainer width="100%" height={h}>
                 <ScatterChart margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2d3240" />
-                  <XAxis type="number" dataKey="x" name="Qty Sold" label={{ value: 'Qty Sold →', position: 'insideBottom', offset: -16, fill: '#6b7280', fontSize: 11 }} tick={{ fill: '#6b7280', fontSize: 11 }} />
-                  <YAxis type="number" dataKey="y" name="Profitability" domain={[0, 100]} label={{ value: 'Profitability % →', angle: -90, position: 'insideLeft', offset: 10, fill: '#6b7280', fontSize: 11 }} tick={{ fill: '#6b7280', fontSize: 11 }} tickFormatter={v => `${v}%`} />
-                  <ReferenceLine x={medianQty} stroke="#4b5563" strokeDasharray="5 4" label={{ value: `median ${medianQty.toFixed(0)}`, position: 'top', fill: '#6b7280', fontSize: 10 }} />
-                  <ReferenceLine y={100 - FC_CUTOFF} stroke="#4b5563" strokeDasharray="5 4" label={{ value: `FC ${FC_CUTOFF}%`, position: 'right', fill: '#6b7280', fontSize: 10 }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={colors.border} />
+                  <XAxis type="number" dataKey="x" name="Qty Sold" label={{ value: 'Qty Sold →', position: 'insideBottom', offset: -16, fill: colors.text3, fontSize: 11 }} tick={{ fill: colors.text3, fontSize: 11 }} />
+                  <YAxis type="number" dataKey="y" name="Profitability" domain={[0, 100]} label={{ value: 'Profitability % →', angle: -90, position: 'insideLeft', offset: 10, fill: colors.text3, fontSize: 11 }} tick={{ fill: colors.text3, fontSize: 11 }} tickFormatter={v => `${v}%`} />
+                  <ReferenceLine x={medianQty} stroke={colors.borderLt} strokeDasharray="5 4" label={{ value: `median ${medianQty.toFixed(0)}`, position: 'top', fill: colors.text3, fontSize: 10 }} />
+                  <ReferenceLine y={100 - FC_CUTOFF} stroke={colors.borderLt} strokeDasharray="5 4" label={{ value: `FC ${FC_CUTOFF}%`, position: 'right', fill: colors.text3, fontSize: 10 }} />
                   <ReferenceLine x={0} stroke="none" label={{ value: '★ STARS', position: 'insideTopRight', fill: '#34d399', fontSize: 9, offset: 8 }} />
                   <RTooltip content={<ScatterTooltipContent />} cursor={{ strokeDasharray: '3 3' }} />
                   <Scatter data={scatterData} shape={<ScatterDot />} />
@@ -380,8 +382,8 @@ export default function MenuEngineering() {
                 <ResponsiveContainer width="100%" height={h}>
                   <BarChart data={topItems} layout="vertical" margin={{ top: 0, right: 40, bottom: 0, left: 0 }}>
                     <XAxis type="number" hide />
-                    <YAxis type="category" dataKey="name" width={140} tick={{ fill: '#9ca3af', fontSize: 11 }} />
-                    <RTooltip content={<BarTooltipContent />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+                    <YAxis type="category" dataKey="name" width={140} tick={{ fill: colors.text3, fontSize: 11 }} />
+                    <RTooltip content={<BarTooltipContent />} cursor={{ fill: colors.tableHover }} />
                     <Bar dataKey="revenue" radius={[0, 4, 4, 0]}>
                       {topItems.map((entry, i) => (
                         <Cell key={i} fill={Q_HEX[entry.quadrant] || '#c9a84c'} fillOpacity={0.8} />

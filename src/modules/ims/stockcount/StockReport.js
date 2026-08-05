@@ -171,7 +171,7 @@ export default function StockReport() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const statusBadge = (st) => st === 'out'
     ? <span className="badge badge-red">Out</span>
-    : st === 'low' ? <span className="badge badge-yellow">Low</span> : <span className="badge badge-green">OK</span>
+    : st === 'low' ? <span className="badge badge-amber">Low</span> : <span className="badge badge-green">OK</span>
 
   return (
     <div>
@@ -197,7 +197,7 @@ export default function StockReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Low Stock</div>
-          <div className="stat-value" style={{ color: lowCount > 0 ? 'var(--theme-accent)' : 'var(--theme-green)' }}>{lowCount}</div>
+          <div className="stat-value" style={{ color: lowCount > 0 ? 'var(--theme-amber)' : 'var(--theme-green)' }}>{lowCount}</div>
           <div className="stat-sub">at or below par level</div>
         </div>
         <div className="stat-card">
@@ -268,7 +268,7 @@ export default function StockReport() {
                     </td>
                     <td><span className="badge badge-yellow">{r.category}</span></td>
                     <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: r.status === 'out' ? 'var(--theme-red)' : r.status === 'low' ? 'var(--theme-accent)' : 'var(--theme-text1)' }}>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: r.status === 'out' ? 'var(--theme-red)' : r.status === 'low' ? 'var(--theme-amber)' : 'var(--theme-text1)' }}>
                       {r.onHand.toFixed(2)}
                       {r.isNegative && <span title="Negative theoretical — data issue" style={{ color: 'var(--theme-red)', marginLeft: 4 }}>⚠</span>}
                     </td>

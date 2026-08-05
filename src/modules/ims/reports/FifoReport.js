@@ -170,7 +170,7 @@ export default function FifoReport() {
 
   function flagStyle(flag) {
     if (flag === 'expired') return { color: 'var(--theme-red)', badge: 'badge-red', label: 'Expired' }
-    if (flag === 'warning') return { color: 'var(--theme-accent)', badge: 'badge-yellow', label: `Expiring in ${warningDays}d` }
+    if (flag === 'warning') return { color: 'var(--theme-amber)', badge: 'badge-amber', label: `Expiring in ${warningDays}d` }
     return { color: 'var(--theme-green)', badge: 'badge-green', label: 'OK' }
   }
 

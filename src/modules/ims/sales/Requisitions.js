@@ -532,7 +532,7 @@ export default function Requisitions() {
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 3 }}>Status</div>
-                  <span className={`badge ${selectedReq.status === 'issued' ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: 12, padding: '3px 10px' }}>
+                  <span className={`badge ${selectedReq.status === 'issued' ? 'badge-green' : 'badge-amber'}`} style={{ fontSize: 12, padding: '3px 10px' }}>
                     {selectedReq.status === 'issued' ? 'ISSUED' : 'DRAFT'}
                   </span>
                 </div>
@@ -772,7 +772,7 @@ export default function Requisitions() {
                           <td style={{ fontWeight: 600 }}>{req.department}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{lineCount}</td>
                           <td>
-                            <span className={`badge ${req.status === 'issued' ? 'badge-green' : 'badge-yellow'}`}>
+                            <span className={`badge ${req.status === 'issued' ? 'badge-green' : 'badge-amber'}`}>
                               {req.status === 'issued' ? 'Issued' : 'Draft'}
                             </span>
                           </td>

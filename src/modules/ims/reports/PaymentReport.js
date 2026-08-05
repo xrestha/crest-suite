@@ -7,7 +7,7 @@ import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const METHODS = ['Cash', 'Credit', 'FonePay']
-const METHOD_COLORS = { Cash: 'var(--theme-green)', Credit: 'var(--theme-red)', FonePay: 'var(--theme-accent)' }
+const METHOD_COLORS = { Cash: 'var(--theme-green)', Credit: 'var(--theme-red)', FonePay: 'var(--theme-purple)' }
 
 export default function PaymentReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()

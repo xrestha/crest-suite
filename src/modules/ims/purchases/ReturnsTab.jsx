@@ -257,7 +257,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                       −NPR {(ret.qty * ret.rate).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td>
-                      <span className={`badge ${ret.payment_method === 'Cash' ? 'badge-green' : ret.payment_method === 'Credit' ? 'badge-red' : 'badge-yellow'}`}>
+                      <span className={`badge ${ret.payment_method === 'Cash' ? 'badge-green' : ret.payment_method === 'Credit' ? 'badge-red' : 'badge-purple'}`}>
                         {ret.payment_method || 'Cash'}
                       </span>
                     </td>
