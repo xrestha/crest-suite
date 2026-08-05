@@ -9,6 +9,8 @@ export default function Modal({ onClose, title, headerExtra, children, maxWidth 
   const titleId = useId()
   const panelRef = useRef(null)
   const triggerRef = useRef(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
 
   useEffect(() => {
     // Remember whatever had focus before the modal opened (the button that triggered it)
@@ -19,7 +21,7 @@ export default function Modal({ onClose, title, headerExtra, children, maxWidth 
     ;(focusable || panel)?.focus()
 
     const onKeyDown = e => {
-      if (e.key === 'Escape') { onClose(); return }
+      if (e.key === 'Escape') { onCloseRef.current(); return }
       // Trap Tab within the panel — without this, keyboard focus can walk out into the
       // page behind the overlay, which is only visually obscured, not actually inert.
       if (e.key === 'Tab' && panel) {
@@ -36,7 +38,11 @@ export default function Modal({ onClose, title, headerExtra, children, maxWidth 
       document.removeEventListener('keydown', onKeyDown)
       triggerRef.current?.focus?.()
     }
-  }, [onClose])
+    // Deliberately mount-only: `onClose` is almost always a fresh inline arrow function from the
+    // caller, so depending on it here would re-run this effect (and re-steal focus into the panel's
+    // first field) on every parent re-render — e.g. every keystroke in a controlled form field.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div
