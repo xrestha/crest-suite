@@ -38,6 +38,14 @@ colors:
   print-rule-lt: "#dddddd"  # notes-box border
   print-rule-xlt: "#eeeeee" # table row divider
   print-fill: "#f3f3f3"     # table header row background
+  # ImsGuideTab.jsx's buildGuidePrintHtml() (the "Print Guide" export under Admin → Settings →
+  # Guides) is a step further removed than the templates above: it's a fully standalone
+  # `<!doctype html>` string opened in its own print window, with no connection at all to the
+  # React app's stylesheet or :root CSS custom properties — var(--radius-sm) etc. would not
+  # resolve there even inside an on-screen component. Documented 2026-08-05 rather than edited:
+  # its border-radius (3px/4px on .meta chips) and grayscale (#666/#555/#ccc/#f5f5f5/#96700a-as-a
+  # print-safe darkened accent) are a legitimate, structurally-necessary variance from both the
+  # on-screen shape scale and this print ramp, not drift to fix.
   # On-screen exceptions where a CSS var() token genuinely can't be used, documented 2026-07-28
   # instead of left as silent drift.
   chart-tick: "#6b7280"     # Recharts axis tick/label/reference-line fill — var() does not
@@ -104,6 +112,12 @@ typography:
     letterSpacing: "0.08em"
   chevron:
     fontSize: "9px"
+  # Print-only, documented 2026-08-05 alongside the print-color-ramp note below — same reasoning:
+  # a thermal-printer receipt needs fixed-width columns to stay aligned, which Poppins can't give.
+  # Used in creditNoteHtml.js, posOrderPrintHtml.js, parkingSlipHtml.js, PosShifts.jsx's print
+  # block — never inside the live app UI.
+  print-monospace:
+    fontFamily: "'Courier New', monospace"
 rounded:
   sm: "8px"
   md: "12px"
@@ -178,11 +192,12 @@ The palette is a dark charcoal neutral scale with a single warm accent; every ot
 - **Danger Red** (#f87171): Overdue, rejected, negative variance, destructive actions.
 - **Warning Amber** (#fbbf24): Pending, low stock, needs-attention.
 - **Categorical Purple** (#a78bfa): A rationed 4th/5th categorical color for when green/red/amber genuinely aren't enough (e.g. Staff Meals as a distinct expense category, a sub-recipe tab underline). Not a general-purpose accent - reach for it only when a page needs one more distinct hue than the semantic three provide.
+- **Roster shift-type swatches** (`Roster.jsx`'s `DEFAULT_SHIFTS`, seeded into the per-client-customizable `hr_shift_types` table) are a deliberate exception to the token system entirely, not an extension of it - six fixed hex swatches (`#3B82F6`/`#F59E0B`/`#8B5CF6`/`#64748B`/`#10B981`/`#EC4899`/`#6B7280`) so a roster board's color-coding stays legible and consistent regardless of which of the ten theme presets is active, the same reasoning `FoodBeverageSplit.jsx`'s categorical fallback rotation already uses. Admin can further customize these per client via Shift Settings, so they were never meant to track the theme anyway. (A second, drifted copy of this same palette in `shared/constants/shiftTypes.js` was found unused - zero real imports anywhere in the codebase - and deleted 2026-08-05 rather than reconciled.)
 
 ### Named Rules
-**The One Accent Rule.** Aged Brass (or the active preset's own accent) is the only non-semantic color on any screen. If a second "brand" color shows up anywhere outside the rationed purple exception, it's a mistake, not a design choice. **Bright's `ClientDashboard.jsx` KPI badges are the one named, scoped exception** (see Badges / Status Chips) - everywhere else, on every preset including Bright itself, the rule holds as written.
+**The One Accent Rule.** Aged Brass (or the active preset's own accent) is the only non-semantic color on any screen. If a second "brand" color shows up anywhere outside the rationed purple exception, it's a mistake, not a design choice. **Bright's `ClientDashboard.jsx` KPI badges are the one named, scoped exception** (see Badges / Status Chips) - everywhere else, on every preset including Bright itself, the rule holds as written. A 2026-08-05 audit found a second undocumented accent (an indigo/blue, `#60a5fa`/`#818cf8`) had spread into `AdminClients.js` (module pills, a "Features" button) and `SuiteGate.js` (the Suite-upsell card) - fixed to `var(--theme-accent)`/`var(--theme-focus-ring)`, matching the identical upsell card in `PremiumGate.js` which never had the bug.
 
-**The Accent-Text Pairing Rule.** Any element with an accent-colored background uses the theme's paired `accent-text` token for its foreground (`#0f1117` in the Dark preset, `#ffffff` in Bright), never a hardcoded white or black. Because the accent color changes per theme preset, a hardcoded foreground color will silently fail contrast on at least one of the ten presets. This is a real bug the codebase shipped and fixed once already (a floating action button used a hardcoded white label) - treat it as the standing rule, not a one-off fix. A 2026-07-12 audit found the same class of bug in four more shared components (`SearchableSelect.js`, `BsCalendarPicker.js`, `PremiumGate.js`, `ProtectedRoute.js`) that had been hardcoding the Dark preset's exact hex values since before the theme system existed - fixed to read theme tokens, so they now actually respect every preset instead of only working by coincidence on Dark.
+**The Accent-Text Pairing Rule.** Any element with an accent-colored background uses the theme's paired `accent-text` token for its foreground (`#0f1117` in the Dark preset, `#ffffff` in Bright), never a hardcoded white or black. Because the accent color changes per theme preset, a hardcoded foreground color will silently fail contrast on at least one of the ten presets. This is a real bug the codebase shipped and fixed once already (a floating action button used a hardcoded white label) - treat it as the standing rule, not a one-off fix. A 2026-07-12 audit found the same class of bug in four more shared components (`SearchableSelect.js`, `BsCalendarPicker.js`, `PremiumGate.js`, `ProtectedRoute.js`) that had been hardcoding the Dark preset's exact hex values since before the theme system existed - fixed to read theme tokens, so they now actually respect every preset instead of only working by coincidence on Dark. **It recurred once more** (2026-08-05, `AdminClients.js`'s "Annual" badge, hardcoded `#000` on `var(--theme-accent)`) - fixed to `var(--theme-accent-text)`. Given it's now shipped-and-fixed twice, treat any hardcoded `#000`/`#fff`/`white`/`black` sitting next to `var(--theme-accent)` as a near-certain instance of this bug on sight, not just a style-review nit.
 
 ## 3. Typography
 
@@ -236,10 +251,11 @@ Shadow was already in real use before this change beyond the two cases previousl
 - **Style:** each semantic color renders as a ~10-12% alpha tint of itself as background, full-opacity as text - never a solid fill with white text. This keeps a table full of status badges calm even when every row has one.
 - **Roles:** green (paid/approved/healthy), red (overdue/rejected), amber (pending/low), gray (neutral/cancelled).
 - **Bright-only exception (2026-07-12):** `ClientDashboard.jsx`'s five headline KPI cards (Net Purchases, Revenue, Food Cost %, Fixed Costs %, Est. Net Margin %) get a colorful per-category icon badge (blue/green/amber square, `kpiIcon()`) when the active preset is Bright, gated on `themeKey === 'bright'`. This is a deliberate, narrowly-scoped exception to the One Accent Rule for one page and one preset — every other preset, and every other stat-grid page (35+ report pages, `OwnerDashboard.jsx`, `AdminDashboardOverview.jsx`), keeps plain text-only stat cards. Don't propagate this pattern elsewhere by analogy; it was a specific design call for this one dashboard, not a new baseline.
+- A 2026-08-05 audit found `AdminClients.js`'s Trial Accounts panel had drifted onto a solid `background:'#f87171'`/`color:'#fff'` fill for its count pill and "Wants to Subscribe" badge — fixed to the standard `.badge`/`.badge-red` alpha-tint classes.
 
 ### Cards / Containers
 - **Corner style:** 18px radius (`--radius-lg`; bumped from 10px 2026-07-12) - noticeably rounded, still not pill-shaped.
-- **Background:** one step lighter than the page background; no gradient, no tint toward the accent.
+- **Background:** one step lighter than the page background; no gradient, no tint toward the accent. A 2026-08-05 audit found `AdminClients.js`'s Trial Accounts panel header using a `linear-gradient()` — the one confirmed instance of this rule being broken found so far. Fixed to a flat `rgba(248,113,113,0.10)` wash (the same literal `.badge-red` background tint, scaled up for a section header rather than an inline chip).
 - **Shadow strategy:** `var(--theme-card-shadow)` (added 2026-07-12 - see Elevation). Depth is background-shift + border + a per-preset-tuned shadow, no longer border-only.
 - **Border:** 1px, structural border color.
 - **Internal padding:** 24px, consistent regardless of card content density.

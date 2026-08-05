@@ -219,16 +219,16 @@ export default function AdminClients() {
         if (trialClients.length === 0) return null
         const now = new Date()
         return (
-          <div style={{ marginBottom: 28, border: '2px solid #f87171', borderRadius: 12, overflow: 'hidden' }}>
-            {/* Header */}
-            <div style={{ background: 'linear-gradient(135deg, #450a0a 0%, #7f1d1d 100%)', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ marginBottom: 28, border: '2px solid var(--theme-red)', borderRadius: 12, overflow: 'hidden' }}>
+            {/* Header — flat alpha-tint wash, not a gradient (DESIGN.md: cards never gradient/tint toward the accent) */}
+            <div style={{ background: 'rgba(248,113,113,0.10)', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
               <span style={{ fontSize: 18 }}>🧪</span>
               <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: '#fecaca', letterSpacing: 0.3 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-red)', letterSpacing: 0.3 }}>
                   Trial Accounts
-                  <span style={{ marginLeft: 8, background: '#f87171', color: '#fff', borderRadius: 12, padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
+                  <span style={{ marginLeft: 8, background: 'rgba(248,113,113,0.18)', color: 'var(--theme-red)', borderRadius: 12, padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
                 </div>
-                <div style={{ fontSize: 11, color: '#fca5a5', marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                   {trialClients.filter(c => c.subscribe_requested).length > 0
                     ? `${trialClients.filter(c => c.subscribe_requested).length} requesting to subscribe`
                     : 'Free trial users — 7 days · Starter plan'}
@@ -236,7 +236,7 @@ export default function AdminClients() {
               </div>
             </div>
             {/* Rows */}
-            <div style={{ background: 'rgba(239,68,68,0.04)' }}>
+            <div style={{ background: 'rgba(248,113,113,0.04)' }}>
               {trialClients.map(c => {
                 const expAt   = c.trial_expires_at ? new Date(c.trial_expires_at) : null
                 const purgeAt = c.trial_purge_at   ? new Date(c.trial_purge_at)   : null
@@ -247,13 +247,13 @@ export default function AdminClients() {
                 return (
                   <div key={c.id} style={{
                     display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px',
-                    borderBottom: '1px solid rgba(239,68,68,0.12)',
-                    background: wantsToSub ? 'rgba(239,68,68,0.06)' : 'transparent',
+                    borderBottom: '1px solid rgba(248,113,113,0.12)',
+                    background: wantsToSub ? 'rgba(248,113,113,0.06)' : 'transparent',
                   }}>
                     {/* Subscribe badge */}
                     {wantsToSub && (
                       <div style={{ position: 'relative', flexShrink: 0 }}>
-                        <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#f87171', boxShadow: '0 0 0 0 rgba(248,113,113,0.5)', animation: 'pulse-dot 1.5s infinite' }} />
+                        <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: 'var(--theme-red)', boxShadow: '0 0 0 0 rgba(248,113,113,0.5)', animation: 'pulse-dot 1.5s infinite' }} />
                       </div>
                     )}
                     {/* Info */}
@@ -261,7 +261,7 @@ export default function AdminClients() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</span>
                         {wantsToSub && (
-                          <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: '#fff', background: '#ef4444', borderRadius: 8, padding: '2px 7px' }}>
+                          <span className="badge badge-red" style={{ flexShrink: 0, fontWeight: 700 }}>
                             Wants to Subscribe
                           </span>
                         )}
@@ -274,11 +274,11 @@ export default function AdminClients() {
                           </span>
                         )}
                         {expired
-                          ? <span style={{ color: '#f87171', fontWeight: 600 }}>
+                          ? <span style={{ color: 'var(--theme-red)', fontWeight: 600 }}>
                               · Trial expired{purgeDays != null && purgeDays > 0 ? ` · data purge in ${purgeDays}d` : ' · purge imminent'}
                             </span>
                           : daysLeft != null
-                            ? <span style={{ color: daysLeft <= 2 ? '#f59e0b' : 'var(--theme-text2)' }}>
+                            ? <span style={{ color: daysLeft <= 2 ? 'var(--theme-amber)' : 'var(--theme-text2)' }}>
                                 · {daysLeft === 0 ? 'Expires today' : `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`}
                               </span>
                             : ''}
@@ -395,9 +395,9 @@ export default function AdminClients() {
                   {/* Module pills */}
                   <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
                     {[
-                      { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan,     color: '#60a5fa', borderRgba: 'rgba(96,165,250,0.4)' },
-                      { key: 'HR',  enabled: !!c.hr_enabled,          plan: c.hr_plan,  color: '#34d399', borderRgba: 'rgba(52,211,153,0.35)' },
-                      { key: 'POS', enabled: !!c.pos_enabled,         plan: c.pos_plan, color: '#a78bfa', borderRgba: 'rgba(167,139,250,0.35)' },
+                      { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan,     color: 'var(--theme-accent)', borderRgba: 'var(--theme-focus-ring)' },
+                      { key: 'HR',  enabled: !!c.hr_enabled,          plan: c.hr_plan,  color: 'var(--theme-green)', borderRgba: 'rgba(52,211,153,0.35)' },
+                      { key: 'POS', enabled: !!c.pos_enabled,         plan: c.pos_plan, color: 'var(--theme-purple)', borderRgba: 'rgba(167,139,250,0.35)' },
                     ].map(m => (
                       <span key={m.key} style={{
                         fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
@@ -413,7 +413,7 @@ export default function AdminClients() {
                   {/* Sub badge + Manage */}
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
                     {c.billing_cycle === 'annual' && (c.ims_ends_at || c.subscription_ends_at) && (
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4, color: '#000', background: 'var(--theme-accent)' }}>Annual</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4, color: 'var(--theme-accent-text)', background: 'var(--theme-accent)' }}>Annual</span>
                     )}
                     <SubBadge client={c} />
                     <button
@@ -433,7 +433,7 @@ export default function AdminClients() {
                 >
                   <button
                     className="btn btn-ghost"
-                    style={{ fontSize: 10, padding: '2px 8px', color: '#818cf8', borderColor: 'rgba(129,140,248,0.25)' }}
+                    style={{ fontSize: 10, padding: '2px 8px' }}
                     onClick={e => { e.stopPropagation(); setFeatureModalClient(c) }}
                   >
                     Features ⊞

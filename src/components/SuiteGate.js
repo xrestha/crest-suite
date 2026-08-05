@@ -43,10 +43,10 @@ export default function SuiteGate({ children, minTier = 'growth', featureKey, fe
     <div
       onClick={() => navigate('/pricing')}
       className="card"
-      style={{ textAlign: 'center', padding: '48px 24px', cursor: 'pointer', borderStyle: 'dashed', borderColor: 'rgba(129,140,248,0.4)' }}
+      style={{ textAlign: 'center', padding: '48px 24px', cursor: 'pointer', borderStyle: 'dashed', borderColor: 'var(--theme-focus-ring)' }}
     >
       <div style={{ fontSize: 32, marginBottom: 12 }}>🔒</div>
-      <p style={{ fontSize: 15, color: '#818cf8', fontWeight: 700, margin: '0 0 8px' }}>Unlock with Crest Suite Growth</p>
+      <p style={{ fontSize: 15, color: 'var(--theme-accent)', fontWeight: 700, margin: '0 0 8px' }}>Unlock with Crest Suite Growth</p>
       <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
         {featureLabel} is part of the Suite bundle — cross-module data across {requireModules.map(m => MODULE_LABELS[m]).join(', ')}. View plans →
       </p>

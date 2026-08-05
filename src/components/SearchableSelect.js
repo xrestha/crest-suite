@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useId } from 'react'
 
 // Type-to-filter combobox for long option lists (e.g. 200+ items).
 // Drop-in replacement for a <select>: pass value, onChange(value), and
@@ -12,6 +12,9 @@ export default function SearchableSelect({ value, onChange, options, placeholder
   const rootRef = useRef(null)
   const inputRef = useRef(null)
   const listRef = useRef(null)
+  const uid = useId()
+  const listboxId = `${uid}-listbox`
+  const optionId = v => `${uid}-opt-${v}`
 
   const selected = options.find(o => o.value === value)
 
@@ -77,6 +80,8 @@ export default function SearchableSelect({ value, onChange, options, placeholder
     <div ref={rootRef} style={{ position: 'relative', ...style }}>
       <button
         type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
         onClick={() => (open ? close() : openIt())}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
@@ -105,18 +110,26 @@ export default function SearchableSelect({ value, onChange, options, placeholder
             onKeyDown={onKeyDown}
             placeholder="Type to search…"
             autoComplete="off"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls={listboxId}
+            aria-autocomplete="list"
+            aria-activedescendant={filtered[highlight] ? optionId(filtered[highlight].value) : undefined}
             style={{
               width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: 'none',
               borderBottom: '1px solid var(--theme-border)', padding: '9px 11px', fontSize: 13, color: 'var(--theme-text1)',
               outline: 'none', fontFamily: 'inherit',
             }}
           />
-          <div ref={listRef} style={{ maxHeight: coords.listMax, overflowY: 'auto' }}>
+          <div ref={listRef} id={listboxId} role="listbox" style={{ maxHeight: coords.listMax, overflowY: 'auto' }}>
             {filtered.length === 0 ? (
               <div style={{ padding: '12px', fontSize: 12, color: 'var(--theme-text2)' }}>No matches</div>
             ) : filtered.map((opt, i) => (
               <div
                 key={opt.value}
+                id={optionId(opt.value)}
+                role="option"
+                aria-selected={opt.value === value}
                 onMouseEnter={() => setHighlight(i)}
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => pick(opt)}
