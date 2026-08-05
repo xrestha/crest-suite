@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
 import { Navigate } from 'react-router-dom'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -192,7 +191,8 @@ export default function KotLog() {
 
   if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     if (tab === 'register') {
       const ws = XLSX.utils.json_to_sheet(logRows.map(r => {

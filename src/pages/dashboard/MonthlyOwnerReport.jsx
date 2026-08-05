@@ -9,7 +9,6 @@ import SuiteGate from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
 import { printWithTitle } from '../../utils/printTitle'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
-import { exportMonthlyReportExcel } from '../../modules/ownerReport/monthlyReportExcel'
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
 import './MonthlyOwnerReport.css'
 
@@ -211,7 +210,10 @@ export default function MonthlyOwnerReport() {
           </select>
           {report && (
             <>
-              <button className="btn btn-ghost" onClick={() => exportMonthlyReportExcel(report, bizInfo)}>Export Excel</button>
+              <button className="btn btn-ghost" onClick={async () => {
+                const { exportMonthlyReportExcel } = await import('../../modules/ownerReport/monthlyReportExcel')
+                exportMonthlyReportExcel(report, bizInfo)
+              }}>Export Excel</button>
               <button
                 className="btn btn-ghost"
                 onClick={() => printWithTitle(`Owner Report — ${periodLabel} — ${bizInfo.name}`)}

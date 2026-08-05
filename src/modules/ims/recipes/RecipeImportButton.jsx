@@ -4,7 +4,6 @@ import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import { convertQty } from '../../../utils/nutrition'
 import { calcRecipeCost, calcSubRecipeCostPerUnit } from './recipeCostCalc'
-import * as XLSX from 'xlsx'
 
 const IMPORT_COLS = ['Menu Item (Recipe)', 'Category', 'Selling Price', 'Yield', 'Ingredient (name or code)', 'Qty', 'Unit']
 
@@ -80,7 +79,8 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState('')
 
-  function downloadRecipeTemplate() {
+  async function downloadRecipeTemplate() {
+    const XLSX = await import('xlsx')
     const example = [
       ['Avocado Toast', 'Food', 433.63, 1, items[0]?.name || 'Sourdough Bread', 80, items[0]?.uom || 'GM'],
       ['', '', '', '', items[1]?.name || 'Avocado', 100, items[1]?.uom || 'GM'],
@@ -110,7 +110,8 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
   // ignores anything past column 6). Portable across clients too: only names are written, never
   // item_id/recipe_id, so importing it into a different client matches against that client's own
   // Item Master instead of carrying over any client-specific identifiers.
-  function downloadRecipeExport() {
+  async function downloadRecipeExport() {
+    const XLSX = await import('xlsx')
     const rows = []
     ;(exportRecipes || recipes).forEach(r => {
       const cost = calcRecipeCost(r, recipes)
@@ -164,8 +165,9 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
     if (!file) return
     if (!clientId) { setImportError('No client selected. Pick a client in the top-left switcher first.'); return }
     const reader = new FileReader()
-    reader.onload = ev => {
+    reader.onload = async ev => {
       try {
+        const XLSX = await import('xlsx')
         const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' })
         const wsName = wb.SheetNames.find(n => n.toLowerCase() === 'recipes') || wb.SheetNames[0]
         const ws = wb.Sheets[wsName]

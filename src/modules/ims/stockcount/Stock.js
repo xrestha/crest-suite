@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -493,7 +492,8 @@ export default function Stock() {
     return byCategory
   }
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     const rows = items.map(item => {
       const row      = stockData[item.id] || {}

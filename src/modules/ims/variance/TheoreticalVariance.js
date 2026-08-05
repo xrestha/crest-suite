@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -184,7 +183,8 @@ export default function TheoreticalVariance() {
       })
   }
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     const data = filteredRows().map(({ item, theor, actual, variance, variancePct, varianceVal }) => ({
       'Item':                item.name,

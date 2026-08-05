@@ -3,7 +3,6 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
-import * as XLSX from 'xlsx'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday } from '../../../utils/bsCalendar'
 import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 import { buildAttendanceFromRoster } from './attendanceFromRoster'
@@ -530,7 +529,8 @@ export default function AttendanceSheet() {
     return { counts, otHours, hoursWorked }
   }
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const rows = employees.map(emp => {
       const row = { 'Employee': emp.full_name, 'Code': emp.employee_code || '', 'Pay Basis': emp.pay_basis || 'monthly' }
       days.forEach(d => {

@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -78,7 +77,8 @@ export default function PurchaseOneLakhAboveReport() {
 
   const totals = rows.reduce((s, v) => ({ gross: s.gross + v.gross, discount: s.discount + (v.discount || 0), taxBase: s.taxBase + v.taxBase, returned: s.returned + v.returned, net: s.net + v.net }), { gross: 0, discount: 0, taxBase: 0, returned: 0, net: 0 })
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(rows.map(v => ({
       'Vendor': v.name,
       'PAN/VAT No.': v.pan,

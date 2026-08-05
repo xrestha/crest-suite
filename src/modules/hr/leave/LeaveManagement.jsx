@@ -4,7 +4,6 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import * as XLSX from 'xlsx'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange } from './leaveConstants'
 
@@ -176,7 +175,8 @@ export default function LeaveManagement() {
       .reduce((a, r) => a + (parseFloat(r.days) || 0), 0)
   }
 
-  function exportBalances() {
+  async function exportBalances() {
+    const XLSX = await import('xlsx')
     const rows = employees.map(e => {
       const row = { Employee: e.full_name, Code: e.employee_code || '' }
       activeTypes.forEach(t => {

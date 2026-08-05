@@ -3,7 +3,6 @@ import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import ChartCard from '../../../components/ChartCard'
 import StatPill from '../../../components/StatPill'
@@ -238,7 +237,8 @@ export default function PeriodComparison() {
     }
   })()
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const wb   = XLSX.utils.book_new()
     const data = shown.map((p, i) => {
       const s    = stats[p.id] || {}

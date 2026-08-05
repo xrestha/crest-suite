@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
@@ -142,7 +141,8 @@ export default function StockReport() {
   const outCount     = rows.filter(r => r.status === 'out').length
   const negativeCount = rows.filter(r => r.isNegative).length
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const data = filtered.map(r => ({
       'Item': r.item.name,
       'Code': r.item.item_code || '',

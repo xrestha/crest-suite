@@ -3,7 +3,6 @@ import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
@@ -146,7 +145,8 @@ export default function FifoReport() {
   const expiredCount  = filtered.filter(r => r.flag === 'expired').length
   const warningCount  = filtered.filter(r => r.flag === 'warning').length
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const data = filtered.map(r => ({
       'Item': r.itemName,
       'Category': r.category,

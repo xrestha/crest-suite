@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
@@ -113,7 +112,8 @@ export default function RecipeMargin() {
     return 'NPR ' + Number(n).toLocaleString('en-NP', { maximumFractionDigits: 0 })
   }
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const wb   = XLSX.utils.book_new()
     const data = display.map((r, i) => ({
       '#':                       i + 1,

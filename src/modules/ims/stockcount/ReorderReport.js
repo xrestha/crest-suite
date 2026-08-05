@@ -3,7 +3,6 @@ import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -260,7 +259,8 @@ export default function ReorderReport() {
     window.open(`https://wa.me/?text=${encodeURIComponent(buildWhatsAppText())}`, '_blank', 'noopener,noreferrer')
   }
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const exportRows = selectedIds.size > 0 ? filtered.filter(r => selectedIds.has(r.item.id)) : filtered
     const data = exportRows.map(r => ({
       'Item': r.item.name,

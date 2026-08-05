@@ -3,7 +3,6 @@ import { useSearchParams, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
@@ -116,7 +115,8 @@ export default function StockMovements() {
   const compValue = filtered.filter(r => r.source === 'pos_comp').reduce((s, r) => s + r.value, 0)
   const itemsAffected = new Set(filtered.map(r => r.item?.name)).size
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const data = filtered.map(r => ({
       'Day': r.bsDay || '',
       'Item': r.item.name || '',

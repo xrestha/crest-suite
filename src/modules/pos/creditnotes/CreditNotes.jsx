@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -97,7 +96,8 @@ export default function CreditNotes() {
     setNotes(prev => prev.map(n => n.id === note.id ? { ...n, print_count: (n.print_count || 0) + 1 } : n))
   }
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(notes.map(n => {
       const bs = adToBs(new Date(n.created_at))
       return {

@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S522 — 2026-08-05 — `/impeccable optimize`: defer the 138kB xlsx library to click-time on all 37 pages that had it
+
+Measured before touching anything: a production build's gzip size report showed `xlsx` (SheetJS) as a single 138 kB shared chunk — the largest chunk in the entire app after `main.js` itself, larger even than `recharts` (102 kB). A grep found the cause: 37 files did `import * as XLSX from 'xlsx'` at the top of the module, so every one of those already-lazy route chunks (Stock, Purchases, PayrollRun, SalesReport, AuditLog, and 32 others) forced a parallel fetch of that 138 kB chunk on page load — merely visiting the page, not clicking its Export/Import button, paid the cost. `recharts` was deliberately left alone: it's core above-the-fold chart content on the pages that use it, not a deferred action, so eager-loading it is correct.
+
+Fixed by making each export/import handler `async` and adding `const XLSX = await import('xlsx')` as its first line, so the chunk now only loads the moment a user actually clicks Export or Import. Two files needed a different shape: `SalesReport.jsx`/`CoversReport.jsx` share a `withLetterhead()` helper across every tab's export branch, so `XLSX` became its first parameter instead of a closed-over module import; `MonthlyOwnerReport.jsx`'s dedicated `monthlyReportExcel.js` helper uses `XLSX` throughout, so the page now dynamically imports that whole module at click time rather than touching every function inside it. Verified in the actual built output, not just assumed: the compiled chunk for a fixed page now shows `r.e(1238).then(r.bind(r,1238))` (webpack's lazy-chunk-fetch) sitting inside the button's `onClick`, where it used to be evaluated at module load.
+
+One unrelated finding surfaced along the way and was fixed in place: the design-detector hook flagged `AuditLog.js`'s `ACTION_STYLE.UPDATE` badge for the same undocumented `#60a5fa` blue that S521 had just fixed in two other files — a third recurrence, fixed to `var(--theme-purple)` (a genuine 4th-category case here, since Added/Deleted already own green/red).
+
+**Files:** 37 files across `src/modules/hr/`, `src/modules/ims/`, `src/modules/pos/`, `src/pages/AuditLog.js`, plus `src/pages/dashboard/MonthlyOwnerReport.jsx` — see `CLAUDE.md`'s Stack section for the full list and the two non-standard cases.
+
+---
+
 ### S521 — 2026-08-05 — Full `/impeccable audit` pass: fixed all findings (a11y, theming, dead code)
 
 A whole-project (not single-page) `/impeccable audit` — Accessibility 2/4, Performance 3/4, Responsive 3/4, Theming 2/4, Implementation Integrity 3/4, 13/20 overall — followed by fixing every finding. Full findings list and reasoning were reported inline; summary of what shipped:

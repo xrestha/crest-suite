@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -173,7 +172,8 @@ export default function PosExceptionReport() {
 
   const staffOptions = [...new Set(rows.map(r => r.closed_by).filter(Boolean))]
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(filtered.map(r => {
       const bs = r.closed_at ? adToBs(new Date(r.closed_at)) : null
       return {

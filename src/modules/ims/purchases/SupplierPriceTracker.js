@@ -2,7 +2,6 @@ import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
 import { getCf } from './purchasesHelpers'
@@ -155,7 +154,8 @@ export default function SupplierPriceTracker() {
 
   // ── Excel export ───────────────────────────────────────────────────────────
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const byItem = getPurchasesForVendor(selectedVendorId)
     const wb = XLSX.utils.book_new()
     const vendorLabel = selectedVendorId === 'all' ? 'All_Vendors' : (vendorMap[selectedVendorId]?.name?.replace(/\s+/g, '_') || 'Vendor')

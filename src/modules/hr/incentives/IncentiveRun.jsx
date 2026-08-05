@@ -3,7 +3,6 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
-import * as XLSX from 'xlsx'
 import { getBsToday } from '../../../utils/bsCalendar'
 import { computeBonusTds, fiscalYearOf } from '../payroll/tds'
 import IncentiveConfigs from './IncentiveConfigs'
@@ -171,7 +170,8 @@ export default function IncentiveRun() {
   const total    = rows.reduce((a, r) => a + (r.amount || 0), 0)
   const totalTds = rows.reduce((a, r) => a + (r.tds || 0), 0)
 
-  function exportSheet(data, name, ext = 'xlsx') {
+  async function exportSheet(data, name, ext = 'xlsx') {
+    const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, name)

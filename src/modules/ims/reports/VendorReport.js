@@ -2,7 +2,6 @@ import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import { bsToAd } from '../../../utils/bsCalendar'
@@ -275,7 +274,8 @@ export default function VendorReport() {
     return val !== 0 ? `NPR ${Number(val.toFixed(0)).toLocaleString('en-NP')}` : '—'
   }
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     const summaryData = vendorSummary.map(r => ({
       'Vendor': r.vendor.name,

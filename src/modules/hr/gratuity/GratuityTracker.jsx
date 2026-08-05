@@ -3,7 +3,6 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
-import * as XLSX from 'xlsx'
 import { SSF_CAP } from '../payrollConstants'
 
 const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
@@ -91,7 +90,8 @@ export default function GratuityTracker() {
   const vestedCount    = rows.filter(r => r.g.vested).length
   const nonMonthly     = employees.filter(e => (e.pay_basis || 'monthly') !== 'monthly').length
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(rows.map(r => ({
       'Employee':          r.full_name,
       'Code':              r.employee_code || '',

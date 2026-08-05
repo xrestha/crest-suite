@@ -3,7 +3,6 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
-import * as XLSX from 'xlsx'
 import { SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT, PAY_BASES, EMPLOYEE_STATUS_COLORS as STATUS_COLORS } from '../payrollConstants'
 import PayForm from './PayForm'
 
@@ -78,7 +77,8 @@ export default function PaySetup() {
     return acc
   }, { gross: 0, ssf_emp: 0, ssf_employer: 0, deductions: 0, net: 0, count: 0 })
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const rows = filtered.map(emp => {
       const s = getSalary(emp)
       const base = {

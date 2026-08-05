@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -215,37 +214,38 @@ export default function CoversReport() {
   if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
 
   const dateRangeLine = `@As On Dated : ${fromIso} (B.S. ${bsSlash(fromIso)})  To : ${toIso} (B.S. ${bsSlash(toIso)})  @Division : ${bizInfo.name}`
-  function withLetterhead(title, dataRows) {
+  function withLetterhead(XLSX, title, dataRows) {
     const aoa = [[title], [`CompanyName : ${bizInfo.name}`], [dateRangeLine], []]
     const ws = XLSX.utils.aoa_to_sheet(aoa)
     XLSX.utils.sheet_add_json(ws, dataRows, { origin: -1 })
     return ws
   }
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     if (tab === 'trend') {
-      const ws = withLetterhead('Covers Report - Daily Trend', trendRows.map(r => ({
+      const ws = withLetterhead(XLSX, 'Covers Report - Daily Trend', trendRows.map(r => ({
         'Date (BS)': `${r.day} ${BS_MONTHS[r.month - 1]} ${r.year}`, 'Bills': r.bills, 'Covers': r.covers,
         'Net Sales (NPR)': Math.round(r.net * 100) / 100, 'Revenue/Cover (NPR)': Math.round(r.revPerCover * 100) / 100,
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'Daily Trend')
       XLSX.writeFile(wb, `covers-daily-trend-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'turnover') {
-      const ws = withLetterhead('Covers Report - Turnover Time', turnoverRows.map(r => ({
+      const ws = withLetterhead(XLSX, 'Covers Report - Turnover Time', turnoverRows.map(r => ({
         'Party Size': r.label, 'Orders': r.orders, 'Covers': r.covers,
         'Avg Turnover (min)': Math.round(r.avgMinutes * 10) / 10, 'Net Sales (NPR)': Math.round(r.net * 100) / 100,
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'Turnover Time')
       XLSX.writeFile(wb, `covers-turnover-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'peak') {
-      const ws = withLetterhead('Covers Report - Peak Hours', peakRows.filter(h => h.covers > 0).map(h => ({
+      const ws = withLetterhead(XLSX, 'Covers Report - Peak Hours', peakRows.filter(h => h.covers > 0).map(h => ({
         'Hour': hourLabel(h.hour), 'Bills': h.bills, 'Covers': h.covers,
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'Peak Hours')
       XLSX.writeFile(wb, `covers-peak-hours-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'server') {
-      const ws = withLetterhead('Covers Report - By Server', serverRows.map(r => ({
+      const ws = withLetterhead(XLSX, 'Covers Report - By Server', serverRows.map(r => ({
         'Staff': r.name, 'Bills': r.bills, 'Covers': r.covers,
         'Net Sales (NPR)': Math.round(r.net * 100) / 100, 'Revenue/Cover (NPR)': Math.round(r.revPerCover * 100) / 100,
       })))

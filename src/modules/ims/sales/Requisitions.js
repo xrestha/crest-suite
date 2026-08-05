@@ -1,6 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -298,7 +297,8 @@ export default function Requisitions() {
     }, 0)
   }
 
-  function exportExcel(req, lines) {
+  async function exportExcel(req, lines) {
+    const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     const rows = lines.map(l => {
       const rate    = parseFloat(l.items?.per_uom_rate || 0)

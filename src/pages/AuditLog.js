@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useState } from 'react'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import Tip from '../components/Tip'
@@ -34,7 +33,7 @@ const TABLE_LABELS = {
 
 const ACTION_STYLE = {
   INSERT: { label: 'Added',   color: 'var(--theme-green)', bg: 'rgba(52,211,153,0.12)' },
-  UPDATE: { label: 'Updated', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
+  UPDATE: { label: 'Updated', color: 'var(--theme-purple)', bg: 'rgba(167,139,250,0.12)' },
   DELETE: { label: 'Deleted', color: 'var(--theme-red)', bg: 'rgba(248,113,113,0.12)' },
 }
 
@@ -269,7 +268,8 @@ export default function AuditLog() {
     return haystack.includes(q)
   })
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const rows = visibleLogs.map(log => ({
       Time: fmtTime(log.created_at),
       Client: log.client_name || '—',

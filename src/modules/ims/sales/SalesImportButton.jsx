@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import * as XLSX from 'xlsx'
 import Tip from '../../../components/Tip'
 
 const norm = s => String(s ?? '').trim()
@@ -77,8 +76,9 @@ export default function SalesImportButton({ recipes, onMatched, disabled }) {
     e.target.value = '' // allow re-selecting the same file
     if (!file) return
     const reader = new FileReader()
-    reader.onload = ev => {
+    reader.onload = async ev => {
       try {
+        const XLSX = await import('xlsx')
         const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
         // defval fills every blank cell with '' instead of leaving it as a hole in the row array —

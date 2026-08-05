@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import * as XLSX from 'xlsx'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -397,7 +396,7 @@ export default function SalesReport() {
 
   // Printable-statutory-document look (Company Name/VAT/Address letterhead + date-range line baked
   // into the sheet itself), matching the format competitor ERP exports use — see [[pos_reports_gap_list]].
-  function withLetterhead(title, rangeLine, dataRows) {
+  function withLetterhead(XLSX, title, rangeLine, dataRows) {
     const aoa = [
       [title],
       [`CompanyName : ${bizInfo.name}`],
@@ -413,10 +412,11 @@ export default function SalesReport() {
   }
   const dateRangeLine = `@As On Dated : ${fromIso} (B.S. ${bsSlash(fromIso)})  To : ${toIso} (B.S. ${bsSlash(toIso)})  @Division : ${bizInfo.name}`
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     if (tab === 'daily') {
-      const ws = withLetterhead('Sales Report - Daily', dateRangeLine, dailyRows.map(r => ({
+      const ws = withLetterhead(XLSX, 'Sales Report - Daily', dateRangeLine, dailyRows.map(r => ({
         'Date (BS)': `${r.day} ${BS_MONTHS[r.month - 1]} ${r.year}`, 'Bills': r.bills, 'Qty': r.qty,
         'Gross (NPR)': Math.round(r.gross * 100) / 100, 'Discount (NPR)': Math.round(r.discount * 100) / 100,
         'Non-Taxable (NPR)': Math.round(r.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(r.taxable * 100) / 100,
@@ -425,11 +425,11 @@ export default function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, 'Daily Sales')
       XLSX.writeFile(wb, `daily-sales-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'hourly') {
-      const ws = withLetterhead('Sales Report - Hourly', dateRangeLine, hourlyRows.map(h => ({ 'Hour': hourLabel(h.hour), 'Bills': h.bills, 'Qty': h.qty, 'Net Sales (NPR)': Math.round(h.net * 100) / 100 })))
+      const ws = withLetterhead(XLSX, 'Sales Report - Hourly', dateRangeLine, hourlyRows.map(h => ({ 'Hour': hourLabel(h.hour), 'Bills': h.bills, 'Qty': h.qty, 'Net Sales (NPR)': Math.round(h.net * 100) / 100 })))
       XLSX.utils.book_append_sheet(wb, ws, 'Hourly Sales')
       XLSX.writeFile(wb, `hourly-sales-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'voucher') {
-      const ws = withLetterhead('Sales Book Report', dateRangeLine, filteredVoucherRows.map(v => {
+      const ws = withLetterhead(XLSX, 'Sales Book Report', dateRangeLine, filteredVoucherRows.map(v => {
         const bs = adToBs(new Date(v.closedAt))
         return {
           'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`, 'Voucher#': v.orderNo, 'Invoice#': v.invoiceNo || '',
@@ -443,7 +443,7 @@ export default function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, 'Bill Register')
       XLSX.writeFile(wb, `bill-register-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'compxref') {
-      const ws = withLetterhead('Comped Bills', dateRangeLine, compedBillRows.map(c => {
+      const ws = withLetterhead(XLSX, 'Comped Bills', dateRangeLine, compedBillRows.map(c => {
         const bs = adToBs(new Date(c.closedAt))
         return {
           'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
@@ -458,7 +458,7 @@ export default function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, 'Comped Bills')
       XLSX.writeFile(wb, `comped-bills-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'payment') {
-      const ws = withLetterhead('Sales Report - Payment Summary', dateRangeLine, paymentRows.map(p => ({
+      const ws = withLetterhead(XLSX, 'Sales Report - Payment Summary', dateRangeLine, paymentRows.map(p => ({
         'Payment Method': p.method, 'Bills': p.bills,
         'Gross (NPR)': Math.round(p.gross * 100) / 100, 'Discount (NPR)': Math.round(p.discount * 100) / 100,
         'Non-Taxable (NPR)': Math.round(p.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(p.taxable * 100) / 100,
@@ -468,7 +468,7 @@ export default function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, 'Payment Summary')
       XLSX.writeFile(wb, `payment-summary-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'delivery') {
-      const ws = withLetterhead('Sales Report - Delivery Partners', dateRangeLine, deliveryPartnerRows.map(r => {
+      const ws = withLetterhead(XLSX, 'Sales Report - Delivery Partners', dateRangeLine, deliveryPartnerRows.map(r => {
         const bs = adToBs(new Date(r.closedAt))
         return {
           'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
@@ -484,7 +484,7 @@ export default function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, 'Delivery Partners')
       XLSX.writeFile(wb, `delivery-partners-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'category') {
-      const ws = withLetterhead('Sales Report - Category Wise', dateRangeLine, categoryRows.map(c => ({
+      const ws = withLetterhead(XLSX, 'Sales Report - Category Wise', dateRangeLine, categoryRows.map(c => ({
         'Category': c.name, 'Qty Sales': c.qtySales, 'Qty Return': c.qtyReturn, 'Qty Net': c.qtySales - c.qtyReturn,
         'Gross (NPR)': Math.round(c.gross * 100) / 100, 'Discount (NPR)': Math.round(c.discount * 100) / 100,
         'Non-Taxable (NPR)': Math.round(c.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(c.taxable * 100) / 100,
@@ -493,7 +493,7 @@ export default function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, 'Category Sales')
       XLSX.writeFile(wb, `category-sales-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'item') {
-      const ws = withLetterhead('Sales Report - Item Wise', dateRangeLine, itemRows.map(i => ({
+      const ws = withLetterhead(XLSX, 'Sales Report - Item Wise', dateRangeLine, itemRows.map(i => ({
         'Item': i.name, 'Qty Sales': i.qtySales, 'Qty Return': i.qtyReturn, 'Qty Net': i.qtySales - i.qtyReturn,
         'Gross (NPR)': Math.round(i.gross * 100) / 100, 'Discount (NPR)': Math.round(i.discount * 100) / 100,
         'Non-Taxable (NPR)': Math.round(i.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(i.taxable * 100) / 100,
@@ -502,7 +502,7 @@ export default function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, 'Item Sales')
       XLSX.writeFile(wb, `item-sales-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'customer') {
-      const ws = withLetterhead('Sales Report - Customer Wise', dateRangeLine, customerRows.map(c => ({
+      const ws = withLetterhead(XLSX, 'Sales Report - Customer Wise', dateRangeLine, customerRows.map(c => ({
         'Customer Name': c.name, 'Mobile': c.phone, 'PAN': c.pan || '', 'Bills': c.bills,
         'Gross (NPR)': Math.round(c.gross * 100) / 100, 'Discount (NPR)': Math.round(c.discount * 100) / 100,
         'Non-Taxable (NPR)': Math.round(c.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(c.taxable * 100) / 100,
@@ -512,7 +512,7 @@ export default function SalesReport() {
       XLSX.writeFile(wb, `customer-sales-${fromIso}-to-${toIso}.xlsx`)
     } else {
       const oneLakhRangeLine = `@Fiscal Year : ${selectedFy}  @Division : ${bizInfo.name}`
-      const ws = withLetterhead('One Lakh Above Report (Annexure 13)', oneLakhRangeLine, parties.map(p => ({
+      const ws = withLetterhead(XLSX, 'One Lakh Above Report (Annexure 13)', oneLakhRangeLine, parties.map(p => ({
         'Party Name': p.name, 'PAN': p.pan || '', 'Bill Count': p.bills,
         'Gross (NPR)': Math.round(p.gross * 100) / 100, 'Taxable (NPR)': Math.round(p.taxable * 100) / 100,
         'Non-Taxable (NPR)': Math.round(p.nonTaxable * 100) / 100, 'VAT (NPR)': Math.round(p.vat * 100) / 100,

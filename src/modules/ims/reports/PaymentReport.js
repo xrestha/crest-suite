@@ -3,7 +3,6 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
-import * as XLSX from 'xlsx'
 import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
@@ -89,7 +88,8 @@ export default function PaymentReport() {
     return { day, byMethod, dayTotal: dayGross - dayReturn, dayGross, dayReturn }
   })
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     const summaryData = summary.map(s => ({
       'Payment Method': s.method,

@@ -4,7 +4,6 @@ import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
-import * as XLSX from 'xlsx'
 import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
 import { fiscalYearOf } from '../payroll/tds'
 import { SSF_CAP } from '../payrollConstants'
@@ -141,7 +140,8 @@ export default function HrReports() {
   const ssfRows = rows.filter(({ emp }) => emp.ssf_enrolled && emp.ssf_no && String(emp.ssf_no).trim())
   const noSsfCount = rows.length - ssfRows.length
 
-  function downloadSheet(data, sheet, ext = 'xlsx') {
+  async function downloadSheet(data, sheet, ext = 'xlsx') {
+    const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, sheet)

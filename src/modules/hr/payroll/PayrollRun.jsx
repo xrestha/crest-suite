@@ -4,7 +4,6 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
-import * as XLSX from 'xlsx'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { computePayslip } from './payrollCompute'
 import { computeMonthlyTds } from './tds'
@@ -301,7 +300,8 @@ export default function PayrollRun() {
     setTimeout(() => { printWithTitle(`Payslip - ${emp.full_name} - ${periodLabel}`); setPrintSlip(null) }, 60)
   }
 
-  function exportExcel() {
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
     const rows = payslips.map(s => {
       const emp = empMap[s.employee_id] || {}
       return {

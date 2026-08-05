@@ -3,7 +3,6 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
-import * as XLSX from 'xlsx'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 
@@ -136,8 +135,9 @@ export default function AnnualSummary() {
     return 'var(--theme-red)'
   }
 
-  function exportExcel() {
+  async function exportExcel() {
     if (!report) return
+    const XLSX = await import('xlsx')
     const xlRows = report.rows.map(r => ({
       'Month':           r.label,
       'Revenue (NPR)':   r.revenue.toFixed(0),

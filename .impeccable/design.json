@@ -1,18 +1,23 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-12T00:00:00.000Z",
-  "title": "Design System: Crest Inventory",
+  "generatedAt": "2026-08-05T00:00:00.000Z",
+  "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
-      "aged-brass": { "role": "primary", "displayName": "Aged Brass", "canonical": "oklch(74% 0.10 75)", "tonalRamp": ["oklch(20% 0.03 75)", "oklch(32% 0.05 75)", "oklch(44% 0.07 75)", "oklch(56% 0.09 75)", "oklch(66% 0.10 75)", "oklch(74% 0.10 75)", "oklch(84% 0.08 75)", "oklch(93% 0.04 75)"] },
-      "ink-bg": { "role": "neutral", "displayName": "Ink", "canonical": "oklch(15% 0.01 260)", "tonalRamp": ["oklch(10% 0.005 260)", "oklch(15% 0.01 260)", "oklch(20% 0.012 260)", "oklch(28% 0.014 260)", "oklch(38% 0.015 260)", "oklch(50% 0.012 260)", "oklch(70% 0.008 260)", "oklch(90% 0.004 260)"] },
-      "ink-card": { "role": "neutral", "displayName": "Ink Card", "canonical": "oklch(19% 0.012 260)", "tonalRamp": ["oklch(12% 0.006 260)", "oklch(19% 0.012 260)", "oklch(25% 0.013 260)", "oklch(32% 0.014 260)", "oklch(42% 0.015 260)", "oklch(54% 0.012 260)", "oklch(72% 0.008 260)", "oklch(91% 0.004 260)"] },
-      "text-primary": { "role": "neutral", "displayName": "Parchment Text", "canonical": "oklch(90% 0.03 85)", "tonalRamp": ["oklch(20% 0.01 85)", "oklch(35% 0.015 85)", "oklch(50% 0.02 85)", "oklch(65% 0.025 85)", "oklch(78% 0.03 85)", "oklch(85% 0.03 85)", "oklch(90% 0.03 85)", "oklch(96% 0.015 85)"] },
-      "text-secondary": { "role": "neutral", "displayName": "Slate Text", "canonical": "oklch(66% 0.02 265)", "tonalRamp": ["oklch(20% 0.01 265)", "oklch(34% 0.015 265)", "oklch(48% 0.018 265)", "oklch(58% 0.02 265)", "oklch(66% 0.02 265)", "oklch(74% 0.018 265)", "oklch(84% 0.012 265)", "oklch(93% 0.006 265)"] },
-      "signal-success": { "role": "success", "displayName": "Success Green", "canonical": "oklch(75% 0.15 155)", "tonalRamp": ["oklch(22% 0.06 155)", "oklch(35% 0.09 155)", "oklch(48% 0.12 155)", "oklch(60% 0.14 155)", "oklch(70% 0.15 155)", "oklch(75% 0.15 155)", "oklch(85% 0.11 155)", "oklch(94% 0.05 155)"] },
-      "signal-danger": { "role": "danger", "displayName": "Danger Red", "canonical": "oklch(70% 0.17 20)", "tonalRamp": ["oklch(24% 0.08 20)", "oklch(36% 0.11 20)", "oklch(48% 0.14 20)", "oklch(60% 0.16 20)", "oklch(68% 0.17 20)", "oklch(70% 0.17 20)", "oklch(83% 0.10 20)", "oklch(93% 0.05 20)"] },
-      "signal-warning": { "role": "warning", "displayName": "Warning Amber", "canonical": "oklch(83% 0.15 85)", "tonalRamp": ["oklch(28% 0.07 85)", "oklch(42% 0.10 85)", "oklch(56% 0.13 85)", "oklch(70% 0.15 85)", "oklch(78% 0.15 85)", "oklch(83% 0.15 85)", "oklch(90% 0.10 85)", "oklch(96% 0.05 85)"] },
-      "signal-categorical": { "role": "categorical", "displayName": "Categorical Purple", "canonical": "oklch(72% 0.13 300)", "tonalRamp": ["oklch(24% 0.06 300)", "oklch(38% 0.09 300)", "oklch(50% 0.11 300)", "oklch(62% 0.12 300)", "oklch(70% 0.13 300)", "oklch(72% 0.13 300)", "oklch(84% 0.09 300)", "oklch(93% 0.04 300)"] }
+      "aged-brass": { "role": "primary", "displayName": "Aged Brass", "canonical": "oklch(74% 0.117 90)", "tonalRamp": ["oklch(15% 0.059 90)", "oklch(28% 0.088 90)", "oklch(40% 0.105 90)", "oklch(52% 0.117 90)", "oklch(63% 0.117 90)", "oklch(74% 0.117 90)", "oklch(85% 0.088 90)", "oklch(94% 0.047 90)"] },
+      "aged-brass-hover": { "role": "primary", "displayName": "Aged Brass Hover", "canonical": "oklch(79% 0.104 91)", "tonalRamp": ["oklch(15% 0.052 91)", "oklch(28% 0.078 91)", "oklch(40% 0.093 91)", "oklch(52% 0.104 91)", "oklch(63% 0.104 91)", "oklch(74% 0.104 91)", "oklch(85% 0.078 91)", "oklch(94% 0.041 91)"] },
+      "ink-bg": { "role": "neutral", "displayName": "Ink", "canonical": "oklch(18% 0.013 271)", "tonalRamp": ["oklch(15% 0.006 271)", "oklch(28% 0.010 271)", "oklch(40% 0.012 271)", "oklch(52% 0.013 271)", "oklch(63% 0.013 271)", "oklch(74% 0.013 271)", "oklch(85% 0.010 271)", "oklch(94% 0.005 271)"] },
+      "ink-card": { "role": "neutral", "displayName": "Ink Card", "canonical": "oklch(23% 0.022 269)", "tonalRamp": ["oklch(15% 0.011 269)", "oklch(28% 0.017 269)", "oklch(40% 0.020 269)", "oklch(52% 0.022 269)", "oklch(63% 0.022 269)", "oklch(74% 0.022 269)", "oklch(85% 0.017 269)", "oklch(94% 0.009 269)"] },
+      "ink-border": { "role": "neutral", "displayName": "Ink Border", "canonical": "oklch(31% 0.026 269)", "tonalRamp": ["oklch(15% 0.013 269)", "oklch(28% 0.020 269)", "oklch(40% 0.024 269)", "oklch(52% 0.026 269)", "oklch(63% 0.026 269)", "oklch(74% 0.026 269)", "oklch(85% 0.020 269)", "oklch(94% 0.011 269)"] },
+      "ink-border-lt": { "role": "neutral", "displayName": "Ink Border Light", "canonical": "oklch(26% 0.026 268)", "tonalRamp": ["oklch(15% 0.013 268)", "oklch(28% 0.019 268)", "oklch(40% 0.023 268)", "oklch(52% 0.026 268)", "oklch(63% 0.026 268)", "oklch(74% 0.026 268)", "oklch(85% 0.019 268)", "oklch(94% 0.010 268)"] },
+      "ink-sidebar": { "role": "neutral", "displayName": "Ink Sidebar", "canonical": "oklch(18% 0.013 264)", "tonalRamp": ["oklch(15% 0.007 264)", "oklch(28% 0.010 264)", "oklch(40% 0.012 264)", "oklch(52% 0.013 264)", "oklch(63% 0.013 264)", "oklch(74% 0.013 264)", "oklch(85% 0.010 264)", "oklch(94% 0.005 264)"] },
+      "text-primary": { "role": "neutral", "displayName": "Parchment Text", "canonical": "oklch(91% 0.023 85)", "tonalRamp": ["oklch(15% 0.012 85)", "oklch(28% 0.017 85)", "oklch(40% 0.021 85)", "oklch(52% 0.023 85)", "oklch(63% 0.023 85)", "oklch(74% 0.023 85)", "oklch(85% 0.017 85)", "oklch(94% 0.009 85)"] },
+      "text-secondary": { "role": "neutral", "displayName": "Slate Text", "canonical": "oklch(66% 0.027 265)", "tonalRamp": ["oklch(15% 0.013 265)", "oklch(28% 0.020 265)", "oklch(40% 0.024 265)", "oklch(52% 0.027 265)", "oklch(63% 0.027 265)", "oklch(74% 0.027 265)", "oklch(85% 0.020 265)", "oklch(94% 0.011 265)"] },
+      "text-tertiary": { "role": "neutral", "displayName": "Fog Text", "canonical": "oklch(71% 0.019 261)", "tonalRamp": ["oklch(15% 0.010 261)", "oklch(28% 0.014 261)", "oklch(40% 0.017 261)", "oklch(52% 0.019 261)", "oklch(63% 0.019 261)", "oklch(74% 0.019 261)", "oklch(85% 0.014 261)", "oklch(94% 0.008 261)"] },
+      "signal-success": { "role": "success", "displayName": "Success Green", "canonical": "oklch(77% 0.153 163)", "tonalRamp": ["oklch(15% 0.077 163)", "oklch(28% 0.115 163)", "oklch(40% 0.138 163)", "oklch(52% 0.153 163)", "oklch(63% 0.153 163)", "oklch(74% 0.153 163)", "oklch(85% 0.115 163)", "oklch(94% 0.061 163)"] },
+      "signal-danger": { "role": "danger", "displayName": "Danger Red", "canonical": "oklch(71% 0.166 22)", "tonalRamp": ["oklch(15% 0.083 22)", "oklch(28% 0.125 22)", "oklch(40% 0.150 22)", "oklch(52% 0.166 22)", "oklch(63% 0.166 22)", "oklch(74% 0.166 22)", "oklch(85% 0.125 22)", "oklch(94% 0.066 22)"] },
+      "signal-warning": { "role": "warning", "displayName": "Warning Amber", "canonical": "oklch(84% 0.164 84)", "tonalRamp": ["oklch(15% 0.082 84)", "oklch(28% 0.123 84)", "oklch(40% 0.148 84)", "oklch(52% 0.164 84)", "oklch(63% 0.164 84)", "oklch(74% 0.164 84)", "oklch(85% 0.123 84)", "oklch(94% 0.066 84)"] },
+      "signal-categorical": { "role": "categorical", "displayName": "Categorical Purple", "canonical": "oklch(71% 0.159 294)", "tonalRamp": ["oklch(15% 0.080 294)", "oklch(28% 0.119 294)", "oklch(40% 0.143 294)", "oklch(52% 0.159 294)", "oklch(63% 0.159 294)", "oklch(74% 0.159 294)", "oklch(85% 0.119 294)", "oklch(94% 0.064 294)"] }
     },
     "typographyMeta": {
       "wordmark": { "displayName": "Wordmark", "purpose": "The Crest brand mark only - sidebar and login screen. Never reused for a heading." },
@@ -20,8 +25,9 @@
       "label": { "displayName": "Label", "purpose": "Table column headers, stat card labels, form field labels - the uppercase-tracked tier." }
     },
     "shadows": [
-      { "name": "floating-action", "value": "0 4px 16px rgba(0,0,0,0.3)", "purpose": "The one static elevation shadow, for content fixed above the page (e.g. a bottom-anchored cart summary button)." },
-      { "name": "live-pulse-ring", "value": "0 0 0 0 rgba(var(--signal-rgb), 0.5) -> 0 0 0 6px rgba(var(--signal-rgb), 0.18)", "purpose": "Breathing ring animation on elements needing real-time attention (new order banner, live badge). Uses the relevant signal color's own alpha." }
+      { "name": "card-elevation", "value": "var(--theme-card-shadow) - dark presets: inset 0 1px 0 0 rgba(text1,0.06), 0 10px 24px -8px rgba(bg,0.55), 0 3px 8px -3px rgba(bg,0.4); light presets: 0 1px 2px rgba(text1,0.06), 0 10px 24px -8px rgba(text1,0.1)", "purpose": "Uniform policy shadow on every .card/.stat-card, added 2026-07-12 - retired the old flat-by-default model. Generated per-preset from that preset's own bg/text1 (or accent, for Bright) so the shadow's cast color matches the theme instead of flattening to generic black. Background-lightness shift is still the primary depth cue; this is a secondary layer, not a decoration budget - don't invent a stronger version to mean 'important'." },
+      { "name": "floating-action", "value": "0 4px 16px rgba(0,0,0,0.3)", "purpose": "For content genuinely fixed above the page (e.g. the bottom-anchored Fab / cart button) - unchanged since before the elevation model rewrite." },
+      { "name": "live-pulse-ring", "value": "0 0 0 0 rgba(var(--signal-rgb), 0.5) -> 0 0 0 6px rgba(var(--signal-rgb), 0.18)", "purpose": "Breathing ring animation on elements needing real-time attention (new order banner, live badge). Uses the relevant signal color's own alpha - unchanged since before the elevation model rewrite." }
     ],
     "motion": [
       { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "The one formalized easing curve, used for sidebar nav hover/active transitions." },
@@ -37,57 +43,58 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The single call-to-action button style. Accent background, theme-paired foreground, 700 weight.",
+      "description": "The single call-to-action button style. Accent background, theme-paired foreground, 700 weight, 12px radius.",
       "html": "<button class=\"ds-btn-primary\">Save Changes</button>",
-      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 700; cursor: pointer; border: none; background: var(--theme-accent); color: var(--theme-accent-text); transition: background 0.13s, color 0.13s; } .ds-btn-primary:hover { background: var(--theme-accent-hover); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring); }"
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 700; cursor: pointer; border: none; background: var(--theme-accent); color: var(--theme-accent-text); transition: background 0.13s, color 0.13s; } .ds-btn-primary:hover { background: var(--theme-accent-hover); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring); }"
     },
     {
       "name": "Ghost Button",
       "kind": "button",
       "refersTo": "button-ghost",
-      "description": "The default secondary/tertiary action button - quiet until hovered.",
+      "description": "The default secondary/tertiary action button - quiet until hovered. Same 12px radius as Primary.",
       "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
-      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; background: var(--theme-input-bg); color: var(--theme-text1); border: 1px solid var(--theme-border-lt); transition: background 0.13s, color 0.13s, border-color 0.13s; } .ds-btn-ghost:hover { background: var(--theme-table-hover); border-color: var(--theme-accent); }"
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; cursor: pointer; background: var(--theme-input-bg); color: var(--theme-text1); border: 1px solid var(--theme-border-lt); transition: background 0.13s, color 0.13s, border-color 0.13s; } .ds-btn-ghost:hover { background: var(--theme-table-hover); border-color: var(--theme-accent); }"
     },
     {
       "name": "Status Badge",
       "kind": "chip",
       "refersTo": "badge",
-      "description": "Alpha-tinted status chip. Shown here in the success variant; danger/warning/gray follow the same pattern with their own signal color.",
+      "description": "Alpha-tinted status chip, 8px radius. Shown here in the success variant; danger/warning/gray follow the same shape with their own signal color - never a solid fill with white text.",
       "html": "<span class=\"ds-badge ds-badge-green\">Paid</span>",
-      "css": ".ds-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; text-transform: capitalize; } .ds-badge-green { background: rgba(52,211,153,0.10); color: var(--theme-green); }"
+      "css": ".ds-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 500; text-transform: capitalize; } .ds-badge-green { background: rgba(52,211,153,0.10); color: var(--theme-green); }"
     },
     {
       "name": "Card",
       "kind": "card",
       "refersTo": "card",
-      "description": "The base surface for grouped content - flat, bordered, one tone lighter than the page.",
+      "description": "The base surface for grouped content - 18px radius, one tone lighter than the page, plus the per-preset card-elevation shadow (see extensions.shadows) added 2026-07-12. Depth is background-shift + border + shadow now, not border-only.",
       "html": "<div class=\"ds-card\"><p class=\"ds-card-title\">Basic Salary</p><p class=\"ds-card-value\">NPR 25,000</p></div>",
-      "css": ".ds-card { background: var(--theme-card); border: 1px solid var(--theme-border); border-radius: 10px; padding: 24px; } .ds-card-title { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--theme-text3); } .ds-card-value { margin: 0; font-size: 15px; font-weight: 700; color: var(--theme-text1); }"
+      "css": ".ds-card { background: var(--theme-card); border: 1px solid var(--theme-border); border-radius: 18px; padding: 24px; box-shadow: var(--theme-card-shadow); } .ds-card-title { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--theme-text3); } .ds-card-value { margin: 0; font-size: 15px; font-weight: 700; color: var(--theme-text1); }"
     },
     {
       "name": "Text Input",
       "kind": "input",
       "refersTo": "input",
-      "description": "Labeled form field with the theme-colored focus ring - label always sits above, never a placeholder standing in for it.",
+      "description": "Labeled form field with the theme-colored focus ring, 12px radius - label always sits above, never a placeholder standing in for it.",
       "html": "<div class=\"ds-field\"><label class=\"ds-field-label\">Vendor Name</label><input class=\"ds-field-input\" type=\"text\" placeholder=\"e.g. Big Mart\" /></div>",
-      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; } .ds-field-label { font-size: 12px; font-weight: 500; color: var(--theme-text2); letter-spacing: 0.04em; } .ds-field-input { background: var(--theme-input-bg); border: 1px solid var(--theme-border); border-radius: 6px; padding: 9px 12px; font-size: 13px; color: var(--theme-text1); outline: none; transition: border-color 0.14s; } .ds-field-input:focus { border-color: var(--theme-accent); box-shadow: 0 0 0 3px var(--theme-focus-ring); } .ds-field-input::placeholder { color: var(--theme-text3); }"
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; } .ds-field-label { font-size: 12px; font-weight: 500; color: var(--theme-text2); letter-spacing: 0.04em; } .ds-field-input { background: var(--theme-input-bg); border: 1px solid var(--theme-border); border-radius: 12px; padding: 9px 12px; font-size: 13px; color: var(--theme-text1); outline: none; transition: border-color 0.14s; } .ds-field-input:focus { border-color: var(--theme-accent); box-shadow: 0 0 0 3px var(--theme-focus-ring); } .ds-field-input::placeholder { color: var(--theme-text3); }"
     }
   ],
   "narrative": {
     "northStar": "The Back-of-House Command Center",
-    "overview": "Crest Inventory is operated, not visited. An owner is checking margin between service rushes; an accountant is reconciling TDS figures before a filing deadline. Neither has time for the interface to perform. The system is built around legibility under pressure: dense tables that stay scannable, a single restrained accent, and status communicated through color and position rather than decoration. This deliberately rejects two things named in PRODUCT.md: the dated, hierarchy-less density of legacy Nepali ERP software, and the templated purple-gradient look of generic AI-generated SaaS. The product runs across nine interchangeable theme presets, all built from the same token set; every rule is written against the default preset's values, but the relationships between tokens hold across all nine.",
+    "overview": "Crest Suite is operated, not visited. An owner is checking margin between service rushes; an accountant is reconciling TDS figures before a filing deadline. Neither has time for the interface to perform. The system is built around legibility under pressure: dense tables that stay scannable, a single restrained accent, and status communicated through color and position rather than decoration. This deliberately rejects two things named in PRODUCT.md: the dated, hierarchy-less density of legacy Nepali ERP software, and the templated purple-gradient look of generic AI-generated SaaS. The product runs across ten interchangeable theme presets (dark charcoal-and-gold is the shipped default; Bright, a crisp cool-blue light theme, is the newest), all built from the same token set; every rule is written against the default preset's values, but the relationships between tokens hold across all ten, even where literal shape/shadow values don't.",
     "keyCharacteristics": [
-      "Flat by default: borders and tonal fills carry hierarchy, not shadows",
-      "One accent color per screen, applied sparingly, never as a wash",
+      "Depth comes primarily from a one-step background-lightness shift, with a per-preset shadow as a secondary cue (elevation model rewritten 2026-07-12 - previously flat-only, shadows are now uniform policy on every card, not a decoration budget)",
+      "One accent color per screen, applied sparingly, never as a wash - Bright's ClientDashboard.jsx KPI badges are the one named, scoped exception",
       "A serif wordmark is the one deliberate ornamental choice in an otherwise all-sans, all-functional system",
-      "Status is color-coded consistently, with a rationed 4th color reserved for genuine 4th/5th categories"
+      "Status is color-coded consistently, with a rationed 4th color (purple) reserved for genuine 4th/5th categories"
     ],
     "rules": [
-      { "name": "The One Accent Rule", "body": "Aged Brass is the only non-semantic color on any screen. If a second brand color shows up anywhere outside the rationed purple exception, it's a mistake, not a design choice.", "section": "colors" },
-      { "name": "The Accent-Text Pairing Rule", "body": "Any element with an Aged-Brass background uses the theme's paired accent-text token for its foreground, never a hardcoded white or black - the accent color changes per theme preset and a hardcoded foreground will fail contrast on at least one of the nine.", "section": "colors" },
+      { "name": "The One Accent Rule", "body": "Aged Brass is the only non-semantic color on any screen. If a second brand color shows up anywhere outside the rationed purple exception, it's a mistake, not a design choice. A 2026-08-05 audit found a second undocumented accent (an indigo/blue, #60a5fa/#818cf8) had spread into three files across two separate sessions before being caught - treat any unfamiliar saturated color next to Aged Brass as a near-certain instance of this drift, not a one-off.", "section": "colors" },
+      { "name": "The Accent-Text Pairing Rule", "body": "Any element with an Aged-Brass background uses the theme's paired accent-text token for its foreground, never a hardcoded white or black - the accent color changes per theme preset and a hardcoded foreground will fail contrast on at least one of the ten. Shipped and fixed twice as a real bug (a FAB label, then an admin page's badge) - on its second recurrence, treat any hardcoded #000/#fff next to var(--theme-accent) as the bug on sight.", "section": "colors" },
       { "name": "The One Serif Rule", "body": "Georgia appears exactly once per screen (the wordmark, if visible at all). Never used for a heading, callout, or emphasis.", "section": "typography" },
-      { "name": "The Flat-By-Default Rule", "body": "A card, table, or panel gets a background shift and a border. It does not also get a shadow for polish. Shadow is a signal (floating, or needs-attention-now), not decoration.", "section": "elevation" }
+      { "name": "Card elevation is uniform policy, not a decoration budget", "body": "Every card gets the same per-preset card-elevation shadow (see extensions.shadows). This retired the old Flat-By-Default Rule (2026-07-12). Don't invent a stronger or different shadow to mean 'important' or 'premium' - floating-action and live-pulse-ring are the only two shadows that still carry extra meaning.", "section": "elevation" },
+      { "name": "Badges are alpha-tint, never solid fill", "body": "Each semantic color renders as a ~10-12% alpha tint of itself as background, full-opacity as text - never a solid fill with white text. Found and fixed as a real recurrence on an admin page's Trial Accounts panel (2026-08-05).", "section": "components" }
     ],
     "dos": [
       "Do use the theme's accent-text token as the foreground on any accent-colored background",
@@ -99,7 +106,7 @@
     "donts": [
       "Don't build dense, hierarchy-less layouts in the name of fitting more in",
       "Don't reach for purple gradients, Inter-everywhere, or a templated hero-plus-three-cards layout",
-      "Don't add box-shadow to a card or panel for polish",
+      "Don't invent a stronger/different shadow to mean important or premium - card elevation is uniform policy now, not a decoration budget",
       "Don't hardcode white or black as text on an accent background",
       "Don't use a second saturated brand color alongside Aged Brass on the same screen"
     ]

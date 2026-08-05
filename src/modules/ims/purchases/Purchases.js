@@ -7,7 +7,6 @@ import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import SearchableSelect from '../../../components/SearchableSelect'
-import * as XLSX from 'xlsx'
 import { getCf } from './purchasesHelpers'
 import PurchaseBillModal from './PurchaseBillModal'
 import PurchaseBillPrint from './PurchaseBillPrint'
@@ -770,7 +769,8 @@ export default function Purchases() {
         })
         const sortedCats = Object.keys(byCategory).sort()
 
-        function exportRegisterExcel() {
+        async function exportRegisterExcel() {
+          const XLSX = await import('xlsx')
           const wb = XLSX.utils.book_new()
           const rows = []
           sortedCats.forEach(cat => {
