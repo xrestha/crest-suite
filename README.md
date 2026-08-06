@@ -150,6 +150,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S525 — 2026-08-06 — Purchases page: Qty + Amount totals in the table footer, fixed a column-alignment bug
+
+The Purchases table's footer row already computed a grand total (`filteredValue`) but rendered it under the wrong column — `colSpan={7}` on the "Total" label cell miscounted the 9 real columns (Day/Item/Vendor/Qty/UOM/Rate/Total/Expiry/actions), landing the NPR figure under Expiry instead of Total. Rebuilt the footer row's cells to align 1:1 with the header (`colSpan={3}` label, then explicit Qty/UOM/Rate/Total/Expiry+actions cells) and added a Qty total. The Qty total only renders when a specific item is filtered (`filterItem !== 'all'`) — summing raw `qty` across different items of different UOMs would be a nonsense figure, so "All Items" shows `—` instead; when one item is selected it sums each entry's display-unit qty (dividing by `getCf()`'s conversion factor the same way the row-level Qty cells already do) and shows the unit alongside it.
+
+**Files:** `src/modules/ims/purchases/Purchases.js`
+
+---
+
 ### S524 — 2026-08-05 — Modal focus-steal bug fix; `/impeccable colorize` pass on IMS
 
 **Modal focus-trap bug (affected all 19+ create/edit modals app-wide, not just one page).** User reported "can't edit, type" in the Vendors "Edit Vendor" modal — typing in any field but the first kept getting interrupted. Root cause was in the shared `Modal.js`, not `Vendors.js`: its focus-trap `useEffect` depended on `[onClose]`, but every caller passes a fresh inline arrow function (`onClose={() => setShowForm(false)}`) on every render. Each keystroke in a controlled form field triggers a parent re-render → new `onClose` reference → effect re-runs → cleanup yanks focus back to the button that opened the modal → effect re-fires and refocuses the panel's *first* focusable field, regardless of which field the user was actually typing in. Fixed by tracking the latest `onClose` in a ref and making the effect mount-only (`[]` deps), so it no longer re-arms on every parent re-render. Confirmed fixed live.

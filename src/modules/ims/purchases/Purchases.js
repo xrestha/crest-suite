@@ -262,6 +262,14 @@ export default function Purchases() {
   const returnTotal = returns.reduce((s, r) => s + r.qty * r.rate, 0)
   const netTotal    = grossTotal - returnTotal
   const filteredValue = filtered.reduce((s, p) => s + p.qty * p.rate, 0)
+  // Only meaningful when one specific item is filtered — summing raw qty across
+  // different items (potentially different UOMs) would be a nonsense figure.
+  const filteredQty = filterItem !== 'all'
+    ? filtered.reduce((s, p) => { const cf = getCf(p.items); return s + (cf > 1 ? p.qty / cf : p.qty) }, 0)
+    : null
+  const filteredQtyUnit = filterItem !== 'all' && filtered[0]
+    ? (getCf(filtered[0].items) > 1 ? filtered[0].items.purchase_unit : filtered[0].items?.uom)
+    : ''
   const uniqueDays  = [...new Set(purchases.map(p => p.bs_day))].sort((a, b) => a - b)
 
   // Number of distinct bills (groups) per day — shown on each day pill
@@ -718,7 +726,12 @@ export default function Purchases() {
                       })
                     })}
                     <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                      <td colSpan={7} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
+                      <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>
+                        {filteredQty !== null ? filteredQty.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
+                      </td>
+                      <td style={{ color: 'var(--theme-text2)', fontSize: 12, paddingTop: 12 }}>{filteredQtyUnit}</td>
+                      <td></td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 15, paddingTop: 12 }}>
                         NPR {filteredValue.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
