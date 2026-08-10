@@ -65,7 +65,15 @@ Deno.serve(async (req) => {
 
     // Checked before the sign-in attempt so an already-locked account doesn't burn a real auth
     // attempt. Same ordering as hr-selfservice-login.
-    const { data: lockData } = await admin.rpc('check_pos_pin_lock', { p_staff_id: staff_id })
+    //
+    // Both lockout RPCs FAIL OPEN, deliberately: a null result reads as "not locked" and the login
+    // proceeds. Locking every staff member out of a live restaurant floor because of a transient DB
+    // error would be worse than the brute-force risk of one unguarded request. But fail-open must be
+    // LOUD, or the lockout can silently stop working and every symptom still looks like a normal,
+    // healthy sign-in — which is the exact failure the whole server-side move was meant to end.
+    // These console.error lines are the only thing that would surface it, in the function logs.
+    const { data: lockData, error: lockErr } = await admin.rpc('check_pos_pin_lock', { p_staff_id: staff_id })
+    if (lockErr) console.error('[pos-staff-login] check_pos_pin_lock FAILED — lockout not enforced on this request:', lockErr.message)
     if (lockData?.[0]?.locked) {
       return json({ error: 'Too many incorrect attempts', locked: true, locked_until: lockData[0].locked_until }, 423)
     }
@@ -91,9 +99,12 @@ Deno.serve(async (req) => {
     })
 
     const succeeded = !signInErr && !!signInData?.session
-    const { data: attemptData } = await admin.rpc('record_pos_pin_attempt', {
+    const { data: attemptData, error: attemptErr } = await admin.rpc('record_pos_pin_attempt', {
       p_staff_id: staff_id, p_success: succeeded,
     })
+    // The more dangerous of the two to lose silently: if this stops recording, the counter never
+    // advances and NO account can ever lock, however many wrong PINs are tried.
+    if (attemptErr) console.error('[pos-staff-login] record_pos_pin_attempt FAILED — this attempt was NOT counted toward lockout:', attemptErr.message)
 
     if (!succeeded) {
       const after = attemptData?.[0]

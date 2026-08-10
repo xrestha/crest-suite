@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crest-v56';
+const CACHE_NAME = 'crest-v57';
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -21,8 +21,22 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(event.request.url);
 
-  // Never cache Supabase API or auth calls — always live data
-  if (url.hostname.includes('supabase.co')) return;
+  // Same-origin only. Returning early hands the request back to the browser's own default
+  // handling, which is what we want for everything below.
+  //
+  // This supersedes the old `hostname.includes('supabase.co')` skip (Supabase is cross-origin, so
+  // it is covered by this check) and fixes a real bug it left behind: the Google Fonts stylesheet
+  // and its woff2 files fell through to the cache-first branch, where `fetch(event.request)`
+  // returns an OPAQUE response for a no-cors cross-origin request. `cache.put()` REJECTS on an
+  // opaque response, and `res.ok` is false for one (status 0), so the work could only ever fail —
+  // surfacing as the "Uncaught (in promise) TypeError: Failed to fetch at service-worker.js:45"
+  // seen during the crest-v56 rollout. Caching a third party's assets was never the intent here.
+  //
+  // Independently, a service worker inherits the CSP served with its own script, and this app's
+  // connect-src (vercel.json) does not list fonts.googleapis.com — so a SW-issued fetch for the
+  // font would be blocked there too. Not intercepting it at all sidesteps both problems, and the
+  // browser caches fonts perfectly well on its own.
+  if (url.origin !== self.location.origin) return;
 
   if (event.request.mode === 'navigate') {
     // Navigation requests: network first, fall back to cached root shell

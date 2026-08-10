@@ -70,7 +70,14 @@ Deno.serve(async (req) => {
 
     // Checked BEFORE the sign-in attempt so an already-locked account can't burn real auth
     // attempts (and can't be used to keep Supabase's own sign-in rate limit warm).
-    const { data: lockData } = await admin.rpc('check_hr_pin_lock', { p_staff_id: staff_id })
+    //
+    // Both lockout RPCs FAIL OPEN, deliberately: a null result reads as "not locked" and the login
+    // proceeds, because locking every employee out of Self-Service over a transient DB error is
+    // worse than the brute-force risk of one unguarded request. But fail-open must be LOUD, or the
+    // lockout can silently stop working while every symptom still looks like a healthy sign-in.
+    // These console.error lines are the only thing that would surface it, in the function logs.
+    const { data: lockData, error: lockErr } = await admin.rpc('check_hr_pin_lock', { p_staff_id: staff_id })
+    if (lockErr) console.error('[hr-selfservice-login] check_hr_pin_lock FAILED — lockout not enforced on this request:', lockErr.message)
     if (lockData?.[0]?.locked) {
       return json({ error: 'Too many incorrect attempts', locked: true, locked_until: lockData[0].locked_until }, 423)
     }
@@ -100,9 +107,12 @@ Deno.serve(async (req) => {
     })
 
     const succeeded = !signInErr && !!signInData?.session
-    const { data: attemptData } = await admin.rpc('record_hr_pin_attempt', {
+    const { data: attemptData, error: attemptErr } = await admin.rpc('record_hr_pin_attempt', {
       p_staff_id: staff_id, p_success: succeeded,
     })
+    // The more dangerous of the two to lose silently: if this stops recording, the counter never
+    // advances and NO account can ever lock, however many wrong PINs are tried.
+    if (attemptErr) console.error('[hr-selfservice-login] record_hr_pin_attempt FAILED — this attempt was NOT counted toward lockout:', attemptErr.message)
 
     if (!succeeded) {
       const after = attemptData?.[0]
