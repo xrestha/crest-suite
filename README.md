@@ -150,6 +150,32 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S530 — 2026-08-10 — Stock Movements: ingredient search, sort, totals row and print on both tabs
+
+Asked for, pointing at Recipe Costing's "Find ingredient in recipes" box as the model.
+
+**Ingredient search (Sub-Recipes tab).** Mirrors `Recipes.js`'s existing search — same input treatment, same accent-tinted border when active, same clear button — and matches its behaviour in the part that matters: it sees through nesting. `subRecipeUsage.js` now runs `explodeRecipeTree` over the sub-recipe ids themselves (not just the dishes sold) so each row carries its own **fully exploded** raw-ingredient list, and `subRecipeHasIngredient()` matches against that. So searching "herbs" finds a sauce whose only raw items come from a base sub-recipe underneath it, which is the case a shallow one-level match would miss. The item names and the rates the reconciliation figure needs come from **one** `items` fetch over the union of both id sets, rather than two overlapping queries.
+
+**Sort on both tabs.** Per-tab keys (Day/Item/Category/Qty/Source/Value on Raw Items; Sub-Recipe/Qty/Batches/Cost per Batch/Value on Sub-Recipes) with a shared asc/desc toggle — per-tab because the two tables share no columns, so one key would be meaningless on whichever tab wasn't selected when it was set. One comparator handles text and numbers so the direction toggle means the same thing everywhere.
+
+**TOTAL footer row on both tables**, summing the Value of whatever is currently filtered. Deliberately no Qty total on Raw Items — those rows span different items in different UOMs, so a single summed quantity would be a nonsense figure; on Sub-Recipes it totals Qty only when every visible row shares one yield UOM, and shows a dash otherwise. Same rule S525 applied to Purchases. Since I couldn't drive a browser this time, footer/header column alignment was checked by parsing the JSX and comparing `colSpan` totals against the header count for both tables — that exact mismatch was a real bug on Purchases (S525), so it was worth verifying mechanically rather than by eye.
+
+**Print on both tabs** via the existing `printWithTitle()`, titled after the active tab so "Save as PDF" suggests a useful filename. Filter row, tab bar and header buttons carry `no-print`, leaving the header, stat cards and table.
+
+Also added the ingredient list as a column on the Excel sheet, since it's now loaded anyway.
+
+**"Unused this period" line**, added after the count gap came up: Recipe Costing showed 57 sub-recipes against this tab's 48. Not a discrepancy — that page counts the master list (`Recipes.js:177`, a plain `category === 'Sub-Recipe'` filter over an unfiltered fetch), this one counts what a period's sales actually consumed. The tab now names the difference outright rather than leaving it to a manual cross-check of two pages: "9 of your 57 sub-recipes weren't used this period", with the names. That gap is a useful figure in itself — prep items nothing sold touched.
+
+It also flags the one case where the two counts genuinely **cannot** reconcile: a recipe used as an ingredient via `sub_recipe_id` whose own category was never set to Sub-Recipe. It counts here (the walk reaches it) but not in Recipe Costing's category-based total, so used + unused would exceed the master count. That's a data-entry problem on the recipe, so it gets its own amber note naming the offenders rather than silently breaking the arithmetic.
+
+`CI=true npm run build` clean, 207/207 tests across 16 suites (9 new: ingredient exposure, the nested-match case, `subRecipeHasIngredient`'s empty/partial/absent/missing-field behaviour, and the unused-diff including the used+unused = master-total tie-out and the miscategorised case). The test stub also had to start honouring `.eq()` filters for the master-list query to be tested for the right reason — it ignores a filter on a column the fixture doesn't define, so fixtures stay minimal without the category filter becoming a no-op. `CACHE_NAME` → `crest-v55`.
+
+**Not verified in a browser** — the Playwright MCP server disconnected mid-session. Given that the live check is exactly what caught the runtime bug in S529, this is a real gap rather than a formality: worth a click through both tabs before relying on it.
+
+**Files:** `src/modules/ims/stockcount/subRecipeUsage.js` (+ test), `src/modules/ims/stockcount/StockMovements.js`, `src/pages/Help.js`, `src/pages/settings/imsGuideData.js`, `public/service-worker.js`
+
+---
+
 ### S529 — 2026-08-10 — Swept the silent 1000-row truncation across the whole app (61 sites, 42 files)
 
 S528 found and fixed the truncation on three reads and flagged the rest as latent. This finished it. Supabase caps PostgREST at 1000 rows, and a bare `.select()` past that returns truncated data with **no error and nothing in the array to say so** — every total summed from it is then wrong, and wrong quietly.

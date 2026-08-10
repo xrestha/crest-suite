@@ -22,23 +22,40 @@ function ledgerSource(source) {
   return 'manual' // manual, or a legacy NULL (see salesDepletion.js)
 }
 
-export const EMPTY_USAGE = { rows: [], derivedItemValue: 0, salesRowsUsed: 0 }
+export const EMPTY_USAGE = {
+  rows: [], derivedItemValue: 0, salesRowsUsed: 0,
+  totalSubRecipes: 0, unusedSubRecipes: [], miscategorised: [],
+}
 
 // `scopedFrom` is the caller's useScopedDb binding — recipes/items are client-scoped, while
 // sales_entries is period-scoped and stays on raw supabase.from() like everywhere else.
 export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
   if (!periodId) return EMPTY_USAGE
 
-  // Paged: a period's sales_entries can exceed PostgREST's 1000-row cap, and a truncated read
-  // here would understate every batch figure with no error to notice (see fetchAllRows.js).
-  const { data: salesRows } = await fetchAllRows(() => supabase
-    .from('sales_entries')
-    .select('recipe_id, qty_sold, bs_day, source')
-    .eq('period_id', periodId)
-    .order('id'))
+  // `allSubs` is the master list — every recipe categorised as a sub-recipe, unfiltered, exactly
+  // as Recipes.js counts its own "N sub-recipes" header (Recipes.js:177). Fetched up front so the
+  // unused-this-period diff is available on every return path below, including the ones that bail
+  // out early: "nothing sold, so all of them are unused" is a legitimate answer, not a blank.
+  const [{ data: salesRows }, { data: allSubs }] = await Promise.all([
+    // Paged: a period's sales_entries can exceed PostgREST's 1000-row cap, and a truncated read
+    // here would understate every batch figure with no error to notice (see fetchAllRows.js).
+    fetchAllRows(() => supabase
+      .from('sales_entries')
+      .select('recipe_id, qty_sold, bs_day, source')
+      .eq('period_id', periodId)
+      .order('id')),
+    scopedFrom('recipes', 'id, name').eq('category', 'Sub-Recipe'),
+  ])
+
+  const subMaster = allSubs || []
+  const noneUsed = () => ({
+    ...EMPTY_USAGE,
+    totalSubRecipes: subMaster.length,
+    unusedSubRecipes: subMaster.map(r => r.name).sort((a, b) => a.localeCompare(b)),
+  })
 
   const depleting = selectDepletingSales(salesRows || []).filter(r => r.recipe_id && Number(r.qty_sold) > 0)
-  if (depleting.length === 0) return EMPTY_USAGE
+  if (depleting.length === 0) return noneUsed()
 
   const soldRecipeIds = [...new Set(depleting.map(r => r.recipe_id))]
   const tree = await explodeRecipeTree(supabase, soldRecipeIds)
@@ -66,17 +83,31 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
 
   const subIds = Object.keys(agg)
   if (subIds.length === 0) {
-    return { ...EMPTY_USAGE, derivedItemValue: await valueItems(supabase, itemAgg), salesRowsUsed: depleting.length }
+    // No sub-recipes, but the raw-item total still matters — it's the reconciliation figure.
+    const itemMap = await fetchItemMap(supabase, Object.keys(itemAgg))
+    const derived = Object.keys(itemAgg).reduce((s, id) => s + itemAgg[id] * (itemMap[id]?.rate || 0), 0)
+    return { ...noneUsed(), derivedItemValue: derived, salesRowsUsed: depleting.length }
   }
 
-  const [{ data: recipeMeta }, batchCosts, derivedItemValue] = await Promise.all([
-    scopedFrom('recipes', 'id, name, yield_qty, yield_uom').in('id', subIds),
+  // subTree is each sub-recipe exploded on its own — whole-batch quantities of the raw items it
+  // is made from. Needed for the "find ingredient" search on the page: a sub-recipe's own
+  // ingredients are not otherwise knowable from `tree` above, which is keyed by the DISHES sold.
+  const [{ data: recipeMeta }, batchCosts, subTree] = await Promise.all([
+    scopedFrom('recipes', 'id, name, yield_qty, yield_uom, category').in('id', subIds),
     // Whole-BATCH cost — computeRecipeCosts does not divide by yield_qty (unlike
     // calcSubRecipeCostPerUnit in recipeCostCalc.js, which returns per-output-unit), so
     // multiplying by `batches` below is correct and needs no further division.
     computeRecipeCosts(supabase, subIds),
-    valueItems(supabase, itemAgg),
+    explodeRecipeTree(supabase, subIds),
   ])
+
+  // One items fetch covering both jobs: valuing the derived raw-item total (reconciliation) and
+  // naming each sub-recipe's ingredients (search). Two separate queries would fetch overlapping
+  // id sets twice for no benefit.
+  const subItemIds = Object.values(subTree).flatMap(n => n.items.map(i => i.item_id))
+  const itemMap = await fetchItemMap(supabase, [...new Set([...Object.keys(itemAgg), ...subItemIds])])
+  const derivedItemValue = Object.keys(itemAgg)
+    .reduce((s, id) => s + itemAgg[id] * (itemMap[id]?.rate || 0), 0)
 
   const metaMap = Object.fromEntries((recipeMeta || []).map(r => [r.id, r]))
   const rows = subIds.map(id => {
@@ -92,21 +123,56 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
       value: agg[id].batches * batchCost,
       batchCost,
       bySource: agg[id].bySource,
+      // Fully exploded, so a nested sub-recipe's own raw ingredients are searchable from the
+      // parent too — matching Recipes.js's ingredient search, which also sees through nesting.
+      ingredients: (subTree[id]?.items || [])
+        .map(i => itemMap[i.item_id]?.name)
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b)),
     }
   }).sort((a, b) => b.value - a.value || b.qty - a.qty)
 
-  return { rows, derivedItemValue, salesRowsUsed: depleting.length }
+  // The diff behind Recipe Costing showing (say) 57 sub-recipes while this tab shows 48: that page
+  // counts the master list, this one counts what a period's sales actually consumed. The
+  // difference is prep items nothing sold touched — a useful figure in its own right, not a
+  // discrepancy, so it is named here rather than left to a manual cross-check of two pages.
+  const usedIds = new Set(subIds)
+  const unusedSubRecipes = subMaster
+    .filter(r => !usedIds.has(r.id))
+    .map(r => r.name)
+    .sort((a, b) => a.localeCompare(b))
+
+  // The one case where the two counts genuinely cannot reconcile: a recipe used as an ingredient
+  // via sub_recipe_id whose own category was never set to 'Sub-Recipe'. It is counted here (it is
+  // reached by the walk) but not by Recipe Costing's category-based count, so "used + unused"
+  // would exceed the master total. That is a data-entry problem on the recipe, worth naming.
+  const miscategorised = (recipeMeta || [])
+    .filter(r => r.category !== 'Sub-Recipe')
+    .map(r => r.name)
+    .sort((a, b) => a.localeCompare(b))
+
+  return {
+    rows,
+    derivedItemValue,
+    salesRowsUsed: depleting.length,
+    totalSubRecipes: subMaster.length,
+    unusedSubRecipes,
+    miscategorised,
+  }
 }
 
-// Total cost value of the raw items this derivation implies — the comparison figure behind the
-// reconciliation note, so a gap against the ledger's own Value Depleted is stated rather than
-// left for someone to notice.
-async function valueItems(supabase, itemAgg) {
-  const itemIds = Object.keys(itemAgg)
-  if (itemIds.length === 0) return 0
-  const { data: items } = await supabase.from('items').select('id, per_uom_rate').in('id', itemIds)
-  const rateMap = Object.fromEntries((items || []).map(i => [i.id, parseFloat(i.per_uom_rate) || 0]))
-  return itemIds.reduce((s, id) => s + itemAgg[id] * (rateMap[id] || 0), 0)
+// id → { name, rate } for valuing and naming items in one round trip.
+async function fetchItemMap(supabase, itemIds) {
+  if (itemIds.length === 0) return {}
+  const { data: items } = await supabase.from('items').select('id, name, per_uom_rate').in('id', itemIds)
+  return Object.fromEntries((items || []).map(i => [i.id, { name: i.name, rate: parseFloat(i.per_uom_rate) || 0 }]))
+}
+
+// True if any of this sub-recipe's raw ingredients matches the (already lowercased) query —
+// the Sub-Recipes tab's equivalent of Recipes.js's recipeHasIngredient().
+export function subRecipeHasIngredient(row, q) {
+  if (!q) return true
+  return (row.ingredients || []).some(n => n.toLowerCase().includes(q))
 }
 
 // Narrows a usage row to one ledger source. qty/batches/value are all linear in qty, so the

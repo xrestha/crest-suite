@@ -639,12 +639,16 @@ export const IMS_GUIDE_GROUPS = [
           'Select period (or arrive via a deep link from Reorder Report). Search by item, filter by source (POS Sale / POS Comp). Export Excel.',
           'Order # is clickable and opens the original POS bill.',
           'Sub-Recipes tab: how many batches of each prep item this period\'s sales consumed. Shares the search + source filters; has no Day filter (see gotchas). Exports as a second Excel sheet, "Sub-Recipe Usage", leaving the first sheet unchanged.',
+          'Both tabs: a Sort dropdown (per-tab keys, shared asc/desc toggle), a TOTAL footer row summing the Value of the current filtered set, and a Print button (printWithTitle, so "Save as PDF" gets a useful filename). Filters/tabs/buttons carry no-print so the printout is the header, stat cards and table only.',
+          'Sub-Recipes tab names the sub-recipes NOT used this period ("9 of your 57 …"), which is why its count is lower than Recipe Costing\'s header: that page counts the master list (Recipes.js:177, category === \'Sub-Recipe\', unfiltered), this one counts what the period\'s sales consumed. A separate amber note flags any recipe used via sub_recipe_id whose category isn\'t Sub-Recipe — counted here but not by Recipe Costing, so used + unused would exceed the master total until the category is fixed.',
+          'Sub-Recipes tab also has "Find ingredient in sub-recipes" — the same idea as Recipes.js\'s recipeHasIngredient() search, backed by subRecipeHasIngredient() over each row\'s fully-exploded raw-ingredient list, so it matches through nesting (a sauce whose only raw items come from a base sub-recipe still matches that base\'s ingredients).',
         ],
         fields: [
           { label: 'Value', desc: '|qty| × item.per_uom_rate. Stat cards include "Comp Value" — value given away with zero revenue (source=pos_comp movements only).' },
           { label: 'Qty Used (Sub-Recipes tab)', desc: 'Output units of the sub-recipe consumed — the unit its yield_uom names, e.g. 25,000 ml of a sauce. Summed across every dish sold that uses it, including via other sub-recipes.' },
           { label: 'Batches Used', desc: 'Qty Used ÷ recipes.yield_qty. Full batches of prep the period\'s sales actually consumed.' },
           { label: 'Cost / Batch', desc: 'computeRecipeCosts() for the sub-recipe — whole-batch ingredient cost with nested sub-recipes included. Note it does NOT divide by yield_qty (unlike calcSubRecipeCostPerUnit in recipeCostCalc.js), which is why Value = Batches × this.' },
+          { label: 'TOTAL row', desc: 'Sums the Value of the currently filtered rows on both tabs. Qty is deliberately NOT summed on Raw Items (rows span different items in different UOMs) and only sums on Sub-Recipes when every visible row shares one yield UOM — otherwise it shows a dash, same rule as Purchases\' Qty total.' },
         ],
         formulas: [
           'Sub-recipe usage = Σ over depleting sales rows of (per-portion output units from explodeRecipeTree × qty_sold); batches = that ÷ yield_qty; value = batches × whole-batch cost.',

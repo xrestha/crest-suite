@@ -6,8 +6,9 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
-import { loadSubRecipeUsage, usageForSource, EMPTY_USAGE } from './subRecipeUsage'
+import { loadSubRecipeUsage, usageForSource, subRecipeHasIngredient, EMPTY_USAGE } from './subRecipeUsage'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { printWithTitle } from '../../../utils/printTitle'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -29,6 +30,12 @@ export default function StockMovements() {
   const [noBomRecipes, setNoBomRecipes] = useState([])
   const [tab, setTab] = useState('items')
   const [usage, setUsage] = useState(EMPTY_USAGE)
+  const [ingSearch, setIngSearch] = useState('')
+  // Sort is per-tab: the two tables share no columns, so one shared key would be meaningless on
+  // whichever tab wasn't selected when it was set.
+  const [itemSort, setItemSort] = useState('day')
+  const [subSort, setSubSort] = useState('value')
+  const [sortDir, setSortDir] = useState('desc')
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -119,12 +126,33 @@ export default function StockMovements() {
     }
   }
 
+  // Text sorts read naturally A→Z on "asc"; numeric ones read biggest-first on "desc". One
+  // comparator handles both so the direction toggle means the same thing on every column.
+  const dirMul = sortDir === 'asc' ? 1 : -1
+  const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(b) : (a || 0) - (b || 0)) * dirMul
+
+  const ITEM_SORTS = {
+    day:      { label: 'Day',          get: r => r.bsDay },
+    item:     { label: 'Item',         get: r => r.item.name || '' },
+    category: { label: 'Category',     get: r => r.category || '' },
+    qty:      { label: 'Qty Depleted', get: r => r.qtyAbs },
+    source:   { label: 'Source',       get: r => r.source || '' },
+    value:    { label: 'Value',        get: r => r.value },
+  }
+  const SUB_SORTS = {
+    name:      { label: 'Sub-Recipe',    get: r => r.name || '' },
+    qty:       { label: 'Qty Used',      get: r => r.qty },
+    batches:   { label: 'Batches Used',  get: r => r.batches },
+    batchCost: { label: 'Cost / Batch',  get: r => r.batchCost },
+    value:     { label: 'Value',         get: r => r.value },
+  }
+
   const filtered = rows.filter(r => {
     const matchSource = filterSource === 'all' || r.source === filterSource
     const matchSearch = (r.item.name || '').toLowerCase().includes(search.toLowerCase())
     const matchDay = (dayFrom === '' || (r.bsDay || 0) >= Number(dayFrom)) && (dayTo === '' || (r.bsDay || 0) <= Number(dayTo))
     return matchSource && matchSearch && matchDay
-  })
+  }).sort((a, b) => cmp(ITEM_SORTS[itemSort].get(a), ITEM_SORTS[itemSort].get(b)))
 
   const totalValue = filtered.reduce((s, r) => s + r.value, 0)
   const compValue = filtered.filter(r => r.source === 'pos_comp').reduce((s, r) => s + r.value, 0)
@@ -133,11 +161,16 @@ export default function StockMovements() {
   // Sub-recipe usage shares the search + source filters (both map cleanly onto the sales rows it
   // derives from) but deliberately not the Day range — the derivation includes Bulk rows, which
   // carry bs_day 0 and belong to no single day, so a day filter here would quietly drop them.
+  const ingQ = ingSearch.trim().toLowerCase()
   const subRows = usage.rows
     .map(r => usageForSource(r, filterSource))
-    .filter(r => r.qty > 0 && (r.name || '').toLowerCase().includes(search.toLowerCase()))
+    .filter(r => r.qty > 0
+      && (r.name || '').toLowerCase().includes(search.toLowerCase())
+      && subRecipeHasIngredient(r, ingQ))
+    .sort((a, b) => cmp(SUB_SORTS[subSort].get(a), SUB_SORTS[subSort].get(b)))
   const subValueTotal = subRows.reduce((s, r) => s + r.value, 0)
   const subBatchTotal = subRows.reduce((s, r) => s + r.batches, 0)
+  const subQtyIsComparable = new Set(subRows.map(r => r.yieldUom)).size === 1
 
   // Reconciliation. The sub-recipe figures come from sales_entries; the ledger is what was
   // actually written. They legitimately diverge — manual-sales depletion only started 2026-07-30
@@ -152,6 +185,12 @@ export default function StockMovements() {
   // reads as the entire period's value.
   const showRecon = !loading && usage.rows.length > 0 &&
     Math.abs(reconGap) > Math.max(1, usage.derivedItemValue * 0.005)
+
+  // Titles the print job after the tab actually on screen — printWithTitle sets document.title so
+  // the browser's "Save as PDF" suggests a useful filename instead of the app's static one.
+  function printCurrentTab() {
+    printWithTitle(`${tab === 'subs' ? 'Sub-Recipe Usage' : 'Stock Movements'} - ${periodLabel}`)
+  }
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
@@ -184,9 +223,10 @@ export default function StockMovements() {
         'Batches Used': parseFloat(r.batches.toFixed(3)),
         'Cost per Batch (NPR)': parseFloat(r.batchCost.toFixed(2)),
         'Value (NPR)': parseFloat(r.value.toFixed(0)),
+        'Ingredients': (r.ingredients || []).join(', '),
       }))
       const subWs = XLSX.utils.json_to_sheet(subData)
-      subWs['!cols'] = [24,16,12,8,13,20,12].map(w => ({ wch: w }))
+      subWs['!cols'] = [24,16,12,8,13,20,12,60].map(w => ({ wch: w }))
       XLSX.utils.book_append_sheet(wb, subWs, 'Sub-Recipe Usage')
     }
 
@@ -209,7 +249,10 @@ export default function StockMovements() {
               : `Ledger of every stock depletion from POS sales/comps and manual Sales Entry — ${periodLabel}`}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <Tip text="Prints exactly what's on screen — the active tab, with the current search, source and sort filters applied, including the totals row." width={280}>
+            <button className="btn btn-ghost" onClick={printCurrentTab} style={{ fontSize: 12 }}>🖨 Print</button>
+          </Tip>
           <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
           <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>)}
@@ -260,7 +303,7 @@ export default function StockMovements() {
       </div>
       )}
 
-      <div className="tab-bar" style={{ marginBottom: 16 }}>
+      <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
         <button className={`tab-btn ${tab === 'items' ? 'tab-btn--active' : ''}`} onClick={() => setTab('items')}>
           Raw Items
         </button>
@@ -278,7 +321,7 @@ export default function StockMovements() {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="no-print" style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <input style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
           placeholder={tab === 'subs' ? 'Search sub-recipes…' : 'Search items…'} value={search} onChange={e => setSearch(e.target.value)} />
         <select className="form-select" value={filterSource} onChange={e => setFilterSource(e.target.value)}>
@@ -309,6 +352,53 @@ export default function StockMovements() {
           )}
         </div>
         )}
+
+        {/* Sort. The two tabs have no columns in common, so each keeps its own key; the direction
+            toggle is shared, since "biggest first" means the same thing on either table. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Sort</span>
+          <select
+            className="form-select"
+            value={tab === 'subs' ? subSort : itemSort}
+            onChange={e => (tab === 'subs' ? setSubSort : setItemSort)(e.target.value)}
+          >
+            {Object.entries(tab === 'subs' ? SUB_SORTS : ITEM_SORTS).map(([k, s]) => (
+              <option key={k} value={k}>{s.label}</option>
+            ))}
+          </select>
+          <Tip text="Ascending sorts text A→Z and numbers smallest-first; descending does the reverse." width={250}>
+            <button
+              className="btn btn-ghost"
+              style={{ fontSize: 12, padding: '6px 10px' }}
+              onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))}
+              aria-label={`Sort ${sortDir === 'asc' ? 'ascending' : 'descending'} — click to reverse`}
+            >
+              {sortDir === 'asc' ? '↑ Asc' : '↓ Desc'}
+            </button>
+          </Tip>
+        </div>
+
+        {/* Ingredient search — Sub-Recipes only. Same idea as Recipes.js's "Find ingredient in
+            recipes", and it sees through nesting for the same reason: `ingredients` is the fully
+            exploded raw-item list, so searching "coffee" finds a sauce that only contains it via
+            another sub-recipe. */}
+        {tab === 'subs' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Tip text="Find every sub-recipe that uses an ingredient — e.g. type 'milk' to list all prep items containing it. Also matches ingredients hidden inside nested sub-recipes." width={300}>
+            <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>ⓘ</span>
+          </Tip>
+          <div style={{ position: 'relative' }}>
+            <input
+              style={{ background: 'var(--theme-card)', border: `1px solid ${ingQ ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 6, padding: '8px 12px 8px 30px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
+              placeholder="Find ingredient in sub-recipes…" value={ingSearch} onChange={e => setIngSearch(e.target.value)} />
+            <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
+            {ingSearch && (
+              <button onClick={() => setIngSearch('')} title="Clear"
+                style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 4px' }}>×</button>
+            )}
+          </div>
+        </div>
+        )}
         <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
           {tab === 'subs'
             ? `${subRows.length} sub-recipe${subRows.length !== 1 ? 's' : ''}`
@@ -326,6 +416,26 @@ export default function StockMovements() {
             {' '}— not a second set of ledger rows. The same ingredients appear on the Raw Items tab; this groups them by the prep item they passed through.
           </p>
         </div>
+
+        {/* Explains the gap against Recipe Costing's own sub-recipe count, which is the master
+            list rather than a per-period figure — and the unused names are worth seeing in their
+            own right (prep items nothing sold this period touched). */}
+        {usage.unusedSubRecipes.length > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 14, lineHeight: 1.7 }}>
+            <strong style={{ color: 'var(--theme-text1)' }}>{usage.unusedSubRecipes.length}</strong> of your{' '}
+            <strong style={{ color: 'var(--theme-text1)' }}>{usage.totalSubRecipes}</strong> sub-recipes weren't used this period
+            {' '}<Tip text="Recipe Costing counts every sub-recipe on file. This tab counts only the ones this period's sales actually consumed, so the difference is prep items nothing sold touched — worth a look if the kitchen still preps any of them to stock." width={320}>
+              <span style={{ color: 'var(--theme-text3)', cursor: 'help' }}>ⓘ</span>
+            </Tip>:
+            {' '}<span style={{ color: 'var(--theme-text3)' }}>{usage.unusedSubRecipes.join(', ')}</span>
+          </div>
+        )}
+
+        {usage.miscategorised.length > 0 && (
+          <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--theme-amber)' }}>
+            {usage.miscategorised.length} recipe{usage.miscategorised.length !== 1 ? 's are' : ' is'} used as an ingredient by another recipe but {usage.miscategorised.length !== 1 ? 'are' : 'is'} not categorised as a Sub-Recipe: <strong>{usage.miscategorised.join(', ')}</strong>. {usage.miscategorised.length !== 1 ? 'They' : 'It'} still count{usage.miscategorised.length !== 1 ? '' : 's'} here, but not in Recipe Costing's sub-recipe total — set the category on the recipe to make the two agree.
+          </div>
+        )}
 
         {showRecon && (
           <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--theme-amber)' }}>
@@ -369,6 +479,28 @@ export default function StockMovements() {
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12, fontSize: 13 }}>
+                    TOTAL <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}>({subRows.length} shown)</span>
+                  </td>
+                  {/* Qty Used only totals when every row shares one UOM — summing grams and
+                      millilitres into a single number would be a nonsense figure, so it shows a
+                      dash instead (same rule as Purchases' Qty total across mixed units). */}
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12, fontSize: 13 }}>
+                    {subQtyIsComparable && subRows.length > 0
+                      ? `${subRows.reduce((s, r) => s + r.qty, 0).toLocaleString('en-NP', { maximumFractionDigits: 2 })} ${subRows[0].yieldUom}`
+                      : '—'}
+                  </td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-purple)', paddingTop: 12, fontSize: 13 }}>
+                    {subBatchTotal.toLocaleString('en-NP', { maximumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ paddingTop: 12 }} />
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 12, fontSize: 15 }}>
+                    {subValueTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}
@@ -428,6 +560,23 @@ export default function StockMovements() {
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                {/* Cells line up 1:1 with the 9 header columns (Day/Item/Category/UOM/Qty/
+                    Source/Order/Staff/Value) — the same alignment bug S525 fixed on Purchases,
+                    avoided here by not collapsing the middle columns into one colSpan. */}
+                <tr>
+                  <td colSpan={4} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12, fontSize: 13 }}>
+                    TOTAL <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}>({filtered.length} shown)</span>
+                  </td>
+                  {/* No Qty total: these rows span different items in different UOMs (grams, ml,
+                      pcs), so one summed quantity would mean nothing. Value is the comparable one. */}
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text3)', paddingTop: 12 }}>—</td>
+                  <td colSpan={3} style={{ paddingTop: 12 }} />
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 12, fontSize: 15 }}>
+                    {totalValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}

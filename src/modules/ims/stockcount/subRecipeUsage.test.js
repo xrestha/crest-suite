@@ -1,4 +1,4 @@
-import { loadSubRecipeUsage, usageForSource } from './subRecipeUsage'
+import { loadSubRecipeUsage, usageForSource, subRecipeHasIngredient, EMPTY_USAGE } from './subRecipeUsage'
 
 // Stub covering every query the loader makes, directly or via explodeRecipeTree /
 // computeRecipeCosts. Rows carry all columns any caller might select — the real code picks the
@@ -15,13 +15,20 @@ function makeStub({ sales = [], ingredients = [], recipes = [], items = [] } = {
   // Chainable + thenable, matching the shapes the loader actually builds:
   //   .select().in(...)                        — recipes / items lookups
   //   .select().eq(...).order(...).range(...)  — the paged sales_entries read (fetchAllRows)
-  const chain = (table) => {
+  // .eq() filters are recorded and applied on resolution — the loader relies on
+  // .eq('category', 'Sub-Recipe') to build the master list, so a stub that ignored eq would make
+  // the unused-diff tests pass for the wrong reason.
+  const chain = (table, eqs = []) => {
+    // A filter on a column the fixture doesn't define is ignored rather than matching nothing —
+    // that keeps fixtures minimal (no period_id/client_id boilerplate on every row) while still
+    // genuinely enforcing .eq('category', 'Sub-Recipe'), which every recipe fixture does define.
+    const apply = rows => rows.filter(r => eqs.every(([col, val]) => r[col] === undefined || r[col] === val))
     const c = {
-      eq: () => c,
+      eq: (col, val) => chain(table, [...eqs, [col, val]]),
       order: () => c,
-      in: (col, ids) => Promise.resolve({ data: rowsFor(table, col, ids), error: null }),
-      range: (from, to) => Promise.resolve({ data: rowsFor(table).slice(from, to + 1), error: null }),
-      then: (res, rej) => Promise.resolve({ data: rowsFor(table), error: null }).then(res, rej),
+      in: (col, ids) => Promise.resolve({ data: apply(rowsFor(table, col, ids)), error: null }),
+      range: (from, to) => Promise.resolve({ data: apply(rowsFor(table)).slice(from, to + 1), error: null }),
+      then: (res, rej) => Promise.resolve({ data: apply(rowsFor(table)), error: null }).then(res, rej),
     }
     return c
   }
@@ -39,10 +46,10 @@ const BASE = {
     { recipe_id: 'sauce', qty_per_portion: 1000, item_id: 'tomato', sub_recipe_id: null, items: { yield_pct: 100 } },
   ],
   recipes: [
-    { id: 'sauce', yield_qty: 2000, yield_uom: 'ml', name: 'House Sauce', cost_price: null },
-    { id: 'dish',  yield_qty: 1,    yield_uom: 'portion', name: 'Pasta',  cost_price: null },
+    { id: 'sauce', yield_qty: 2000, yield_uom: 'ml', name: 'House Sauce', category: 'Sub-Recipe', cost_price: null },
+    { id: 'dish',  yield_qty: 1,    yield_uom: 'portion', name: 'Pasta',  category: 'Food', cost_price: null },
   ],
-  items: [{ id: 'tomato', per_uom_rate: 0.5 }],
+  items: [{ id: 'tomato', name: 'Tomatoes', per_uom_rate: 0.5 }],
 }
 
 describe('loadSubRecipeUsage', () => {
@@ -117,8 +124,8 @@ describe('loadSubRecipeUsage', () => {
         { recipe_id: 'base',  qty_per_portion: 200, item_id: 'herb', sub_recipe_id: null, items: { yield_pct: 100 } },
       ],
       recipes: [
-        { id: 'sauce', yield_qty: 2000, yield_uom: 'ml', name: 'House Sauce', cost_price: null },
-        { id: 'base',  yield_qty: 500,  yield_uom: 'g',  name: 'Herb Base',   cost_price: null },
+        { id: 'sauce', yield_qty: 2000, yield_uom: 'ml', name: 'House Sauce', category: 'Sub-Recipe', cost_price: null },
+        { id: 'base',  yield_qty: 500,  yield_uom: 'g',  name: 'Herb Base',   category: 'Sub-Recipe', cost_price: null },
       ],
       items: [{ id: 'herb', per_uom_rate: 2 }],
       sales: [{ recipe_id: 'dish', qty_sold: 10, bs_day: 1, source: 'pos' }],
@@ -136,7 +143,7 @@ describe('loadSubRecipeUsage', () => {
     const { supabase, scopedFrom } = makeStub({
       ingredients: [{ recipe_id: 'dish', qty_per_portion: 20, item_id: 'tomato', sub_recipe_id: null, items: { yield_pct: 100 } }],
       recipes: [],
-      items: [{ id: 'tomato', per_uom_rate: 0.5 }],
+      items: [{ id: 'tomato', name: 'Tomatoes', per_uom_rate: 0.5 }],
       sales: [{ recipe_id: 'dish', qty_sold: 3, bs_day: 1, source: 'pos' }],
     })
     const { rows, derivedItemValue } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
@@ -146,7 +153,109 @@ describe('loadSubRecipeUsage', () => {
 
   test('no period returns the empty shape rather than throwing', async () => {
     const { supabase, scopedFrom } = makeStub()
-    expect(await loadSubRecipeUsage(supabase, scopedFrom, null)).toEqual({ rows: [], derivedItemValue: 0, salesRowsUsed: 0 })
+    expect(await loadSubRecipeUsage(supabase, scopedFrom, null)).toEqual(EMPTY_USAGE)
+  })
+})
+
+describe('ingredient search', () => {
+  test('each row carries its own raw ingredients, named and sorted', async () => {
+    const { supabase, scopedFrom } = makeStub({
+      ...BASE,
+      ingredients: [
+        ...BASE.ingredients,
+        { recipe_id: 'sauce', qty_per_portion: 5, item_id: 'basil', sub_recipe_id: null, items: { yield_pct: 100 } },
+      ],
+      items: [...BASE.items, { id: 'basil', name: 'Basil', per_uom_rate: 3 }],
+      sales: [{ recipe_id: 'dish', qty_sold: 1, bs_day: 1, source: 'pos' }],
+    })
+    const { rows } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(rows[0].ingredients).toEqual(['Basil', 'Tomatoes'])
+  })
+
+  test('a nested sub-recipe\'s ingredients are visible on the parent, not just on itself', async () => {
+    const { supabase, scopedFrom } = makeStub({
+      ingredients: [
+        { recipe_id: 'dish',  qty_per_portion: 50,  item_id: null, sub_recipe_id: 'sauce', items: null },
+        { recipe_id: 'sauce', qty_per_portion: 100, item_id: null, sub_recipe_id: 'base',  items: null },
+        { recipe_id: 'base',  qty_per_portion: 200, item_id: 'herb', sub_recipe_id: null, items: { yield_pct: 100 } },
+      ],
+      recipes: [
+        { id: 'sauce', yield_qty: 2000, yield_uom: 'ml', name: 'House Sauce', category: 'Sub-Recipe', cost_price: null },
+        { id: 'base',  yield_qty: 500,  yield_uom: 'g',  name: 'Herb Base',   category: 'Sub-Recipe', cost_price: null },
+      ],
+      items: [{ id: 'herb', name: 'Fresh Herbs', per_uom_rate: 2 }],
+      sales: [{ recipe_id: 'dish', qty_sold: 1, bs_day: 1, source: 'pos' }],
+    })
+    const { rows } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    const sauce = rows.find(r => r.name === 'House Sauce')
+    // The sauce contains no raw item directly — only the base — so this is the whole point:
+    // searching "herbs" must still surface it.
+    expect(sauce.ingredients).toEqual(['Fresh Herbs'])
+    expect(subRecipeHasIngredient(sauce, 'herbs')).toBe(true)
+  })
+})
+
+describe('unused-this-period diff', () => {
+  // Two sub-recipes on file, only one reachable from what sold — the shape behind "9 of your 57
+  // weren't used this period", which is what the count gap against Recipe Costing actually is.
+  const withSpare = {
+    ...BASE,
+    recipes: [
+      ...BASE.recipes,
+      { id: 'spare', yield_qty: 100, yield_uom: 'g', name: 'Unused Paste', category: 'Sub-Recipe', cost_price: null },
+    ],
+    sales: [{ recipe_id: 'dish', qty_sold: 1, bs_day: 1, source: 'pos' }],
+  }
+
+  test('names the sub-recipes nothing sold this period touched', async () => {
+    const { supabase, scopedFrom } = makeStub(withSpare)
+    const { rows, unusedSubRecipes, totalSubRecipes } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(rows.map(r => r.name)).toEqual(['House Sauce'])
+    expect(unusedSubRecipes).toEqual(['Unused Paste'])
+    // used + unused ties back to the master total, which is the whole point of showing it.
+    expect(rows.length + unusedSubRecipes.length).toBe(totalSubRecipes)
+  })
+
+  test('when nothing sold at all, every sub-recipe counts as unused rather than reporting none', async () => {
+    const { supabase, scopedFrom } = makeStub({ ...withSpare, sales: [] })
+    const { rows, unusedSubRecipes, totalSubRecipes } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(rows).toEqual([])
+    expect(totalSubRecipes).toBe(2)
+    expect(unusedSubRecipes).toEqual(['House Sauce', 'Unused Paste'])
+  })
+
+  test('flags a recipe used as an ingredient but not categorised as a Sub-Recipe', async () => {
+    // House Sauce is referenced via sub_recipe_id but left on the default category, so Recipe
+    // Costing would not count it and used+unused could not tie out. That gets named, not hidden.
+    const { supabase, scopedFrom } = makeStub({
+      ...BASE,
+      recipes: [{ id: 'sauce', yield_qty: 2000, yield_uom: 'ml', name: 'House Sauce', category: 'Food', cost_price: null }],
+      sales: [{ recipe_id: 'dish', qty_sold: 1, bs_day: 1, source: 'pos' }],
+    })
+    const { miscategorised } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    expect(miscategorised).toEqual(['House Sauce'])
+  })
+})
+
+describe('subRecipeHasIngredient', () => {
+  const row = { ingredients: ['Acai Powder', 'Banana', 'Honey'] }
+
+  test('an empty query matches everything (no filter applied)', () => {
+    expect(subRecipeHasIngredient(row, '')).toBe(true)
+  })
+
+  test('matches on a partial, case-insensitive substring', () => {
+    expect(subRecipeHasIngredient(row, 'acai')).toBe(true)
+    expect(subRecipeHasIngredient(row, 'nan')).toBe(true)
+  })
+
+  test('does not match an ingredient that is absent', () => {
+    expect(subRecipeHasIngredient(row, 'mango')).toBe(false)
+  })
+
+  test('a row with no ingredients never matches a real query, and does not throw', () => {
+    expect(subRecipeHasIngredient({}, 'milk')).toBe(false)
+    expect(subRecipeHasIngredient({}, '')).toBe(true)
   })
 })
 
