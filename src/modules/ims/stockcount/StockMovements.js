@@ -6,6 +6,8 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
+import { loadSubRecipeUsage, usageForSource, EMPTY_USAGE } from './subRecipeUsage'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -25,6 +27,8 @@ export default function StockMovements() {
   const [dayFrom, setDayFrom] = useState('')
   const [dayTo, setDayTo] = useState('')
   const [noBomRecipes, setNoBomRecipes] = useState([])
+  const [tab, setTab] = useState('items')
+  const [usage, setUsage] = useState(EMPTY_USAGE)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -55,12 +59,23 @@ export default function StockMovements() {
   }
 
   async function loadReport(periodId, presetItemId) {
+    // Sub-recipe usage is derived from sales_entries, not from the ledger below — see
+    // subRecipeUsage.js. Loaded alongside rather than lazily on tab switch: it shares the period
+    // and feeds the reconciliation note, which has to be right the moment the page paints.
+    loadSubRecipeUsage(supabase, scopedFrom, periodId)
+      .then(setUsage)
+      .catch(err => { console.error('sub-recipe usage failed:', err); setUsage(EMPTY_USAGE) })
+
     const [{ data: movements }, { data: profs }, { data: soldEntries }] = await Promise.all([
-      scopedFrom('stock_movements',
+      // Paged, not a bare select: a busy period exceeds PostgREST's 1000-row cap, which returns
+      // silently truncated data and understated every stat card below (S528 — found live at
+      // exactly "1000 movements"). `id` is the unique tiebreaker that makes the paging stable,
+      // since created_at alone is not unique across rows written by the same bill.
+      fetchAllRows(() => scopedFrom('stock_movements',
         'id, item_id, bs_day, qty, source, ref_id, created_at, ' +
         'items(name, uom, item_code, per_uom_rate, categories(name)), ' +
         'pos_orders(order_no, close_type, closed_by)'
-      ).eq('period_id', periodId).order('created_at', { ascending: false }),
+      ).eq('period_id', periodId).order('created_at', { ascending: false }).order('id')),
       supabase.rpc('get_client_profile_names', { p_client_id: effectiveClientId }),
       // sales_entries is period_id-scoped, not client_id-scoped — stays on raw supabase.from() (see scopedDb notes).
       // No source filter: manual Sales Entry saves deplete stock too (S492), same as POS, so a
@@ -115,6 +130,29 @@ export default function StockMovements() {
   const compValue = filtered.filter(r => r.source === 'pos_comp').reduce((s, r) => s + r.value, 0)
   const itemsAffected = new Set(filtered.map(r => r.item?.name)).size
 
+  // Sub-recipe usage shares the search + source filters (both map cleanly onto the sales rows it
+  // derives from) but deliberately not the Day range — the derivation includes Bulk rows, which
+  // carry bs_day 0 and belong to no single day, so a day filter here would quietly drop them.
+  const subRows = usage.rows
+    .map(r => usageForSource(r, filterSource))
+    .filter(r => r.qty > 0 && (r.name || '').toLowerCase().includes(search.toLowerCase()))
+  const subValueTotal = subRows.reduce((s, r) => s + r.value, 0)
+  const subBatchTotal = subRows.reduce((s, r) => s + r.batches, 0)
+
+  // Reconciliation. The sub-recipe figures come from sales_entries; the ledger is what was
+  // actually written. They legitimately diverge — manual-sales depletion only started 2026-07-30
+  // with no backfill, credit notes never restore stock, and a recipe with no ingredients depletes
+  // nothing — so when the derivation's own raw-item value doesn't match the ledger's, say why
+  // rather than leaving two numbers on one page disagreeing in silence.
+  // Compared against the UNFILTERED ledger total, since the derivation ignores the day filter.
+  const ledgerTotalValue = rows.reduce((s, r) => s + r.value, 0)
+  const reconGap = usage.derivedItemValue - ledgerTotalValue
+  // `!loading` matters: the usage derivation resolves independently of the ledger fetch, so
+  // without it there's a window where usage has landed but `rows` is still empty and the gap
+  // reads as the entire period's value.
+  const showRecon = !loading && usage.rows.length > 0 &&
+    Math.abs(reconGap) > Math.max(1, usage.derivedItemValue * 0.005)
+
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const data = filtered.map(r => ({
@@ -133,6 +171,25 @@ export default function StockMovements() {
     const wb = XLSX.utils.book_new()
     const period = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : 'Report'
     XLSX.utils.book_append_sheet(wb, ws, 'Stock Movements')
+
+    // Second sheet, not extra columns on the first — the raw-item ledger and the sub-recipe
+    // rollup are different grains (one row per depletion vs one row per sub-recipe) and the
+    // existing sheet's shape is left byte-identical so nobody's saved template breaks.
+    if (subRows.length > 0) {
+      const subData = subRows.map(r => ({
+        'Sub-Recipe': r.name,
+        'Yield per Batch': r.yieldQty ? `${r.yieldQty} ${r.yieldUom}` : '',
+        'Qty Used': parseFloat(r.qty.toFixed(3)),
+        'UOM': r.yieldUom,
+        'Batches Used': parseFloat(r.batches.toFixed(3)),
+        'Cost per Batch (NPR)': parseFloat(r.batchCost.toFixed(2)),
+        'Value (NPR)': parseFloat(r.value.toFixed(0)),
+      }))
+      const subWs = XLSX.utils.json_to_sheet(subData)
+      subWs['!cols'] = [24,16,12,8,13,20,12].map(w => ({ wch: w }))
+      XLSX.utils.book_append_sheet(wb, subWs, 'Sub-Recipe Usage')
+    }
+
     XLSX.writeFile(wb, `Stock_Movements_${period.replace(' ', '_')}.xlsx`)
   }
 
@@ -146,7 +203,11 @@ export default function StockMovements() {
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title">Stock Movements</h1>
-          <p className="page-subtitle">Ledger of every stock depletion from POS sales/comps and manual Sales Entry — {periodLabel}</p>
+          <p className="page-subtitle">
+            {tab === 'subs'
+              ? `Prep-level view — which sub-recipes this period's sales consumed, and how many batches — ${periodLabel}`
+              : `Ledger of every stock depletion from POS sales/comps and manual Sales Entry — ${periodLabel}`}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
@@ -156,6 +217,25 @@ export default function StockMovements() {
         </div>
       </div>
 
+      {tab === 'subs' ? (
+        <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 24 }}>
+          <div className="stat-card">
+            <div className="stat-label">Sub-Recipes Used</div>
+            <div className="stat-value">{subRows.length}</div>
+            <div className="stat-sub">distinct prep items consumed</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label"><Tip text="Total batches across every sub-recipe below — a rough measure of how much prep work this period's sales required." width={260}>Batches Used</Tip></div>
+            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple)' }}>{subBatchTotal.toLocaleString('en-NP', { maximumFractionDigits: 1 })}</div>
+            <div className="stat-sub">summed across all sub-recipes</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label"><Tip text="Batches used × cost per batch. This is a slice of the raw-item value on the Raw Items tab, not an addition to it — the same ingredients, grouped by the prep item they went through." width={280}>Value</Tip></div>
+            <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {subValueTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
+            <div className="stat-sub">at ingredient cost</div>
+          </div>
+        </div>
+      ) : (
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
         <div className="stat-card">
           <div className="stat-label">Movements</div>
@@ -178,6 +258,16 @@ export default function StockMovements() {
           <div className="stat-sub">distinct items depleted</div>
         </div>
       </div>
+      )}
+
+      <div className="tab-bar" style={{ marginBottom: 16 }}>
+        <button className={`tab-btn ${tab === 'items' ? 'tab-btn--active' : ''}`} onClick={() => setTab('items')}>
+          Raw Items
+        </button>
+        <button className={`tab-btn ${tab === 'subs' ? 'tab-btn--active' : ''}`} onClick={() => setTab('subs')}>
+          Sub-Recipes {usage.rows.length > 0 && `(${usage.rows.length})`}
+        </button>
+      </div>
 
       {noBomRecipes.length > 0 && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber)' }}>
@@ -190,13 +280,17 @@ export default function StockMovements() {
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <input style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
-          placeholder="Search items…" value={search} onChange={e => setSearch(e.target.value)} />
+          placeholder={tab === 'subs' ? 'Search sub-recipes…' : 'Search items…'} value={search} onChange={e => setSearch(e.target.value)} />
         <select className="form-select" value={filterSource} onChange={e => setFilterSource(e.target.value)}>
           <option value="all">All Sources</option>
           <option value="pos_sale">POS Sale</option>
           <option value="pos_comp">POS Comp</option>
           <option value="manual">Manual Entry</option>
         </select>
+        {/* Day range is Raw Items only — the sub-recipe rollup includes Bulk sales rows, which
+            carry bs_day 0 and belong to no single day, so filtering it by day would silently
+            drop them rather than narrow the view. */}
+        {tab === 'items' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Tip text="Filters by Day within the selected period above — not a calendar date." width={220}>
             <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Day</span>
@@ -214,9 +308,72 @@ export default function StockMovements() {
             <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => { setDayFrom(''); setDayTo('') }}>✕ Clear</button>
           )}
         </div>
-        <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} entr{filtered.length !== 1 ? 'ies' : 'y'}</span>
+        )}
+        <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
+          {tab === 'subs'
+            ? `${subRows.length} sub-recipe${subRows.length !== 1 ? 's' : ''}`
+            : `${filtered.length} entr${filtered.length !== 1 ? 'ies' : 'y'}`}
+        </span>
       </div>
 
+      {tab === 'subs' ? (
+      <div className="card">
+        <div style={{ marginBottom: 14 }}>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)' }}>
+            <Tip text="A sub-recipe is never depleted as itself — recipe_ingredients stores it as a reference, so the ledger on the Raw Items tab only ever holds the raw ingredients at the bottom of the tree. This tab re-walks the same recipes against this period's sales to show the prep layer in between." width={320}>
+              Derived from this period's sales entries
+            </Tip>
+            {' '}— not a second set of ledger rows. The same ingredients appear on the Raw Items tab; this groups them by the prep item they passed through.
+          </p>
+        </div>
+
+        {showRecon && (
+          <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--theme-amber)' }}>
+            These figures imply NPR {usage.derivedItemValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })} of raw ingredients, but the ledger recorded NPR {ledgerTotalValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+            {' '}({reconGap > 0 ? '+' : '−'}NPR {Math.abs(reconGap).toLocaleString('en-NP', { maximumFractionDigits: 0 })} difference).
+            {' '}Usual causes: a recipe edited after a sale — the ledger froze each depletion at the ingredients in force when it was sold, while this view re-walks the recipe as it stands today, so the two part ways permanently for anything sold before the edit; manual Sales Entry only started depleting stock on 2026-07-30 and earlier saves were never backfilled; POS credit notes reverse revenue but never restore stock; and recipes with no ingredients linked deplete nothing (see the banner above when that applies).
+          </div>
+        )}
+
+        {loading ? (
+          <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Building report…</p>
+        ) : subRows.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-icon">⚙</div>
+            <p className="empty-state-text">No sub-recipe usage this period. This appears once a dish that uses a sub-recipe is sold — either through POS or a saved manual Sales Entry.</p>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Sub-Recipe</th>
+                  <th><Tip text="How much one batch of this sub-recipe produces, from its Recipe Costing record." width={240}>Yield per Batch</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Output units consumed — e.g. 25,000 g of a sauce, regardless of how many batches that took. Summed across every dish sold that uses it, including through other sub-recipes." width={300}>Qty Used</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Qty Used ÷ Yield per Batch. How many full batches of prep this period's sales actually consumed." width={260}>Batches Used</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Total ingredient cost of one batch, from Recipe Costing — nested sub-recipes included." width={250}>Cost / Batch</Tip></th>
+                  <th style={{ textAlign: 'right' }}>Value (NPR)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subRows.map(r => (
+                  <tr key={r.id}>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>⚙ {r.name}</td>
+                    <td style={{ color: 'var(--theme-text2)' }}>{r.yieldQty ? `${r.yieldQty} ${r.yieldUom}` : '—'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
+                      {r.qty.toLocaleString('en-NP', { maximumFractionDigits: 3 })} <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>{r.yieldUom}</span>
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-purple)' }}>{r.batches.toLocaleString('en-NP', { maximumFractionDigits: 2 })}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.batchCost.toLocaleString('en-NP', { maximumFractionDigits: 2 })}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.value.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      ) : (
       <div className="card">
         {loading ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Building report…</p>
@@ -275,6 +432,7 @@ export default function StockMovements() {
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

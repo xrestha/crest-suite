@@ -1,3 +1,10 @@
+// persistSalesDay.js imports scopedDb, which imports the real supabaseClient — and that calls
+// createClient() at module load, so this suite failed to run at all ("supabaseUrl is required")
+// in any environment without REACT_APP_SUPABASE_URL set, which includes a plain checkout and CI.
+// Mocked the same way scopedDb.test.js already does it; every test below passes its own mock
+// client into the function under test, so nothing here needs the real one.
+jest.mock('../../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }))
+
 import { persistSalesDay, isMissingFunctionError, findSupersededRows } from './persistSalesDay'
 
 // Minimal stand-in for a PostgrestBuilder: chainable, records what was called on it, and is

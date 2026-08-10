@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { printWithTitle } from '../../../utils/printTitle'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
@@ -93,9 +94,13 @@ export default function ReorderReport() {
       supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
+      // Both paged rather than bare selects — either can exceed PostgREST's silent 1000-row cap
+      // on a busy period, and a truncated read here understates theoretical usage and Book Stock
+      // with no error to notice. Book Stock is a figure people place orders against, so a
+      // quietly-low number is worse than a missing one (S528, see shared/fetchAllRows.js).
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).order('id')),
       scopedFrom('par_levels'),
-      scopedFrom('stock_movements', 'item_id, qty').eq('period_id', periodId)
+      fetchAllRows(() => scopedFrom('stock_movements', 'item_id, qty').eq('period_id', periodId).order('id'))
     ])
 
     const parMap = {}

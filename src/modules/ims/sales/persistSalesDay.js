@@ -2,6 +2,7 @@ import { withTimeout } from '../../../utils/withTimeout'
 import { isAuthExpiredError } from '../../../utils/sessionKeepAlive'
 import { scopedInsert, scopedDelete } from '../../../shared/scopedDb'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { buildPosIndex, posSupersedesManual } from './salesDepletion'
 
 // How long any single save request may hang before we give up and re-enable the button (S453/S454).
 export const SAVE_TIMEOUT_MS = 20000
@@ -163,12 +164,17 @@ export async function depleteManualSales(supabase, { clientId, periodId, bsDay, 
     if (candidates.length === 0) return
 
     const recipeIds = [...new Set(candidates.map(r => r.recipe_id))]
-    const posQuery = supabase.from('sales_entries').select('recipe_id')
+    // bs_day is selected (not just recipe_id) so buildPosIndex can key the supersedes check by day
+    // — the query below is already day-scoped, but the shared index is what Stock Movements'
+    // Sub-Recipe Usage view also reads, and that one sees the whole period at once.
+    const posQuery = supabase.from('sales_entries').select('recipe_id, bs_day')
       .eq('period_id', periodId).in('recipe_id', recipeIds).in('source', ['pos', 'pos_comp'])
     const { data: posRows } = await (bsDay === 0 ? posQuery : posQuery.eq('bs_day', bsDay))
-    const posRecipeIds = new Set((posRows || []).map(r => r.recipe_id))
 
-    const qualifying = candidates.filter(r => !posRecipeIds.has(r.recipe_id))
+    // The POS-supersedes-manual rule lives in salesDepletion.js, shared with the read path that
+    // re-derives sub-recipe consumption from sales_entries — see that file's header for why.
+    const posIndex = buildPosIndex((posRows || []).map(r => ({ ...r, source: 'pos' })))
+    const qualifying = candidates.filter(r => !posSupersedesManual(r.recipe_id, bsDay, posIndex))
     if (qualifying.length === 0) return
 
     const breakdown = await explodeRecipeIngredients(supabase, [...new Set(qualifying.map(r => r.recipe_id))])

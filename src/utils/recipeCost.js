@@ -13,7 +13,33 @@ export function getSuggestedPrice(cost, vatRate = 0.13, targetFcPct = 0.30) {
 // at 5 rounds). Returns { [recipeId]: [{ item_id, qty }] } — qty is base-UOM, yield_pct-trimmed
 // and sub-recipe yield_qty-scaled, duplicate item_ids aggregated per recipe. Caller multiplies by
 // their own qty (this returns per-one-unit quantities). Requires a live Supabase client.
+//
+// Thin wrapper over explodeRecipeTree below, which does the actual work and additionally reports
+// the sub-recipe nodes it passes through. This function's return shape is depended on by ~8 files
+// (Variance, ReorderReport, StockReport, ShrinkageReport, ClientDashboard, OwnerDashboard,
+// computeMonthlyReport, computeInventoryVariance/ShrinkageTrend) — every one of them drives a
+// stock or cost figure, so it must keep returning exactly the flat item array it always has.
 export async function explodeRecipeIngredients(supabase, recipeIds) {
+  const tree = await explodeRecipeTree(supabase, recipeIds)
+  const out = {}
+  for (const recipeId of Object.keys(tree)) out[recipeId] = tree[recipeId].items
+  return out
+}
+
+// Same recursion as above, but also reports the sub-recipe nodes it passes through on the way
+// down — which explodeRecipeIngredients throws away, since a sub-recipe is only ever a scaling
+// step between a dish and its raw items (recipe_ingredients stores sub_recipe_id with item_id
+// NULL, so a sub-recipe can never be a leaf). That discarded middle layer is exactly what
+// "how many batches of this sauce did we use" needs, so it's collected here instead of being
+// re-derived by a second, drift-prone copy of the same walk.
+//
+// Returns { [recipeId]: { items: [{ item_id, qty }], subRecipes: [{ sub_recipe_id, qty, batches }] } }
+// per one unit/portion of the parent, both arrays aggregated by id:
+//   qty     — output units of the sub-recipe consumed (the unit its yield_uom names)
+//   batches — qty ÷ that sub-recipe's own yield_qty, i.e. fraction of a batch
+// Nested sub-recipes are reported at their own output-unit scale, not the top parent's, so a
+// base sauce used inside another sauce shows its real consumption rather than being folded away.
+export async function explodeRecipeTree(supabase, recipeIds) {
   if (!recipeIds || recipeIds.length === 0) return {}
 
   const { data: topIng } = await supabase
@@ -53,7 +79,10 @@ export async function explodeRecipeIngredients(supabase, recipeIds) {
     frontier = [...new Set((si || []).map(r => r.sub_recipe_id).filter(Boolean))].filter(id => !recipeMeta[id])
   }
 
-  function explode(recipeId, scale, depth) {
+  // `subs` is an out-param the caller passes in — pushing into it rather than returning a second
+  // array keeps the leaf-item return value (and so the recursive spread below) byte-identical to
+  // what this function did before sub-recipe reporting existed.
+  function explode(recipeId, scale, depth, subs) {
     if (depth > 10) return [] // guard against runaway/cyclic sub-recipe refs
     const result = []
     for (const r of allIng.filter(x => x.recipe_id === recipeId)) {
@@ -63,7 +92,14 @@ export async function explodeRecipeIngredients(supabase, recipeIds) {
         result.push({ item_id: r.item_id, qty: qty / yf })
       } else if (r.sub_recipe_id) {
         const sr = recipeMeta[r.sub_recipe_id]
-        if (sr) result.push(...explode(r.sub_recipe_id, qty / (parseFloat(sr.yield_qty) || 1), depth + 1))
+        if (sr) {
+          // `qty` is already this sub-recipe's own output units (scaled by every yield_qty above
+          // it), and the recursion scale below is the same figure expressed in batches — so both
+          // reported numbers are the ones the walk already had to compute, not a re-derivation.
+          const batches = qty / (parseFloat(sr.yield_qty) || 1)
+          subs.push({ sub_recipe_id: r.sub_recipe_id, qty, batches })
+          result.push(...explode(r.sub_recipe_id, batches, depth + 1, subs))
+        }
       }
     }
     return result
@@ -72,8 +108,18 @@ export async function explodeRecipeIngredients(supabase, recipeIds) {
   const out = {}
   for (const recipeId of recipeIds) {
     const agg = {}
-    explode(recipeId, 1, 0).forEach(({ item_id, qty }) => { agg[item_id] = (agg[item_id] || 0) + qty })
-    out[recipeId] = Object.entries(agg).map(([item_id, qty]) => ({ item_id, qty }))
+    const subs = []
+    explode(recipeId, 1, 0, subs).forEach(({ item_id, qty }) => { agg[item_id] = (agg[item_id] || 0) + qty })
+    const subAgg = {}
+    subs.forEach(({ sub_recipe_id, qty, batches }) => {
+      const e = subAgg[sub_recipe_id] || (subAgg[sub_recipe_id] = { qty: 0, batches: 0 })
+      e.qty += qty
+      e.batches += batches
+    })
+    out[recipeId] = {
+      items: Object.entries(agg).map(([item_id, qty]) => ({ item_id, qty })),
+      subRecipes: Object.entries(subAgg).map(([sub_recipe_id, e]) => ({ sub_recipe_id, ...e })),
+    }
   }
   return out
 }
