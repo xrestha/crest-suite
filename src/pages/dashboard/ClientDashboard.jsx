@@ -164,7 +164,10 @@ export default function ClientDashboard() {
       period ? supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id) : { data: [] },
       scopedFrom('items', 'id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
       scopedFrom('par_levels', 'item_id, par_qty'),
-      period ? supabase.from('overheads').select('amount').eq('period_id', period.id) : { data: [] },
+      // `bucket` is selected (not just `amount`) because the Overheads page splits fixed costs
+      // into three buckets — overhead / labor / tax_fees — and the Revenue vs Cost Breakdown pie
+      // needs them apart. The KPI cards still use the all-bucket sum; see overheadBuckets below.
+      period ? supabase.from('overheads').select('amount, bucket').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('wastages').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       // Unfiltered by is_active — an item deactivated mid-period still has real purchase/wastage
       // history for that period. Used for Top Items by Spend and itemRateMap below so those don't
@@ -437,12 +440,22 @@ export default function ClientDashboard() {
       setAndCache(setReorderItems, 'reorderItems', [])
     }
 
-    const overheadTotal = (overheadsData || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
+    // Two shapes of the same figure, deliberately: `overheadTotal` is every bucket combined (what
+    // the Fixed Costs % and Est. Net Margin % cards have always meant by "overheads"), while
+    // `overheadBuckets` keeps the split so the cost pie can show Labor as its own slice without
+    // inventing a second, overlapping labor number. Rows with a NULL bucket fall back to
+    // 'overhead', matching Overheads.js's own `r.bucket || 'overhead'` grouping.
+    const overheadBuckets = { overhead: 0, labor: 0, tax_fees: 0 }
+    ;(overheadsData || []).forEach(o => {
+      const b = overheadBuckets[o.bucket] !== undefined ? o.bucket : 'overhead'
+      overheadBuckets[b] += parseFloat(o.amount || 0)
+    })
+    const overheadTotal = overheadBuckets.overhead + overheadBuckets.labor + overheadBuckets.tax_fees
 
     // itemRateMap already built above (for recipeCostMap) — same items(id, per_uom_rate) shape.
     const wastageValueTotal = (wastagesData || []).reduce((s, w) => s + parseFloat(w.qty || 0) * (itemRateMap[w.item_id] || 0), 0)
 
-    setAndCache(setStats, 'stats', { itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
+    setAndCache(setStats, 'stats', { itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, overheadBuckets, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
     setLoading(false)
     const fcPctNow = revenueTotal > 0 ? (purchaseTotal / revenueTotal) * 100 : null
     loadFcTrend(period, fcPctNow, myId)
@@ -677,28 +690,50 @@ export default function ClientDashboard() {
   const fcTrendBest = fcTrend.length > 0 ? fcTrend.reduce((best, p) => p.fc < best.fc ? p : best) : null
   const fcTrendWorst = fcTrend.length > 0 ? fcTrend.reduce((worst, p) => p.fc > worst.fc ? p : worst) : null
 
-  // Revenue vs Cost Breakdown pie — a "P&L at a glance" composition of the same figures behind
-  // the Est. Net Margin % card (revenue minus food cost and overheads). Labor is basic payroll
-  // only (hrStats.payroll), not a full labor-cost estimate — Owner Dashboard's payroll-vs-revenue
-  // figure is the authoritative one for that; this is a lighter at-a-glance view. Pro-gated same
-  // as netMarginCard since overheads (the biggest lever here) are a Pro-only figure.
+  // Revenue vs Cost Breakdown pie — a "P&L at a glance" composition of exactly the figures behind
+  // the Est. Net Margin % card (revenue minus food cost and overheads), in the standard restaurant
+  // P&L order: Food Cost → Labor → Overheads → Tax & Fees → what's left.
+  //
+  // Labor comes from the Overheads page's own `labor` bucket, NOT from HR payroll. Until S526 this
+  // chart drew `stats.overheadTotal` (which is all three buckets summed, labor included) as one
+  // "Overheads" slice AND added `hrStats.payroll` on top as a separate "Labor (basic)" slice — so
+  // every rupee of labor was counted twice and the pie's own total came out well above the total
+  // cost the net-margin figure beside it was computed from (found live: NPR 454k of slices against
+  // a 401k cost base, with the -57.2% margin correctly reflecting only the 401k). OwnerDashboard
+  // already avoids this by querying `.eq('bucket','overhead')` before subtracting HR payroll
+  // separately; this page keeps all three buckets (its KPI cards mean the combined figure) and
+  // splits them for display instead, so the slices always sum to exactly the cost base behind the
+  // margin. Pro-gated same as netMarginCard since overheads are a Pro-only figure.
+  //
   // Net Margin only joins the slices when positive — a negative-value pie slice renders as a
   // misleading sliver rather than "costs exceeded revenue," so a negative margin is surfaced via
   // the footer callout below instead of forced into the chart.
-  const COST_BREAKDOWN_COLORS = { 'Food Cost': colors.accent, 'Overheads': colors.red, 'Labor (basic)': colors.purple, 'Net Margin': colors.green }
-  const costBreakdownLabor = clientModules.hr && hrStats?.payroll > 0 ? hrStats.payroll : 0
+  const COST_BREAKDOWN_COLORS = { 'Food Cost': colors.accent, 'Labor': colors.purple, 'Overheads': colors.red, 'Tax & Fees': colors.amber, 'Net Margin': colors.green }
+  // Falls back to one combined slice for a `stats` object restored from a pre-S526 session cache,
+  // which has overheadTotal but no overheadBuckets — still correct, just less broken out.
+  const ohBuckets = stats?.overheadBuckets
   const costBreakdown = [
     { name: 'Food Cost', value: Math.max(0, stats?.purchaseTotal || 0) },
-    { name: 'Overheads', value: Math.max(0, stats?.overheadTotal || 0) },
-    ...(costBreakdownLabor > 0 ? [{ name: 'Labor (basic)', value: costBreakdownLabor }] : []),
+    ...(ohBuckets
+      ? [
+          { name: 'Labor',      value: Math.max(0, ohBuckets.labor || 0) },
+          { name: 'Overheads',  value: Math.max(0, ohBuckets.overhead || 0) },
+          { name: 'Tax & Fees', value: Math.max(0, ohBuckets.tax_fees || 0) },
+        ]
+      : [{ name: 'Overheads', value: Math.max(0, stats?.overheadTotal || 0) }]),
     ...(netMarginPct != null && netMarginPct > 0
-      ? [{ name: 'Net Margin', value: Math.max(0, (stats.revenueTotal || 0) - (stats.purchaseTotal || 0) - (stats.overheadTotal || 0) - costBreakdownLabor) }]
+      ? [{ name: 'Net Margin', value: Math.max(0, (stats.revenueTotal || 0) - (stats.purchaseTotal || 0) - (stats.overheadTotal || 0)) }]
       : []),
   ].filter(r => r.value > 0)
   const costBreakdownTotal = costBreakdown.reduce((s, r) => s + r.value, 0)
+  // HR is running real payroll but nobody has filled the Overheads page's Labor bucket for this
+  // period — so labor is genuinely missing from the split above rather than double-counted. Say so
+  // instead of quietly substituting the payroll figure, which would no longer tie to Est. Net
+  // Margin % (that card, and this pie, are both driven by the Overheads page's numbers).
+  const laborBucketMissing = clientModules.hr && hrStats?.payroll > 0 && ohBuckets && !(ohBuckets.labor > 0)
   const costBreakdownSummary = costBreakdown.length === 0
     ? 'No cost data for this period.'
-    : `Revenue breakdown this period: ${costBreakdown.map(r => `${r.name} NPR ${r.value.toLocaleString('en-NP')}`).join(', ')}. Net margin: ${netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}.`
+    : `Revenue breakdown this period: ${costBreakdown.map(r => `${r.name} NPR ${Math.round(r.value).toLocaleString('en-NP')}`).join(', ')}. Net margin: ${netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}.${laborBucketMissing ? ` Labor is not included — the Overheads page's Labor bucket is empty for this period, though HR payroll is NPR ${Math.round(hrStats.payroll).toLocaleString('en-NP')}.` : ''}`
 
   // Shared mini card style + a11y — returns a spreadable props object so every KPI card gets
   // keyboard support (role/tabIndex/onKeyDown) and a visible focus ring for free, instead of each
@@ -880,7 +915,7 @@ export default function ClientDashboard() {
     <div {...kpiCard(null)}>
       {kpiIcon(Target, 'green')}
       <div style={kpiLabelStyle}>
-        <Tip text="Revenue minus food cost and overheads, as a % of revenue. This is what the business keeps after ingredient and fixed costs. Healthy Nepal F&B target: ≥20%." width={260}>Est. Net Margin %</Tip>
+        <Tip text="Revenue minus food cost and every overhead bucket — including labor and tax & fees — as a % of revenue. This is what the business keeps after ingredient and fixed costs. Healthy Nepal F&B target: ≥20%." width={260}>Est. Net Margin %</Tip>
       </div>
       <div style={{
         ...kpiValueStyle(22, 800),
@@ -1254,6 +1289,17 @@ export default function ClientDashboard() {
                   Net margin: {netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
                   {netMarginPct != null && netMarginPct < 0 && ' — costs exceeded revenue this period'}
                 </div>
+                {/* Percentages below the slices are a share of whatever the pie actually contains,
+                    which flips with the sign of the margin — say which, rather than leaving a bare
+                    "23.4%" to be read against the wrong denominator. */}
+                <div style={{ fontSize: 10, marginTop: 2, color: 'var(--theme-text3)' }}>
+                  {netMarginPct != null && netMarginPct > 0 ? '% of revenue' : '% of total cost'} · from Overheads page buckets
+                </div>
+                {laborBucketMissing && (
+                  <div style={{ fontSize: 10, marginTop: 4, color: 'var(--theme-amber)' }}>
+                    Labor not included — the Labor bucket on Overheads is empty this period, but HR payroll is NPR {Math.round(hrStats.payroll).toLocaleString('en-NP')}.
+                  </div>
+                )}
                 <p className="sr-only">{costBreakdownSummary}</p>
               </>}
               renderChart={h => {
@@ -1267,7 +1313,7 @@ export default function ClientDashboard() {
                 <>
                   {big && (
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                      <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString()}`} />
+                      <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`} />
                       {fcPct != null && <StatPill label="Food cost %" value={`${fcPct.toFixed(1)}%`} color={colors.accent} />}
                       <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
                     </div>
@@ -1291,7 +1337,7 @@ export default function ClientDashboard() {
                       </Pie>
                       <Tooltip
                         contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
-                        formatter={(v, name) => [`NPR ${Number(v).toLocaleString()} (${(v / costBreakdownTotal * 100).toFixed(1)}%)`, name]}
+                        formatter={(v, name) => [`NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })} (${(v / costBreakdownTotal * 100).toFixed(1)}%)`, name]}
                       />
                     </PieChart>
                   </ResponsiveContainer>

@@ -150,6 +150,24 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S526 — 2026-08-10 — Dashboard: Revenue vs Cost Breakdown pie was double-counting labor
+
+The pie drew `stats.overheadTotal` as a single "Overheads" slice **and** `hrStats.payroll` as a separate "Labor (basic)" slice on top of it — but the Overheads page stores fixed costs in three buckets (`overhead` / `labor` / `tax_fees`) and `overheadTotal` sums all three, labor included. So every rupee of labor was counted twice, and the pie's own total came out well above the cost base the net-margin figure beside it was computed from. Caught live on a real period: slices summed to NPR 454,172 (Food 106,462 + Overheads 295,000 + Labor 52,710) while the −57.2% net margin shown in the same card was correctly derived from a 401,462 cost base — the two figures in one card disagreed by exactly the payroll number.
+
+`OwnerDashboard.jsx` already avoids this by querying `.eq('bucket','overhead')` before subtracting a separately-computed HR payroll (there's a comment there saying why). This page can't take that route — its Fixed Costs % and Est. Net Margin % KPI cards both mean the *combined* all-bucket figure, and that's what Help/the IMS guide document. So the fix goes the other way: keep `overheadTotal` as-is for the cards, additionally carry an `overheadBuckets` split on `stats` (the query now selects `bucket` alongside `amount`), and have the pie render the buckets as their own slices — Food Cost → Labor → Overheads → Tax & Fees → Net Margin, the standard restaurant-P&L order. The slices now sum to exactly the cost base behind the margin, by construction, and no HR figure enters the chart at all.
+
+Kept the HR payroll figure useful rather than just dropping it: when HR is enabled with real payroll but the Overheads page's Labor bucket is empty for the period, labor is genuinely *missing* from the split rather than double-counted, so the footer says so explicitly (with the payroll figure) instead of quietly substituting it — substituting would have re-broken the tie-out with Est. Net Margin %, which is driven by the Overheads page's numbers, not HR's.
+
+Two smaller fixes in the same card, both visible in the same screenshot: the expanded view's Revenue stat pill rendered `NPR 255,412.142` (a bare `.toLocaleString()` with no `maximumFractionDigits`, unlike every legend row beside it, which already used `0`) — same fix applied to the tooltip formatter. And the legend's bare percentages had no stated denominator, which flips with the sign of the margin (share of revenue when positive, share of total cost when the pie contains only costs) — now captioned. Est. Net Margin %'s tooltip also now spells out that "overheads" includes labor and tax & fees, since that ambiguity is what made the double-count read as plausible.
+
+A `stats` object restored from a pre-S526 `sessionStorage` cache has `overheadTotal` but no `overheadBuckets`; the pie falls back to the single combined "Overheads" slice in that case rather than rendering a labor-less breakdown.
+
+`CI=true npm run build` clean. `CACHE_NAME` → `crest-v52`.
+
+**Files:** `src/pages/dashboard/ClientDashboard.jsx`, `public/service-worker.js`
+
+---
+
 ### S525 — 2026-08-06 — Purchases page: Qty + Amount totals in the table footer, fixed a column-alignment bug
 
 The Purchases table's footer row already computed a grand total (`filteredValue`) but rendered it under the wrong column — `colSpan={7}` on the "Total" label cell miscounted the 9 real columns (Day/Item/Vendor/Qty/UOM/Rate/Total/Expiry/actions), landing the NPR figure under Expiry instead of Total. Rebuilt the footer row's cells to align 1:1 with the header (`colSpan={3}` label, then explicit Qty/UOM/Rate/Total/Expiry+actions cells) and added a Qty total. The Qty total only renders when a specific item is filtered (`filterItem !== 'all'`) — summing raw `qty` across different items of different UOMs would be a nonsense figure, so "All Items" shows `—` instead; when one item is selected it sums each entry's display-unit qty (dividing by `getCf()`'s conversion factor the same way the row-level Qty cells already do) and shows the unit alongside it.
