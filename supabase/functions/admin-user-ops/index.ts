@@ -33,6 +33,36 @@ Deno.serve(async (req) => {
       if (!business_name || !email || !password) {
         return json({ error: 'business_name, email and password are required' }, 400)
       }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: 'A valid email is required' }, 400)
+      if (password.length < 8) return json({ error: 'Password must be at least 8 characters' }, 400)
+      if (String(business_name).length > 120) return json({ error: 'Business name is too long' }, 400)
+
+      // Rate limit. This action is unauthenticated by design (it IS the public signup form), so
+      // without a cap a loop here creates unbounded auth users + clients + profiles, each of which
+      // then sits in Admin -> Clients until trial_purge_at 22 days later.
+      //
+      // Per-IP first, then a global circuit breaker so a distributed attempt still can't run away
+      // — a real product doing 30 genuine signups in one hour is a good problem to notice manually.
+      const ip = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown'
+      const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+
+      const { count: ipCount } = await admin
+        .from('trial_signup_attempts').select('id', { count: 'exact', head: true })
+        .eq('ip', ip).gte('created_at', since)
+      if ((ipCount ?? 0) >= 3) {
+        return json({ error: 'Too many signup attempts from this network. Please try again in an hour.' }, 429)
+      }
+
+      const { count: globalCount } = await admin
+        .from('trial_signup_attempts').select('id', { count: 'exact', head: true })
+        .gte('created_at', since)
+      if ((globalCount ?? 0) >= 30) {
+        return json({ error: 'Signups are temporarily paused. Please try again shortly.' }, 429)
+      }
+
+      // Recorded BEFORE the attempt, so a failing loop (duplicate email, weak password) burns
+      // quota exactly like a succeeding one — otherwise the cheapest attack is to keep failing.
+      await admin.from('trial_signup_attempts').insert({ ip, email })
 
       const { data: authData, error: authErr } = await admin.auth.admin.createUser({
         email,
@@ -125,6 +155,63 @@ Deno.serve(async (req) => {
     }
     if (action === 'create_hr_staff' || action === 'reset_hr_password' || action === 'delete_hr_staff' || action === 'update_hr_role') {
       if (!isHrPrivileged) return json({ error: 'Forbidden' }, 403)
+    }
+
+    // ── Target resolution for every staff-management action ───────────────────
+    // Until this existed, each of reset_pos_pin / reset_ims_password / reset_hr_password /
+    // delete_*_staff verified ONLY that the target shared the caller's client_id — and never that
+    // the target was actually a staff account. The client Owner shares that client_id, so any
+    // module manager could:
+    //
+    //   reset_ims_password { userId: <owner id> }  -> overwrite the Owner's password, then log in
+    //                                                 as them (the Owner's email comes free from
+    //                                                 get_ims_eligible_users, which any same-client
+    //                                                 session could call -- see the companion
+    //                                                 migration 20260810130000)
+    //   delete_ims_staff   { userId: <owner id> }  -> delete the Owner's auth user outright; the
+    //                                                 "managers can only be deleted by admin"
+    //                                                 guard misses the Owner, whose ims_role is
+    //                                                 NULL rather than 'manager'
+    //   update_ims_role    { userId: <owner id> }  -> stamp a staff marker on the Owner, which per
+    //                                                 the negative isOwner test silently demotes
+    //                                                 them out of Owner-level access
+    //
+    // requireStaffTarget() closes all three: a non-admin caller may only act on an account that
+    // already carries the staff marker for the module being acted on, and never on an admin.
+    // Admin callers are deliberately exempt from the marker requirement -- resetting a locked-out
+    // Owner's password is legitimate operator support, and admin already has unrestricted
+    // createUser/deleteUser below.
+    //
+    // The marker per module mirrors that module's own RESTRICTIVE RLS predicate exactly, so
+    // "is a POS staff account" means the same thing here as it does to the database:
+    //   pos -> pos_email IS NOT NULL   (same filter as get_pos_staff / is_pos_pin_staff())
+    //   ims -> ims_role  IS NOT NULL   (same filter as is_ims_staff())
+    //   hr  -> hr_role   IS NOT NULL   (same filter as is_hr_role_staff())
+    const STAFF_MARKER: Record<string, (t: Record<string, unknown>) => boolean> = {
+      pos: t => !!t.pos_email,
+      ims: t => !!t.ims_role,
+      hr:  t => !!t.hr_role,
+    }
+    const MODULE_LABEL: Record<string, string> = { pos: 'POS', ims: 'IMS', hr: 'HR' }
+
+    async function loadTarget(userId: string) {
+      const { data } = await admin
+        .from('profiles')
+        .select('id, role, client_id, pos_role, pos_email, ims_role, hr_role, hr_self_service')
+        .eq('id', userId).single()
+      return data as Record<string, unknown> | null
+    }
+
+    // Returns a ready-to-send error response, or null when the target is acceptable.
+    function requireStaffTarget(target: Record<string, unknown> | null, module: string) {
+      if (!target) return json({ error: 'User not found' }, 404)
+      if (target.role === 'admin') return json({ error: 'Forbidden' }, 403)
+      if (isCallerAdmin) return null
+      if (target.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
+      if (!STAFF_MARKER[module](target)) {
+        return json({ error: `This is not a ${MODULE_LABEL[module]} staff account and cannot be managed from here` }, 403)
+      }
+      return null
     }
 
     // ── Create a POS staff member — name + PIN, auto-generated email ──────────
@@ -266,11 +353,12 @@ Deno.serve(async (req) => {
         return json({ error: 'Invalid pos_allow_void' }, 400)
       }
 
-      if (!isCallerAdmin) {
-        const { data: targetProfile } = await admin
-          .from('profiles').select('client_id').eq('id', userId).single()
-        if (targetProfile?.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
-      }
+      // POS has no "assign an existing login" mode -- every one of PosStaff.jsx's four callers
+      // (updateRole / updateTeam / updateDiscountLimit / updateAllowVoid) acts on a row from
+      // get_pos_staff_list, which returns PIN accounts only. So the target must already be one.
+      const posTarget = await loadTarget(userId)
+      const posDenied = requireStaffTarget(posTarget, 'pos')
+      if (posDenied) return posDenied
 
       // Every field here is only written when the caller actually sent it. updateTeam/
       // updateDiscountLimit/updateAllowVoid each call this action with only their one field set
@@ -303,11 +391,11 @@ Deno.serve(async (req) => {
       const { userId } = params
       if (!userId) return json({ error: 'userId is required' }, 400)
 
-      if (!isCallerAdmin) {
-        const { data: targetProfile } = await admin
-          .from('profiles').select('client_id, pos_role').eq('id', userId).single()
-        if (targetProfile?.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
-        if (targetProfile?.pos_role === 'manager') return json({ error: 'Managers can only be deleted by admin' }, 403)
+      const posTarget = await loadTarget(userId)
+      const posDenied = requireStaffTarget(posTarget, 'pos')
+      if (posDenied) return posDenied
+      if (!isCallerAdmin && posTarget?.pos_role === 'manager') {
+        return json({ error: 'Managers can only be deleted by admin' }, 403)
       }
 
       const { error: delErr } = await admin.auth.admin.deleteUser(userId)
@@ -321,14 +409,12 @@ Deno.serve(async (req) => {
       if (!userId || !pin) return json({ error: 'userId and pin are required' }, 400)
       if (!/^\d{4,6}$/.test(pin)) return json({ error: 'PIN must be 4–6 digits' }, 400)
 
-      // Verify the target user belongs to the same client (managers can't reset other clients' pins)
-      if (!isCallerAdmin) {
-        const { data: targetProfile } = await admin
-          .from('profiles').select('client_id').eq('id', userId).single()
-        if (targetProfile?.client_id !== profile?.client_id) {
-          return json({ error: 'Forbidden' }, 403)
-        }
-      }
+      // Same client AND actually a POS PIN account. The client_id check alone used to let a POS
+      // manager point this at the Owner (who shares the client_id) and overwrite their password
+      // with a 4-6 digit PIN they chose -- see requireStaffTarget's note above.
+      const pinTarget = await loadTarget(userId)
+      const pinDenied = requireStaffTarget(pinTarget, 'pos')
+      if (pinDenied) return pinDenied
 
       const { error: updateErr } = await admin.auth.admin.updateUserById(userId, { password: pin })
       if (updateErr) return json({ error: updateErr.message }, 400)
@@ -401,11 +487,21 @@ Deno.serve(async (req) => {
       const validRoles = ['staff', 'supervisor', 'manager']
       if (ims_role && !validRoles.includes(ims_role)) return json({ error: 'Invalid ims_role' }, 400)
 
-      const { data: targetProfile } = await admin
-        .from('profiles').select('client_id, pos_role, hr_self_service, hr_role').eq('id', userId).single()
-
-      if (!isCallerAdmin && targetProfile?.client_id !== profile?.client_id) {
+      const targetProfile = await loadTarget(userId)
+      if (!targetProfile) return json({ error: 'User not found' }, 404)
+      if (targetProfile.role === 'admin') return json({ error: 'Forbidden' }, 403)
+      if (!isCallerAdmin && targetProfile.client_id !== profile?.client_id) {
         return json({ error: 'Forbidden' }, 403)
+      }
+      // Unlike POS, IMS has an "Existing User" mode (ImsStaff.jsx:190) that deliberately targets a
+      // login with NO staff markers yet -- which is exactly the shape of the client Owner's own
+      // account. So this can't simply require an existing ims_role the way update_pos_role does.
+      // Instead: converting a non-staff login into IMS staff is an Owner-level decision, because
+      // stamping ims_role onto the Owner demotes them out of Owner access (the isOwner test in
+      // AuthContext.js is a negative one). A module manager may still change or clear the role of
+      // someone who is already IMS staff.
+      if (ims_role && !targetProfile.ims_role && !(isCallerAdmin || isCallerOwner)) {
+        return json({ error: 'Only the account owner or an administrator can give an existing login IMS access' }, 403)
       }
       // An account already marked POS PIN staff, HR self-service, or HR staff is RLS-blocked from
       // every pure-IMS / IMS+POS table regardless of ims_role (no_pos_pin_staff /
@@ -429,11 +525,11 @@ Deno.serve(async (req) => {
       const { userId } = params
       if (!userId) return json({ error: 'userId is required' }, 400)
 
-      if (!isCallerAdmin) {
-        const { data: targetProfile } = await admin
-          .from('profiles').select('client_id, ims_role').eq('id', userId).single()
-        if (targetProfile?.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
-        if (targetProfile?.ims_role === 'manager') return json({ error: 'Managers can only be deleted by admin' }, 403)
+      const imsTarget = await loadTarget(userId)
+      const imsDenied = requireStaffTarget(imsTarget, 'ims')
+      if (imsDenied) return imsDenied
+      if (!isCallerAdmin && imsTarget?.ims_role === 'manager') {
+        return json({ error: 'Managers can only be deleted by admin' }, 403)
       }
 
       const { error: delErr } = await admin.auth.admin.deleteUser(userId)
@@ -447,13 +543,13 @@ Deno.serve(async (req) => {
       if (!userId || !password) return json({ error: 'userId and password are required' }, 400)
       if (password.length < 8) return json({ error: 'Password must be at least 8 characters' }, 400)
 
-      if (!isCallerAdmin) {
-        const { data: targetProfile } = await admin
-          .from('profiles').select('client_id').eq('id', userId).single()
-        if (targetProfile?.client_id !== profile?.client_id) {
-          return json({ error: 'Forbidden' }, 403)
-        }
-      }
+      // Same client AND actually an IMS staff account -- this was the sharpest edge of the
+      // Owner-takeover chain: the Owner's id and real email both come back from
+      // get_ims_eligible_users, so a client_id-only check meant one call here handed a manager a
+      // working Owner login.
+      const imsPwTarget = await loadTarget(userId)
+      const imsPwDenied = requireStaffTarget(imsPwTarget, 'ims')
+      if (imsPwDenied) return imsPwDenied
 
       const { error: updateErr } = await admin.auth.admin.updateUserById(userId, { password })
       if (updateErr) return json({ error: updateErr.message }, 400)
@@ -526,11 +622,16 @@ Deno.serve(async (req) => {
       const validRoles = ['staff', 'supervisor', 'manager']
       if (hr_role && !validRoles.includes(hr_role)) return json({ error: 'Invalid hr_role' }, 400)
 
-      const { data: targetProfile } = await admin
-        .from('profiles').select('client_id, pos_role, ims_role, hr_self_service').eq('id', userId).single()
-
-      if (!isCallerAdmin && targetProfile?.client_id !== profile?.client_id) {
+      const targetProfile = await loadTarget(userId)
+      if (!targetProfile) return json({ error: 'User not found' }, 404)
+      if (targetProfile.role === 'admin') return json({ error: 'Forbidden' }, 403)
+      if (!isCallerAdmin && targetProfile.client_id !== profile?.client_id) {
         return json({ error: 'Forbidden' }, 403)
+      }
+      // Mirror of update_ims_role's first-assignment gate — HR has the same "Existing User" mode
+      // (HrStaff.jsx:189), so the same Owner-demotion path exists here.
+      if (hr_role && !targetProfile.hr_role && !(isCallerAdmin || isCallerOwner)) {
+        return json({ error: 'Only the account owner or an administrator can give an existing login HR access' }, 403)
       }
       // Same reasoning as update_ims_role's guard — an account already marked POS PIN staff, IMS
       // staff, or HR self-service is RLS-blocked from every hr_ table regardless of hr_role.
@@ -550,11 +651,11 @@ Deno.serve(async (req) => {
       const { userId } = params
       if (!userId) return json({ error: 'userId is required' }, 400)
 
-      if (!isCallerAdmin) {
-        const { data: targetProfile } = await admin
-          .from('profiles').select('client_id, hr_role').eq('id', userId).single()
-        if (targetProfile?.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
-        if (targetProfile?.hr_role === 'manager') return json({ error: 'Managers can only be deleted by admin' }, 403)
+      const hrTarget = await loadTarget(userId)
+      const hrDenied = requireStaffTarget(hrTarget, 'hr')
+      if (hrDenied) return hrDenied
+      if (!isCallerAdmin && hrTarget?.hr_role === 'manager') {
+        return json({ error: 'Managers can only be deleted by admin' }, 403)
       }
 
       const { error: delErr } = await admin.auth.admin.deleteUser(userId)
@@ -568,13 +669,10 @@ Deno.serve(async (req) => {
       if (!userId || !password) return json({ error: 'userId and password are required' }, 400)
       if (password.length < 8) return json({ error: 'Password must be at least 8 characters' }, 400)
 
-      if (!isCallerAdmin) {
-        const { data: targetProfile } = await admin
-          .from('profiles').select('client_id').eq('id', userId).single()
-        if (targetProfile?.client_id !== profile?.client_id) {
-          return json({ error: 'Forbidden' }, 403)
-        }
-      }
+      // Same client AND actually an HR staff account — mirror of reset_ims_password's guard.
+      const hrPwTarget = await loadTarget(userId)
+      const hrPwDenied = requireStaffTarget(hrPwTarget, 'hr')
+      if (hrPwDenied) return hrPwDenied
 
       const { error: updateErr } = await admin.auth.admin.updateUserById(userId, { password })
       if (updateErr) return json({ error: updateErr.message }, 400)
@@ -870,6 +968,9 @@ Deno.serve(async (req) => {
 
     return json({ error: `Unknown action: ${action}` }, 400)
   } catch (err) {
-    return json({ error: (err as Error).message })
+    // Was defaulting to HTTP 200 with an error body, so callers had no way to tell a thrown
+    // failure from a success by status alone (and the clearModuleData/deleteClientData sequences
+    // throw mid-run by design when an FK blocks them).
+    return json({ error: (err as Error).message }, 500)
   }
 })

@@ -21,15 +21,22 @@ export default function Pos() {
   // The device secret (not the raw client_id) is what get_pos_staff actually checks — fetched
   // here from an authenticated session so an unauthenticated PosLogin visit can never obtain it
   // for a client it isn't already bound to.
+  //
+  // Read through get_pos_device_secret() rather than straight off the clients row: the secret has
+  // moved to the admin-only client_secrets table, because clients_select allowed `id =
+  // my_client_id()` with no staff restriction — so every POS PIN waiter and HR self-service
+  // employee of the client could read the secret that was added specifically to stop outsiders
+  // enumerating the staff roster. The RPC enforces the same admin/Owner/POS-manager rank the
+  // Activate button below is already gated on (canManage), but on the server.
   async function activate() {
     if (!clientId || activating) return
     setActivating(true)
-    const { data, error } = await supabase.from('clients').select('pos_device_secret').eq('id', clientId).single()
+    const { data: secret, error } = await supabase.rpc('get_pos_device_secret', { p_client_id: clientId })
     setActivating(false)
-    if (error || !data?.pos_device_secret) return
+    if (error || !secret) return
     localStorage.setItem('pos_device_client_id', clientId)
     localStorage.setItem('pos_device_client_name', clientName)
-    localStorage.setItem('pos_device_secret', data.pos_device_secret)
+    localStorage.setItem('pos_device_secret', secret)
     setActivated(true)
   }
 

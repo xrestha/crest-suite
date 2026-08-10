@@ -19,8 +19,14 @@ const SETTINGS_DEFAULTS = {
   property_email: '', vat_number: '', fc_warning_pct: 35, fc_critical_pct: 45,
   expiry_warning_days: 7, variance_flag_pct: 10, item_code_prefix: 'ITM',
   contact_phone: '', contact_email: '', contact_website: '',
-  is_vat_registered: true, invoice_prefix: '', payment_qr_data: '', pos_webhook_secret: ''
+  is_vat_registered: true, invoice_prefix: '', payment_qr_data: ''
 }
+// pos_webhook_secret deliberately is NOT in the object above and is held in its own state below.
+// It moved out of `settings` into the admin-only client_secrets table (migration 20260810140000)
+// because settings_select let every account of the client read it — including a POS PIN waiter,
+// who could then forge a signed payment confirmation for their own open bill. Keeping it out of
+// clientSettings means all three saveClientSettings() call sites stay correct for free, rather
+// than each needing to remember to strip a field the settings table no longer has.
 
 // 32 random bytes, hex-encoded — pasted into the merchant's webhook-signing-secret field once
 // a real FonePay/eSewa integration exists (see supabase/functions/pos-payment-webhook).
@@ -54,6 +60,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [loadingSettings, setLoadingSettings] = useState(false)
   const [savingSettings, setSavingSettings]   = useState(false)
   const [settingsMsg, setSettingsMsg]         = useState('')
+  const [webhookSecret, setWebhookSecret]     = useState('') // client_secrets, not settings — see SETTINGS_DEFAULTS
 
   // QR tab state
   const [qrPreview, setQrPreview] = useState('')
@@ -285,6 +292,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // ── Settings ──
   async function fetchClientSettings() {
     setLoadingSettings(true)
+    // Separate read: the webhook secret lives in client_secrets, which is admin-only at the RLS
+    // level, so it can't ride along on the settings row any more.
+    const { data: secretRow } = await supabase
+      .from('client_secrets').select('pos_webhook_secret').eq('client_id', client.id).maybeSingle()
+    setWebhookSecret(secretRow?.pos_webhook_secret || '')
     const data = await loadClientSettings(client.id)
     if (data) {
       setClientSettings(prev => {
@@ -300,6 +312,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setSavingSettings(true); setSettingsMsg('')
     try {
       await saveClientSettings(client.id, clientSettings)
+      // Webhook secret writes to its own admin-only table. Upserted alongside because this one
+      // handler backs both the Settings tab's Save and the QR tab's "Save Webhook Secret" button.
+      const { error: secretErr } = await supabase
+        .from('client_secrets')
+        .upsert({ client_id: client.id, pos_webhook_secret: webhookSecret.trim() || null, updated_at: new Date().toISOString() },
+                { onConflict: 'client_id' })
+      if (secretErr) throw new Error(secretErr.message)
       setSettingsMsg('ok:Settings saved.')
     } catch (e) {
       setSettingsMsg('error:' + e.message)
@@ -1125,8 +1144,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   <div style={{ display: 'flex', gap: 8 }}>
                     <input
                       type="text"
-                      value={clientSettings.pos_webhook_secret || ''}
-                      onChange={e => setClientSettings({ ...clientSettings, pos_webhook_secret: e.target.value })}
+                      value={webhookSecret}
+                      onChange={e => setWebhookSecret(e.target.value)}
                       placeholder="blank = auto-confirmation disabled for this client"
                       style={{ flex: 1, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', color: 'var(--theme-text1)', outline: 'none' }}
                     />
@@ -1134,7 +1153,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       type="button"
                       className="btn-ghost"
                       style={{ fontSize: 12, whiteSpace: 'nowrap' }}
-                      onClick={() => setClientSettings(prev => ({ ...prev, pos_webhook_secret: generateWebhookSecret() }))}
+                      onClick={() => setWebhookSecret(generateWebhookSecret())}
                     >
                       Generate
                     </button>

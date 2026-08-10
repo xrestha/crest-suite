@@ -106,9 +106,19 @@ Deno.serve(async (req) => {
   try {
     const expected = Deno.env.get('HSS_CREST_SYNC_SECRET')
     if (!expected) return json({ error: 'Server misconfigured: HSS_CREST_SYNC_SECRET not set' }, 500)
+    // Compared as fixed-length SHA-256 digests rather than raw bytes. timingSafeEqual returns
+    // early when the lengths differ, so feeding it the raw strings leaked the secret's length
+    // through response timing — hashing first makes every comparison exactly 32 bytes regardless
+    // of what was submitted.
     const given = req.headers.get('x-sync-secret') || ''
     const enc = new TextEncoder()
-    if (!timingSafeEqual(enc.encode(expected), enc.encode(given))) return json({ error: 'Invalid secret' }, 401)
+    const [expectedHash, givenHash] = await Promise.all([
+      crypto.subtle.digest('SHA-256', enc.encode(expected)),
+      crypto.subtle.digest('SHA-256', enc.encode(given)),
+    ])
+    if (!timingSafeEqual(new Uint8Array(expectedHash), new Uint8Array(givenHash))) {
+      return json({ error: 'Invalid secret' }, 401)
+    }
 
     const url = Deno.env.get('SUPABASE_URL')!
     const svc = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!

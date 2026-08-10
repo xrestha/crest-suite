@@ -65,11 +65,16 @@ Deno.serve(async (req) => {
       return json({ error: 'client_id, provider, amount, txn_ref are required' }, 400)
     }
 
-    const { data: settings } = await admin
-      .from('settings').select('pos_webhook_secret').eq('client_id', client_id).maybeSingle()
-    if (!settings?.pos_webhook_secret) return json({ error: 'Webhook not configured for this client' }, 400)
+    // Moved out of `settings` into the admin-only client_secrets table (migration 20260810140000):
+    // settings_select allowed any same-client account to read this HMAC key, and S316's restrictive
+    // staff policies on settings cover INSERT/UPDATE/DELETE only, never SELECT. A waiter holding
+    // this secret could forge a confirmation for their own open bill and have the floor screen
+    // close it as digitally paid.
+    const { data: secrets } = await admin
+      .from('client_secrets').select('pos_webhook_secret').eq('client_id', client_id).maybeSingle()
+    if (!secrets?.pos_webhook_secret) return json({ error: 'Webhook not configured for this client' }, 400)
 
-    const ok = await verifySignature(settings.pos_webhook_secret, { txn_ref, amount, provider }, signature)
+    const ok = await verifySignature(secrets.pos_webhook_secret, { txn_ref, amount, provider }, signature)
     if (!ok) return json({ error: 'Invalid signature' }, 401)
 
     // Idempotent — a provider retry lands the same txn_ref twice; the unique constraint on

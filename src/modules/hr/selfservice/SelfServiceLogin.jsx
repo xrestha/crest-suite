@@ -82,44 +82,35 @@ export default function SelfServiceLogin() {
     // "Signing in..." with no error and no way to retry (found live, 2026-07-28, on two different
     // employees' phones — one on weak wifi, one on 4G). See withTimeout.js for the full mechanism.
     try {
-      // Same PIN-brute-force mitigation as PosLogin.jsx — checked before attempting sign-in so an
-      // already-locked account doesn't burn a real auth attempt.
-      const { data: lockData } = await withTimeout(
-        supabase.rpc('check_hr_pin_lock', { p_staff_id: selected.id }), 15000, 'Checking account status'
-      )
-      if (lockData?.[0]?.locked) {
-        setError(`Too many incorrect attempts. Try again ${formatLockRemaining(lockData[0].locked_until)}.`)
-        setPin(''); return
-      }
-
-      // The actual sign-in now happens server-side (hr-selfservice-login Edge Function) so the
-      // browser never has to hold the account's real email — get_hr_self_service_staff above no
-      // longer returns it at all. See that function's own comment for the full incident writeup
-      // (2026-07-28): the picker's client_id is a link an admin hands out to their whole staff by
-      // design, so anything sensitive it returned to an anonymous caller was effectively public.
+      // Sign-in AND the PIN lockout both live server-side now (hr-selfservice-login). This used to
+      // call check_hr_pin_lock before and record_hr_pin_attempt after, which meant the lockout was
+      // only ever as real as the browser chose to make it — skipping those two RPCs and calling the
+      // Edge Function directly walked a 4-digit PIN unimpeded, and every input needed to do that
+      // (staff_id from the anon-callable picker, client_id from the QR link handed to all staff) is
+      // public by design. See that function's comment for the full writeup. Calling
+      // record_hr_pin_attempt from here as well would now double-count, locking a fat-fingered
+      // employee out after 3 real attempts instead of 5.
       const { data: loginData, error: err } = await withTimeout(
         supabase.functions.invoke('hr-selfservice-login', { body: { staff_id: selected.id, pin } }), 15000, 'Signing in'
       )
-      const { data: attemptData } = await withTimeout(
-        supabase.rpc('record_hr_pin_attempt', { p_staff_id: selected.id, p_success: !err }), 15000, 'Recording attempt'
-      )
-
-      if (!err && loginData?.access_token) {
-        await withTimeout(
-          supabase.auth.setSession({
-            access_token: loginData.access_token,
-            refresh_token: loginData.refresh_token,
-          }), 15000, 'Starting your session'
-        )
-      }
 
       if (err || !loginData?.access_token) {
-        const afterAttempt = attemptData?.[0]
-        setError(afterAttempt?.locked
-          ? `Too many incorrect attempts. Try again ${formatLockRemaining(afterAttempt.locked_until)}.`
+        // A locked/incorrect PIN comes back as a non-2xx, so supabase-js puts the body on
+        // error.context rather than in `data` — same unwrap the shared invokeEdge() helper does.
+        let lockedUntil = null
+        try { const b = await err?.context?.json(); lockedUntil = b?.locked ? b.locked_until : null } catch (_) { /* keep the generic message */ }
+        setError(lockedUntil
+          ? `Too many incorrect attempts. Try again ${formatLockRemaining(lockedUntil)}.`
           : 'Incorrect PIN. Try again.')
         setPin(''); return
       }
+
+      await withTimeout(
+        supabase.auth.setSession({
+          access_token: loginData.access_token,
+          refresh_token: loginData.refresh_token,
+        }), 15000, 'Starting your session'
+      )
       navigate('/hr/self-service', { replace: true })
     } catch (e) {
       setError(e.message || 'Something went wrong. Check your connection and try again.')

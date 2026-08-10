@@ -387,6 +387,14 @@ verify_jwt = false
 [functions.billing-export]
 verify_jwt = false
 
+# pos-staff-login runs BEFORE authentication — it is what issues the session in the first place —
+# so the caller has no Supabase JWT to send and the gateway would reject every real POS login with
+# 401 before the function ran. What authenticates the caller is the per-client device secret, which
+# the function verifies server-side against clients.pos_device_secret (the same check get_pos_staff
+# does), followed by the account's own PIN. Same reasoning as pos-payment-webhook above.
+[functions.pos-staff-login]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

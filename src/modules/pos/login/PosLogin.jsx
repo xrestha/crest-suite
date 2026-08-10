@@ -59,35 +59,40 @@ export default function PosLogin() {
     if (pin.length < 4 || signingIn) return
     setSigningIn(true); setError('')
 
-    // The PIN doubles as the full Supabase Auth password, so an app-level lockout is the standard
-    // mitigation for its low entropy — see migration 20260707240000_pos_pin_lockout.sql. Checked
-    // before attempting sign-in so an already-locked account doesn't burn a real auth attempt.
-    const { data: lockData } = await supabase.rpc('check_pos_pin_lock', { p_staff_id: selected.id })
-    if (lockData?.[0]?.locked) {
-      setError(`Too many incorrect attempts. Try again ${formatLockRemaining(lockData[0].locked_until)}.`)
-      setPin('')
-      setSigningIn(false)
-      return
-    }
+    try {
+      // Sign-in and the PIN lockout both run server-side now (pos-staff-login). This used to call
+      // check_pos_pin_lock, then signInWithPassword directly with selected.pos_email, then
+      // record_pos_pin_attempt — which made the lockout advisory: the PIN literally IS the Supabase
+      // Auth password, so anyone holding a pos_email could call signInWithPassword in a loop and
+      // walk the 4-digit keyspace with those two RPCs never on the path. And pos_email itself no
+      // longer comes back from get_pos_staff at all, so the browser never holds a working login
+      // identifier — same fix S464 applied to HR Self-Service. See the Edge Function's comment.
+      const { data, error: err } = await supabase.functions.invoke('pos-staff-login', {
+        body: { client_id: clientId, device_secret: deviceSecret, staff_id: selected.id, pin },
+      })
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email:    selected.pos_email,
-      password: pin,
-    })
-    const { data: attemptData } = await supabase.rpc('record_pos_pin_attempt', {
-      p_staff_id: selected.id, p_success: !error,
-    })
+      if (err || !data?.access_token) {
+        // Locked/incorrect comes back non-2xx, so supabase-js puts the body on error.context.
+        let lockedUntil = null
+        try { const b = await err?.context?.json(); lockedUntil = b?.locked ? b.locked_until : null } catch (_) { /* keep the generic message */ }
+        setError(lockedUntil
+          ? `Too many incorrect attempts. Try again ${formatLockRemaining(lockedUntil)}.`
+          : 'Incorrect PIN. Try again.')
+        setPin('')
+        return
+      }
 
-    if (error) {
-      const afterAttempt = attemptData?.[0]
-      setError(afterAttempt?.locked
-        ? `Too many incorrect attempts. Try again ${formatLockRemaining(afterAttempt.locked_until)}.`
-        : 'Incorrect PIN. Try again.')
+      await supabase.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      })
+      navigate('/pos', { replace: true })
+    } catch (e) {
+      setError(e.message || 'Something went wrong. Check your connection and try again.')
       setPin('')
+    } finally {
       setSigningIn(false)
-      return
     }
-    navigate('/pos', { replace: true })
   }
 
   function formatLockRemaining(lockedUntil) {

@@ -46,12 +46,15 @@ Deno.serve(async (req) => {
     if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
 
     const { data: profile } = await admin
-      .from('profiles').select('role, client_id, hr_self_service, hr_employee_id').eq('id', user.id).single()
+      .from('profiles').select('role, client_id, hr_self_service, hr_employee_id, pos_role, ims_role, hr_role').eq('id', user.id).single()
 
     const isCallerAdmin = profile?.role === 'admin'
-    // A "real" (non-self-service) profile tied to the client — owner/manager, whoever can reach
-    // the main Roster page. Self-service employees never get here for publish/admin-decision actions.
-    const isCallerStaffUser = !profile?.hr_self_service
+    // Whoever can actually reach the main Roster page: the Owner (no staff markers at all) or an
+    // HR staff account. `!hr_self_service` alone used to be the whole test, which was true for POS
+    // and IMS staff too — so any waiter or storekeeper of the client could fire roster-published
+    // push notifications at every self-service employee. Fixed-string payloads, so it was
+    // notification spam rather than a disclosure, but there is no reason for them to be here.
+    const isCallerStaffUser = !profile?.hr_self_service && !profile?.pos_role && !profile?.ims_role
 
     // Sends one push payload to every subscription for a profile, pruning dead (404/410) ones.
     async function sendToProfile(profileId: string, payload: Record<string, string>) {
