@@ -107,6 +107,13 @@ A full review on 2026-08-10 found that most of the app's access control was enfo
 
 `is_client_owner()` (added by `20260810130000`) is now the **third** copy of the negative Owner test, alongside `isOwner` in `AuthContext.js` and `isCallerOwner` in `admin-user-ops/index.ts`. A new staff-account marker column must be added to **all three** — miss one and Owner detection breaks silently and in the permissive direction.
 
+**Security headers live in `vercel.json`, and that file cannot carry comments** — it is strict JSON validated against Vercel's schema, which rejects any unknown property, so the usual `"//": "why"` trick fails the *build* rather than being ignored (found the hard way: the first deploy of these headers errored with ``headers[1].headers[0]` should NOT have additional property `//``). The rationale therefore lives here:
+
+- **`script-src 'self'` with no `'unsafe-inline'`** is only viable because the production build emits a single external `<script src=/static/js/main.*.js>` and no inline runtime chunk — verified against real build output, and re-checkable with `grep -o "<script[^>]*>" build/index.html`. If a future CRA/webpack change starts inlining the runtime, every page will fail to boot with a CSP violation in the console; the fix is `INLINE_RUNTIME_CHUNK=false`, **not** adding `'unsafe-inline'` back.
+- **`style-src` does allow inline**: the Google Fonts stylesheet is an external `<link>`, and chart/UI libraries inject `<style>` elements at runtime. React's own `style={{}}` prop sets CSSOM properties directly and is not subject to CSP at all.
+- **`connect-src` is the control that matters most** — it is the exfiltration boundary. Supabase (REST + realtime websocket + storage) plus the two nutrition APIs (`usdaNutrition.js`, `NutritionEditorModal.jsx`), and nothing else. `wa.me` is only ever a navigation target, never fetched, so it needs no entry. **Adding any new third-party API call requires adding its origin here or it fails silently in production and works fine in dev.**
+- The print/KOT windows are unaffected: their templates are script-free, and `w.print()` is called from the *opener*, not from inline script in the written document.
+
 Two entitlement/abuse fixes from the same pass: `feature_flags` writes are now admin-only (one `FOR ALL` policy previously let any account of the client set every Pro flag true, and `hasFeature()` is "plan tier OR explicit flag", so that was a free tier upgrade); and `register_trial` — unauthenticated by design — is rate-limited per-IP (3/hr) and globally (30/hr) via `trial_signup_attempts`, recorded *before* the attempt so a failing loop burns quota too.
 
 ### Multi-tenant data isolation

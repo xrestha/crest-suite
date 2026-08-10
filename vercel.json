@@ -9,28 +9,12 @@
     {
       "source": "/(.*)",
       "headers": [
-        {
-          "//": "Clickjacking. The app has genuinely destructive one-click actions behind an authenticated session (Admin -> Danger Zone: Clear Client Data / Delete Client; Periods: Close & Advance; POS: Void), so a framed overlay is a real risk rather than a theoretical one. frame-ancestors in the CSP below is the modern control; X-Frame-Options stays for older browsers that ignore it.",
-          "key": "X-Frame-Options",
-          "value": "DENY"
-        },
+        { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "X-Content-Type-Options", "value": "nosniff" },
-        {
-          "//": "Bill/KOT print windows and WhatsApp share links (wa.me) open with the app URL as referrer; strict-origin-when-cross-origin keeps the path (which can contain client and order ids) off third-party requests.",
-          "key": "Referrer-Policy",
-          "value": "strict-origin-when-cross-origin"
-        },
-        {
-          "//": "Nothing in the app uses these. POS runs on shared floor tablets, so denying them outright means a compromised dependency cannot quietly turn one into a microphone or a tracker.",
-          "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
-        },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()" },
         { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
-        {
-          "//": "script-src is 'self' with NO 'unsafe-inline': verified against the real production build, which emits a single external <script src=/static/js/main.*.js> and no inline runtime chunk. If a future CRA/webpack change starts inlining the runtime again, every page will fail to boot with a CSP violation in the console -- fix it with INLINE_RUNTIME_CHUNK=false rather than by adding 'unsafe-inline' back. style-src does allow inline: the Google Fonts stylesheet is an external <link> and several chart/UI libraries inject <style> elements at runtime (React's own style={{}} prop sets CSSOM properties directly and is not subject to CSP at all). connect-src is the exfiltration control that matters most here -- Supabase (REST + realtime websocket + storage), plus the two nutrition lookup APIs (usdaNutrition.js, NutritionEditorModal.jsx), and nothing else. wa.me is only ever a navigation target, never fetched, so it needs no entry.",
-          "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.nal.usda.gov https://world.openfoodfacts.org; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-        }
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.nal.usda.gov https://world.openfoodfacts.org; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" }
       ]
     }
   ]
