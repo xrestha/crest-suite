@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
@@ -67,8 +68,8 @@ export default function VendorReport() {
 
   async function loadData(periodId) {
     const [{ data: p }, { data: r }] = await Promise.all([
-      supabase.from('purchase_entries').select('*, items(name, categories(name)), vendors(name), payment_method').eq('period_id', periodId).order('bs_day'),
-      scopedFrom('vendor_returns', '*, items(name), vendors(name), payment_method').eq('period_id', periodId).order('bs_day')
+      fetchAllRows(() => supabase.from('purchase_entries').select('*, items(name, categories(name)), vendors(name), payment_method').eq('period_id', periodId).order('bs_day').order('id')),
+      fetchAllRows(() => scopedFrom('vendor_returns', '*, items(name), vendors(name), payment_method').eq('period_id', periodId).order('bs_day').order('id'))
     ])
     setPurchases(p || [])
     setReturns(r || [])

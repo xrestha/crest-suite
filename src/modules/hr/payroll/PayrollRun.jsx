@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
@@ -76,7 +77,13 @@ export default function PayrollRun() {
       scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('hr_salary_components'),
-      scopedFrom('hr_attendance').eq('period_id', periodId),
+      // Paged: hr_attendance is one row per employee PER DAY, so a period holds staff × ~30 rows
+      // and crosses PostgREST's silent 1000-row cap at ~34 staff. A truncated read here doesn't
+      // fail loudly — it just makes the employees past the cutoff look like they have no
+      // attendance at all, which pays daily/hourly staff ZERO and pays monthly staff a full month
+      // with no absence deduction. The old query had no ORDER BY either, so which employees got
+      // cut was arbitrary and could differ between two runs of the same period (S529).
+      fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', periodId).order('id')),
       scopedFrom('hr_overtime_entries', 'employee_id, ot_hours, ot_type')
         .eq('bs_year', bsYear).eq('bs_month', bsMonth).eq('status', 'approved'),
       scopedFrom('hr_advances').order('issued_date'),

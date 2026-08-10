@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { supabase } from '../../supabaseClient'
 import { bsToAd, adToBs, daysInBsMonth } from '../../utils/bsCalendar'
 
@@ -60,7 +61,10 @@ export async function loadFromPos(period, scopedFrom) {
   const orderDayMap = {}
   validOrders.forEach(o => { orderDayMap[o.id] = adToBs(new Date(o.closed_at)).day })
   const orderIds = validOrders.map(o => o.id)
-  const { data: items } = await scopedFrom('pos_order_items', 'order_id, category, qty, unit_price, comped').in('order_id', orderIds)
+  // Paged: a month of bill lines runs to thousands, past PostgREST's silent 1000-row cap, which
+  // would quietly shrink the dashboard's POS Sales by Category pivot to a fraction of the
+  // month while still reading as a complete one (S529).
+  const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, category, qty, unit_price, comped').in('order_id', orderIds).order('id'))
   const agg = {}
   ;(items || []).forEach(i => {
     if (i.comped) return // never billed at menu price — excluded from revenue, same as every POS report

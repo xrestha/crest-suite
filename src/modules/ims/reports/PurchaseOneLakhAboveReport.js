@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { getBsFiscalYear } from '../../../utils/bsCalendar'
@@ -44,9 +45,13 @@ export default function PurchaseOneLakhAboveReport() {
     if (periodIds.length === 0) { setVendors([]); setLoading(false); return }
 
     const [{ data: entData }, { data: retData }] = await Promise.all([
-      supabase.from('purchase_entries')
-        .select('*, vendors(name, pan_vat_no)').in('period_id', periodIds),
-      scopedFrom('vendor_returns', '*, vendors(name, pan_vat_no), purchase_entries(vat_inclusive)').in('period_id', periodIds),
+      // Paged: this spans a whole BS fiscal year (12 periods), so it is one of the largest
+      // purchase reads in the app — and it decides which vendors cross the IRD Annexure 13
+      // one-lakh disclosure threshold, so a truncated read could omit a vendor that legally
+      // must be disclosed (S529).
+      fetchAllRows(() => supabase.from('purchase_entries')
+        .select('*, vendors(name, pan_vat_no)').in('period_id', periodIds).order('id')),
+      fetchAllRows(() => scopedFrom('vendor_returns', '*, vendors(name, pan_vat_no), purchase_entries(vat_inclusive)').in('period_id', periodIds).order('id')),
     ])
     const entries = entData || []
 

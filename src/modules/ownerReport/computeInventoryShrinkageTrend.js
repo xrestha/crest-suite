@@ -6,6 +6,7 @@
 // fewer than 2 closed periods are available (not enough signal for a trend).
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 
 const WINDOW_SIZE = 6
@@ -32,7 +33,7 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
   const windowIds = window.map(p => p.id)
   const [{ data: opening }, { data: purchases }, { data: returns }, { data: wastages }, { data: closing }, { data: staffMeals }, { data: salesData }, { data: items }, { data: recipes }] = await Promise.all([
     supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', windowIds),
-    supabase.from('purchase_entries').select('period_id, item_id, qty').in('period_id', windowIds),
+    fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty').in('period_id', windowIds).order('id')),
     supabase.from('vendor_returns').select('period_id, item_id, qty').in('period_id', windowIds),
     supabase.from('wastages').select('period_id, item_id, qty').in('period_id', windowIds),
     supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', windowIds),

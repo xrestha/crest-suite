@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
@@ -98,7 +99,8 @@ export default function CoversReport() {
 
     let byOrder = {}
     if (orderList.length > 0) {
-      const { data: items } = await scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', orderList.map(o => o.id))
+      // Paged — a month of bill lines runs to thousands, past the silent 1000-row cap (S529).
+      const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', orderList.map(o => o.id)).order('id'))
       byOrder = (items || []).filter(i => !i.comped).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc

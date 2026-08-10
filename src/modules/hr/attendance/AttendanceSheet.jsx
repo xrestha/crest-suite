@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday } from '../../../utils/bsCalendar'
 import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
@@ -108,7 +109,9 @@ export default function AttendanceSheet() {
   }
 
   const loadAttendance = useCallback(async (periodId) => {
-    const { data } = await scopedFrom('hr_attendance').eq('period_id', periodId)
+    // Paged: one row per employee per day, so the grid itself silently loses whole employees'
+    // rows past the 1000-row cap at ~34 staff — and this sheet is what payroll then reads (S529).
+    const { data } = await fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', periodId).order('id'))
     const map = {}
     // Postgres's `time` column reads back as "08:00:00" — normalize to the display convention
     // ("8:00") on load rather than waiting for the admin to focus/blur each cell once.

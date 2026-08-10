@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { formatAd, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
@@ -111,9 +112,12 @@ export default function KotLog() {
     const orderIds = orderList.map(o => o.id)
     const orderById = Object.fromEntries(orderList.map(o => [o.id, o]))
 
+    // Both paged: one row per ticket send and one per bill line respectively, so a month of
+    // service pushes both past PostgREST's silent 1000-row cap. Truncated, the sent-vs-current
+    // comparison below would flag phantom discrepancies from missing rows alone (S529).
     const [{ data: logs }, { data: currentItems }] = await Promise.all([
-      scopedFrom('pos_kot_log', 'order_id, items').in('order_id', orderIds),
-      scopedFrom('pos_order_items', 'order_id, recipe_id, name, qty').in('order_id', orderIds),
+      fetchAllRows(() => scopedFrom('pos_kot_log', 'order_id, items').in('order_id', orderIds).order('id')),
+      fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, name, qty').in('order_id', orderIds).order('id')),
     ])
 
     const sentByOrderItem = sumSentQtyByOrderItem(logs)
@@ -153,9 +157,12 @@ export default function KotLog() {
     const orderById = Object.fromEntries(orderList.map(o => [o.id, o]))
 
     const [{ data: logs }, { data: currentItems }, { data: profs }] = await Promise.all([
-      scopedFrom('pos_kot_log', 'id, order_id, station, items, sent_at, sent_by')
-        .in('order_id', orderIds).order('sent_at', { ascending: true }),
-      scopedFrom('pos_order_items', 'order_id, recipe_id, name, qty').in('order_id', orderIds),
+      // Paged, same as the summary load above. `id` follows sent_at as the unique tiebreaker —
+      // several tickets can share a timestamp, and paging a non-unique sort can repeat a row on
+      // one page and skip it on the next.
+      fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, station, items, sent_at, sent_by')
+        .in('order_id', orderIds).order('sent_at', { ascending: true }).order('id')),
+      fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, name, qty').in('order_id', orderIds).order('id')),
       // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin) —
       // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except

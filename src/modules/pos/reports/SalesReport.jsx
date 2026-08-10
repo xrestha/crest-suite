@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
@@ -100,7 +101,11 @@ export default function SalesReport() {
       // Excludes item-level comps (comped=true) — those never billed at menu price (they print
       // on their own Complimentary Slip instead, see PosOrders.jsx), so every tab built from
       // itemsByOrder must exclude them too or Gross/Taxable/Net overstate actual revenue.
-      const { data: items } = await scopedFrom('pos_order_items', 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, comp_reason').in('order_id', orderList.map(o => o.id))
+      // Paged: pos_order_items is the highest-volume table in the app — one row per line per
+      // bill, so a month of ordinary service runs to thousands and blows straight past
+      // PostgREST's silent 1000-row cap. Truncated, every figure on this page would be built
+      // from roughly the first tenth of the month while looking like a full month (S529).
+      const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, comp_reason').in('order_id', orderList.map(o => o.id)).order('id'))
       byOrder = (items || []).filter(i => !i.comped).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
@@ -343,7 +348,9 @@ export default function SalesReport() {
     if (list.length > 0) {
       // Same comped exclusion as loadRange above — an item-level comp isn't part of what the
       // party actually paid, so it can't count toward their Annexure 13 one-lakh threshold.
-      const { data: items } = await scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', list.map(o => o.id))
+      // Paged for the same reason as loadRange above — and this one feeds an IRD Annexure 13
+      // threshold, so a truncated read could drop a customer below one lakh incorrectly (S529).
+      const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', list.map(o => o.id)).order('id'))
       byOrder = (items || []).filter(i => !i.comped).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc

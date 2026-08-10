@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -74,13 +75,14 @@ export default function NonVatReport() {
     // vendor_returns has no vat_inclusive column of its own, and this report is the non-VAT half
     // of the filing. Mirrors VatReport, which selects purchase_entries(vat_inclusive) the same way.
     const [{ data }, { data: rets }] = await Promise.all([
-      supabase
+      fetchAllRows(() => supabase
         .from('purchase_entries')
         .select('*, items(name, uom, categories(name)), vendors(name, pan_vat_no)')
         .eq('period_id', periodId)
         .eq('vat_inclusive', false)
         .order('bs_day')
-        .order('created_at'),
+        .order('created_at')
+        .order('id')),
       scopedFrom('vendor_returns', '*, items(name, uom), vendors(name, pan_vat_no), purchase_entries(vat_inclusive)')
         .eq('period_id', periodId),
     ])

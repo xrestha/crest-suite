@@ -7,12 +7,13 @@
 // the lowest-friction, most internally-consistent choice.
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 
 export async function computeInventoryVariance(clientId, period) {
   const [{ data: opening }, { data: purchases }, { data: returns }, { data: wastages }, { data: closing }, { data: items }, { data: recipes }, { data: salesData }] = await Promise.all([
     supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id),
-    supabase.from('purchase_entries').select('item_id, qty').eq('period_id', period.id),
+    fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', period.id).order('id')),
     supabase.from('vendor_returns').select('item_id, qty').eq('period_id', period.id),
     supabase.from('wastages').select('item_id, qty').eq('period_id', period.id),
     supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id),

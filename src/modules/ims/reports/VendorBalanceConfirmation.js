@@ -3,6 +3,7 @@ import { useSearchParams, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import { getBsFiscalYear, getBsFiscalYearStart, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -65,24 +66,30 @@ export default function VendorBalanceConfirmation() {
 
     // Full history of this vendor's Credit bills — Opening Balance needs everything before this
     // FY, not just the FY window itself.
-    const { data: creditData } = await supabase
+    // Paged: deliberately unbounded by period (every credit bill for this vendor, ever), which is
+    // the whole point of an opening-balance carry-forward — and therefore a prime candidate for
+    // PostgREST's silent 1000-row cap. A truncated read would understate the balance on a
+    // document sent to the vendor for signature (S529).
+    const { data: creditData } = await fetchAllRows(() => supabase
       .from('purchase_entries')
       .select('id, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, vendor_id, payment_method, monthly_periods!inner(client_id, bs_year, bs_month)')
       .eq('monthly_periods.client_id', effectiveClientId)
       .eq('vendor_id', selectedVendorId)
       .eq('payment_method', 'Credit')
+      .order('id'))
     const creditEntries = creditData || []
 
     // Cash/FonePay bills never carry a balance, so only the selected FY's periods matter for them.
     let cashEntries = []
     if (fyPeriodIds.length > 0) {
-      const { data: cashData } = await supabase
+      const { data: cashData } = await fetchAllRows(() => supabase
         .from('purchase_entries')
         .select('id, bs_day, qty, rate, invoice_ref, vat_inclusive, discount_amount, purchase_group_id, vendor_id, payment_method, monthly_periods!inner(client_id, bs_year, bs_month, id)')
         .eq('monthly_periods.client_id', effectiveClientId)
         .eq('vendor_id', selectedVendorId)
         .neq('payment_method', 'Credit')
         .in('monthly_periods.id', fyPeriodIds)
+        .order('id'))
       cashEntries = cashData || []
     }
 

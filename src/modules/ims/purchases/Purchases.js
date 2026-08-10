@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import Fab from '../../../components/Fab'
@@ -102,12 +103,14 @@ export default function Purchases() {
   }
 
   async function loadPurchases(periodId) {
-    const { data } = await supabase
+    // Paged — the purchases table itself, one row per bill line for the period (S529).
+    const { data } = await fetchAllRows(() => supabase
       .from('purchase_entries')
       .select('*, items(name, uom, purchase_unit, conversion_factor, categories(name)), vendors(name)')
       .eq('period_id', periodId)
       .order('bs_day')
       .order('created_at')
+      .order('id'))
     setAndCache(setPurchases, `purchases_${periodId}`, data || [])
   }
 

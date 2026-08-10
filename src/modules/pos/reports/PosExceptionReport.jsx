@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
@@ -57,8 +58,12 @@ export default function PosExceptionReport() {
       // Item-level comps (see PosOrders.jsx) — these live inside otherwise-'paid' orders, which
       // the query above never fetches (it's paid-with-a-discount or void/writeoff only), so they
       // need their own fetch or they'd be invisible in this report entirely.
-      scopedFrom('pos_order_items', 'order_id, recipe_id, qty, unit_price, vat_rate, comped_by, comped_at, comp_reason, comp_no')
-        .eq('comped', true).gte('comped_at', fromTs).lte('comped_at', toTs),
+      // Paged: comps are individually rare, but this filters a whole date range rather than one
+      // bill, and a long range on a busy outlet can still cross the silent 1000-row cap — at
+      // which point the exception report would under-report exactly the exceptions it exists to
+      // surface, with no error to say so (S529).
+      fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, qty, unit_price, vat_rate, comped_by, comped_at, comp_reason, comp_no')
+        .eq('comped', true).gte('comped_at', fromTs).lte('comped_at', toTs).order('id')),
     ])
 
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
@@ -73,8 +78,8 @@ export default function PosExceptionReport() {
     let itemsByOrder = {}
     let costMap = {}
     if (needItems.length > 0) {
-      const { data: items } = await scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, recipe_id')
-        .in('order_id', needItems.map(o => o.id))
+      const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, recipe_id')
+        .in('order_id', needItems.map(o => o.id)).order('id'))
       itemsByOrder = (items || []).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc

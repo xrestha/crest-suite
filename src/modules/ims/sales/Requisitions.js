@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { getBsToday } from '../../../utils/bsCalendar'
@@ -153,7 +154,7 @@ export default function Requisitions() {
       { data: reqLines }] = await Promise.all([
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
-      supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),

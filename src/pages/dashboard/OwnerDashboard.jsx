@@ -8,6 +8,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { getBsToday, BS_MONTHS, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import Tip from '../../components/Tip'
 import SuiteGate from '../../components/SuiteGate'
@@ -104,7 +105,7 @@ export default function OwnerDashboard() {
   // filter, the Overheads page's "Labor Costs" tab rows would get subtracted a second time.
   async function loadImsFigures(period) {
     const results = await Promise.all([
-      period ? supabase.from('purchase_entries').select('item_id, qty, rate, payment_method').eq('period_id', period.id) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, payment_method').eq('period_id', period.id).order('id')) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
       scopedFrom('recipes', 'id, selling_price'),
@@ -147,7 +148,7 @@ export default function OwnerDashboard() {
   // ── Items below reorder par — a live inventory position, not a period total ──
   async function loadReorderStats(period) {
     const results = await Promise.all([
-      period ? supabase.from('purchase_entries').select('item_id, qty').eq('period_id', period.id) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id) : { data: [] },
@@ -203,12 +204,15 @@ export default function OwnerDashboard() {
 
   // ── Overdue vendor payables (>60 days) — cross-period by nature, doesn't wait on `period` ──
   async function loadOverduePayables() {
-    const { data, error } = await supabase
+    // Paged: every unpaid credit bill across all periods, so this grows without bound as the
+    // system is used and would silently stop counting overdue payables past 1000 rows (S529).
+    const { data, error } = await fetchAllRows(() => supabase
       .from('purchase_entries')
       .select('id, bs_day, qty, rate, monthly_periods!inner(client_id, bs_year, bs_month)')
       .eq('monthly_periods.client_id', effectiveClientId)
       .eq('payment_method', 'Credit')
       .is('paid_at', null)
+      .order('id'))
 
     const rows = data || []
     const ids = rows.map(e => e.id)

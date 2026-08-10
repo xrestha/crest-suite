@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ChartCard from '../../../components/ChartCard'
@@ -112,7 +113,7 @@ export default function PeriodComparison() {
       { data: closings },
       { data: sales },
     ] = await Promise.all([
-      supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', ids),
+      fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', ids).order('id')),
       scopedFrom('vendor_returns', 'period_id, qty, rate').in('period_id', ids),
       supabase.from('wastages').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
       supabase.from('opening_stock').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),

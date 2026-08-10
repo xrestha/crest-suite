@@ -7,6 +7,7 @@
 // this is bill-age-since-purchase, not true payment-terms-SLA compliance.
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { bsToAd } from '../../utils/bsCalendar'
 
 const EPS = 0.001
@@ -20,9 +21,11 @@ function billAgingBucket(daysOld) {
 
 export async function computeVendorPurchasingSection(clientId, period, generatedAt) {
   const [{ data: purchases }, { data: returns }, { data: vendors }] = await Promise.all([
-    supabase.from('purchase_entries')
+    // Paged — feeds a FROZEN snapshot, so a truncated read becomes the permanent record (S529).
+    fetchAllRows(() => supabase.from('purchase_entries')
       .select('id, vendor_id, qty, rate, payment_method, discount_amount, purchase_group_id, invoice_ref, bs_day')
-      .eq('period_id', period.id),
+      .eq('period_id', period.id)
+      .order('id')),
     supabase.from('vendor_returns').select('vendor_id, qty, rate, purchase_entry_id').eq('period_id', period.id),
     scopedFrom('vendors', clientId, 'id, name').eq('is_active', true),
   ])

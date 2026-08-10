@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -37,8 +38,13 @@ export default function SupplierPriceTracker() {
       scopedFrom('vendors', 'id, name').eq('is_active', true).order('name'),
       scopedFrom('items', 'id, name, item_code, uom, rate, per_uom_rate, purchase_qty, purchase_unit, conversion_factor, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       scopedFrom('monthly_periods').order('bs_year').order('bs_month'),
-      supabase.from('purchase_entries').select('id, item_id, vendor_id, period_id, rate, qty, bs_day, monthly_periods!inner(client_id)')
+      // Paged: every purchase line this client has ever recorded, across all periods — price
+      // history is the point of this page, so it is unbounded by construction and grows past the
+      // silent 1000-row cap quickly. Truncated, it would quietly drop the oldest (or newest,
+      // depending on scan order) price points the trend is drawn from (S529).
+      fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, vendor_id, period_id, rate, qty, bs_day, monthly_periods!inner(client_id)')
         .eq('monthly_periods.client_id', effectiveClientId)
+        .order('id'))
     ])
 
     setVendors(v || [])

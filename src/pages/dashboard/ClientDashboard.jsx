@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
@@ -151,7 +152,7 @@ export default function ClientDashboard() {
       scopedFrom('vendors', '*', { count: 'exact', head: true }).eq('is_active', true),
       scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).neq('category', 'Sub-Recipe'),
       scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).eq('category', 'Sub-Recipe'),
-      period ? supabase.from('purchase_entries').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, bs_day').eq('period_id', period.id).order('id')) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
       // Fetches every source (including 'pos_comp') — revenue figures below filter comps out
       // client-side, but theoreticalMap (Reorder + Variance widgets) needs every source counted,
@@ -593,7 +594,7 @@ export default function ClientDashboard() {
     const periodIds = closed.map(p => p.id)
 
     const trendResults = await Promise.all([
-      periodIds.length ? supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', periodIds) : { data: [] },
+      periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', periodIds).order('id')) : { data: [] },
       periodIds.length ? supabase.from('vendor_returns').select('period_id, qty, rate').in('period_id', periodIds)   : { data: [] },
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
       periodIds.length ? supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount').in('period_id', periodIds).neq('source', 'pos_comp') : { data: [] },

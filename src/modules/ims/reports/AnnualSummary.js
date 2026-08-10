@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -76,7 +77,7 @@ export default function AnnualSummary() {
       scopedFrom('items', 'id, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
       supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', periodIds),
       supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', periodIds),
-      supabase.from('purchase_entries').select('period_id, item_id, qty, rate').in('period_id', periodIds),
+      fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty, rate').in('period_id', periodIds).order('id')),
       scopedFrom('vendor_returns', 'period_id, item_id, qty, rate').in('period_id', periodIds),
       supabase.from('wastages').select('period_id, item_id, qty').in('period_id', periodIds),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.

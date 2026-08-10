@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { Navigate } from 'react-router-dom'
@@ -121,7 +122,7 @@ export default function TheoreticalVariance() {
       supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
-      supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),

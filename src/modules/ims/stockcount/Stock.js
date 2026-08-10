@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
@@ -146,7 +147,7 @@ export default function Stock() {
       supabase.from('closing_stock').select('*').eq('period_id', periodId),
       supabase.from('wastages').select('id, item_id, qty, bs_day, reason, items(name, uom, per_uom_rate)').eq('period_id', periodId),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId)
     ])
 

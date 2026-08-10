@@ -150,6 +150,26 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S529 — 2026-08-10 — Swept the silent 1000-row truncation across the whole app (61 sites, 42 files)
+
+S528 found and fixed the truncation on three reads and flagged the rest as latent. This finished it. Supabase caps PostgREST at 1000 rows, and a bare `.select()` past that returns truncated data with **no error and nothing in the array to say so** — every total summed from it is then wrong, and wrong quietly.
+
+**The worst instance was payroll, and it was worse than the flag suggested.** `hr_attendance` is one row per employee **per day**, so a period holds `staff × ~30` rows and crosses the cap at **~34 staff** — a mid-sized restaurant, not a chain. `PayrollRun.jsx` read it with no limit *and no `ORDER BY`*, then fed it straight to the payslip engine. Employees past the cutoff simply appeared to have no attendance at all, which means **daily/hourly staff get paid zero** (their pay comes *from* those rows) and **monthly staff get paid a full month with no absence deduction**. And with no sort order, *which* employees fell past the cutoff was arbitrary and could differ between two runs of the same period. Same read in `PayrollCalculation.jsx`, `AttendanceSheet.jsx` (the grid payroll reads from), and both owner-report labor sections.
+
+`pos_order_items` is one row per line per bill — the highest-volume table in the app, thousands per month — so Sales Report, Covers Report, KOT Log, Exception Report, the dashboard's POS pivot and the demand forecast were each reading roughly the first tenth of a busy month while presenting it as the whole month. `pos_kot_log` got the same treatment (one row per ticket send), since a truncated read there makes the sent-vs-current comparison flag phantom discrepancies from missing rows alone.
+
+`purchase_entries` is fine for a single period but not for the reports that span them: Annual Summary, Period Comparison, Shrinkage Trend, VAT/Non-VAT, One Lakh Above (which decides an IRD Annexure 13 disclosure threshold — a truncated read could omit a vendor that legally must be disclosed), Vendor Balance Confirmation (a document sent to the vendor for signature), Supplier Price Tracker and Owner Dashboard's overdue payables. **Outstanding Payables** is the standout: unbounded by period by design, so it degrades the longer the system is used.
+
+Deliberately **not** wrapped, and worth not "finishing" later: single-parent reads (`.eq('order_id', X)` — one bill cannot have 1000 lines) and `head: true` count queries (`Vendors.js`'s delete guard returns a count, not rows, so the cap cannot apply). The unused import that guard picked up during the mechanical pass was reverted.
+
+Two traps hit while doing it, both now in CLAUDE.md. **The bulk edit introduced a real bug and only the browser caught it:** where the original chain continued past the line being edited, the closing paren landed early and a trailing `.order('created_at')` ended up applied to `fetchAllRows`' *result* — a plain `{data, error}`, not a builder — a runtime `TypeError` that compiles fine and only appears on page load. Found on Purchases by actually opening it; then scripted a paren-balance check across all 61 sites to confirm it was the only one, rather than assuming. Separately, a CRA dev server left running shares `node_modules/.cache` with `npm run build` and kept rewriting stale ESLint entries underneath it, producing phantom `'fetchAllRows' is defined but never used` errors on files where import and usage are both plainly present — stop the dev server before trusting a CI build.
+
+`CI=true npm run build` clean, 198/198 tests across 16 suites. `CACHE_NAME` → `crest-v54`.
+
+**Files:** 42 across IMS/HR/POS/dashboard/owner-report — see `git show` for the list; the change is one shape repeated (`fetchAllRows(() => …​.order('id'))`), plus `OutstandingPayables.js` restructured to a query factory since it builds its filter conditionally.
+
+---
+
 ### S528 — 2026-08-10 — Stock Movements: a Sub-Recipes tab, because the ledger structurally cannot show them
 
 Asked whether Stock Movements shows sub-recipe usage. It does not, and the reason is in the data model rather than the page: `recipe_ingredients` stores a sub-recipe as `sub_recipe_id` with **`item_id` NULL** (`Recipes.js:503-508`), so `explode()` always takes the recurse branch and only ever emits a result on reaching a real `item_id` at the bottom of the tree. The sub-recipe is a scaling step that gets discarded, and `stock_movements` has no column for the path a depletion took — so a client running a prep-heavy kitchen could see 45g of acai powder consumed but never "12.5 batches of Acai Base."

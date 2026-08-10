@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
@@ -153,7 +154,7 @@ export default function Overheads() {
       { data: salesData },
       { data: recipes }
     ] = await Promise.all([
-      supabase.from('purchase_entries').select('qty, rate').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('purchase_entries').select('qty, rate').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'qty, rate').eq('period_id', periodId),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
       supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp'),

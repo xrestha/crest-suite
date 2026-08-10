@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { Navigate } from 'react-router-dom'
@@ -39,7 +40,7 @@ export default function BudgetVsActual() {
     const catList = cats || categories
     const [{ data: items }, { data: purchases }, { data: returns }, { data: budgetRows }] = await Promise.all([
       scopedFrom('items', 'id, category_id').eq('is_active', true),
-      supabase.from('purchase_entries').select('item_id, qty, rate').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate').eq('period_id', periodId).order('id')),
       supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', periodId),
       supabase.from('budgets').select('*').eq('period_id', periodId).eq('client_id', effectiveClientId),
     ])

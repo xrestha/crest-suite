@@ -2,6 +2,7 @@ import { useState, useEffect, Fragment } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
 import { computePayslip, calcAmount } from './payrollCompute'
@@ -227,7 +228,9 @@ export default function PayrollCalculation() {
       scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('hr_salary_components'),
-      scopedFrom('hr_attendance').eq('period_id', p.id),
+      // Paged — same reason as PayrollRun.jsx: one row per employee per day crosses the silent
+      // 1000-row cap at ~34 staff, and a truncated read silently zeroes daily/hourly pay (S529).
+      fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', p.id).order('id')),
       scopedFrom('hr_overtime_entries', 'employee_id, ot_hours, ot_type')
         .eq('bs_year', p.bs_year).eq('bs_month', p.bs_month).eq('status', 'approved'),
       scopedFrom('hr_advances').order('issued_date'),

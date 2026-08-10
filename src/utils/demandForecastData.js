@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient'
 import { scopedFrom, scopedInsert, scopedDelete } from '../shared/scopedDb'
+import { fetchAllRows } from '../shared/fetchAllRows'
 import { bsToAd, adToBs } from './bsCalendar'
 import { computeOrderAmounts } from './posBillingMath'
 
@@ -130,8 +131,10 @@ export async function runForecast(clientId, horizonDays = 7) {
 
     let itemsByOrder = {}
     if (orderList.length > 0) {
-      const { data: items } = await scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, qty, unit_price, vat_rate, comped')
-        .in('order_id', orderList.map(o => o.id))
+      // Paged: the forecast reads a long history of bills, so this is the largest pos_order_items
+      // read in the app — truncation would silently train the forecast on a fraction of it (S529).
+      const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, qty, unit_price, vat_rate, comped')
+        .in('order_id', orderList.map(o => o.id)).order('id'))
       itemsByOrder = (items || []).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc

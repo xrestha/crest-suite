@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -48,7 +49,7 @@ export default function DeadStock() {
     ] = await Promise.all([
       scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),

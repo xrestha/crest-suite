@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd, adToBs } from '../../../utils/bsCalendar'
 import { calcBillTotals, billKeyOf, aging } from '../purchases/purchasesHelpers'
@@ -101,19 +102,29 @@ export default function OutstandingPayables() {
     setExpandedBill(null)
     setSelectedBills(new Set())
 
-    let query = supabase
-      .from('purchase_entries')
-      .select('id, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, monthly_periods!inner(client_id, bs_year, bs_month), items(name, uom, categories(name)), vendors(id, name)')
-      .eq('monthly_periods.client_id', effectiveClientId)
-      .eq('payment_method', 'Credit')
+    // A factory, not a single builder: fetchAllRows needs a fresh query per page (a supabase-js
+    // builder is a one-shot thenable). This read is unbounded by period — it spans every credit
+    // bill this client has ever recorded — so it is the single most likely place in the app to
+    // cross PostgREST's silent 1000-row cap, and it gets likelier the longer the system is used.
+    // A truncated read here would hide genuinely outstanding bills from the payables list (S529).
+    const buildQuery = () => {
+      let q = supabase
+        .from('purchase_entries')
+        .select('id, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, monthly_periods!inner(client_id, bs_year, bs_month), items(name, uom, categories(name)), vendors(id, name)')
+        .eq('monthly_periods.client_id', effectiveClientId)
+        .eq('payment_method', 'Credit')
 
-    if (tab === 'outstanding') {
-      query = query.is('paid_at', null).order('created_at', { ascending: true })
-    } else {
-      query = query.not('paid_at', 'is', null).order('paid_at', { ascending: false })
+      if (tab === 'outstanding') {
+        q = q.is('paid_at', null).order('created_at', { ascending: true })
+      } else {
+        q = q.not('paid_at', 'is', null).order('paid_at', { ascending: false })
+      }
+      // Unique tiebreaker — created_at/paid_at are not unique, and paging a non-unique sort can
+      // repeat a bill on one page and skip another on the next.
+      return q.order('id')
     }
 
-    const { data, error } = await query
+    const { data, error } = await fetchAllRows(buildQuery)
 
     if (error) {
       if (error.code === '42703' || error.message?.includes('paid_at')) setSetupNeeded(true)

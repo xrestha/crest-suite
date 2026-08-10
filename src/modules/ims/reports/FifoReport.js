@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
@@ -59,11 +60,12 @@ export default function FifoReport() {
     // which is the standard FIFO assumption and the same level of precision every other report
     // in this app already works at.
     const [{ data: purchases }, { data: returns }, { data: sales }, { data: wastages }, { data: staffMeals }, { data: clientRecipes }] = await Promise.all([
-      supabase.from('purchase_entries')
+      fetchAllRows(() => supabase.from('purchase_entries')
         .select('*, items(name, uom, per_uom_rate, categories(name))')
         .eq('period_id', periodId)
         .not('expiry_date', 'is', null)
-        .order('expiry_date'),
+        .order('expiry_date')
+        .order('id')),
       scopedFrom('vendor_returns', 'purchase_entry_id, qty')
         .eq('period_id', periodId),
       supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),

@@ -4,6 +4,7 @@
 // always "the currently open one." See CLAUDE.md's Monthly Owner/Manager Report section.
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 import { calcAmount, hourlyRateOf, tallyAttendance } from '../hr/payroll/payrollCompute'
 import { SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
@@ -27,7 +28,7 @@ import { computeInventoryDepthSection } from './computeInventoryDepthSection'
 // of generation"), not a live "how overdue is it right now" figure that drifts once time passes.
 async function computeImsSection(clientId, period) {
   const results = await Promise.all([
-    supabase.from('purchase_entries').select('id, item_id, qty, rate, payment_method').eq('period_id', period.id),
+    fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, qty, rate, payment_method').eq('period_id', period.id).order('id')),
     supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id),
     // Two sales fetches, because one row set cannot answer both questions. REVENUE excludes comps
     // (a comped dish collected nothing), CONSUMPTION includes them (its ingredients were still
@@ -151,7 +152,9 @@ async function computeHrSection(clientId, period) {
     scopedFrom('hr_overtime_entries', clientId, 'employee_id, ot_hours, ot_type, status, bs_year, bs_month')
       .eq('status', 'approved').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
     scopedFrom('hr_leave_requests', clientId, 'leave_type_id, status, start_date, end_date, days'),
-    scopedFrom('hr_attendance', clientId, 'status, hours_worked, ot_hours').eq('period_id', period.id),
+    // Paged — one row per employee per day, past the 1000-row cap at ~34 staff. This feeds the
+    // frozen snapshot's labor figures, so a truncated read would be preserved permanently (S529).
+    fetchAllRows(() => scopedFrom('hr_attendance', clientId, 'status, hours_worked, ot_hours').eq('period_id', period.id).order('id')),
     scopedFrom('hr_leave_types', clientId, 'id, name'),
     scopedFrom('hr_payroll_runs', clientId, 'id').eq('period_id', period.id).eq('status', 'finalized').maybeSingle(),
   ])
@@ -312,7 +315,10 @@ async function computePosSection(clientId, period) {
 
   const orderIds = orders.map(o => o.id)
   const { data: itemRows } = orderIds.length > 0
-    ? await scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no').in('order_id', orderIds)
+    // Paged: a month of bill lines runs to thousands. This one is written into a FROZEN snapshot,
+    // so a truncated read wouldn't just be wrong once — it would be preserved as the permanent
+    // record of that period, with no later recompute to correct it (S529).
+    ? await fetchAllRows(() => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no').in('order_id', orderIds).order('id'))
     : { data: [] }
 
   const byOrder = {}
@@ -362,7 +368,7 @@ async function computePosSection(clientId, period) {
   const voidOrderIds = (voidRows || []).map(o => o.id)
   let voidsAmount = 0
   if (voidOrderIds.length > 0) {
-    const { data: voidItems } = await scopedFrom('pos_order_items', clientId, 'order_id, qty, unit_price').in('order_id', voidOrderIds)
+    const { data: voidItems } = await fetchAllRows(() => scopedFrom('pos_order_items', clientId, 'order_id, qty, unit_price').in('order_id', voidOrderIds).order('id'))
     voidsAmount = (voidItems || []).reduce((s, i) => s + i.qty * i.unit_price, 0)
   }
 
