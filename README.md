@@ -150,6 +150,26 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S527 — 2026-08-10 — Revenue vs Cost Breakdown: the 5 slice colors were near-indistinguishable
+
+Reported from a screenshot ("colors used are almost similar"). S526's slice palette was built from the semantic theme tokens — `accent` / `purple` / `red` / `amber` / `green` — which was the real mistake: **that token set was never designed as a categorical palette.** `--theme-accent` and `--theme-purple` are literally the same hex in three presets (Dracula `#bd93f9`, Catppuccin Mocha `#cba6f7`, Latte `#8839ef`), and accent sits right beside amber in Dark (`#c9a84c` vs `#fbbf24`) and Warm — so the pie drew visually identical slices in 5 of the 10 themes, not just the one in the screenshot.
+
+Measured rather than eyeballed, on the Dark card surface (`#181c27`): Tax & Fees ↔ Food Cost came out at **ΔE 10.6** for normal vision against a floor of 15, and Overheads ↔ Food Cost at **ΔE 5.1** under deuteranopia against a floor of 8. Both hard failures, and the deutan one was invisible to the original report — worth noting that the reported symptom (gold vs amber) and the worst actual collision (gold vs salmon, for red-green colorblind readers) were *different pairs*.
+
+The replacement was brute-forced over 33,649 five-hue combinations drawn from the file's existing `CHART_COLORS` plus adjacent steps of the same hue families, scored against both floors across five real card surfaces (three dark presets, two light), with semantic constraints pinned: Food Cost keeps the signature gold so the slice still ties to the Food Cost % card and trend line, and Net Margin stays green. Result — Food Cost `#c9a84c` gold, Labor `#60a5fa` blue, Overheads `#8b5cf6` violet, Tax & Fees `#ec4899` pink, Net Margin `#34d399` green. Worst pair is now ΔE 16.8 normal / 8.6 deutan, both above floor. Tritan lands at 7.7, inside the 6–8 band that's acceptable only with secondary encoding — satisfied here by the existing 2px `paddingAngle` gaps, the percent-on-slice labels in the expanded view, and the name+NPR+% legend at every size.
+
+Red is deliberately gone from the chart. On this dashboard red already means "over threshold" (FC% > 45%, negative margin), so spending it on a slice that merely means "Overheads" was overloading a status color — the four cost slices are now plainly categorical and only Net Margin keeps a semantic hue. Moving to fixed hex also means the pie no longer repaints per theme, matching Spend by Category and Top Items by Spend, which already use fixed `CHART_COLORS`. The expanded view's "Food cost %" stat pill was switched from `colors.accent` to the Food Cost slice hex for the same reason — on a preset where accent isn't gold, the pill disagreed with the slice it summarizes.
+
+One thing left alone knowingly: the validator also flags the lightness band (Crest's chart hues are brighter pastels than its reference dark-mode steps) and warns that several are under 3:1 against a white card. Both are properties of the app's whole existing chart palette, not this chart — fixing them here would have made this one pie disagree with every other chart on the page. The contrast warning's stated relief (visible labels / a table view) is already met by the legend.
+
+Rendered a before/after of both palettes on real dark and light card surfaces and looked at it, rather than trusting the numbers alone.
+
+`CI=true npm run build` clean.
+
+**Files:** `src/pages/dashboard/ClientDashboard.jsx`
+
+---
+
 ### S526 — 2026-08-10 — Dashboard: Revenue vs Cost Breakdown pie was double-counting labor
 
 The pie drew `stats.overheadTotal` as a single "Overheads" slice **and** `hrStats.payroll` as a separate "Labor (basic)" slice on top of it — but the Overheads page stores fixed costs in three buckets (`overhead` / `labor` / `tax_fees`) and `overheadTotal` sums all three, labor included. So every rupee of labor was counted twice, and the pie's own total came out well above the cost base the net-margin figure beside it was computed from. Caught live on a real period: slices summed to NPR 454,172 (Food 106,462 + Overheads 295,000 + Labor 52,710) while the −57.2% net margin shown in the same card was correctly derived from a 401,462 cost base — the two figures in one card disagreed by exactly the payroll number.

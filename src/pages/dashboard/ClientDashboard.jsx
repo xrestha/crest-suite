@@ -708,7 +708,36 @@ export default function ClientDashboard() {
   // Net Margin only joins the slices when positive — a negative-value pie slice renders as a
   // misleading sliver rather than "costs exceeded revenue," so a negative margin is surfaced via
   // the footer callout below instead of forced into the chart.
-  const COST_BREAKDOWN_COLORS = { 'Food Cost': colors.accent, 'Labor': colors.purple, 'Overheads': colors.red, 'Tax & Fees': colors.amber, 'Net Margin': colors.green }
+  // Fixed hex, not theme tokens — same rule as CHART_COLORS above (CSS var() doesn't resolve
+  // inside Recharts' SVG fill), and the legend swatches must match the slices they label.
+  //
+  // These were `colors.accent/purple/red/amber/green` until S527, which was a genuine
+  // indistinguishability bug rather than a taste call: the semantic token set was never designed
+  // as a categorical palette. `accent` and `purple` are literally the same hex in three presets
+  // (Dracula #bd93f9, Mocha #cba6f7, Latte #8839ef), and accent sits beside amber in Dark
+  // (#c9a84c vs #fbbf24) and Warm — so the pie drew near-identical slices in 5 of the 10 themes.
+  // Measured on the Dark card surface: Tax & Fees↔Food Cost came out at ΔE 10.6 for normal
+  // vision (floor is 15) and Overheads↔Food Cost at ΔE 5.1 under deuteranopia (floor is 8).
+  //
+  // The replacement was brute-forced against those two floors across five card surfaces (three
+  // dark presets, two light) rather than picked by eye: worst pair is now ΔE 16.8 normal / 8.6
+  // deutan. Tritan lands at 7.7, inside the 6–8 band that's only acceptable with secondary
+  // encoding — satisfied here by the 2px paddingAngle gaps, the percent-on-slice labels in the
+  // expanded view, and the name+NPR+% legend under every size.
+  //
+  // Red is deliberately gone: on this dashboard red means "over threshold" (FC% > 45%, negative
+  // margin), so spending it on a slice that merely means "Overheads" was overloading a status
+  // color. The four cost slices are now plainly categorical and only Net Margin keeps a semantic
+  // hue. #60a5fa here is NOT the undocumented accent S521 removed from AdminClients/SuiteGate —
+  // that was UI chrome, where the one-accent rule applies; this is a chart series hue, the same
+  // exemption CHART_COLORS already relies on.
+  const COST_BREAKDOWN_COLORS = {
+    'Food Cost':  '#c9a84c', // gold — kept, so the slice ties to the Food Cost % card/trend line
+    'Labor':      '#60a5fa', // blue
+    'Overheads':  '#8b5cf6', // violet
+    'Tax & Fees': '#ec4899', // pink
+    'Net Margin': '#34d399', // green — the one slice that stays semantic (profit reads as good)
+  }
   // Falls back to one combined slice for a `stats` object restored from a pre-S526 session cache,
   // which has overheadTotal but no overheadBuckets — still correct, just less broken out.
   const ohBuckets = stats?.overheadBuckets
@@ -1314,7 +1343,9 @@ export default function ClientDashboard() {
                   {big && (
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                       <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`} />
-                      {fcPct != null && <StatPill label="Food cost %" value={`${fcPct.toFixed(1)}%`} color={colors.accent} />}
+                      {/* Matches the Food Cost slice, not colors.accent — on a preset where accent
+                          isn't gold the pill would otherwise disagree with the slice it summarizes. */}
+                      {fcPct != null && <StatPill label="Food cost %" value={`${fcPct.toFixed(1)}%`} color={COST_BREAKDOWN_COLORS['Food Cost']} />}
                       <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
                     </div>
                   )}
