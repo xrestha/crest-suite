@@ -13,6 +13,7 @@ import {
   ComposedChart, LineChart, BarChart, Bar, Area, Line,
   XAxis, YAxis, CartesianGrid, ReferenceLine, Tooltip as RTooltip, ResponsiveContainer,
 } from 'recharts'
+import { chartMotion } from '../../../shared/chartMotion'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -409,14 +410,14 @@ export default function PeriodComparison() {
                       formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
                     />
                     {big ? (
-                      <Area type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2.5} fill="url(#pcPurchasesFill)" connectNulls dot={{ r: 3, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.accent }} />
+                      <Area type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2.5} fill="url(#pcPurchasesFill)" connectNulls dot={{ r: 3, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.accent }} {...chartMotion()} />
                     ) : (
-                      <Line type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.accent }} />
+                      <Line type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.accent }} {...chartMotion()} />
                     )}
                     {big ? (
-                      <Area type="monotone" dataKey="revenue" name="Revenue" stroke={colors.green} strokeWidth={2.5} fill="url(#pcRevenueFill)" connectNulls dot={{ r: 3, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.green }} />
+                      <Area type="monotone" dataKey="revenue" name="Revenue" stroke={colors.green} strokeWidth={2.5} fill="url(#pcRevenueFill)" connectNulls dot={{ r: 3, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.green }} {...chartMotion()} />
                     ) : (
-                      <Line type="monotone" dataKey="revenue" name="Revenue" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.green }} />
+                      <Line type="monotone" dataKey="revenue" name="Revenue" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.green }} {...chartMotion()} />
                     )}
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -424,7 +425,7 @@ export default function PeriodComparison() {
               return (
                 <>
                   {big && (
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                    <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                       <StatPill label="Total revenue" value={fmt(totalRevenue)} color={colors.green} />
                       <StatPill label="Total purchases" value={fmt(totalPurchases)} color={colors.accent} />
                       <StatPill label="Net position" value={fmt(totalRevenue - totalPurchases)} />
@@ -467,7 +468,7 @@ export default function PeriodComparison() {
                       return [lines.join(' · '), 'Food Cost %']
                     }}
                   />
-                  <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false}
+                  <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false} {...chartMotion()}
                     dot={(props) => {
                       const { cx, cy, payload } = props
                       const col = payload.fc == null ? colors.text3 : payload.fc <= 30 ? colors.green : payload.fc <= 38 ? colors.amber : colors.red
@@ -501,7 +502,7 @@ export default function PeriodComparison() {
                     formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
                   />
                   {categories.map(c => (
-                    <Bar key={c} dataKey={c} name={c} stackId="rev" fill={colorOf(c)} radius={c === categories[categories.length - 1] ? [3, 3, 0, 0] : 0} />
+                    <Bar key={c} dataKey={c} name={c} stackId="rev" fill={colorOf(c)} radius={c === categories[categories.length - 1] ? [3, 3, 0, 0] : 0} {...chartMotion()} />
                   ))}
                 </BarChart>
               </ResponsiveContainer>

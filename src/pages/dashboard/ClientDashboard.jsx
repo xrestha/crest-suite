@@ -10,6 +10,7 @@ import {
   LineChart, Line, ComposedChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine,
   BarChart, Bar
 } from 'recharts'
+import { chartMotion } from '../../shared/chartMotion'
 import { ArrowDown, ArrowUp, Percent, Receipt, Target, Lock, TriangleAlert, Clock, LayoutGrid } from 'lucide-react'
 import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
@@ -1051,7 +1052,7 @@ export default function ClientDashboard() {
             return (
               <>
                 {big && (
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                  <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                     <StatPill label="Total spend" value={`NPR ${categorySpendTotal.toLocaleString()}`} />
                     <StatPill label="Top category" value={`${categorySpend[0].name} (${((categorySpend[0].value / categorySpendTotal) * 100).toFixed(0)}%)`} color={CHART_COLORS[0]} />
                     <StatPill label="Categories" value={categorySpend.length} />
@@ -1060,6 +1061,7 @@ export default function ClientDashboard() {
                 <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
                   <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                     <Pie
+                      {...chartMotion()}
                       data={categorySpend} dataKey="value" nameKey="name"
                       cx="50%" cy="50%"
                       innerRadius={big ? 80 : 38} outerRadius={big ? 140 : 60}
@@ -1160,24 +1162,24 @@ export default function ClientDashboard() {
                     labelFormatter={l => l}
                   />
                   {big ? (
-                    <Area type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2.5} fill="url(#dtPurchasesFill)" connectNulls dot={{ r: 3, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.accent }} />
+                    <Area type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2.5} fill="url(#dtPurchasesFill)" connectNulls dot={{ r: 3, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.accent }} {...chartMotion()} />
                   ) : (
-                    <Line type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.accent }} />
+                    <Line type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.accent }} {...chartMotion()} />
                   )}
                   {hasDailySales && (big ? (
-                    <Area type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={2.5} fill="url(#dtSalesFill)" connectNulls dot={{ r: 3, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.green }} />
+                    <Area type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={2.5} fill="url(#dtSalesFill)" connectNulls dot={{ r: 3, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.green }} {...chartMotion()} />
                   ) : (
-                    <Line type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.green }} />
+                    <Line type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.green }} {...chartMotion()} />
                   ))}
-                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={colors.purple} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.purple }} />}
-                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={colors.red} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.red }} />}
+                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={colors.purple} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.purple }} {...chartMotion()} />}
+                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={colors.red} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.red }} {...chartMotion()} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )
             return (
               <>
                 {big && (
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                  <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                     <StatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString()}`} color={colors.accent} />
                     {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString()}`} color={colors.green} />}
                     {salesProjection && <StatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString()}`} color={colors.purple} />}
@@ -1214,7 +1216,7 @@ export default function ClientDashboard() {
             return (
               <>
                 {big && (
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                  <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                     <StatPill label={`Top ${shown.length} total`} value={`NPR ${shownTotal.toLocaleString()}`} color={colors.accent} />
                     <StatPill label="Top item" value={shown[0].fullName || shown[0].name} color={CHART_COLORS[0]} />
                     {purchaseTotal > 0 && <StatPill label="Share of net purchases" value={`${((shownTotal / purchaseTotal) * 100).toFixed(0)}%`} />}
@@ -1229,7 +1231,7 @@ export default function ClientDashboard() {
                       formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}${purchaseTotal > 0 ? ` (${((v / purchaseTotal) * 100).toFixed(1)}% of purchases)` : ''}`, p.payload.fullName || n]}
                       labelFormatter={() => ''}
                     />
-                    <Bar dataKey="value" fill={colors.accent} radius={[0, 3, 3, 0]} barSize={big ? 18 : 10}>
+                    <Bar dataKey="value" fill={colors.accent} radius={[0, 3, 3, 0]} barSize={big ? 18 : 10} {...chartMotion()}>
                       {shown.map((entry, i) => (
                         <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                       ))}
@@ -1263,7 +1265,7 @@ export default function ClientDashboard() {
                 return (
                 <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
                   {big && fcTrendAvg != null && (
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                    <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                       <StatPill label="Average" value={`${fcTrendAvg.toFixed(1)}%`} color={colors.accent} />
                       <StatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.green} />
                       <StatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.red} />
@@ -1290,7 +1292,7 @@ export default function ClientDashboard() {
                             return [lines.join(' · '), 'Food Cost %']
                           }}
                         />
-                        <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false}
+                        <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false} {...chartMotion()}
                           dot={(props) => {
                             const { cx, cy, payload } = props
                             const col = payload.fc <= 35 ? colors.green : payload.fc <= 45 ? colors.accent : colors.red
@@ -1342,7 +1344,7 @@ export default function ClientDashboard() {
                 return (
                 <>
                   {big && (
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                    <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                       <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`} />
                       {/* Matches the Food Cost slice, not colors.accent — on a preset where accent
                           isn't gold the pill would otherwise disagree with the slice it summarizes. */}
@@ -1353,6 +1355,7 @@ export default function ClientDashboard() {
                   <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
                     <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                       <Pie
+                        {...chartMotion()}
                         data={costBreakdown} dataKey="value" nameKey="name"
                         cx="50%" cy="50%"
                         innerRadius={big ? 80 : 38} outerRadius={big ? 140 : 60}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { chartMotion } from '../../../shared/chartMotion'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -375,7 +376,7 @@ export default function CoversReport() {
                     labelStyle={{ color: '#e8e0d0' }} itemStyle={{ color: '#e8e0d0' }}
                     formatter={v => [v, 'Covers']}
                   />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={GOLD} />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={GOLD} {...chartMotion()} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -447,7 +448,7 @@ export default function CoversReport() {
                     labelStyle={{ color: '#e8e0d0' }} itemStyle={{ color: '#e8e0d0' }}
                     formatter={v => [v, 'Covers']}
                   />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={GOLD} />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={GOLD} {...chartMotion()} />
                 </BarChart>
               </ResponsiveContainer>
             )}

@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { chartMotion } from '../../../shared/chartMotion'
 import Tip from '../../../components/Tip'
 import ChartCard from '../../../components/ChartCard'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
@@ -202,7 +203,7 @@ export default function BestSellers() {
                     itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={(v) => [sortBy === 'revenue' ? fmt(v) : sortBy === 'margin' ? `${v}%` : v, sortBy === 'revenue' ? 'Revenue' : sortBy === 'qty' ? 'Qty Sold' : 'Margin']}
                   />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]} {...chartMotion()}>
                     {chartData.map((_, i) => <Cell key={i} fill={i < 3 ? GOLD_HEX : GREEN_HEX} />)}
                   </Bar>
                 </BarChart>

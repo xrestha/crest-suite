@@ -11,6 +11,7 @@ import {
   Tooltip as RTooltip, ReferenceLine, ResponsiveContainer,
   Cell, BarChart, Bar,
 } from 'recharts'
+import { chartMotion } from '../../../shared/chartMotion'
 import { Navigate } from 'react-router-dom'
 
 const QUADRANTS = {
@@ -355,7 +356,7 @@ export default function MenuEngineering() {
                   <ReferenceLine y={100 - FC_CUTOFF} stroke={colors.borderLt} strokeDasharray="5 4" label={{ value: `FC ${FC_CUTOFF}%`, position: 'right', fill: colors.text3, fontSize: 10 }} />
                   <ReferenceLine x={0} stroke="none" label={{ value: '★ STARS', position: 'insideTopRight', fill: '#34d399', fontSize: 9, offset: 8 }} />
                   <RTooltip content={<ScatterTooltipContent />} cursor={{ strokeDasharray: '3 3' }} />
-                  <Scatter data={scatterData} shape={<ScatterDot />} />
+                  <Scatter data={scatterData} shape={<ScatterDot />} {...chartMotion()} />
                 </ScatterChart>
               </ResponsiveContainer>
             )}
@@ -384,7 +385,7 @@ export default function MenuEngineering() {
                     <XAxis type="number" hide />
                     <YAxis type="category" dataKey="name" width={140} tick={{ fill: colors.text3, fontSize: 11 }} />
                     <RTooltip content={<BarTooltipContent />} cursor={{ fill: colors.tableHover }} />
-                    <Bar dataKey="revenue" radius={[0, 4, 4, 0]}>
+                    <Bar dataKey="revenue" radius={[0, 4, 4, 0]} {...chartMotion()}>
                       {topItems.map((entry, i) => (
                         <Cell key={i} fill={Q_HEX[entry.quadrant] || '#c9a84c'} fillOpacity={0.8} />
                       ))}

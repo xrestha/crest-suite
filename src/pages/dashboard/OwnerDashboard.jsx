@@ -4,6 +4,7 @@ import { TriangleAlert } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
 } from 'recharts'
+import { chartMotion } from '../../shared/chartMotion'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
 import { supabase } from '../../supabaseClient'
@@ -567,10 +568,10 @@ export default function OwnerDashboard() {
                     labelStyle={{ color: 'var(--theme-text1)' }}
                     formatter={(v, name) => [v != null ? `${v}%` : '—', name]}
                   />
-                  <Line type="monotone" dataKey="fc" name="Food Cost %" stroke={colors.accent} strokeWidth={2} connectNulls dot={{ r: 2 }} />
-                  <Line type="monotone" dataKey="labor" name="Labor Cost %" stroke={colors.purple} strokeWidth={2} connectNulls dot={{ r: 2 }} />
-                  <Line type="monotone" dataKey="prime" name="Prime Cost %" stroke={colors.red} strokeWidth={2.5} connectNulls dot={{ r: 3 }} />
-                  <Line type="monotone" dataKey="margin" name="Net Margin %" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="fc" name="Food Cost %" stroke={colors.accent} strokeWidth={2} connectNulls dot={{ r: 2 }} {...chartMotion()} />
+                  <Line type="monotone" dataKey="labor" name="Labor Cost %" stroke={colors.purple} strokeWidth={2} connectNulls dot={{ r: 2 }} {...chartMotion()} />
+                  <Line type="monotone" dataKey="prime" name="Prime Cost %" stroke={colors.red} strokeWidth={2.5} connectNulls dot={{ r: 3 }} {...chartMotion()} />
+                  <Line type="monotone" dataKey="margin" name="Net Margin %" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2 }} {...chartMotion()} />
                 </LineChart>
               </ResponsiveContainer>
             )}

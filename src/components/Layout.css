@@ -10,7 +10,12 @@
   100% { box-shadow: 0 0 0 0 rgba(248,113,113,0);    }
 }
 
-/* ChartCard's expanded-chart modal (src/components/ChartCard.js) */
+/* ChartCard (src/components/ChartCard.js) — the expand sequence.
+   These were inline `style={{ animation }}` literals until 2026-08-11. Moved to classes for one
+   reason beyond tidiness: an inline animation cannot be switched off by a media query, so the
+   whole sequence ignored prefers-reduced-motion while the rest of the app honored it (see the
+   guard at the foot of this block). Note the Recharts series animation inside these cards is a
+   separate mechanism entirely — it interpolates SVG attributes in JS and no CSS here reaches it. */
 @keyframes chart-modal-backdrop-in {
   from { opacity: 0; }
   to   { opacity: 1; }
@@ -18,6 +23,84 @@
 @keyframes chart-modal-panel-in {
   from { opacity: 0; transform: scale(0.96) translateY(6px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+/* The stat strip only exists in the expanded view, and it arrives as a row of peers — the one
+   place on this surface where a stagger describes something true about the content instead of
+   decorating it. Capped at three steps (~135ms total delay): the strip is always 3 pills, and a
+   stagger that outlasts the panel it rides in on reads as the UI being slow. */
+@keyframes chart-stat-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.chart-modal-backdrop { animation: chart-modal-backdrop-in var(--motion-fast) var(--ease-standard); }
+.chart-modal-panel    { animation: chart-modal-panel-in 180ms var(--ease-entrance); }
+
+.chart-stat-strip > * {
+  animation: chart-stat-in var(--motion-slow) var(--ease-entrance) backwards;
+}
+.chart-stat-strip > *:nth-child(1) { animation-delay: 60ms; }
+.chart-stat-strip > *:nth-child(2) { animation-delay: 105ms; }
+.chart-stat-strip > *:nth-child(3) { animation-delay: 150ms; }
+
+/* The expand affordance is the only thing telling you a chart card opens, and it sits in the
+   quietest text tier — so it has to acknowledge the pointer and the keyboard, or it reads as
+   an icon rather than a control. Same --motion-fast/--ease-standard pairing every other
+   interactive element in this file uses; the focus ring is the themed one from DESIGN.md's
+   Inputs section, not a browser default. */
+.chart-icon-btn {
+  color: var(--theme-text3);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  transition: color var(--motion-fast) var(--ease-standard),
+              background var(--motion-fast) var(--ease-standard);
+}
+.chart-icon-btn:hover {
+  color: var(--theme-accent);
+  background: var(--theme-table-hover);
+}
+.chart-icon-btn:focus-visible {
+  outline: none;
+  color: var(--theme-accent);
+  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+}
+
+/* Both of these set their resting background here rather than inline in ChartCard.js. That is
+   not a style preference: an inline `background:'none'` outranks any class rule, so the hover
+   tint silently never applied while the hover color did — measured, not assumed. */
+.chart-close-btn {
+  color: var(--theme-text2);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  transition: color var(--motion-fast) var(--ease-standard),
+              background var(--motion-fast) var(--ease-standard),
+              border-color var(--motion-fast) var(--ease-standard);
+}
+.chart-close-btn:hover {
+  color: var(--theme-text1);
+  background: var(--theme-table-hover);
+  border-color: var(--theme-accent);
+}
+.chart-close-btn:focus-visible {
+  outline: none;
+  border-color: var(--theme-accent);
+  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* !important is load-bearing here, not defensive: .chart-modal-* still lose to any inline
+     animation a future edit reintroduces, and a reader who asked for less motion should win
+     that conflict. The elements' resting state is the visible one, so killing the animation
+     reveals them rather than hiding them. */
+  .chart-modal-backdrop,
+  .chart-modal-panel,
+  .chart-stat-strip > * {
+    animation: none !important;
+  }
+  .chart-icon-btn,
+  .chart-close-btn {
+    transition-duration: 0ms !important;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -74,9 +157,17 @@
   --font-size-chevron:      9px;
 
   /* Motion tokens — same easing/duration for every sidebar hover/active transition so it reads
-     as one deliberate system rather than several different per-rule timings. */
+     as one deliberate system rather than several different per-rule timings.
+     --ease-entrance / --motion-slow were added 2026-08-11 for the ChartCard expand sequence:
+     that curve was already shipping as an inline literal in ChartCard.js, so naming it here is
+     what makes it reusable rather than a second, per-component timing. --ease-standard remains
+     the right curve for a state change in place (hover, active); --ease-entrance is for something
+     arriving that wasn't on screen before, where the near-flat tail reads as settling rather than
+     stopping. Anything longer than --motion-slow on an Operate surface is latency, not motion. */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-fast:   160ms;
+  --motion-slow:   260ms;
 
   /* Shape scale — theme-invariant (radius does not vary per preset, unlike color/shadow above).
      sm: badges/small controls, md: buttons/inputs/tabs, lg: cards/panels, xl: hero surfaces

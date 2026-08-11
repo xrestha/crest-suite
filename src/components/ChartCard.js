@@ -21,20 +21,23 @@ export default function ChartCard({
 
   const modal = expanded ? createPortal(
     <div
+      className="chart-modal-backdrop"
       onClick={() => setExpanded(false)}
-      style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, animation: 'chart-modal-backdrop-in 0.15s ease-out' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
     >
       <div
+        className="chart-modal-panel"
         onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xl)', padding: '20px 28px', width: '92%', maxWidth: 1100, boxShadow: '0 8px 60px rgba(0,0,0,0.5)', animation: 'chart-modal-panel-in 0.18s cubic-bezier(0.16,1,0.3,1)' }}
+        style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xl)', padding: '20px 28px', width: '92%', maxWidth: 1100, boxShadow: '0 8px 60px rgba(0,0,0,0.5)' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--theme-border)' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>{title}</div>
           <div style={{ display: 'flex', gap: 18, fontSize: 11, alignItems: 'center' }}>
             {legend}
             <button
+              className="chart-close-btn"
               onClick={() => setExpanded(false)}
-              style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', color: 'var(--theme-text2)', fontSize: 12 }}
+              style={{ border: '1px solid var(--theme-border)', padding: '3px 10px', cursor: 'pointer', fontSize: 12 }}
             >✕ Close</button>
           </div>
         </div>
@@ -52,9 +55,10 @@ export default function ChartCard({
         <div style={{ display: 'flex', gap: 14, fontSize: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           {legend}
           <button
+            className="chart-icon-btn"
             onClick={() => setExpanded(true)}
             title="Expand chart"
-            style={{ background: 'none', border: 'none', padding: '2px 4px', cursor: 'pointer', color: 'var(--theme-text3)', lineHeight: 1, borderRadius: 4 }}
+            style={{ border: 'none', padding: '3px 5px', cursor: 'pointer', lineHeight: 0 }}
           >
             <ExpandIcon />
           </button>

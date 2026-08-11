@@ -133,6 +133,20 @@ spacing:
   sm: "8px"
   md: "16px"
   lg: "24px"
+# Motion. A closed set of two duration/easing pairs, mirroring the --motion-*/--ease-* custom
+# properties at the top of Layout.css. Documented 2026-08-11 (see the Motion section) — the
+# 160ms/ease-standard pair had shipped since the 2026-07-12 sidebar rewrite but was never in the
+# frontmatter, and the entrance pair was living as an inline literal in ChartCard.js. Recharts
+# series animation is deliberately NOT on this scale: it takes only ease|ease-in|ease-out|
+# ease-in-out|linear, so it cannot express ease-entrance, and it is configured in
+# src/shared/chartMotion.js instead.
+motion:
+  fast:
+    duration: "160ms"
+    easing: "cubic-bezier(0.4, 0, 0.2, 1)"
+  slow:
+    duration: "260ms"
+    easing: "cubic-bezier(0.16, 1, 0.3, 1)"
 components:
   button-primary:
     backgroundColor: "{colors.aged-brass}"
@@ -276,13 +290,36 @@ Shadow was already in real use before this change beyond the two cases previousl
 - **Structure:** `.sidebar-shell`, one column, 240px expanded / 56px collapsed (`--main-content` margin-left tracks the same two values). Top to bottom: brand (logo + wordmark, Georgia serif per the One Serif Rule + Ctrl-K search trigger) → module switcher (see below) → scrollable nav content (client badge, nav groups, footer) → a fixed bottom row (Help / collapse toggle / Sign out), always visible regardless of collapsed state.
 - **Module switcher:** a horizontal pill row (`.module-switcher`/`.module-tab`, `border-radius: 999px`-adjacent full-pill shape) when expanded, one tab per module the user can see (Admin/IMS/HR/POS - 1 to 4 tabs depending on role and what the client has enabled). Collapses to a vertical icon-only column (same buttons, `flex-direction` flip) when the sidebar is collapsed - visually equivalent to the pre-2026-07-12 icon rail. **Hidden entirely when only one module is visible** - a one-pill switcher reads as broken UI, not a real choice.
 - **Collapsed state:** a CSS class toggle (`.sidebar-wrap--collapsed`), not a JSX unmount - the nav content stays mounted and is hidden via `display:none`, so scroll position and any open dropdown state survive a collapse/expand toggle instead of resetting.
-- **Style:** sidebar background matched to the active theme (dark sidebar on dark themes, light on light themes) so it never reads as a fixed dark strip on a light theme. Nav items use the accent color for active/hover state, 160ms `cubic-bezier(0.4, 0, 0.2, 1)` transitions - the one formalized motion timing in the system, reused for every sidebar interaction rather than invented per-component.
+- **Style:** sidebar background matched to the active theme (dark sidebar on dark themes, light on light themes) so it never reads as a fixed dark strip on a light theme. Nav items use the accent color for active/hover state, using the `--motion-fast`/`--ease-standard` pairing from the Motion section below (this sidebar is where those two tokens originated) rather than a timing invented per-component.
 - **Accepted exception:** `.sidebar-shell`'s collapse toggle animates `width`, and `.main-content`'s tracks it by animating `margin-left` (`Layout.css`, both `transition: ... 0.22s ease`) rather than `transform`/`opacity`. Normally a layout-property animation, flagged as such. Kept as-is (confirmed 2026-07-12, reasoning unchanged from the original single-rail version): `.sidebar-wrap` is `position: fixed`, so real space must be reserved for whichever width the sidebar currently is - a `transform`-only fix would mean restructuring the sidebar's positioning strategy app-wide, and the animation only fires on a rare, manual, user-triggered toggle, not a continuous or scroll-linked one, so the real jank risk is low. Revisit only if the sidebar's positioning mechanism changes for other reasons.
 
 ### Data Tables (signature component)
 Dense, functional, and the component most of the product's screens are actually built around. Column headers are 11px uppercase labels at wide tracking; rows are 13px body text with a light bottom border between them (no border on the last row); row hover applies a barely-there tint (`table-hover`, 2-8% alpha depending on theme) rather than a solid highlight. Wide tables always live inside a horizontal-scroll wrapper rather than compressing columns to fit - the data stays legible at native width instead of getting cramped to avoid a scrollbar.
 
-## 6. Do's and Don'ts
+## 6. Motion
+
+Motion is functional here, not expressive: this is an Operate surface, so it acknowledges an action, explains a state change, or preserves continuity — and otherwise stays out of the way. There is no page-load choreography anywhere in the app, and adding some to a data screen would be a regression, not a polish pass.
+
+### Tokens
+
+A closed set of four, defined in `Layout.css`'s `:root` (added to the system in stages — `--motion-fast`/`--ease-standard` with the 2026-07-12 sidebar rewrite, `--motion-slow`/`--ease-entrance` on 2026-08-11 when `ChartCard`'s expand sequence needed a second, genuinely different role):
+
+- **`--motion-fast` (160ms) + `--ease-standard` (`cubic-bezier(0.4, 0, 0.2, 1)`)** — a state change *in place*: hover, active, focus, a nav item lighting up. Symmetrical curve, because nothing is arriving or leaving.
+- **`--motion-slow` (260ms) + `--ease-entrance` (`cubic-bezier(0.16, 1, 0.3, 1)`)** — something *arriving* that wasn't on screen: a modal panel, a stat pill resolving in. The near-flat tail reads as settling rather than stopping.
+
+Anything longer than `--motion-slow` on a working screen reads as latency, not motion. Exit faster than entrance, or instantly — a dismissal that makes you wait is worse than one that just happens.
+
+### Named Rules
+
+**Every animation must be switch-off-able by `prefers-reduced-motion`, which means it cannot be an inline style.** Inline `style={{ animation }}` beats any stylesheet rule, so a media query cannot reach it — the animation is then unconditional for every user regardless of their OS preference. `ChartCard`'s expand sequence shipped this way and went unguarded until 2026-08-11. Put animations in a class; put the class in the reduced-motion block at the foot of its section in `Layout.css`.
+
+**Recharts is a second motion system that shares none of these tokens, on purpose.** It interpolates SVG attributes in JavaScript, so no CSS rule — including the reduced-motion guard above — reaches a chart series. Every series goes through `src/shared/chartMotion.js` instead, which is the *only* place the reduced-motion gate for charts can live. It cannot use `--ease-entrance`: Recharts accepts only `ease|ease-in|ease-out|ease-in-out|linear`, and a `cubic-bezier()` there is invalid. The two systems are aligned on duration band (450ms series vs 260ms shell) and deliberately not on curve.
+
+**Stagger describes a list, or it is decoration.** The only staggered sequence in the app is `ChartCard`'s expanded stat strip (`.chart-stat-strip`, three steps at 60/105/150ms) — a row of peers that genuinely appears as a row. Cap the total delay; a stagger that outlasts the container it rides in on reads as the UI being slow. Do not reinterpret scrolled sections, table rows, or card grids as staggered lists.
+
+**One accepted exception, unchanged:** the sidebar collapse animates `width`/`margin-left` (layout properties) rather than `transform`. See Navigation for why — `.sidebar-wrap` is `position: fixed`, so real space has to be reserved, and the animation fires only on a rare manual toggle. The `/impeccable` hook flags both lines on every edit to `Layout.css`; they are correct as written.
+
+## 7. Do's and Don'ts
 
 ### Do:
 - **Do** use the theme's `accent-text` token as the foreground on any accent-colored background - it changes per preset and a hardcoded color will fail contrast on at least one of the ten themes.

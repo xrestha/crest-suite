@@ -1,4 +1,5 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
+import { chartMotion } from '../../shared/chartMotion'
 import { useTheme } from '../../context/ThemeContext'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
@@ -60,7 +61,7 @@ export default function FoodBeverageSplit({ activePeriod, includeManual, include
         return (
           <>
             {big && (
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+              <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                 <StatPill label="Total revenue" value={fmtNpr(total)} />
                 <StatPill label="Top category" value={`${categories[0]} (${((buckets[categories[0]] / total) * 100).toFixed(0)}%)`} color={colorOf(categories[0])} />
                 <StatPill label="Categories" value={categories.length} />
@@ -69,6 +70,7 @@ export default function FoodBeverageSplit({ activePeriod, includeManual, include
             <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
               <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                 <Pie
+                  {...chartMotion()}
                   data={pieData} dataKey="value" nameKey="name"
                   cx="50%" cy="50%"
                   innerRadius={big ? 80 : 38} outerRadius={big ? 140 : 60}

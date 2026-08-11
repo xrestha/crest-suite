@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import { chartMotion } from '../../../shared/chartMotion'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import ChartCard from '../../../components/ChartCard'
@@ -95,7 +96,7 @@ export default function ValuationReportTab({ assets }) {
                   <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--theme-text2)' }} />
                   <YAxis dataKey="categoryName" type="category" width={140} tick={{ fontSize: 11, fill: 'var(--theme-text2)' }} />
                   <Tooltip formatter={v => `NPR ${fmt(v)}`} contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', fontSize: 12 }} />
-                  <Bar dataKey="nbv" fill="#c9a84c" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="nbv" fill="#c9a84c" radius={[0, 4, 4, 0]} {...chartMotion()} />
                 </BarChart>
               </ResponsiveContainer>
             )}
