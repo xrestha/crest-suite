@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-12T00:00:00.000Z",
+  "generatedAt": "2026-08-12T12:00:00.000Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -448,7 +448,7 @@
       "refersTo": "button-primary",
       "description": "The single accent-filled action on a screen. Foreground is always the paired accent-text token, never a hardcoded white or black.",
       "html": "<button class=\"ds-btn ds-btn-primary\">Save Changes</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn-primary { background: var(--theme-accent, #c9a84c); color: var(--theme-accent-text, #0f1117); font-weight: 700; }\n.ds-btn-primary:hover { background: var(--theme-accent-hover, #d4b96a); }\n.ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }"
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn:disabled { opacity: 0.55; cursor: not-allowed; }\n.ds-btn-primary { background: var(--theme-accent, #c9a84c); color: var(--theme-accent-text, #0f1117); font-weight: 700; }\n.ds-btn-primary:hover:not(:disabled) { background: var(--theme-accent-hover, #d4b96a); }\n.ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }"
     },
     {
       "name": "Ghost Button",
@@ -456,7 +456,7 @@
       "refersTo": "button-ghost",
       "description": "The default button. Sits at page-background fill with a quiet internal border; hover steps the border to the accent — a restrained way of saying \"this became interactive.\"",
       "html": "<button class=\"ds-btn ds-btn-ghost\">Export Excel</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn-ghost { background: var(--theme-input-bg, #0f1117); color: var(--theme-text1, #e8e0d0); border: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-btn-ghost:hover { background: var(--theme-table-hover, rgba(255,255,255,0.03)); border-color: var(--theme-accent, #c9a84c); }\n.ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }"
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn:disabled { opacity: 0.55; cursor: not-allowed; }\n.ds-btn-ghost { background: var(--theme-input-bg, #0f1117); color: var(--theme-text1, #e8e0d0); border: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-btn-ghost:hover:not(:disabled) { background: var(--theme-table-hover, rgba(255,255,255,0.03)); border-color: var(--theme-accent, #c9a84c); }\n.ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }"
     },
     {
       "name": "Danger Button",
@@ -464,7 +464,15 @@
       "refersTo": "button-danger",
       "description": "Destructive actions only — delete, void. Never used to mean \"important\". Red text on a tinted fill rather than a solid red fill, because --theme-red ranges from light to dark across the ten presets and no single foreground contrasts on all of them.",
       "html": "<button class=\"ds-btn ds-btn-danger\">Void Bill</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn-danger { background: var(--theme-input-bg, #0f1117); color: var(--theme-red, #f87171); border: 1px solid rgba(248,113,113,0.45); }\n.ds-btn-danger:hover { background: rgba(248,113,113,0.12); border-color: var(--theme-red, #f87171); }"
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn:disabled { opacity: 0.55; cursor: not-allowed; }\n.ds-btn-danger { background: var(--theme-input-bg, #0f1117); color: var(--theme-red, #f87171); border: 1px solid rgba(248,113,113,0.45); }\n.ds-btn-danger:hover:not(:disabled) { background: rgba(248,113,113,0.12); border-color: var(--theme-red, #f87171); }"
+    },
+    {
+      "name": "Danger Button (Escalated)",
+      "kind": "button",
+      "refersTo": "button-danger-strong",
+      "description": "One step up from the danger variant, for the single irreversible action inside a group of otherwise-recoverable destructive ones — Danger Zone's \"Delete Client\" beside Clear and Archive. Still a tint rather than a solid red fill, for the same reason the base variant is: --theme-red ranges light-to-dark across the ten presets and there is no --theme-red-text to pair with a fill. At most one per group, or the escalation means nothing.",
+      "html": "<div class=\"ds-danger-row\"><button class=\"ds-btn ds-btn-danger\">Clear Client Data</button><button class=\"ds-btn ds-btn-danger ds-btn-danger-strong\">Delete Client</button></div>",
+      "css": ".ds-danger-row { display: flex; gap: 10px; flex-wrap: wrap; }\n.ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn:disabled { opacity: 0.55; cursor: not-allowed; }\n.ds-btn-danger { background: var(--theme-input-bg, #0f1117); color: var(--theme-red, #f87171); border: 1px solid rgba(248,113,113,0.45); }\n.ds-btn-danger:hover:not(:disabled) { background: rgba(248,113,113,0.12); border-color: var(--theme-red, #f87171); }\n.ds-btn-danger-strong { background: rgba(248,113,113,0.16); border-color: rgba(248,113,113,0.55); font-weight: 700; }\n.ds-btn-danger-strong:hover:not(:disabled) { background: rgba(248,113,113,0.24); border-color: var(--theme-red, #f87171); }"
     },
     {
       "name": "Status Badge",
@@ -505,6 +513,14 @@
       "description": "The filter/sort control on nearly every list page. Active reads as selected, not pressed — accent text, accent border at 50% alpha, focus-ring token as fill. Deliberately at the standard 12px radius rather than full-pill, which is reserved for the sidebar module switcher.",
       "html": "<div class=\"ds-tab-bar\"><button class=\"ds-tab\">All</button><button class=\"ds-tab ds-tab-active\">Pending</button><button class=\"ds-tab\">Paid</button></div>",
       "css": ".ds-tab-bar { display: flex; gap: 8px; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-tab { appearance: none; background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 12px; padding: 4px 12px; font-size: 12px; font-weight: 500; font-family: inherit; color: var(--theme-text2, #8a92a3); cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s; }\n.ds-tab:hover { color: var(--theme-text1, #e8e0d0); border-color: rgba(201,168,76,0.25); }\n.ds-tab-active { color: var(--theme-accent, #c9a84c); border-color: rgba(201,168,76,0.5); background: var(--theme-focus-ring, rgba(201,168,76,0.15)); font-weight: 600; }"
+    },
+    {
+      "name": "Panel Tab (underline)",
+      "kind": "nav",
+      "refersTo": "panel-tab",
+      "description": "The second, distinct tab family: sections within one surface, typically a modal panel (ClientDrawer's eight), as opposed to Tab Pill's filter/sort controls which change what a single view shows. Bordered pill for a filter, underline for a section; never both in one row. A danger section keeps --theme-red in both states and takes its underline in red. The row wraps rather than overflowing — an overflowing tab bar silently hides its last tab, which is how ClientDrawer's Danger tab went missing for a release.",
+      "html": "<div class=\"ds-panel-tabs\" role=\"tablist\" aria-label=\"Sections\"><button class=\"ds-panel-tab ds-panel-tab-active\" role=\"tab\" aria-selected=\"true\" tabindex=\"0\">Users</button><button class=\"ds-panel-tab\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Billing</button><button class=\"ds-panel-tab\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Settings</button><button class=\"ds-panel-tab ds-panel-tab-danger\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">⚠ Danger</button></div>",
+      "css": ".ds-panel-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 18px; border-bottom: 1px solid var(--theme-border, #2a2f3d); font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-panel-tab { background: none; border: none; cursor: pointer; padding: 11px 14px; min-height: 40px; font-size: 13px; font-weight: 400; font-family: inherit; white-space: nowrap; color: var(--theme-text2, #8a92a3); border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 160ms cubic-bezier(0.4,0,0.2,1), border-color 160ms cubic-bezier(0.4,0,0.2,1); }\n.ds-panel-tab:hover { color: var(--theme-text1, #e8e0d0); }\n.ds-panel-tab:focus-visible { outline: none; color: var(--theme-accent, #c9a84c); box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }\n.ds-panel-tab-active { color: var(--theme-accent, #c9a84c); border-bottom-color: var(--theme-accent, #c9a84c); font-weight: 600; }\n.ds-panel-tab-danger, .ds-panel-tab-danger:hover { color: var(--theme-red, #f87171); }\n.ds-panel-tab-danger.ds-panel-tab-active { border-bottom-color: var(--theme-red, #f87171); }"
     },
     {
       "name": "Data Table",
@@ -587,6 +603,41 @@
         "name": "Stagger describes a list, or it is decoration",
         "section": "motion",
         "body": "The only staggered sequence in the app is ChartCard's expanded stat strip (three steps at 60/105/150ms) — a row of peers that genuinely appears as a row. Cap the total delay. Do not reinterpret scrolled sections, table rows, or card grids as staggered lists."
+      },
+      {
+        "name": "The Measured-Floor Rule",
+        "body": "When a row of chips or badges repeats down a list, give each a minWidth taken from the measured widest real label, plus textAlign:center. Content-width chips vary on incidental things — \"IMS · Starter\" is wider than \"IMS · Pro\" — so the columns, and everything anchored after them, slide from row to row for no meaningful reason and the list reads ragged. Measure in the browser rather than guessing a number.",
+        "section": "layout"
+      },
+      {
+        "name": "space-between on two controls in a wide container is an anti-pattern",
+        "body": "It does not distribute, it banishes — the two items end up at opposite edges of however wide the container happens to be, with the entire remainder as dead space. Group related controls with a gap and let the container's own alignment place the group.",
+        "section": "layout"
+      },
+      {
+        "name": "No interactive control below 12px",
+        "body": "Chips and buttons in dense list rows sit at 12–12.5px with roughly 5–7px vertical padding; 10px is for genuinely non-interactive micro-labels only. 10px with 2px vertical padding is legible in a mockup, a squint in use, and a poor hit target.",
+        "section": "layout"
+      },
+      {
+        "name": "Never hand-roll a button's inline style when a variant exists",
+        "body": "The 2026-08-12 audit of ClientDrawer.js found six Danger Zone buttons each carrying a near-identical eight-property inline style object, with three different red alphas serving as an ad-hoc severity ladder, all at an off-scale 6px radius and none inheriting the hover transition. .btn-danger had existed the whole time. Drift concentrates almost perfectly in controls that opted out of a class — that is the single most reliable place to look for it.",
+        "section": "components"
+      },
+      {
+        "name": "Every field needs id + htmlFor",
+        "body": "A label that is merely a sibling of its input, which is what .form-field renders by default, names nothing: screen readers announce an unnamed edit box and clicking the label focuses nothing. This is a systemic gap — 22 files use .form-field and only Login.js, ResetPassword.js and SelfServiceHome.jsx associate their labels — so treat it as the pattern to extend, and write new fields with the pair from the start.",
+        "section": "components"
+      },
+      {
+        "name": "A control the user must reach cannot be display:none",
+        "body": "Hiding a real input behind a styled stand-in is fine; hiding it with display:none (or visibility:hidden) removes it from the tab order, so there is no keyboard path to it at all. Use the clip-based .visually-hidden utility when the input itself must stay reachable, or forward a real button's click to it.",
+        "section": "components"
+      },
+      {
+        "name": "Any tab row needs real tablist semantics",
+        "body": "Not just buttons that look selected: role=tablist on the row, role=tab + aria-selected + aria-controls per tab, role=tabpanel + aria-labelledby on the body, and a roving tabIndex so the whole row is one stop in the page's tab order with the arrow keys (plus Home/End) moving inside it. Without the roving index, reaching the eighth tab by keyboard costs eight Tab presses — and the eighth tab is where the destructive actions live.",
+        "section": "components"
       }
     ],
     "dos": [
@@ -594,14 +645,15 @@
       "Do keep tonal alpha-tints (table-hover, focus-ring, badge backgrounds) at 2-18% opacity - enough to register as a state, never opaque enough to compete with real content.",
       "Do wrap every wide table in the horizontal-scroll container rather than shrinking columns.",
       "Do reserve the rationed 4th color (purple) for a genuine 4th/5th categorical need, not as a second accent.",
-      "Do put labels above form fields, always - never a placeholder standing in for a label."
+      "Do put labels above form fields, always - never a placeholder standing in for a label.",
+      "Do give every status message a live region - role=\"alert\" for errors, role=\"status\" for confirmations. A message that is only *shown* announces nothing, and on a destructive surface that means no confirmation an action ran at all."
     ],
     "donts": [
       "Don't build dense, hierarchy-less layouts in the name of \"fitting more in\" - that's the legacy-ERP failure mode this product is explicitly positioned against.",
       "Don't reach for purple gradients, Inter-everywhere, or a templated hero-plus-three-cards layout - the generic-AI-SaaS look PRODUCT.md names directly as an anti-reference.",
-      "Don't invent a stronger/different shadow to mean \"important\" or \"premium.\" Card elevation (--theme-card-shadow) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning.",
+      "Don't invent a stronger/different shadow to mean \"important\" or \"premium.\" Card elevation (--theme-card-shadow) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning (see Elevation).",
       "Don't hardcode white or black as text on an accent background - use the paired accent-text token.",
-      "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (Bright's colorful KPI badges on ClientDashboard.jsx are the one named exception.)"
+      "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (Bright's colorful KPI badges on ClientDashboard.jsx are the one named exception - see Badges / Status Chips.)"
     ]
   }
 }
