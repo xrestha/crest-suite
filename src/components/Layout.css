@@ -919,6 +919,22 @@ table.data-table tr:hover td {
   background: var(--theme-table-hover);
 }
 
+/* An inline expanded-detail row (TadaClaims.jsx): a full-width <td colSpan> holding a nested
+   panel, rendered immediately under the row it belongs to instead of below the whole table.
+   Two overrides are needed because the `tr:hover td` rule above is a descendant selector, not a
+   child one — without these, hovering anywhere in an expanded detail tints both the detail cell
+   and every cell of the line-item table nested inside it, so the whole panel lights up as if it
+   were one hoverable row. The first rule pins the detail cell itself (equal specificity to the
+   hover rule, so it wins by coming later); the second out-specifies the hover rule for the
+   nested table's cells. Nested line-item rows are not interactive, so no hover is restored. */
+table.data-table tr.detail-row > td {
+  background: var(--theme-card);
+}
+
+table.data-table tr.detail-row .data-table td {
+  background: transparent;
+}
+
 table.data-table td select,
 table.data-table td input[type="number"],
 table.data-table td input[type="text"],

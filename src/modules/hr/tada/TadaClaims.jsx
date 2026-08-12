@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { Fragment, useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -196,8 +196,78 @@ export default function TadaClaims() {
     load()
   }
 
-  const selectedClaim = selected ? claims.find(c => c.id === selected) : null
-  const selectedItems = selected ? (itemsByClaimId[selected] || []) : []
+  // One definition of the decision buttons, rendered both on the table row and inside the expanded
+  // detail — a reviewer who trusts the claim never has to open the detail, and one who opened it to
+  // read the expense lines never has to look back up. Every handler stops propagation: the <tr>
+  // itself toggles the detail, so without it approving a claim would also collapse the panel.
+  function claimActions(c, { fontSize = 11, dash = false } = {}) {
+    const act = fn => e => { e.stopPropagation(); fn() }
+    if (c.status === 'pending') return (
+      <>
+        <button className="btn btn-ghost" style={{ fontSize, color: 'var(--theme-green)' }} onClick={act(() => handleApprove(c.id))}>✓ Approve</button>
+        <button className="btn btn-ghost" style={{ fontSize, color: 'var(--theme-red)' }} onClick={act(() => setRejectTarget(c))}>✕ Reject</button>
+        <button className="btn btn-ghost" style={{ fontSize, color: 'var(--theme-red)' }} onClick={act(() => handleDelete(c.id))}>Delete</button>
+      </>
+    )
+    if (c.status === 'approved') return (
+      <button className="btn btn-ghost" style={{ fontSize, color: 'var(--theme-green)' }}
+        onClick={act(() => { setPayMethod('Cash'); setPayTarget(c) })}>
+        💵 Mark Paid
+      </button>
+    )
+    return dash ? <span style={{ fontSize, color: 'var(--theme-text2)' }}>—</span> : null
+  }
+
+  function renderClaimDetail(c) {
+    const emp = empMap[c.employee_id] || {}
+    const lines = itemsByClaimId[c.id] || []
+    return (
+      <div style={{ padding: '16px 18px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>
+              {emp.full_name} — {c.start_point ? `${c.start_point} → ${c.destination || 'Trip'}` : (c.destination || 'Trip')}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 3 }}>
+              {fmtD(c.start_date)} → {fmtD(c.end_date)}
+              {c.trip_purpose && ` · ${c.trip_purpose}`}
+            </div>
+            {c.notes && <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 4 }}>{c.notes}</div>}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>{claimActions(c, { fontSize: 12 })}</div>
+        </div>
+
+        {c.status === 'paid' && (
+          <div style={{ fontSize: 12, color: 'var(--theme-green)', marginBottom: 12 }}>
+            Paid via {c.paid_method} on {fmtD(c.paid_at?.slice(0, 10))}
+          </div>
+        )}
+
+        <div className="table-wrap">
+          <table className="data-table" style={{ fontSize: 12 }}>
+            <thead>
+              <tr><th>Category</th><th>Description</th><th style={{ textAlign: 'right' }}>Amount</th></tr>
+            </thead>
+            <tbody>
+              {lines.map(it => (
+                <tr key={it.id}>
+                  <td>{it.category}</td>
+                  <td style={{ color: 'var(--theme-text3)' }}>{it.description || '—'}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{fmt(it.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ fontWeight: 700 }}>
+                <td colSpan={2}>Total</td>
+                <td style={{ textAlign: 'right' }}>{fmt(c.total_amount)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    )
+  }
 
   const tabBtn = (val, cur, set, label) => (
     <button className={`tab-btn${cur === val ? ' tab-btn--active' : ''}`} onClick={() => set(val)}>{label}</button>
@@ -247,105 +317,50 @@ export default function TadaClaims() {
         {tabBtn('all',      filterStatus, setFilterStatus, 'All')}
       </div>
 
-      <div className="table-wrap" style={{ marginBottom: selected ? 12 : 0 }}>
+      <div className="table-wrap">
         <table className="data-table">
           <thead>
             <tr>
               <th>Employee</th><th>Trip</th><th>Dates (BS)</th>
               <th style={{ textAlign: 'right' }}>Total</th><th>Status</th>
+              <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text3)', padding: 32 }}>No claims found.</td></tr>
+              <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--theme-text3)', padding: 32 }}>No claims found.</td></tr>
             )}
             {filtered.map(c => {
               const emp = empMap[c.employee_id] || {}
               const isSel = selected === c.id
               return (
-                <tr key={c.id} onClick={() => setSelected(isSel ? null : c.id)}
-                  style={{ cursor: 'pointer', background: isSel ? 'color-mix(in srgb, var(--theme-accent) 7%, transparent)' : undefined }}>
-                  <td>
-                    <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{emp.full_name || '—'}</div>
-                    {emp.employee_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{emp.employee_code}</div>}
-                  </td>
-                  <td style={{ color: 'var(--theme-text2)', fontSize: 13 }}>
-                    {c.start_point ? `${c.start_point} → ${c.destination || '—'}` : (c.destination || '—')}
-                    {c.trip_purpose && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{c.trip_purpose}</div>}
-                  </td>
-                  <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{fmtD(c.start_date)} → {fmtD(c.end_date)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{fmt(c.total_amount)}</td>
-                  <td><span className={STATUS_BADGE[c.status]} style={{ textTransform: 'capitalize' }}>{c.status}</span></td>
-                </tr>
+                <Fragment key={c.id}>
+                  <tr onClick={() => setSelected(isSel ? null : c.id)}
+                    style={{ cursor: 'pointer', background: isSel ? 'color-mix(in srgb, var(--theme-accent) 7%, transparent)' : undefined }}>
+                    <td>
+                      <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{emp.full_name || '—'}</div>
+                      {emp.employee_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{emp.employee_code}</div>}
+                    </td>
+                    <td style={{ color: 'var(--theme-text2)', fontSize: 13 }}>
+                      {c.start_point ? `${c.start_point} → ${c.destination || '—'}` : (c.destination || '—')}
+                      {c.trip_purpose && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{c.trip_purpose}</div>}
+                    </td>
+                    <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{fmtD(c.start_date)} → {fmtD(c.end_date)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{fmt(c.total_amount)}</td>
+                    <td><span className={STATUS_BADGE[c.status]} style={{ textTransform: 'capitalize' }}>{c.status}</span></td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{claimActions(c, { dash: true })}</td>
+                  </tr>
+                  {isSel && (
+                    <tr className="detail-row">
+                      <td colSpan={6} style={{ padding: 0 }}>{renderClaimDetail(c)}</td>
+                    </tr>
+                  )}
+                </Fragment>
               )
             })}
           </tbody>
         </table>
       </div>
-
-      {/* Detail panel */}
-      {selectedClaim && (
-        <div className="card" style={{ padding: 20, marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>
-                {empMap[selectedClaim.employee_id]?.full_name} — {selectedClaim.start_point ? `${selectedClaim.start_point} → ${selectedClaim.destination || 'Trip'}` : (selectedClaim.destination || 'Trip')}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 3 }}>
-                {fmtD(selectedClaim.start_date)} → {fmtD(selectedClaim.end_date)}
-                {selectedClaim.trip_purpose && ` · ${selectedClaim.trip_purpose}`}
-              </div>
-              {selectedClaim.notes && <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 4 }}>{selectedClaim.notes}</div>}
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {selectedClaim.status === 'pending' && (
-                <>
-                  <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-green)' }} onClick={() => handleApprove(selectedClaim.id)}>✓ Approve</button>
-                  <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red)' }} onClick={() => setRejectTarget(selectedClaim)}>✕ Reject</button>
-                </>
-              )}
-              {selectedClaim.status === 'approved' && (
-                <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-green)' }}
-                  onClick={() => { setPayMethod('Cash'); setPayTarget(selectedClaim) }}>
-                  💵 Mark Paid
-                </button>
-              )}
-              {selectedClaim.status === 'pending' && (
-                <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red)' }} onClick={() => handleDelete(selectedClaim.id)}>Delete</button>
-              )}
-            </div>
-          </div>
-
-          {selectedClaim.status === 'paid' && (
-            <div style={{ fontSize: 12, color: 'var(--theme-green)', marginBottom: 12 }}>
-              Paid via {selectedClaim.paid_method} on {fmtD(selectedClaim.paid_at?.slice(0, 10))}
-            </div>
-          )}
-
-          <div className="table-wrap">
-            <table className="data-table" style={{ fontSize: 12 }}>
-              <thead>
-                <tr><th>Category</th><th>Description</th><th style={{ textAlign: 'right' }}>Amount</th></tr>
-              </thead>
-              <tbody>
-                {selectedItems.map(it => (
-                  <tr key={it.id}>
-                    <td>{it.category}</td>
-                    <td style={{ color: 'var(--theme-text3)' }}>{it.description || '—'}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{fmt(it.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr style={{ fontWeight: 700 }}>
-                  <td colSpan={2}>Total</td>
-                  <td style={{ textAlign: 'right' }}>{fmt(selectedClaim.total_amount)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
-      )}
 
       {/* New Claim modal */}
       {showAdd && (

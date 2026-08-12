@@ -150,6 +150,26 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S535 — 2026-08-12 — TADA Claims: approving a claim required scrolling to the bottom of the page
+
+Reported from live use: with a long pending list, deciding on the first claim meant clicking the row, scrolling past every other claim to the detail panel at the bottom of the page, acting, then scrolling back up. Two separate causes, both in `TadaClaims.jsx`, and neither was really a layout problem.
+
+**The detail panel rendered after the whole table**, not near the row it described — so its distance from the row you clicked grew with the list. It's now an inline expanded `<tr>` with `colSpan={6}`, rendered immediately under its own row. The panel content moved essentially verbatim into a `renderClaimDetail(c)` helper; the `<tr>` still toggles on click exactly as before.
+
+**There were no row-level actions at all.** Approve/Reject/Delete lived only inside that panel, so even a claim the reviewer already trusted cost a click, a scroll, and a scroll back. There's now an Actions column on the row itself. Worth noting this wasn't a new pattern to invent — **TADA was the outlier**: `LeaveManagement.jsx` has had exactly this Actions column, with the same `btn-ghost` + green/red treatment, since it shipped. The two approval screens now read the same way.
+
+One definition of the buttons (`claimActions(c, { fontSize, dash })`) backs both the row and the expanded detail, so they can't drift apart, and the detail keeps its own copy so someone who opened it to read the expense lines doesn't have to look back up. Every handler calls `e.stopPropagation()` — the row toggles the detail, so without it approving a claim would also collapse the panel underneath it.
+
+**The CSS needed two overrides, for a non-obvious reason.** `table.data-table tr:hover td` in `Layout.css` is a *descendant* selector, not a child one — so hovering an expanded detail row tinted both the detail cell and every cell of the line-item table nested inside it, lighting the whole panel up as though it were one hoverable row. `tr.detail-row > td` pins the detail cell (equal specificity to the hover rule, so it wins by coming later) and `tr.detail-row .data-table td` out-specifies it for the nested cells. The nested line-item rows aren't interactive, so no hover is restored for them.
+
+**Deliberately not done:** bulk-select checkboxes with an "Approve Selected" button. Tempting for long lists, but TADA is a money path with per-claim expense lines worth a glance, and the changes above already take a 20-claim review to 20 clicks and no scrolling — bulk approve would mostly add a fast way to rubber-stamp something unread. Worth revisiting if a real client starts processing 50+ a month.
+
+**Verified:** `CI=true npm run build` clean (no warnings-as-errors). The live browser check was **not** done this session — no test client with pending TADA claims was to hand — so the hover-override specificity reasoning above is derived from the cascade rules rather than measured in the DOM, which is a weaker standard than S533/S534 held themselves to. Worth a look on the next real pass over this page. `CACHE_NAME` bumped to `crest-v60`.
+
+**Files:** `src/modules/hr/tada/TadaClaims.jsx`, `src/components/Layout.css`, `src/pages/Help.js`, `public/service-worker.js`, `README.md`
+
+---
+
 ### S534 — 2026-08-12 — Login page: researched current practice, cross-checked the real page, fixed what it found
 
 Asked to research login-page practice online and cross-check it against `/login`, then to fix everything the cross-check turned up. The review half was done against the running app in a real browser — computed styles, contrast ratios, hit-area rectangles and ARIA read out of the live DOM — not from reading the source, which is what caught the target-size and live-region gaps that look fine in JSX.
