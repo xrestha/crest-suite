@@ -155,9 +155,95 @@ export default function FeatureAccessModal({ client, onClose }) {
         </div>
 
         {/* Scrollable body — the header/footer above/below stay put; everything in between
-            (the feature grid, now taller with the Crest Suite section) scrolls internally
+            (the Crest Suite band and the feature grid below it) scrolls internally
             instead of pushing the Save/Close buttons off-screen on a short viewport. */}
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', minHeight: 0 }}>
+
+        {/* Crest Suite — a separate gating axis (client.suite_plan) from the module plan grids
+            below; only meaningful once both IMS and HR are enabled. Not part of FEATURE_GROUPS
+            since it doesn't key off clientPlan/pos_plan's rank system. Two features live on this
+            axis so far: Owner Dashboard (live KPIs) and its frozen-snapshot sibling, the Monthly
+            Owner/Manager Report (added alongside monthly_owner_reports table).
+
+            Moved ABOVE the plan grid 2026-08-12. It used to sit at the very bottom, which meant
+            scrolling past the Starter column's thirteen rows to reach two checkboxes that are the
+            most commercially significant grant in this modal — and being last read as "least
+            important" rather than "different axis". Leading with it states the distinction
+            structurally: everything below is one plan ladder, this is not on that ladder. */}
+        {imsEnabled && hrEnabled && (() => {
+          const SUITE_RANK = { starter: 0, growth: 1, pro: 2 }
+          const locked = (SUITE_RANK[client.suite_plan] ?? -1) >= SUITE_RANK.growth
+          const suiteFeatures = [
+            { key: 'owner_dashboard', label: 'Owner Dashboard' },
+            { key: 'monthly_owner_report', label: 'Monthly Owner/Manager Report' },
+          ]
+          return (
+            <div style={{ padding: '16px 24px 4px' }}>
+              {/* Flat accent wash + border, the same treatment ClientDrawer's Archive panel uses.
+                  No gradient — Cards rule. */}
+              <div style={{
+                background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.25)',
+                borderRadius: 'var(--radius-lg)', padding: '12px 14px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 9 }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    Crest Suite
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
+                    Sold as the Suite bundle, not by IMS plan — a Pro client does <strong style={{ color: 'var(--theme-text1)' }}>not</strong> get these.
+                    Set the bundle tier on the Billing tab, or grant one here as an exception.
+                  </span>
+                </div>
+                {/* Side by side rather than stacked: two items in a 1120px modal have no reason
+                    to run down the left edge, and the row keeps the band shallow enough that the
+                    plan grid still starts above the fold. */}
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {suiteFeatures.map(({ key, label }) => {
+                    const isAdminGranted = !locked && flags[key] === true
+                    const isOn = locked || isAdminGranted
+                    return (
+                      <div
+                        key={key}
+                        onClick={() => !locked && toggleFeat(key, isAdminGranted)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          background: 'var(--theme-bg)', borderRadius: 6, padding: '6px 8px',
+                          flex: '1 1 300px', maxWidth: 420,
+                          border: `1px solid ${locked ? 'var(--theme-accent)22' : isAdminGranted ? 'var(--theme-accent)50' : 'var(--theme-border)'}`,
+                          cursor: locked ? 'default' : 'pointer', transition: 'border-color 0.15s',
+                        }}>
+                        <div style={{
+                          width: 16, height: 16, borderRadius: 3, flexShrink: 0,
+                          background: isOn ? 'var(--theme-accent)' : 'transparent',
+                          border: `2px solid ${isOn ? 'var(--theme-accent)' : 'var(--theme-text3)'}`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s',
+                        }}>
+                          {isOn && <span style={{ color: 'var(--theme-accent-text)', fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ fontSize: 12, color: isOn ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{label}</span>
+                          {locked && (
+                            <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)', background: 'var(--theme-accent)18', border: '1px solid var(--theme-accent)35', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
+                              Suite {client.suite_plan}
+                            </span>
+                          )}
+                          {isAdminGranted && (
+                            <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)', background: 'var(--theme-accent)18', border: '1px solid var(--theme-accent)35', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
+                              Override
+                            </span>
+                          )}
+                          {!client.suite_plan && !isAdminGranted && (
+                            <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>Not subscribed to Suite</span>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* No active module — feature grants would be inert */}
         {!imsEnabled && !posEnabled ? (
@@ -314,69 +400,6 @@ export default function FeatureAccessModal({ client, onClose }) {
           })}
         </div>
         )}
-
-        {/* Crest Suite — a separate gating axis (client.suite_plan) from the module plan grids
-            above; only meaningful once both IMS and HR are enabled. Not part of FEATURE_GROUPS
-            since it doesn't key off clientPlan/pos_plan's rank system. Two features live on this
-            axis so far: Owner Dashboard (live KPIs) and its frozen-snapshot sibling, the Monthly
-            Owner/Manager Report (added alongside monthly_owner_reports table). */}
-        {imsEnabled && hrEnabled && (() => {
-          const SUITE_RANK = { starter: 0, growth: 1, pro: 2 }
-          const locked = (SUITE_RANK[client.suite_plan] ?? -1) >= SUITE_RANK.growth
-          const suiteFeatures = [
-            { key: 'owner_dashboard', label: 'Owner Dashboard' },
-            { key: 'monthly_owner_report', label: 'Monthly Owner/Manager Report' },
-          ]
-          return (
-            <div style={{ padding: '0 24px 16px' }}>
-              <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 8 }}>
-                Crest Suite
-              </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {suiteFeatures.map(({ key, label }) => {
-                  const isAdminGranted = !locked && flags[key] === true
-                  const isOn = locked || isAdminGranted
-                  return (
-                    <div
-                      key={key}
-                      onClick={() => !locked && toggleFeat(key, isAdminGranted)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10,
-                        background: 'var(--theme-bg)', borderRadius: 6, padding: '6px 8px', maxWidth: 300,
-                        border: `1px solid ${locked ? 'var(--theme-accent)22' : isAdminGranted ? 'var(--theme-accent)50' : 'var(--theme-border)'}`,
-                        cursor: locked ? 'default' : 'pointer', transition: 'border-color 0.15s',
-                      }}>
-                      <div style={{
-                        width: 16, height: 16, borderRadius: 3, flexShrink: 0,
-                        background: isOn ? 'var(--theme-accent)' : 'transparent',
-                        border: `2px solid ${isOn ? 'var(--theme-accent)' : 'var(--theme-text3)'}`,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s',
-                      }}>
-                        {isOn && <span style={{ color: '#000', fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <span style={{ fontSize: 12, color: isOn ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{label}</span>
-                        {locked && (
-                          <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)', background: 'var(--theme-accent)18', border: '1px solid var(--theme-accent)35', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
-                            Suite {client.suite_plan}
-                          </span>
-                        )}
-                        {isAdminGranted && (
-                          <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)', background: 'var(--theme-accent)18', border: '1px solid var(--theme-accent)35', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
-                            Override
-                          </span>
-                        )}
-                        {!client.suite_plan && !isAdminGranted && (
-                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>Not subscribed to Suite</span>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        })()}
 
         </div>
 
