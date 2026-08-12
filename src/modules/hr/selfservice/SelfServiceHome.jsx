@@ -679,7 +679,7 @@ export default function SelfServiceHome() {
                     const off = r && isOffDay(r.shift_type_name)
                     const isSwapOpen = swapDay && swapDay.bsYear === d.bsYear && swapDay.bsMonth === d.bsMonth && swapDay.bsDay === d.bsDay
                     return (
-                    <div key={`${d.bsYear}-${d.bsMonth}-${d.bsDay}`} className="card" style={{ padding: 12, background: off ? 'rgba(107,114,128,0.12)' : undefined, border: off ? '1px solid rgba(107,114,128,0.3)' : undefined }}>
+                    <div key={`${d.bsYear}-${d.bsMonth}-${d.bsDay}`} className="card" style={{ padding: 12, background: off ? 'rgba(138,146,163,0.12)' : undefined, border: off ? '1px solid rgba(138,146,163,0.3)' : undefined }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600 }}>{d.weekday}, {BS_MONTHS[d.bsMonth - 1]} {d.bsDay}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

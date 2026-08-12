@@ -405,7 +405,7 @@ export default function AuditLog() {
                 </tr>
               )}
               {visibleLogs.map(log => {
-                const act = ACTION_STYLE[log.action] || { label: log.action, color: 'var(--theme-text2)', bg: 'rgba(107,114,128,0.12)' }
+                const act = ACTION_STYLE[log.action] || { label: log.action, color: 'var(--theme-text2)', bg: 'rgba(138,146,163,0.10)' }
                 const fields = diffFields(log)
                 const isOpen = expandedId === log.id
                 return (

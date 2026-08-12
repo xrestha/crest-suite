@@ -150,6 +150,20 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S540 — 2026-08-12 — Three greys for one role: unifying the neutral tint
+
+Clearing a loose end left deliberately unfixed in S539 — the design hook had flagged `ClientDrawer.js`'s plan badge, but folding a design fix into a security commit was the wrong call at the time.
+
+Grepping rather than trusting the hook found the drift was **five files, not one, and three different greys for a single role**: `rgba(138,146,163,…)` (`#8a92a3` = `--theme-text2` "Slate Text", what `.badge-gray` already uses — the canonical one), `rgba(107,114,128,…)` (`#6b7280`, which *is* documented but as **`chart-tick`**), and `rgba(120,113,108,…)` (`#78716c`, documented nowhere). The plan badge used **two different greys inside one element** — `#78716c` for the fill, `#6b7280` for the border — and that badge is duplicated verbatim in `ClientDrawer.js` and `AdminDashboardOverview.jsx`.
+
+**The useful part is why the hook only flagged one of them.** Its check is per-value, not per-role: `#6b7280` is in DESIGN.md, so a chart tick colour used as a badge border passes silently while breaking the chart/chrome separation DESIGN.md exists to enforce. "The hook didn't flag it" is not "it's right" — same lesson as S521's, one level down. All five sites now use the slate.
+
+Two of the three loose ends could not be closed in code: the **Leaked Password Protection** toggle is a Supabase Dashboard setting with no CLI or SQL path, and the POS staff profile showing an email where `full_name` should be is data, not logic — the correct name isn't derivable from anything in the repo.
+
+**Verified:** `CI=true npm run build` exits 0; a full grep for both drifted greys returns nothing in `src/`. `CACHE_NAME` v63 → v64.
+
+**Files:** `src/pages/adminClients/ClientDrawer.js`, `src/pages/dashboard/AdminDashboardOverview.jsx`, `src/pages/AuditLog.js`, `src/modules/hr/reports/HrReports.jsx`, `src/modules/hr/selfservice/SelfServiceHome.jsx`, `public/service-worker.js`, `CLAUDE.md`, `README.md`.
+
 ### S539 — 2026-08-12 — The PIN vault: making the pepper survivable, and admin-recoverable staff PINs
 
 S538 left an operational cost that got rejected on sight: **`PIN_PEPPER` was neither recoverable nor rotatable.** PINs were stored nowhere, so losing the pepper meant hand-resetting every POS and Self-Service account across every client — "too exhausting for any admin," which is fair. The ask was a mechanism where only the admin can view a PIN.

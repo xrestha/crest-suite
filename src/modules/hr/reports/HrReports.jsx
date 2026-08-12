@@ -409,7 +409,7 @@ export default function HrReports() {
                   ssfRows.map(({ s, emp }) => ({ 'SSF No': emp.ssf_no, Employee: emp.full_name, 'SSF Basic': Math.round(Math.min(s.basic, SSF_CAP)), 'Employee 11%': s.ssf_employee, 'Employer 20%': s.ssf_employer, 'Total 31%': s.ssf_employee + s.ssf_employer })),
                   'SSF Challan')}>⬇ Export</button>
               </div>
-              <div className="no-print" style={{ padding: '10px 18px', fontSize: 11, color: 'var(--theme-text2)', borderBottom: '1px solid var(--theme-border)', background: 'rgba(107,114,128,0.06)' }}>
+              <div className="no-print" style={{ padding: '10px 18px', fontSize: 11, color: 'var(--theme-text2)', borderBottom: '1px solid var(--theme-border)', background: 'rgba(138,146,163,0.06)' }}>
                 SSF's SOSYS portal (Collection screen) has no bulk-upload option — confirmed against the official SOSYS manual, entries are typed in one employee at a time. Use this sheet as your reference while entering SOSYS's Collection grid: type each row's <strong>SSF No</strong> and <strong>SSF Basic</strong> — SOSYS calculates the deposit itself, which should match this sheet's <strong>Total 31%</strong>.
               </div>
               {ssfRows.length === 0 ? (
