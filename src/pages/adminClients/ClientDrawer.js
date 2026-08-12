@@ -12,7 +12,7 @@ import Tip from '../../components/Tip'
 import Modal from '../../components/Modal'
 import { MIN_PASSWORD_LENGTH } from '../../utils/weakPasswords'
 import { adminOp } from './adminOp'
-import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_BUNDLES } from '../../data/pricingPlans'
+import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../../data/pricingPlans'
 import { runBackup } from '../../modules/admin/dataExport/runBackup'
 import { restoreClientData } from '../../modules/admin/dataExport/restoreClientData'
 import {
@@ -118,13 +118,15 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // Modules state
   const [imsEnabled, setImsEnabled] = useState(client.ims_enabled !== false)
   const [hrEnabled,  setHrEnabled]  = useState(!!client.hr_enabled)
-  const [hrPlan,  setHrPlan]        = useState(client.hr_plan  || 'starter')
   const [posEnabled, setPosEnabled] = useState(!!client.pos_enabled)
-  const [posPlan, setPosPlan]       = useState(client.pos_plan || 'starter')
-  // Suite bundle tier — a separate gating axis from the per-module plans above (gates
-  // Owner Dashboard). Unlike hrPlan/posPlan, null means "not subscribed to Suite at all",
-  // not a free default tier.
+  // No hrPlan/posPlan state: HR and POS are yes/no modules with no tiers, so there is nothing
+  // to pick. Both used to default to 'starter' here and get written on every save.
+  // Crest Suite Pro — a separate axis from the IMS plan. NULL = not subscribed at all.
   const [suitePlan, setSuitePlan]   = useState(client.suite_plan || null)
+  const [groupId, setGroupId]       = useState(client.group_id || null)
+  const [groups, setGroups]         = useState([])
+  const [newGroupName, setNewGroupName] = useState('')
+  const [savingGroup, setSavingGroup]   = useState(false)
 
   // Billing tab state — per-module end dates; fall back to legacy subscription_ends_at for IMS
   const _legacyEnd = client.subscription_ends_at ? formatAd(new Date(client.subscription_ends_at)) : ''
@@ -185,6 +187,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     if (activeTab === 'data' || activeTab === 'danger') {
       ensureBackupDirectory({ request: false }).then(({ state }) => setBackupState(state))
     }
+    // Outlet groups live on the Billing tab; loaded on first visit rather than with the drawer,
+    // since most clients are single-outlet and never open it.
+    if (activeTab === 'billing') {
+      supabase.from('client_groups').select('id, name, hq_client_id').order('name')
+        .then(({ data }) => setGroups(data || []))
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
@@ -228,34 +236,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setRevealingId(null)
   }
 
-  // One-time reconciliation: a suite_plan that predates handleSuitePlanPick (or was edited
-  // directly in the DB) can be inconsistent with the modules/plans it should imply — self-corrects
-  // the moment this client's drawer opens, instead of only enforcing consistency on the next
-  // manual re-pick. Writes straight to the DB (not staged for Save Subscription) since this is
-  // fixing bad existing data, not a pending edit the admin should get to review first.
-  useEffect(() => {
-    if (!client.suite_plan) return
-    const inconsistent =
-      client.ims_enabled === false || !client.hr_enabled || !client.pos_enabled ||
-      client.plan !== client.suite_plan || client.hr_plan !== client.suite_plan || client.pos_plan !== client.suite_plan
-    if (!inconsistent) return
-    setImsEnabled(true)
-    setHrEnabled(true)
-    setPosEnabled(true)
-    setCurrentPlan(client.suite_plan)
-    setHrPlan(client.suite_plan)
-    setPosPlan(client.suite_plan)
-    supabase.from('clients').update({
-      ims_enabled: true, hr_enabled: true, pos_enabled: true,
-      plan: client.suite_plan, hr_plan: client.suite_plan, pos_plan: client.suite_plan,
-    }).eq('id', client.id).then(({ error }) => {
-      if (error) { setSubMsg('error:' + error.message); return }
-      setSubMsg('ok:Suite Bundle was out of sync with modules/plans — auto-corrected.')
-      onClientUpdated()
-      if (client.id === adminViewClientId) refreshViewModules()
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client.id])
+  // The drawer used to run a "reconciliation" effect here that force-enabled all three modules
+  // and overwrote plan/hr_plan/pos_plan to match suite_plan whenever the two disagreed — correct
+  // while Suite was a bundle that CONTAINED the modules, and actively destructive now that it is
+  // an add-on sold on top of them. Under the add-on model a Suite client legitimately runs any
+  // module combination at any tier, so there is nothing to reconcile; leaving the effect in place
+  // would silently rewrite a real subscription the moment an admin opened the drawer.
 
   // ── Users ──
   async function loadUsers() {
@@ -437,11 +423,10 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setSavingSettings(false)
   }
 
-  // ── Module toggles (instant save) — a no-op while a Suite Bundle is active, since the bundle
-  // requires all three modules together; toggle one off first only after dropping back to
-  // "Not Subscribed" on the Suite Bundle picker below. ──
+  // ── Module toggles (instant save). These used to no-op while a Suite Bundle was active,
+  // because the bundle required all three modules together. Crest Suite Pro is an add-on now, so
+  // a Suite client can run any module combination and every toggle stays live. ──
   async function handleToggleIms() {
-    if (suitePlan) return
     const next = !imsEnabled
     setImsEnabled(next)
     await supabase.from('clients').update({ ims_enabled: next }).eq('id', client.id)
@@ -450,7 +435,6 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
 
   async function handleToggleHr() {
-    if (suitePlan) return
     const next = !hrEnabled
     setHrEnabled(next)
     await supabase.from('clients').update({ hr_enabled: next }).eq('id', client.id)
@@ -459,7 +443,6 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
 
   async function handleTogglePos() {
-    if (suitePlan) return
     const next = !posEnabled
     setPosEnabled(next)
     await supabase.from('clients').update({ pos_enabled: next }).eq('id', client.id)
@@ -467,21 +450,44 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     if (client.id === adminViewClientId) refreshViewModules()
   }
 
-  // Picking a bundle means all three modules are included — keep this tab's other fields
-  // consistent with that instead of allowing a contradictory state (e.g. Suite Pro selected while
-  // IMS sits toggled off). Takes effect on the next Save Subscription, same as the plan/date
-  // fields below; picking "Not Subscribed" (key=null) only clears the bundle and leaves whatever
-  // modules/plans were already set untouched, since modules can still be sold individually.
-  function handleSuitePlanPick(key) {
-    setSuitePlan(key)
-    if (key) {
-      setImsEnabled(true)
-      setHrEnabled(true)
-      setPosEnabled(true)
-      setCurrentPlan(key)
-      setHrPlan(key)
-      setPosPlan(key)
-    }
+  // Crest Suite Pro is an add-on, so turning it on implies exactly one thing: IMS must be
+  // enabled (SuiteGate's requireModules floor). It says nothing about HR, POS, or which IMS tier
+  // the client is on — those stay whatever the admin set. Takes effect on the next Save
+  // Subscription, same as the plan/date fields below.
+  function handleSuiteToggle(on) {
+    setSuitePlan(on ? 'pro' : null)
+    if (on) setImsEnabled(true)
+  }
+
+  // ── Outlet group (instant save — structural, not billing) ──
+  // The clients.group_id trigger nulls profiles.active_client_id for anyone pointed at this
+  // outlet, so a regrouping can never leave a user resolved to an outlet they can no longer
+  // reach. That is what keeps my_client_id() a join-free COALESCE.
+  async function handleGroupChange(nextGroupId) {
+    setSavingGroup(true)
+    const { error } = await supabase.from('clients').update({ group_id: nextGroupId }).eq('id', client.id)
+    setSavingGroup(false)
+    if (error) { setSubMsg('error:' + error.message); return }
+    setGroupId(nextGroupId)
+    setSubMsg('ok:' + (nextGroupId ? 'Outlet added to group.' : 'Outlet removed from its group.'))
+    onClientUpdated()
+  }
+
+  async function handleCreateGroup() {
+    const name = newGroupName.trim()
+    if (!name) return
+    setSavingGroup(true)
+    const { data, error } = await supabase.from('client_groups')
+      .insert({ name, hq_client_id: client.id }).select().single()
+    if (error) { setSavingGroup(false); setSubMsg('error:' + error.message); return }
+    const { error: linkErr } = await supabase.from('clients').update({ group_id: data.id }).eq('id', client.id)
+    setSavingGroup(false)
+    if (linkErr) { setSubMsg('error:' + linkErr.message); return }
+    setGroups(g => [...g, data].sort((a, b) => a.name.localeCompare(b.name)))
+    setGroupId(data.id)
+    setNewGroupName('')
+    setSubMsg(`ok:Created group "${name}" with this outlet as HQ.`)
+    onClientUpdated()
   }
 
   // ── Billing ──
@@ -505,8 +511,10 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       pos_ends_at:   posEndsAt || null,
       suite_ends_at: suiteEndsAt || null,
       plan:          currentPlan,
-      hr_plan:       hrPlan,
-      pos_plan:      posPlan,
+      // hr_plan/pos_plan are deliberately not written. HR and POS are yes/no modules with no
+      // tiers, so writing a "plan" for either created a value the product never sold — and until
+      // this session that value silently raised the IMS tier, handing out IMS Pro for free.
+      // The columns stay in the DB (vestigial) rather than being dropped; nothing reads them.
       suite_plan:    suitePlan,
       billing_cycle: billingCycle,
     }).eq('id', client.id)
@@ -1076,7 +1084,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   </p>
                   {suitePlan && (
                     <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
-                      Locked while a Suite Bundle is active — all three modules are included. Set Suite Bundle to "Not Subscribed" below to toggle these individually again.
+                      Crest Suite Pro is active. It sits on top of these modules rather than including them, so each stays individually toggleable — only Crest IMS is required.
                     </p>
                   )}
                   {[
@@ -1084,7 +1092,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     { key: 'hr',  label: 'Crest HR',  sub: 'Human Resources',      enabled: hrEnabled,  toggle: handleToggleHr  },
                     { key: 'pos', label: 'Crest POS', sub: 'Point of Sale',        enabled: posEnabled, toggle: handleTogglePos  },
                   ].map(mod => (
-                    <div key={mod.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--theme-border-lt)', opacity: suitePlan ? 0.6 : 1 }}>
+                    <div key={mod.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
                       <div>
                         <p style={{ margin: '0 0 1px', fontSize: 13, fontWeight: 700, color: mod.enabled ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{mod.label}</p>
                         <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text2)' }}>{mod.sub}</p>
@@ -1100,11 +1108,10 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         aria-checked={mod.enabled}
                         aria-label={`${mod.label} enabled`}
                         onClick={mod.toggle}
-                        disabled={!!suitePlan}
                         style={{
                           position: 'relative', width: 38, height: 22, padding: 0,
                           borderRadius: 'var(--radius-full)', flexShrink: 0,
-                          cursor: suitePlan ? 'not-allowed' : 'pointer',
+                          cursor: 'pointer',
                           background: mod.enabled ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                           border: `1px solid ${mod.enabled ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
                           transition: 'background var(--motion-fast) var(--ease-standard)',
@@ -1121,30 +1128,29 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   ))}
                 </div>
 
-                {/* Suite Bundle — a bundle-tier subscription (IMS+HR+POS together) that unlocks
-                    cross-module features like Owner Dashboard. Null = not subscribed. Picking a
-                    tier also enables all three modules and syncs their plan to match (see
-                    handleSuitePlanPick) — it's billed and priced as one bundle, not summed from
-                    three independently-set module plans. */}
+                {/* Crest Suite Pro — one SKU, on or off. It used to be a three-tier bundle that
+                    CONTAINED IMS+HR+POS; it is now an add-on priced on top of whichever modules
+                    the client bought, so it neither implies HR/POS nor dictates the IMS tier.
+                    Only IMS is implied — SuiteGate's requireModules floor. */}
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>
-                  <Tip text="A bundle-tier subscription (IMS+HR+POS together) that unlocks cross-module features like Owner Dashboard. Picking a tier enables all three modules below and syncs their plan to match — it's billed as one bundle, not three separate module plans." width={300}>
-                    Suite Bundle
+                  <Tip text="The owner layer — Owner Dashboard, Monthly Owner/Manager Report, Multi-Outlet Group Console, Demand Forecast and Fixed Assets. Priced per outlet on top of this client's modules, not instead of them. Requires IMS." width={300}>
+                    Crest Suite Pro
                   </Tip>
                 </p>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                  {[{ key: null, label: 'Not Subscribed' }, ...SUITE_BUNDLES].map(opt => {
-                    const active = suitePlan === opt.key
+                  {[{ on: false, label: 'Not Subscribed' }, { on: true, label: 'Crest Suite Pro' }].map(opt => {
+                    const active = (suitePlan === 'pro') === opt.on
                     return (
-                      <button key={opt.key ?? 'none'} type="button" aria-pressed={active} onClick={() => handleSuitePlanPick(opt.key)} style={{
+                      <button key={String(opt.on)} type="button" aria-pressed={active} onClick={() => handleSuiteToggle(opt.on)} style={{
                         padding: '8px 14px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
                         border: active ? '1px solid var(--theme-accent)' : '1px solid var(--theme-border)',
                         background: active ? 'rgba(201,168,76,0.1)' : 'none',
                         color: active ? 'var(--theme-accent)' : 'var(--theme-text3)',
                       }}>
                         <div>{opt.label}</div>
-                        {opt.monthly != null && (
+                        {opt.on && (
                           <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>
-                            NPR {(billingCycle === 'annual' ? opt.annual : opt.monthly).toLocaleString('en-NP')}/mo
+                            +NPR {(billingCycle === 'annual' ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString('en-NP')}/mo
                           </div>
                         )}
                       </button>
@@ -1154,10 +1160,51 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 {/* Was color:'#fff' — every light preset has card:#ffffff, so this line was white
                     on white and literally invisible on five of the ten themes. */}
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
-                  Selecting a bundle disables individual module pricing below.
+                  Added on top of the module pricing below — it does not replace it.
                 </p>
 
-                {/* Suite Bundle expiry — its own renewal schedule, independent of any single
+                {/* Outlet group — structural, so it saves instantly like the module toggles
+                    rather than waiting for Save Subscription. Suite Pro is priced per outlet, so
+                    grouping does not change what this client pays; it only lets one owner login
+                    switch between outlets and roll them up in the Group Console. */}
+                <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>
+                  <Tip text="Links this outlet to others under the same owner. An Owner login can then switch between them from the sidebar, and the Group Console rolls up every outlet that has Crest Suite Pro. Each outlet still pays for its own modules and its own Suite Pro." width={300}>
+                    Outlet Group
+                  </Tip>
+                </p>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <select
+                    className="form-select"
+                    style={{ maxWidth: 240 }}
+                    value={groupId || ''}
+                    onChange={e => handleGroupChange(e.target.value || null)}
+                    disabled={savingGroup}
+                  >
+                    <option value="">No group (single outlet)</option>
+                    {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                  <input
+                    value={newGroupName}
+                    onChange={e => setNewGroupName(e.target.value)}
+                    placeholder="or create a new group…"
+                    style={{ maxWidth: 200 }}
+                  />
+                  <button
+                    className="btn btn-ghost"
+                    style={{ fontSize: 11 }}
+                    disabled={savingGroup || !newGroupName.trim()}
+                    onClick={handleCreateGroup}
+                  >
+                    Create & Assign
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
+                  {groupId
+                    ? 'Changing or clearing the group signs every affected user back into their own outlet.'
+                    : 'Leave as “No group” for a single-outlet client — nothing about their app changes.'}
+                </p>
+
+                {/* Crest Suite Pro expiry — its own renewal schedule, independent of any single
                     module's end date (borrowing IMS's date as a proxy elsewhere is a fallback
                     for pre-migration clients only, not a substitute for tracking this directly). */}
                 {suitePlan && (() => {
@@ -1165,7 +1212,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   return (
                     <div style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Suite Bundle</p>
+                        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Crest Suite Pro</p>
                         {s.label && (
                           <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
                             {s.label}
@@ -1173,7 +1220,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         )}
                       </div>
                       <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 6px' }}>
-                        <Tip text="Date when this client's Suite Bundle subscription expires — independent of each module's own expiry above. Gates Owner Dashboard access alongside the tier picked above." width={300}>Suite subscription end date</Tip>
+                        <Tip text="Date when this client's Crest Suite Pro add-on expires — independent of each module's own expiry above. Gates Owner Dashboard, Monthly Owner Report, Multi-Outlet, Demand Forecast and Fixed Assets." width={300}>Suite subscription end date</Tip>
                       </p>
                       <div style={{ marginBottom: 8 }}>
                         <BsCalendarPicker value={suiteEndsAt} onChange={setSuiteEndsAt} clearable />
@@ -1217,35 +1264,36 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
                 {/* Per-module subscription sections */}
                 {[
+                  // Only IMS has a tier picker; HR/POS render a flat price box (see flatPricing
+                  // below), so plan/setPlan were only ever read on the IMS row.
                   { key: 'ims', label: 'Crest IMS', enabled: imsEnabled, plan: currentPlan, setPlan: setCurrentPlan, endsAt: imsEndsAt, setEndsAt: setImsEndsAt },
-                  { key: 'hr',  label: 'Crest HR',  enabled: hrEnabled,  plan: hrPlan,      setPlan: setHrPlan,      endsAt: hrEndsAt,  setEndsAt: setHrEndsAt  },
-                  { key: 'pos', label: 'Crest POS', enabled: posEnabled, plan: posPlan,     setPlan: setPosPlan,     endsAt: posEndsAt, setEndsAt: setPosEndsAt },
+                  { key: 'hr',  label: 'Crest HR',  enabled: hrEnabled,  plan: null, setPlan: null, endsAt: hrEndsAt,  setEndsAt: setHrEndsAt  },
+                  { key: 'pos', label: 'Crest POS', enabled: posEnabled, plan: null, setPlan: null, endsAt: posEndsAt, setEndsAt: setPosEndsAt },
                 ].map(mod => {
                   if (!mod.enabled) return null
                   const s = getDateStatus(mod.endsAt)
                   const flatPricing = mod.key === 'hr' ? HR_PRICING : mod.key === 'pos' ? POS_PRICING : null
                   const accentBase = MODULE_COLORS[mod.key]
-                  // Suite Bundle replaces per-module pricing/dates entirely in clientMRR (it's a
-                  // single discounted subscription, not an add-on) — disable these sections while
-                  // it's selected so admins aren't led to believe editing them changes billing.
-                  const lockedBySuite = !!suitePlan
+                  // These sections used to be disabled whenever a Suite Bundle was selected,
+                  // because the bundle replaced per-module pricing and dates entirely in
+                  // clientMRR. Crest Suite Pro is additive now — the module prices and end dates
+                  // below are still exactly what the client pays — so they stay editable.
                   return (
-                    <div key={mod.key} style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)', opacity: lockedBySuite ? 0.45 : 1, pointerEvents: lockedBySuite ? 'none' : 'auto' }}>
+                    <div key={mod.key} style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)' }}>
                       {/* Header */}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                         <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: accentBase, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{mod.label}</p>
-                        {lockedBySuite ? (
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text3)', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)' }}>
-                            Controlled by Suite Bundle
-                          </span>
-                        ) : s.label && (
+                        {s.label && (
                           <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
                             {s.label}
                           </span>
                         )}
                       </div>
                       {flatPricing ? (
-                        /* HR/POS — flat single price, no tier picker (hr_plan/pos_plan aren't wired to any feature gating) */
+                        /* HR/POS — flat single price, no tier picker. Both are yes/no modules;
+                           the hr_plan/pos_plan columns are vestigial and no longer read or
+                           written anywhere (they used to gate the POS suggestion engine and to
+                           silently raise the IMS tier). */
                         <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', border: `1px solid ${accentBase}40`, background: `${accentBase}12`, marginBottom: 12 }}>
                           <div style={{ fontSize: 15, fontWeight: 700, color: accentBase }}>
                             NPR {(billingCycle === 'annual' ? flatPricing.annual : flatPricing.monthly).toLocaleString('en-NP')}/mo
@@ -1265,7 +1313,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                               const active = mod.plan === p.key
                               const accentColor = MODULE_COLORS.ims
                               return (
-                                <button key={p.key} type="button" aria-pressed={active} disabled={lockedBySuite} onClick={() => mod.setPlan(p.key)} style={{
+                                <button key={p.key} type="button" aria-pressed={active} onClick={() => mod.setPlan(p.key)} style={{
                                   flex: '1 1 120px', padding: '8px 6px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
                                   border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
                                   background: active ? `${accentColor}1a` : 'none',
@@ -1292,14 +1340,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         <Tip text="Date when this module's subscription expires. Client sees a warning in the last 7 days and is blocked after expiry." width={300}>Subscription end date</Tip>
                       </p>
                       <div style={{ marginBottom: 8 }}>
-                        <BsCalendarPicker value={mod.endsAt} onChange={mod.setEndsAt} clearable disabled={lockedBySuite} />
+                        <BsCalendarPicker value={mod.endsAt} onChange={mod.setEndsAt} clearable />
                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         {[{ label: '+7 Days', days: 7 }, { label: '+1 Month', days: 30 }, { label: '+3 Months', days: 90 }, { label: '+1 Year', days: 365 }].map(({ label, days }) => (
-                          <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} disabled={lockedBySuite} onClick={() => extendModule(mod.setEndsAt, days)}>{label}</button>
+                          <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(mod.setEndsAt, days)}>{label}</button>
                         ))}
                         {mod.endsAt && (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} disabled={lockedBySuite} onClick={() => mod.setEndsAt('')}>Clear</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} onClick={() => mod.setEndsAt('')}>Clear</button>
                         )}
                       </div>
                     </div>

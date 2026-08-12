@@ -5,26 +5,79 @@ import { getAccessState } from '../utils/subscription'
 
 const AuthContext = createContext({})
 
+// The three IMS tiers sell three different jobs, and every key below is placed by that rule
+// rather than by when it happened to be built:
+//   Starter — Record & Comply: keep the books, satisfy the IRD.
+//   Growth  — Control: know your costs and where they leak.
+//   Pro     — Strategy: decide what to change next period.
+//
+// Two placement rules fall out of it, both of which had already been broken:
+//   1. A statutory obligation never gates above Starter. vat_report/non_vat_report were always
+//      here; vendor_balance_confirmation (IRD Annexure 13) sat at Pro and has joined them.
+//   2. A feature must be able to produce a number on its own tier's data. reorder_report and
+//      stock_movement_log both derive their core figure from recipe explosion
+//      (ReorderReport.js's explodeRecipeIngredients, StockMovements.js's subRecipeUsage), and
+//      recipe_costing is Growth — so both were sold to Starter clients who structurally could
+//      not get an answer out of them. Moved to Growth; outstanding_payables and
+//      vendor_balance_confirmation moved down in exchange, so Starter's count is unchanged.
 // Included on all plans (Starter and above)
 const STARTER_KEYS = new Set([
-  'monthly_summary', 'annual_summary', 'reorder_report', 'vat_report', 'non_vat_report', 'wastage_report', 'settings',
-  'sales_entry', 'payment_summary', 'stock_report', 'menu_pricing', 'staff_meals', 'stock_movement_log',
+  'monthly_summary', 'annual_summary', 'vat_report', 'non_vat_report', 'wastage_report', 'settings',
+  'sales_entry', 'payment_summary', 'stock_report', 'menu_pricing', 'staff_meals',
+  'outstanding_payables', 'vendor_balance_confirmation',
 ])
 // Requires Growth plan or above
 const GROWTH_KEYS = new Set([
   'recipe_costing', 'variance_report',
   'budget_vs_actual', 'best_sellers', 'purchase_orders',
-  'dead_stock', 'recipe_margin', 'outstanding_payables',
+  'dead_stock', 'recipe_margin',
   'requisitions',
   'nutrition_facts', 'menu_repricing', 'combo_builder',
+  'reorder_report', 'stock_movement_log',
+  // overheads is the data-entry page behind Fixed Costs %/Est. Net Margin on ClientDashboard and
+  // Recipes' True Cost allocation. A data-entry page must not sit above the tier of any figure
+  // that consumes it, or the consumer renders blank with no explanation.
+  'overheads',
 ])
 // Requires Pro plan
 const PRO_KEYS = new Set([
   'menu_engineering', 'fifo_report', 'vendor_report',
-  'price_tracker', 'overheads', 'theoretical_variance',
-  'period_comparison', 'shrinkage_report', 'demand_forecast',
-  'guest_ordering', 'vendor_balance_confirmation', 'fixed_asset_register',
+  'price_tracker', 'theoretical_variance',
+  'period_comparison', 'shrinkage_report',
 ])
+// Crest Suite Pro (clients.suite_plan) — NOT an IMS tier. These must never be added to the three
+// sets above: SuiteGate passes on `tierOk || overridden` where overridden is hasFeature(key), so a
+// tier-set entry would make hasFeature() true for every IMS Pro client and give the SKU away.
+// Their feature_flags columns exist only as the per-client exception that `||` implies.
+// demand_forecast is here because it is genuinely cross-module — Roster.jsx reads
+// demand_forecast_daily to overlay forecast covers on the HR roster.
+export const SUITE_KEYS = new Set([
+  'owner_dashboard', 'monthly_owner_report', 'multi_outlet',
+  'demand_forecast', 'fixed_asset_register',
+])
+// POS module features. POS is deliberately flat (no tiers), so these unlock with the module
+// itself rather than with any plan rank. guest_ordering used to live in PRO_KEYS, which gated a
+// POS feature on the IMS plan — a POS client on IMS Starter could not buy it at any price, even
+// though FeatureAccessModal already declared it planSource: 'pos'.
+const POS_MODULE_KEYS = new Set(['guest_ordering'])
+
+// Returns the SAME array reference when the outlet list hasn't actually changed.
+//
+// This is load-bearing, not a micro-optimisation. `outlets` goes into the context value, so a
+// fresh [] on every fetchProfile() call is a new identity for every consumer — which cascaded
+// into "Maximum update depth exceeded" the moment a real client (not admin) logged in. React
+// bails out of a re-render only when Object.is(prev, next) holds, and [] === [] is false, so
+// "set it to empty again" is a state *change* unless you hand back the previous array.
+//
+// The ungrouped case is the common one — every single-outlet client hits it on every load — so
+// it must be the cheap path. Grouped clients compare by id since the rows are re-fetched fresh.
+function nextOutletsOrSame(prev, client, siblings) {
+  const next = client?.group_id
+    ? (siblings || []).filter(o => o.group_id === client.group_id)
+    : []
+  if (prev.length !== next.length) return next
+  return prev.every((o, i) => o.id === next[i].id) ? prev : next
+}
 
 export function AuthProvider({ children }) {
   const [session, setSession]                   = useState(null)
@@ -34,6 +87,11 @@ export function AuthProvider({ children }) {
   const [ready, setReady]                       = useState(false)
   const [adminViewClientId, setAdminViewClientId]     = useState(() => localStorage.getItem('crest_admin_client_id') || null)
   const [adminViewClientName, setAdminViewClientName] = useState(() => localStorage.getItem('crest_admin_client_name') || '')
+  // Multi-outlet: every client in this user's group, or [] when they aren't in one. Unlike the
+  // admin switcher above this is NOT held in localStorage — the selection lives server-side in
+  // profiles.active_client_id, because it decides which tenant's rows every RLS policy resolves
+  // to. A browser-held value could not be trusted for that.
+  const [outlets, setOutlets] = useState([])
 
   useEffect(() => {
     let mounted = true
@@ -106,6 +164,13 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function fetchProfile(userId, mounted = true) {
+    // Marks "a profile fetch is in flight" so ProtectedRoute can wait instead of concluding the
+    // user is signed out. On a fresh sign-in `session` is set the instant SIGNED_IN fires while
+    // `profile` stays null — fetchProfile is deliberately not awaited there (see the deadlock
+    // note above) — and ProtectedRoute's `if (!profile) -> /login` raced Login's
+    // `if (ready && session) -> /dashboard`, bouncing between the two routes until the profile
+    // landed. That ping-pong is what threw "Maximum update depth exceeded" on every login.
+    if (mounted) setLoading(true)
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -117,23 +182,36 @@ export function AuthProvider({ children }) {
       if (error) { console.error('Profile fetch error:', error); return }
 
       if (data?.client_id) {
+        // The client row to load is the SELECTED outlet (profiles.active_client_id), not
+        // necessarily the home one — my_client_id() resolves the same way server-side, so
+        // loading the home client here would leave the UI describing a different outlet than
+        // every query returns.
+        const effectiveClientId = data.active_client_id || data.client_id
         // clients + feature_flags depend only on client_id, not on each other — run them
         // concurrently instead of waterfalling two more round trips after the profile fetch.
-        const [{ data: client }, { data: flags }] = await Promise.all([
+        // The outlet list joins them rather than adding a third sequential round trip (S460).
+        const [{ data: client }, { data: flags }, { data: siblings }] = await Promise.all([
           supabase
             .from('clients')
-            .select('id, name, location, is_active, is_premium, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, ims_enabled, hr_enabled, hr_plan, pos_enabled, pos_plan, suite_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
-            .eq('id', data.client_id)
+            .select('id, name, location, group_id, is_active, is_premium, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, ims_enabled, hr_enabled, pos_enabled, suite_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
+            .eq('id', effectiveClientId)
             .single(),
           supabase
             .from('feature_flags')
             .select('*')
-            .eq('client_id', data.client_id)
+            .eq('client_id', effectiveClientId)
             .maybeSingle(),
+          // clients_select allows same-group rows, so this returns the outlet list for a grouped
+          // client and exactly one row (their own) for everyone else — no group, no switcher.
+          supabase
+            .from('clients')
+            .select('id, name, location, group_id, is_active, suite_plan, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, subscription_ends_at, trial_ends_at, is_trial, trial_expires_at')
+            .order('name'),
         ])
         if (mounted) {
           data.clients = client
           setFeatureFlags(flags || {})
+          setOutlets(prev => nextOutletsOrSame(prev, client, siblings))
         }
       }
 
@@ -174,7 +252,11 @@ export function AuthProvider({ children }) {
   }
 
   const isAdmin  = profile?.role === 'admin'
-  const clientId = isAdmin ? adminViewClientId : (profile?.client_id || null)
+  // active_client_id mirrors what my_client_id() resolves to server-side. Every scoped query,
+  // and every RLS policy, already follows it — useScopedDb binds clientId straight from here, so
+  // this one value re-scopes all ~200 call sites and 65 CLIENT_SCOPED_TABLES with no per-page
+  // change. NULL for everyone not in a group, which is what keeps ungrouped clients identical.
+  const clientId = isAdmin ? adminViewClientId : (profile?.active_client_id || profile?.client_id || null)
 
   const posEnabled = isAdmin || (profile?.clients?.pos_enabled ?? false)
   const imsEnabled = isAdmin || (profile?.clients?.ims_enabled ?? true)
@@ -192,6 +274,27 @@ export function AuthProvider({ children }) {
   // login works. Admin/owner always resolve to 'foh' (the unrestricted default), same shape as
   // the rank fields above, so neither is ever narrowed by a kitchen/bar nav carve-out.
   const posTeam = isAdmin || isOwner ? 'foh' : (profile?.pos_team || 'foh')
+
+  // ── Multi-outlet ──
+  // Only an Owner switches outlets. A POS till, an IMS storekeeper or an HR clerk belongs to one
+  // physical outlet; handing them a switcher would let a waiter re-point their whole session at
+  // a sibling branch. Staff-account markers are exactly what isOwner already excludes.
+  const canSwitchOutlet = isOwner && outlets.length > 1
+
+  // Writes through set_active_outlet(), never a direct PATCH: active_client_id decides which
+  // tenant every RLS policy resolves to, so it is a privileged column and is deliberately NOT on
+  // guard_profiles_privileged_columns()'s allow-list. The RPC validates group membership and
+  // fails closed. Reloading the profile afterwards re-runs the whole waterfall against the new
+  // outlet, which is what repoints clientId and every page's data.
+  async function switchOutlet(targetClientId) {
+    const { error } = await supabase.rpc('set_active_outlet', { p_client_id: targetClientId || null })
+    if (error) return { error }
+    // sessionStorage caches are namespaced per clientId, but clearing is cheaper than reasoning
+    // about which page cached what against the outlet we are leaving.
+    try { sessionStorage.clear() } catch { /* private mode */ }
+    if (session?.user?.id) await fetchProfile(session.user.id)
+    return {}
+  }
 
   const POS_RANK = { staff: 1, supervisor: 2, manager: 3 }
   function hasPosAccess(minLevel) {
@@ -259,7 +362,25 @@ export function AuthProvider({ children }) {
     return { ims: cIms ?? true, hr: cHr ?? false, pos: cPos ?? false }
   }, [isAdmin, adminViewClientId, viewModules, cIms, cHr, cPos])
 
-  // Derive plan: admin always gets 'pro'; take highest across all active module plans
+  // `plan` is the IMS plan and nothing else. It used to be the MAXIMUM across clients.plan,
+  // ims_plan, hr_plan, pos_plan and is_premium — which was a revenue leak, found live while
+  // smoke-testing the S548 retier: a client sitting at clients.plan = 'starter' with hr_plan and
+  // pos_plan both 'pro' resolved to Pro and received every IMS Pro feature, having bought none.
+  // HR and POS are sold FLAT — neither has tiers and nothing in the product charges for those
+  // columns — so any client with either module enabled at 'pro' was getting IMS Pro free.
+  //
+  // The max made sense while Suite was a bundle: handleSuitePlanPick deliberately wrote all three
+  // plan columns together (that code is deleted). It also once fixed a cosmetic complaint that
+  // POS-only clients showed "Starter" in the sidebar — but a POS-only client has ims_enabled
+  // false, so ModuleGate blocks every IMS route regardless and the label was the only thing the
+  // max was buying. Not worth handing out the Pro tier for.
+  //
+  // ims_plan is dropped outright: there is no such column on `clients` (confirmed against the
+  // live DB — the query errors with 42703). It was always undefined and silently discarded by
+  // filter(Boolean), so this changes nothing except removing a phantom.
+  //
+  // is_premium stays. It is legacy and never written by this app, but unlike hr_plan/pos_plan it
+  // actually means "this client is premium", so honouring it is deliberate rather than accidental.
   const PLAN_RANK = { starter: 0, growth: 1, pro: 2 }
   const plan = isAdmin
     ? 'pro'
@@ -267,10 +388,7 @@ export function AuthProvider({ children }) {
         const c = profile?.clients
         const candidates = [
           c?.plan,
-          c?.ims_enabled  ? c?.ims_plan  : null,
-          c?.hr_enabled   ? c?.hr_plan   : null,
-          c?.pos_enabled  ? c?.pos_plan  : null,
-          c?.is_premium   ? 'pro'        : null,
+          c?.is_premium ? 'pro' : null,
         ].filter(Boolean)
         if (!candidates.length) return 'starter'
         return candidates.reduce((best, p) =>
@@ -321,6 +439,10 @@ export function AuthProvider({ children }) {
     if (STARTER_KEYS.has(featureKey)) return true
     if (GROWTH_KEYS.has(featureKey) && (plan === 'growth' || plan === 'pro')) return true
     if (PRO_KEYS.has(featureKey)    && plan === 'pro') return true
+    // POS is flat — its features unlock with the module, not with any plan rank.
+    if (POS_MODULE_KEYS.has(featureKey) && posEnabled) return true
+    // SUITE_KEYS deliberately fall through to false here. SuiteGate owns that decision via
+    // clients.suite_plan; the flag check at the top of this function is their only override.
     return false
   }
 
@@ -333,6 +455,10 @@ export function AuthProvider({ children }) {
       isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
       accessLocked, accessReason, graceDaysLeft,
       featureFlags, hasFeature,
+      // Multi-outlet. `outlets` is [] for everyone not in a group, so every consumer of these
+      // degrades to today's single-outlet behavior without a special case.
+      outlets, canSwitchOutlet, switchOutlet,
+      groupId: profile?.clients?.group_id || null,
       imsEnabled,
       hrEnabled,
       posEnabled,
@@ -345,10 +471,11 @@ export function AuthProvider({ children }) {
       hasImsAccess,
       hasHrAccess,
       clientModules, // displayed client's actual subscription (nav + dashboard sections)
-      hrPlan: isAdmin ? 'pro' : (profile?.clients?.hr_plan || null),
-      posPlan: isAdmin ? 'pro' : (profile?.clients?.pos_plan || null),
-      // Suite bundle tier (IMS+HR+POS together) — an independent gating axis from the per-module
-      // plan/hrPlan/posPlan above. NULL means not subscribed to Suite at all; no default tier.
+      // hrPlan/posPlan are deliberately NOT exposed. Crest HR and Crest POS are yes/no modules
+      // with no tiers, so a "plan" for either is a concept the product does not sell. The
+      // clients.hr_plan/pos_plan columns still exist but are vestigial; anything that needs to
+      // know whether a client has HR or POS reads hrEnabled/posEnabled.
+      // Crest Suite Pro — an independent axis from `plan` above. NULL = not subscribed.
       suitePlan: isAdmin ? 'pro' : (profile?.clients?.suite_plan || null),
       adminViewClientId, adminViewClientName, switchAdminClient, refreshViewModules,
     }}>

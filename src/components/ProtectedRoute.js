@@ -3,9 +3,14 @@ import { useAuth } from '../context/AuthContext'
 import SubscriptionLock from './SubscriptionLock'
 
 export default function ProtectedRoute({ children, adminOnly = false }) {
-  const { session, profile, ready, accessLocked } = useAuth()
+  const { session, profile, ready, loading, accessLocked } = useAuth()
 
-  if (!ready) {
+  // A session whose profile is still loading is NOT a signed-out user. Redirecting to /login
+  // there raced Login's own `if (ready && session) -> /dashboard` guard and ping-ponged between
+  // the two routes until the fetch landed — "Maximum update depth exceeded" on every sign-in.
+  // Falls through to the checks below once the fetch settles, so a genuinely profile-less
+  // session (a real fetch failure) still reaches /login rather than hanging here forever.
+  if (!ready || (session && !profile && loading)) {
     return (
       <div style={{
         minHeight: '100vh', background: 'var(--theme-bg, #0f1117)',

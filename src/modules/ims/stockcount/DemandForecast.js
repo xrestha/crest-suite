@@ -6,6 +6,7 @@ import Tip from '../../../components/Tip'
 import { BS_MONTHS, bsToAd } from '../../../utils/bsCalendar'
 import { runForecast } from '../../../utils/demandForecastData'
 import { printWithTitle } from '../../../utils/printTitle'
+import SuiteGate from '../../../components/SuiteGate'
 import { Navigate } from 'react-router-dom'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -97,6 +98,7 @@ export default function DemandForecast() {
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
+      <SuiteGate featureKey="demand_forecast" featureLabel="Demand Forecast" requireModules={['ims']}>
       <style>{`
         @media print {
           @page { margin: 14mm 12mm; }
@@ -222,6 +224,7 @@ export default function DemandForecast() {
           </table>
         </div>
       )}
+      </SuiteGate>
     </div>
   )
 }

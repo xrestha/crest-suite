@@ -53,6 +53,7 @@ const DEFAULT_FLAGS = {
   monthly_owner_report: false,
   stock_movement_log: false,
   fixed_asset_register: false,
+  multi_outlet: false,
 }
 
 export function SettingsProvider({ children }) {

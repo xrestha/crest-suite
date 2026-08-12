@@ -621,7 +621,7 @@ export default function Settings() {
           update('plan_prices', { ...planPrices, [key]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) })
         }
         // Same 25%-off-monthly convention already used everywhere else annual pricing appears
-        // (pricingPlans.js's own IMS_TIERS/HR_PRICING/POS_PRICING/SUITE_BUNDLES annual fields are
+        // (pricingPlans.js's own IMS_TIERS/HR_PRICING/POS_PRICING/SUITE_ADDON annual fields are
         // all exactly monthly × 0.75; ClientDrawer's Billing Cycle toggle labels it "Save 25%").
         // Annual is a derived read-only view here, not a second editable source of truth — editing
         // always happens on Monthly, so the two can never drift apart from each other.

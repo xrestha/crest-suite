@@ -1,0 +1,197 @@
+import { useEffect, useState, useCallback } from 'react'
+import { useAuth } from '../../context/AuthContext'
+import { supabase } from '../../supabaseClient'
+import SuiteGate from '../../components/SuiteGate'
+import Tip from '../../components/Tip'
+import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
+
+// Multi-Outlet Group Console — every branch in the group on one screen.
+//
+// Figures come from get_group_summary(), which returns RAW aggregates per outlet (revenue, net
+// purchases, payroll, covers) rather than percentages. The percentages are derived here so this
+// page does not become a fourth independent definition of food cost % / labour cost % alongside
+// OwnerDashboard.jsx, computeMonthlyReport.js and ClientDashboard.jsx.
+//
+// Two things the RPC deliberately does that shape this UI:
+//   - Outlets without Crest Suite Pro come back is_included = false with NULL figures. The
+//     filter is server-side, so an unpaid outlet's revenue never reaches the browser at all.
+//     They are named below instead of silently dropped, or the group total would under-report
+//     with nothing on screen to say so.
+//   - Outlets are matched on (bs_year, bs_month), never period_id — monthly_periods is
+//     UNIQUE(client_id, bs_year, bs_month) with one open period each, so two outlets genuinely
+//     sit in different months. has_period = false is surfaced rather than shown as zero.
+
+const fmtNpr = n => n == null ? '—' : `NPR ${Math.round(n).toLocaleString('en-NP')}`
+const fmtPct = n => n == null || !isFinite(n) ? '—' : `${n.toFixed(1)}%`
+
+function pctColor(v, good, warn) {
+  if (v == null || !isFinite(v)) return 'var(--theme-text3)'
+  if (v <= good) return 'var(--theme-green)'
+  if (v <= warn) return 'var(--theme-amber)'
+  return 'var(--theme-red)'
+}
+
+export default function GroupDashboard() {
+  const { groupId } = useAuth()
+  const today = getBsToday()
+  const [bsYear, setBsYear] = useState(today.year)
+  const [bsMonth, setBsMonth] = useState(today.month)
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    // pos_orders has no period_id or BS columns — only AD closed_at — so the BS month is
+    // converted here and passed through, matching SalesReport.jsx's own convention.
+    const start = bsToAd(bsYear, bsMonth, 1)
+    const end = bsToAd(bsYear, bsMonth, daysInBsMonth(bsYear, bsMonth))
+    const iso = d => d instanceof Date && !isNaN(d) ? d.toISOString().slice(0, 10) : null
+    const { data, error: err } = await supabase.rpc('get_group_summary', {
+      p_bs_year: bsYear,
+      p_bs_month: bsMonth,
+      p_ad_start: iso(start),
+      p_ad_end: iso(end),
+    })
+    if (err) { setError(err.message); setRows([]) }
+    else setRows(data || [])
+    setLoading(false)
+  }, [bsYear, bsMonth])
+
+  useEffect(() => { if (groupId) load() }, [groupId, load])
+
+  const included = rows.filter(r => r.is_included)
+  const excluded = rows.filter(r => !r.is_included)
+  const noPeriod = included.filter(r => !r.has_period)
+
+  const sum = key => included.reduce((t, r) => t + (Number(r[key]) || 0), 0)
+  const groupRevenue = sum('revenue')
+  const groupPurchases = sum('net_purchases')
+  const groupPayroll = sum('payroll')
+  const groupCovers = sum('covers')
+  const groupFc = groupRevenue > 0 ? (groupPurchases / groupRevenue) * 100 : null
+  const groupLabour = groupRevenue > 0 ? (groupPayroll / groupRevenue) * 100 : null
+
+  const years = [today.year - 1, today.year, today.year + 1]
+
+  return (
+    <div style={{ padding: '24px 28px' }}>
+      <div className="page-header no-print">
+        <div>
+          <h1 className="page-title">Group Console</h1>
+          <p className="page-subtitle">Every outlet in your group, side by side for one BS month</p>
+        </div>
+      </div>
+
+      <SuiteGate featureKey="multi_outlet" featureLabel="Multi-Outlet Group Console" requireModules={['ims']}>
+        {!groupId ? (
+          <div className="card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+            <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--theme-text1)', margin: '0 0 8px' }}>
+              This outlet isn’t part of a group yet
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
+              Contact your consultant to link your outlets together — then they all appear here.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="card no-print" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select className="form-select" style={{ maxWidth: 140 }} value={bsMonth} onChange={e => setBsMonth(Number(e.target.value))}>
+                {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+              </select>
+              <select className="form-select" style={{ maxWidth: 120 }} value={bsYear} onChange={e => setBsYear(Number(e.target.value))}>
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <button className="btn btn-ghost" onClick={load} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
+            </div>
+
+            {error && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 13 }}>{error}</p>}
+
+            {/* Coverage first, not as a footnote. A group total that silently omits an outlet is
+                worse than no total, so the reader is told what this figure covers before they
+                read it. */}
+            {(excluded.length > 0 || noPeriod.length > 0) && (
+              <div className="card" style={{ marginBottom: 16, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)' }}>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-amber)' }}>
+                  Showing {included.length} of {rows.length} outlets
+                </p>
+                {excluded.length > 0 && (
+                  <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
+                    {excluded.map(r => r.client_name).join(', ')} {excluded.length === 1 ? 'is' : 'are'} not on Crest Suite Pro —
+                    add it there to include {excluded.length === 1 ? 'its' : 'their'} revenue in these totals.
+                  </p>
+                )}
+                {noPeriod.length > 0 && (
+                  <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
+                    {noPeriod.map(r => r.client_name).join(', ')} {noPeriod.length === 1 ? 'has' : 'have'} no period open for
+                    {' '}{BS_MONTHS[bsMonth - 1]} {bsYear} yet, so {noPeriod.length === 1 ? 'it counts' : 'they count'} as zero.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="stat-grid" style={{ marginBottom: 20 }}>
+              <div className="card">
+                <p className="stat-label"><Tip text="Sum of every included outlet's revenue for this BS month. For a POS-enabled outlet this already includes POS revenue, since PosOrders stamps a sales_entries row per closed bill.">Group Revenue</Tip></p>
+                <p className="stat-value">{fmtNpr(groupRevenue)}</p>
+              </div>
+              <div className="card">
+                <p className="stat-label"><Tip text="Group net purchases ÷ group revenue. Computed on the group totals, not as an average of each outlet's percentage — a small outlet must not swing the group figure as hard as a large one.">Group Food Cost %</Tip></p>
+                <p className="stat-value" style={{ color: pctColor(groupFc, 35, 45) }}>{fmtPct(groupFc)}</p>
+              </div>
+              <div className="card">
+                <p className="stat-label"><Tip text="Finalized payroll (gross + employer SSF) ÷ revenue, across included outlets. Only payroll runs marked finalized count — an unfinalized month reads as zero rather than as an estimate.">Group Labour %</Tip></p>
+                <p className="stat-value" style={{ color: pctColor(groupLabour, 25, 35) }}>{fmtPct(groupLabour)}</p>
+              </div>
+              <div className="card">
+                <p className="stat-label"><Tip text="Covers across included outlets, from paid POS bills closed within this BS month's AD date range. Outlets without POS contribute zero.">Group Covers</Tip></p>
+                <p className="stat-value">{groupCovers ? groupCovers.toLocaleString('en-NP') : '—'}</p>
+              </div>
+            </div>
+
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Outlet</th>
+                    <th style={{ textAlign: 'right' }}>Revenue</th>
+                    <th style={{ textAlign: 'right' }}>Net Purchases</th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Net purchases ÷ revenue for this outlet alone.">Food Cost %</Tip></th>
+                    <th style={{ textAlign: 'right' }}>Payroll</th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Finalized payroll ÷ revenue for this outlet alone.">Labour %</Tip></th>
+                    <th style={{ textAlign: 'right' }}>Covers</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && <tr><td colSpan={7} style={{ color: 'var(--theme-text2)' }}>Loading…</td></tr>}
+                  {!loading && rows.length === 0 && <tr><td colSpan={7} style={{ color: 'var(--theme-text2)' }}>No outlets in this group.</td></tr>}
+                  {!loading && rows.map(r => {
+                    const rev = Number(r.revenue) || 0
+                    const fc = r.is_included && rev > 0 ? (Number(r.net_purchases) / rev) * 100 : null
+                    const lab = r.is_included && rev > 0 ? (Number(r.payroll) / rev) * 100 : null
+                    return (
+                      <tr key={r.client_id} style={{ opacity: r.is_included ? 1 : 0.55 }}>
+                        <td>
+                          {r.client_name}
+                          {!r.is_included && <span className="badge-gray" style={{ marginLeft: 6 }}>No Suite Pro</span>}
+                          {r.is_included && !r.has_period && <span className="badge-amber" style={{ marginLeft: 6 }}>No period</span>}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.revenue) : '—'}</td>
+                        <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.net_purchases) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: pctColor(fc, 35, 45) }}>{fmtPct(fc)}</td>
+                        <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.payroll) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: pctColor(lab, 25, 35) }}>{fmtPct(lab)}</td>
+                        <td style={{ textAlign: 'right' }}>{r.is_included ? (Number(r.covers) || 0).toLocaleString('en-NP') : '—'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </SuiteGate>
+    </div>
+  )
+}

@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useSettings } from '../../context/SettingsContext'
 
-// null = no override (plan decides), true = explicit grant, false = explicit revoke
+// null = no override (plan decides), true = explicit grant.
+//
+// There is NO explicit-revoke value, despite what this comment used to claim. hasFeature() in
+// AuthContext.js only tests `flagVal === true`; null, undefined and false all fall through to the
+// plan check identically, and toggleFeat() below only ever writes true or null. A `false` sitting
+// in the table is therefore a no-op, not a revoke — any left over from earlier data are inert.
+// Believing otherwise cost a round: the S548 grandfather sweep used COALESCE(flag, true) to
+// "preserve" those falses and so under-granted three clients, fixed in 20260812180000.
 const DEFAULT_FLAGS = {
   sales_entry: null, monthly_summary: null, payment_summary: null,
   vendor_report: null, vendor_balance_confirmation: null, variance_report: null, fifo_report: null,
@@ -23,6 +30,7 @@ const DEFAULT_FLAGS = {
   monthly_owner_report: null,
   stock_movement_log: null,
   fixed_asset_register: null,
+  multi_outlet: null,
 }
 
 const FEATURE_GROUPS = [
@@ -34,59 +42,74 @@ const FEATURE_GROUPS = [
     { key: null, label: 'Purchases' },
     { key: null, label: 'Stock Count' },
   ]},
+  // Starter sells Record & Comply. Note Reorder Report and Stock Movements are NOT here: both
+  // derive their core figure from recipe explosion, and recipe_costing is Growth, so a Starter
+  // client could never get a number out of either. Outstanding Payables and Vendor Balance
+  // Confirmation moved down in exchange — the first is plain record-keeping, the second is
+  // statutory (IRD Annexure 13), and statutory never gates above the base tier.
   { tier: 'starter', label: 'Starter Plan',     color: 'var(--theme-text3)', features: [
     { key: 'menu_pricing',    label: 'Menu Pricing' },
     { key: 'sales_entry',     label: 'Sales Entry' },
     { key: 'payment_summary', label: 'Payment Summary' },
     { key: 'monthly_summary', label: 'Monthly Summary' },
     { key: 'annual_summary',  label: 'Annual Summary' },
-    { key: 'reorder_report',  label: 'Reorder Report' },
-    { key: 'stock_movement_log', label: 'Stock Movements' },
+    { key: 'outstanding_payables', label: 'Outstanding Payables' },
     { key: 'vat_report',      label: 'VAT Report' },
     { key: 'non_vat_report',  label: 'Non-VAT Report' },
+    { key: 'vendor_balance_confirmation', label: 'Vendor Balance Confirmation' },
     { key: 'wastage_report',  label: 'Wastage Report' },
     { key: 'stock_report',    label: 'Stock Report' },
     { key: 'settings',        label: 'Settings' },
     { key: 'staff_meals',     label: 'Staff Meals' },
   ]},
+  // Growth sells Control — the recipe-driven cost loop. Overheads lives here rather than Pro
+  // because it is the data-entry page behind Fixed Costs %/Est. Net Margin and Recipes' True
+  // Cost allocation: a data-entry page must not sit above the tier of figures that consume it.
   { tier: 'growth',  label: 'Growth Plan',      color: 'var(--theme-green)', features: [
     { key: 'recipe_costing',       label: 'Recipe Costing' },
     { key: 'purchase_orders',      label: 'Purchase Orders' },
     { key: 'requisitions',         label: 'Requisitions' },
     { key: 'variance_report',      label: 'Variance Report' },
+    { key: 'reorder_report',       label: 'Reorder Report' },
+    { key: 'stock_movement_log',   label: 'Stock Movements' },
+    { key: 'overheads',            label: 'Overheads' },
     { key: 'budget_vs_actual',     label: 'Budget vs Actual' },
     { key: 'best_sellers',         label: 'Best & Worst Sellers' },
     { key: 'dead_stock',           label: 'Dead Stock' },
     { key: 'recipe_margin',        label: 'Recipe Margin' },
-    { key: 'outstanding_payables', label: 'Outstanding Payables' },
     { key: 'nutrition_facts',      label: 'Nutrition Facts' },
     { key: 'menu_repricing',       label: 'Menu Repricing' },
     { key: 'combo_builder',        label: 'Combo Builder' },
   ]},
+  // Pro sells Strategy. Demand Forecast and Fixed Assets left this tier for Crest Suite Pro (see
+  // the Suite band below) — the first is genuinely cross-module, the second is owner/finance
+  // altitude and self-contained.
   { tier: 'pro',     label: 'Pro Plan',         color: 'var(--theme-accent)', features: [
     { key: 'menu_engineering',     label: 'Menu Engineering' },
-    { key: 'overheads',            label: 'Overheads' },
     { key: 'vendor_report',        label: 'Vendor Report' },
-    { key: 'vendor_balance_confirmation', label: 'Vendor Balance Confirmation' },
     { key: 'fifo_report',          label: 'FIFO / Expiry' },
     { key: 'price_tracker',        label: 'Price Tracker' },
     { key: 'theoretical_variance', label: 'Theoretical Variance' },
     { key: 'period_comparison',    label: 'Period Comparison' },
     { key: 'shrinkage_report',     label: 'Shrinkage Report' },
-    { key: 'demand_forecast',      label: 'Demand Forecast' },
-    { key: 'fixed_asset_register', label: 'Fixed Asset Register' },
-    // A POS feature, not an IMS one — its "included in plan" check below uses client.pos_plan,
-    // not clientPlan (the IMS plan), so it doesn't incorrectly key off IMS/POS plan mismatches.
+  ]},
+  // POS is flat — no tiers — so its features unlock with the module itself. guest_ordering used
+  // to sit in the Pro column above, which gated a POS feature on the IMS plan: a POS client on
+  // IMS Starter could not buy it at any price, even though it already declared planSource: 'pos'.
+  { tier: 'pos',     label: 'Crest POS Module', color: 'var(--theme-purple)', features: [
     { key: 'guest_ordering',       label: 'Guest QR Self-Ordering', planSource: 'pos' },
   ]},
 ]
 
-// Returns true if the plan naturally includes this tier's features
-function isPlanIncluded(tier, clientPlan) {
+// Returns true if the plan naturally includes this tier's features.
+// 'pos' is not an IMS tier — POS is flat, so its features are included whenever the module is on;
+// the caller passes client.pos_enabled through as clientPlan for that row.
+function isPlanIncluded(tier, clientPlan, posEnabled) {
   if (tier === 'core') return true
   if (tier === 'starter') return true
   if (tier === 'growth') return clientPlan === 'growth' || clientPlan === 'pro'
   if (tier === 'pro') return clientPlan === 'pro'
+  if (tier === 'pos') return !!posEnabled
   return false
 }
 
@@ -108,7 +131,9 @@ export default function FeatureAccessModal({ client, onClose }) {
   const posEnabled = !!client.pos_enabled
   // Header reflects the primary active module and plan.
   const activeModule = imsEnabled ? 'IMS' : (posEnabled ? 'POS' : (hrEnabled ? 'HR' : 'IMS'))
-  const activePlan   = (imsEnabled ? client.plan : (posEnabled ? client.pos_plan : (hrEnabled ? client.hr_plan : client.plan))) || 'starter'
+  // Only IMS has tiers, so the header always reflects clients.plan. It used to fall back to
+  // pos_plan/hr_plan for module-only clients, which showed a tier neither module actually sells.
+  const activePlan   = client.plan || 'starter'
   const activeColor  = activePlan === 'pro' ? 'var(--theme-accent)' : activePlan === 'growth' ? 'var(--theme-green)' : 'var(--theme-text3)'
   const activeLabel  = activePlan.charAt(0).toUpperCase() + activePlan.slice(1)
 
@@ -159,23 +184,29 @@ export default function FeatureAccessModal({ client, onClose }) {
             instead of pushing the Save/Close buttons off-screen on a short viewport. */}
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', minHeight: 0 }}>
 
-        {/* Crest Suite — a separate gating axis (client.suite_plan) from the module plan grids
-            below; only meaningful once both IMS and HR are enabled. Not part of FEATURE_GROUPS
-            since it doesn't key off clientPlan/pos_plan's rank system. Two features live on this
-            axis so far: Owner Dashboard (live KPIs) and its frozen-snapshot sibling, the Monthly
-            Owner/Manager Report (added alongside monthly_owner_reports table).
+        {/* Crest Suite Pro — a separate gating axis (client.suite_plan) from the module plan
+            grids below. Not part of FEATURE_GROUPS since it doesn't key off clientPlan's rank
+            system at all.
+
+            Requires IMS only. It used to require IMS *and* HR, which made sense when Suite was a
+            bundle containing all three modules; as an add-on it has an IMS floor and adapts to
+            whatever else the client runs (SuiteGate's own requireModules varies per feature).
 
             Moved ABOVE the plan grid 2026-08-12. It used to sit at the very bottom, which meant
-            scrolling past the Starter column's thirteen rows to reach two checkboxes that are the
+            scrolling past the Starter column's thirteen rows to reach the checkboxes that are the
             most commercially significant grant in this modal — and being last read as "least
             important" rather than "different axis". Leading with it states the distinction
             structurally: everything below is one plan ladder, this is not on that ladder. */}
-        {imsEnabled && hrEnabled && (() => {
-          const SUITE_RANK = { starter: 0, growth: 1, pro: 2 }
-          const locked = (SUITE_RANK[client.suite_plan] ?? -1) >= SUITE_RANK.growth
+        {imsEnabled && (() => {
+          // One tier. suite_plan was starter|growth|pro, but both gates were minTier="growth",
+          // so Suite Starter unlocked nothing and Suite Pro added nothing over Suite Growth.
+          const locked = client.suite_plan === 'pro'
           const suiteFeatures = [
             { key: 'owner_dashboard', label: 'Owner Dashboard' },
             { key: 'monthly_owner_report', label: 'Monthly Owner/Manager Report' },
+            { key: 'multi_outlet', label: 'Multi-Outlet Group Console' },
+            { key: 'demand_forecast', label: 'Demand Forecast' },
+            { key: 'fixed_asset_register', label: 'Fixed Assets' },
           ]
           return (
             <div style={{ padding: '16px 24px 4px' }}>
@@ -187,16 +218,16 @@ export default function FeatureAccessModal({ client, onClose }) {
               }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 9 }}>
                   <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                    Crest Suite
+                    Crest Suite Pro
                   </span>
                   <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
-                    Sold as the Suite bundle, not by IMS plan — a Pro client does <strong style={{ color: 'var(--theme-text1)' }}>not</strong> get these.
-                    Set the bundle tier on the Billing tab, or grant one here as an exception.
+                    Sold as an add-on, not by IMS plan — a Pro client does <strong style={{ color: 'var(--theme-text1)' }}>not</strong> get these.
+                    Switch it on in the Billing tab, or grant one here as an exception.
                   </span>
                 </div>
-                {/* Side by side rather than stacked: two items in a 1120px modal have no reason
-                    to run down the left edge, and the row keeps the band shallow enough that the
-                    plan grid still starts above the fold. */}
+                {/* Side by side rather than stacked: a handful of items in a 1120px modal have no
+                    reason to run down the left edge, and the row keeps the band shallow enough
+                    that the plan grid still starts above the fold. */}
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   {suiteFeatures.map(({ key, label }) => {
                     const isAdminGranted = !locked && flags[key] === true
@@ -224,7 +255,7 @@ export default function FeatureAccessModal({ client, onClose }) {
                           <span style={{ fontSize: 12, color: isOn ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{label}</span>
                           {locked && (
                             <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)', background: 'var(--theme-accent)18', border: '1px solid var(--theme-accent)35', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>
-                              Suite {client.suite_plan}
+                              Suite Pro
                             </span>
                           )}
                           {isAdminGranted && (
@@ -257,16 +288,16 @@ export default function FeatureAccessModal({ client, onClose }) {
         ) : !imsEnabled ? (
         /* POS-only client — just show POS feature flags */
         <div style={{ padding: '16px 24px 24px' }}>
-          <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text2)' }}>POS feature overrides — grant features above this client's POS plan tier.</p>
+          <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text2)' }}>POS features — included with the Crest POS module.</p>
           {loading ? <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
             : [
                 { key: 'menu_pricing',   label: 'Menu Pricing' },
-                { key: 'guest_ordering', label: 'Guest QR Self-Ordering', tier: 'pro' },
+                { key: 'guest_ordering', label: 'Guest QR Self-Ordering', moduleIncluded: true },
               ].map(feat => {
-                // Only guest_ordering declares a tier — menu_pricing keeps its original
-                // always-a-toggle behavior (pre-existing, unrelated to this feature).
-                const planIncluded = feat.tier ? isPlanIncluded(feat.tier, client.pos_plan || 'starter') : false
-                const locked = planIncluded
+                // POS has no tiers, so its features come with the module. guest_ordering used to
+                // check pos_plan against a Pro tier POS never sold; menu_pricing keeps its
+                // original always-a-toggle behavior (pre-existing, unrelated).
+                const locked = !!feat.moduleIncluded && posEnabled
                 const isAdminGranted = !locked && flags[feat.key] === true
                 const isOn = locked || isAdminGranted
                 return (
@@ -315,22 +346,25 @@ export default function FeatureAccessModal({ client, onClose }) {
            Self-Ordering") can force this grid (and the whole modal, since nothing above it
            constrains width otherwise) wider than the viewport instead of letting columns
            shrink. minmax(0, 1fr) lets each column actually shrink to fit. */
-        <div style={{ padding: '16px 24px 8px', display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0 14px', alignItems: 'start' }}>
+        <div style={{ padding: '16px 24px 8px', display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '0 14px', alignItems: 'start' }}>
           {loading ? <p style={{ color: 'var(--theme-text2)', fontSize: 13, gridColumn: '1/-1' }}>Loading…</p> : FEATURE_GROUPS.map(group => {
-            const planIncluded = isPlanIncluded(group.tier, clientPlan)
+            const planIncluded = isPlanIncluded(group.tier, clientPlan, client.pos_enabled)
             return (
               <div key={group.tier} style={{ marginBottom: 16 }}>
                 {/* Group header */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <span style={{ fontSize: 10, fontWeight: 800, color: group.color, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{group.label}</span>
+                  {/* The POS column is not on the IMS plan ladder, so it must not borrow the IMS
+                      plan's label — it read "Included in Pro" for a client whose POS access has
+                      nothing to do with their IMS tier. */}
                   {planIncluded && group.tier !== 'core' && (
                     <span style={{ fontSize: 10, color: group.color, background: group.color + '15', border: `1px solid ${group.color}30`, borderRadius: 3, padding: '1px 6px' }}>
-                      Included in {planLabel}
+                      {group.tier === 'pos' ? 'Module enabled' : `Included in ${planLabel}`}
                     </span>
                   )}
                   {!planIncluded && (
                     <span style={{ fontSize: 10, color: 'var(--theme-text3)', background: 'var(--theme-card)', border: '1px solid var(--theme-text3)', borderRadius: 3, padding: '1px 6px' }}>
-                      Not in plan — check to override
+                      {group.tier === 'pos' ? 'POS is off — check to override' : 'Not in plan — check to override'}
                     </span>
                   )}
                 </div>
@@ -340,10 +374,10 @@ export default function FeatureAccessModal({ client, onClose }) {
                   {group.features.map(feat => {
                     const isCore = feat.key === null
                     // Most features check the IMS plan (planIncluded, computed once per group
-                    // above); a feature with planSource: 'pos' checks the client's POS plan
-                    // instead — see guest_ordering above.
+                    // above); a feature with planSource: 'pos' checks the POS module instead.
+                    // POS is flat, so that check is simply "is the module on".
                     const featPlanIncluded = feat.planSource === 'pos'
-                      ? isPlanIncluded(group.tier, client.pos_plan || 'starter')
+                      ? !!client.pos_enabled
                       : planIncluded
                     const locked = isCore || featPlanIncluded  // plan features are always on, non-clickable
                     const isAdminGranted = !locked && flags[feat.key] === true

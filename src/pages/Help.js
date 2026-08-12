@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
-import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_BUNDLES } from '../data/pricingPlans'
+import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
 
 // ── IMS feature data, grouped by plan tier (Getting Started module guide — distinct from the
 // IMS_TIERS pricing data imported above) ─────────────────────────────────────
@@ -17,13 +17,18 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '◆', name: 'Owner Dashboard',
-        guide: 'A single cross-module view for owners — Revenue, Food Cost %, Labor Cost %, Prime Cost % (Food Cost % + Labor Cost %), and True Net Margin % (Revenue − Food Cost − Labor Cost − Overhead), plus Wastage Value, Items Below Par, and Overdue Payables. All figures are Month-to-Date against the current open period, same scoping as Monthly Summary. Below the KPI cards, a Cost & Margin Trend chart plots Food Cost %, Labor Cost %, Prime Cost %, and Net Margin % across your last 12 closed periods, sourced from each period\'s frozen Monthly Owner Report snapshot. Requires both Crest IMS and Crest HR enabled, plus a Crest Suite Growth subscription or above — a separate bundle tier from the individual module plans, set from the Billing tab in Manage Clients.',
-        tips: ['Labor Cost % is a prorated estimate (scaled to days elapsed this month) — it refines to the exact figure once Payroll Run is finalized for the month', 'Prime Cost % is the number most operators benchmark against directly — industry standard is roughly 60–65% of revenue', 'Items Below Par is a live inventory position, not a monthly total', 'A locked padlock means Crest Suite needs upgrading — contact your consultant', 'The trend chart only plots periods that already have a Monthly Owner Report — a brand-new property with no closed periods yet won\'t show it until one exists']
+        guide: 'A single cross-module view for owners — Revenue, Food Cost %, Labor Cost %, Prime Cost % (Food Cost % + Labor Cost %), and True Net Margin % (Revenue − Food Cost − Labor Cost − Overhead), plus Wastage Value, Items Below Par, and Overdue Payables. All figures are Month-to-Date against the current open period, same scoping as Monthly Summary. Below the KPI cards, a Cost & Margin Trend chart plots Food Cost %, Labor Cost %, Prime Cost %, and Net Margin % across your last 12 closed periods, sourced from each period\'s frozen Monthly Owner Report snapshot. Requires both Crest IMS and Crest HR enabled, plus Crest Suite Pro — an add-on bought on top of your modules rather than a bundle that replaces them, switched on from the Billing tab in Manage Clients.',
+        tips: ['Labor Cost % is a prorated estimate (scaled to days elapsed this month) — it refines to the exact figure once Payroll Run is finalized for the month', 'Prime Cost % is the number most operators benchmark against directly — industry standard is roughly 60–65% of revenue', 'Items Below Par is a live inventory position, not a monthly total', 'A locked padlock means Crest Suite Pro is not active on this outlet — contact your consultant', 'The trend chart only plots periods that already have a Monthly Owner Report — a brand-new property with no closed periods yet won\'t show it until one exists']
       },
       {
         icon: '▤', name: 'Monthly Owner/Manager Report',
-        guide: 'The frozen, exportable sibling of Owner Dashboard — a snapshot of every figure (IMS, HR, and POS combined) generated automatically the moment a period closes, so it never changes even if the underlying data is corrected later. Adapts to show only the modules your property actually has enabled. Pick any closed period from the dropdown to view its report, export it to Excel, or print/save it as a PDF. Requires the same Crest Suite Growth subscription as Owner Dashboard. Visible only to Owner and Admin logins.',
+        guide: 'The frozen, exportable sibling of Owner Dashboard — a snapshot of every figure (IMS, HR, and POS combined) generated automatically the moment a period closes, so it never changes even if the underlying data is corrected later. Adapts to show only the modules your property actually has enabled. Pick any closed period from the dropdown to view its report, export it to Excel, or print/save it as a PDF. Requires the same Crest Suite Pro add-on as Owner Dashboard. Visible only to Owner and Admin logins.',
         tips: ['A period from before this feature existed generates its report the first time you open it — this can take a few seconds', 'Revenue here comes from Sales Entries; the separate POS Net Sales figure is derived independently from the Bill Register and will not match to the penny — that is expected', 'Only Admin can Regenerate a snapshot, and it always asks for confirmation first since it overwrites the frozen figures', '"Print / Save as PDF" uses your browser\'s print dialog — choose "Save as PDF" as the destination']
+      },
+      {
+        icon: '⌸', name: 'Group Console (Multi-Outlet)',
+        guide: 'If you run more than one outlet, your outlets can be linked into a group. An Owner login then gets an outlet switcher at the top of the sidebar — pick a branch and the whole app becomes that branch, with no second login. The Group Console itself puts every branch side by side for one BS month: Revenue, Food Cost %, Labour %, and Covers per outlet, plus group totals. Part of Crest Suite Pro, and priced per outlet — each branch needs its own Crest Suite Pro for its figures to appear. Ask your consultant to link your outlets; a single-outlet property sees none of this and is unaffected.',
+        tips: ['The console shows only outlets that have Crest Suite Pro, and names the ones it left out — so a group total is never quietly missing a branch', 'Outlets keep their own periods, so one branch can still be counting a month another has already closed; a branch with no period for the month is flagged rather than shown as zero', 'A branch whose subscription has lapsed locks only itself — the switcher badges it, and your other branches keep working', 'You cannot switch outlets while POS orders are still waiting to sync — reconnect and let them finish first, or they would be saved against the wrong branch', 'Group figures are computed on group totals, not by averaging each branch\'s percentage, so a small outlet does not swing the number as hard as a large one']
       },
       {
         icon: '◷', name: 'Periods',
@@ -720,7 +725,7 @@ const GLOSSARY = [
   { term: 'Requisition',      def: 'An internal stock transfer from the main store to a department (e.g. kitchen, bar), tracked separately from external purchases.' },
 ]
 
-// IMS_TIERS / HR_PRICING / POS_PRICING / SUITE_BUNDLES / MODULE_COLORS now come from
+// IMS_TIERS / HR_PRICING / POS_PRICING / SUITE_ADDON / MODULE_COLORS now come from
 // ../data/pricingPlans — the single source of truth shared with Pricing.js and ClientDrawer.js.
 
 const FAQ = [
@@ -1538,21 +1543,24 @@ export default function Help() {
             })}
           </div>
 
-          {/* Crest Suite — bundle */}
-          <p style={{ fontSize: 11, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest Suite — IMS + HR + POS bundled</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-            {SUITE_BUNDLES.map((bundle, i) => {
-              const imsTier = IMS_TIERS[i]
-              const price = pricingAnnual ? bundle.annual : bundle.monthly
-              const sumMonthly = imsTier.monthly + HR_PRICING.monthly + POS_PRICING.monthly
-              return (
-                <div key={bundle.key} className="card" style={{ textAlign: 'center', padding: '20px 16px' }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 8 }}>{bundle.label}</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString()}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span></div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-green)', marginTop: 6 }}>Save NPR {(sumMonthly - bundle.monthly).toLocaleString()}/mo vs separately</div>
+          {/* Crest Suite Pro — an add-on on top of the modules above, not a bundle containing them */}
+          <p style={{ fontSize: 11, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest Suite Pro — the owner layer, added on top</p>
+          <div className="card" style={{ marginBottom: 24, borderColor: 'rgba(201,168,76,0.2)' }}>
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              <div style={{ minWidth: 180 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 8 }}>{SUITE_ADDON.label}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>
+                  +NPR {(pricingAnnual ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString()}
+                  <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo per outlet</span>
                 </div>
-              )
-            })}
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 6 }}>{SUITE_ADDON.requiresLabel}</div>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, flex: 1, minWidth: 240 }}>
+                {SUITE_ADDON.features.map(f => (
+                  <li key={f} style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 5, lineHeight: 1.5 }}>{f}</li>
+                ))}
+              </ul>
+            </div>
           </div>
 
           <div className="card" style={{ borderColor: 'rgba(201,168,76,0.2)' }}>

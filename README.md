@@ -133,15 +133,23 @@ Architecture: single React app, single Supabase project, feature flags per clien
 | Crest HR (flat, no tiers) | NPR 2,600/mo | — | — |
 | Crest POS (flat, no tiers) | NPR 2,000/mo | — | — |
 
-| Suite Bundle (IMS+HR+POS, ~20% off buying separately) | Monthly | Annual /mo |
+| Add-on | Monthly | Annual /mo |
 | --- | --- | --- |
-| Suite Starter | NPR 5,300 | NPR 3,975 |
-| Suite Growth | NPR 5,800 | NPR 4,350 |
-| Suite Pro | NPR 6,500 | NPR 4,875 |
+| **Crest Suite Pro** (per outlet, requires IMS) | +NPR 2,000 | +NPR 1,500 |
+
+Crest Suite Pro is an **add-on bought on top of the modules above**, not a bundle that contains
+them (changed S548). It was three tiers priced at ~20% off the sum of all three modules, but both
+`SuiteGate` call sites were `minTier="growth"` — so **Suite Starter unlocked nothing at all**, and
+Suite Pro added nothing over Suite Growth on its own axis. `suite_plan` is now `NULL | 'pro'`.
+
+It carries seven features: Owner Dashboard, Monthly Owner/Manager Report, Multi-Outlet Group
+Console, Demand Forecast, Fixed Assets — plus Consolidated P&L and scheduled report delivery on
+the roadmap. Sold **per outlet**, including inside a group: the Group Console rolls up exactly
+those outlets whose `suite_plan = 'pro'` and names the ones it excluded.
 
 Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
-**Module flags on `clients` table:** `ims_enabled` (DEFAULT true), `hr_enabled` (DEFAULT false), `pos_enabled` (DEFAULT false, column added S193), `ims_plan`, `hr_plan`, `pos_plan` (column added S193)  
+**Module flags on `clients` table:** `ims_enabled` (DEFAULT true), `hr_enabled` (DEFAULT false), `pos_enabled` (DEFAULT false, column added S193). Tier lives in `clients.plan` and applies to **IMS only** — HR and POS are yes/no modules with no tiers. `hr_plan`/`pos_plan` still exist as columns but are vestigial and read by nothing (S548); `ims_plan` was listed here for a long time and **has never existed at all**.  
 **Admin UI:** AdminClients → **card module strip** — toggle IMS/HR/POS directly on each client card; Billing tab = live toggles + plan selector + subscription date per module (POS wired S193)  
 **Route guard:** `src/components/ModuleGate.js` — wraps all IMS, HR, and POS routes in App.js; redirects to `/dashboard` when module is off (admin always bypasses)  
 **POS role system (added S195):** `pos_role` column on `profiles` (`staff` / `supervisor` / `manager`). `hasPosAccess(minLevel)` in AuthContext. POS sidebar hidden entirely for users with no role. Tables → supervisor+; Staff → manager+. Crest admin always bypasses.
@@ -149,6 +157,61 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 ---
 
 ## Session Log
+
+### S548 — 2026-08-12 — Retiered every IMS feature by attribute, collapsed Suite into one add-on, and built Multi-Outlet
+
+Started as "reanalyse the plans & pricing — the Suite has nothing other than 2 features." It turned out the tier structure had never been *designed*; it had accreted, and reading it against the code found three separate problems.
+
+**Two Starter features could not produce a number on Starter data.** `ReorderReport.js` imports `explodeRecipeIngredients` and derives consumption by exploding sold recipes into ingredients; `StockMovements.js` is built entirely on recipe explosion plus `subRecipeUsage`, and even maintains a `noBomRecipes` gap list. Both sat in `STARTER_KEYS` while `recipe_costing` is Growth-gated — so a Starter client was sold a Reorder Report with no consumption figure and a stock ledger that was permanently empty. Neither fails loudly; they just render nothing, forever.
+
+**The placement framework that came out of it**, which every future feature should be scored against — five attributes (persona altitude, prerequisite depth, frequency, value type, substitutability), with the tier thesis falling out of the fourth: **Starter = Record & Comply, Growth = Control, Pro = Strategy, Crest Suite Pro = Synthesis.** Two standing rules follow. *A statutory obligation never gates above the base tier* — the codebase already settled this, since `vat_report`/`non_vat_report` were always Starter, but `vendor_balance_confirmation` (IRD Annexure 13) had been sitting at Pro. And *a data-entry page must not sit above the tier of any figure that consumes it* — `overheads` was Pro while `ClientDashboard`, `OwnerDashboard`, `computeMonthlyReport` and `Recipes`' True Cost all read what it writes.
+
+Seven moves, applied in both `AuthContext.js`'s key sets **and** the `minPlan` props in `App.js` — those are two independent mechanisms, and nav visibility runs off a third (`isItemVisible` calls `hasFeature`, not `minPlan`), so all three had to agree or a page ends up reachable-but-hidden:
+
+| Feature | Was | Now | Why |
+| --- | --- | --- | --- |
+| `reorder_report` | Starter | **Growth** | Consumption comes from recipe explosion |
+| `stock_movement_log` | Starter | **Growth** | Same — empty without a BOM |
+| `outstanding_payables` | Growth | **Starter** | Record-keeping; needs no recipes |
+| `vendor_balance_confirmation` | Pro | **Starter** | Statutory, same class as VAT |
+| `overheads` | Pro | **Growth** | Feeds Fixed Costs %/Net Margin |
+| `demand_forecast` | Pro | **Suite** | Cross-module — `Roster.jsx` overlays it on the HR roster |
+| `fixed_asset_register` | Pro | **Suite** | Owner/finance altitude, self-contained |
+
+Starter's count is unchanged (13 in, 13 out) and every remaining Starter feature now produces output. Pro drops 12 → 7, which is the honest consequence of the altitude rule and the reason Pro's price should not rise while Suite absorbs the strategic surface.
+
+**`guest_ordering` was a POS feature gated on the IMS plan** — `FeatureAccessModal` already marked it `planSource: 'pos'` while `AuthContext` had it in `PRO_KEYS`, and `hasFeature()` resolves `plan` from the IMS tier. A POS client on IMS Starter could not buy it at any price. It is now in a `POS_MODULE_KEYS` set that unlocks with the module, since POS is deliberately flat.
+
+**Crest Suite collapsed from three hollow tiers to one add-on SKU.** Both `SuiteGate` call sites were `minTier="growth"`, so **Suite Starter (NPR 5,300/mo) unlocked nothing at all** and Suite Pro added nothing over Suite Growth on its own axis — the only delta was the bundled IMS tier. `Pricing.js` sold the bundle with a strikethrough price and **no feature list whatsoever**. It is now one SKU at +NPR 2,000/mo **per outlet, on top of** a client's modules rather than containing them, with seven features. That inverted two things in `ClientDrawer.js` that were correct for a bundle and destructive for an add-on: a "reconciliation" effect that force-enabled all three modules and overwrote `plan`/`hr_plan`/`pos_plan` to match `suite_plan` the moment an admin opened the drawer (deleted), and the module toggles/pricing locked behind a "Controlled by Suite Bundle" badge (unlocked). `clientMRR()` in `AdminDashboardOverview.jsx` now *adds* Suite instead of returning early and ignoring the modules entirely.
+
+**Nobody loses a feature, and the mechanism already existed.** `hasFeature()` is "plan tier **OR** explicit flag", and `SuiteGate`'s own `overridden` branch reads `hasFeature()` — so grandfathering is a `feature_flags` sweep, no code. `20260812160000` sets `reorder_report`/`stock_movement_log` for every Starter client and `demand_forecast`/`fixed_asset_register` for every Pro client, including an INSERT for clients with no `feature_flags` row at all, who would otherwise fall through both UPDATEs silently. `suite_plan='growth'` sweeps to `'pro'` (2 features → 5, a pure upgrade); **`'starter'` is deliberately left alone** — those clients paid for a tier that unlocked nothing *and* the bundle implied their module subscriptions, so both halves are a per-client billing conversation, not a blanket UPDATE.
+
+**Multi-Outlet (`20260812170000`) — the flagship Suite feature, built on selected-outlet indirection rather than policy rewriting.** `my_client_id()` appears in **151 places across 18 migrations**. Rewriting them to a set-returning `my_client_ids()` would touch every policy on ~50 tables and permanently widen RLS from "one client" to "any client in my group", removing RLS as the backstop behind `scopedDb`'s filter. Instead: add `profiles.active_client_id` and make `my_client_id()` a `coalesce(active_client_id, client_id)`. Every policy keeps its exact shape. The frontend gets it free — `useScopedDb` binds `clientId` straight from `AuthContext`, so one value re-scopes ~200 call sites and all 65 `CLIENT_SCOPED_TABLES` with no per-page edit.
+
+Both columns default NULL, so the `coalesce` returns `client_id` and **every ungrouped client is byte-identical to before**. No policy is rewritten, so all 151 sites keep their *semantics*, not merely their current results.
+
+Four things that shaped it:
+
+- **`active_client_id` is never user-writable.** It decides which tenant every RLS policy resolves to, so it is privilege-bearing and deliberately **not** added to `guard_profiles_privileged_columns()`'s allow-list (S531 invariant #1). `set_active_outlet()` is the only write path; under `SECURITY DEFINER` `current_user` is the owner, so the guard passes it through — the same mechanism `record_pos_pin_attempt` relies on. Membership is validated at **write** time so `my_client_id()` stays a join-free `coalesce` (it runs per row across ~120 policies), and a trigger on `clients.group_id` clears stale selections.
+- **`clients_select` is the one policy that had to change** — it was `id = my_client_id() OR is_admin()`, so a customer could not read that a sibling outlet existed at all.
+- **`get_group_summary()` filters to `suite_plan = 'pro'` server-side and returns the excluded outlets by name.** A client-side filter would ship an unpaid outlet's revenue to the browser and then hide it. It returns raw aggregates rather than percentages, so the page does not become a fourth independent definition of food cost % / labour cost %.
+- **`pos_orders` has no `period_id` or BS columns — only AD `closed_at`** — and BS→AD conversion lives in JS, not SQL. The RPC takes `p_ad_start`/`p_ad_end` and the page converts with `bsToAd()`, matching `SalesReport.jsx`'s convention. The first draft got this wrong by deriving a range from `min(created_at)` on the period row, which is when the period was *created*, not the month it covers.
+
+Three edge cases handled rather than discovered: a lapsed outlet inside a healthy group locks only itself (`getAccessState`/`ProtectedRoute` are per selected outlet), so the switcher badges it; outlets keep independent periods (`monthly_periods` is `UNIQUE(client_id, bs_year, bs_month)`), so the console aligns on `(bs_year, bs_month)` and names outlets with no period rather than showing zero; and switching is **blocked while the offline queue is non-empty** — checking both `getQueue()` and `getPosOrderQueue()`, since stock ops write against the current tenant just as POS orders do.
+
+**HQ→branch master-data push was deliberately left out.** It is the only destructive operation in the design, and deferring costs nothing — the lineage column it needs is purely additive with no backfill. It also deserves customer validation first: head-office menu enforcement suits chains running one identical menu, while independent Nepali groups often run genuinely different menus per location. When picked up, note that `items`/`recipes` have **no** `UNIQUE(client_id, name)` (only `categories` does), so it must match on an added `master_id`, never by name.
+
+**Smoke-testing the retier surfaced a revenue leak that predates it: `hr_plan`/`pos_plan` silently raise the IMS tier.** `plan` in `AuthContext.js` is not `clients.plan` — it is the **maximum** across `clients.plan`, `ims_plan`, `hr_plan`, `pos_plan` and `is_premium` (which forces `'pro'` outright). Found live on a test client sitting at `clients.plan = 'starter'` with `hr_plan`/`pos_plan` both `'pro'`: it resolved to Pro and got every IMS Pro feature, having bought none of them. Since HR and POS are sold flat and nothing in the product charges for those columns, **any client with either module enabled and its plan column at `'pro'` is getting IMS Pro free.** This was coherent while Suite was a bundle — `handleSuitePlanPick` deliberately set all three columns together, which is exactly the code deleted this session — and is a straight leak under the add-on model. The README already contradicted itself here: one entry calls `hr_plan`/`pos_plan` "harmless unused strings", a later one documents `plan` as deriving "the highest tier across all enabled module plans". **Fixed, and the concept removed with it.** `plan` now reads `clients.plan` (plus the legacy `is_premium` boolean, which at least means what it says) and nothing else — verified live on a client left at `plan='starter'` with both module columns still `'pro'`, which now correctly resolves to Starter. `c?.ims_plan` went too: that column has **never existed** (`42703` against the live DB), so it was always `undefined` and silently dropped by `filter(Boolean)` — this README's own Module-flags line still lists it as real.
+
+**HR and POS are yes/no modules, so the tier concept was pulled out of them everywhere, not just out of the plan max.** `pos_plan` turned out to gate something real despite a code comment claiming it was unwired: `PosOrders.jsx` laddered the upsell-suggestion engine off it (category nudge at 'starter', co-occurrence at 'growth', Menu Engineering filter at 'pro'), and since `ClientDrawer` defaulted the column to `'starter'` and wrote it on every save, most POS clients had been getting only the basic nudge. Buying POS now buys the whole engine; the genuine IMS dependency stays, because co-occurrence is sold as the IMS+POS combination and the ME filter needs `recipes.me_class`, which only IMS populates. The category nudge survives as a real fallback for POS-only clients rather than a tier artifact — `rank()` filters to `_score > 0`, so without it a client with no IMS and no manual pairings would have seen an empty panel. Also removed: the `hr_plan`/`pos_plan` writes in `ClientDrawer`'s save, the tier suffix on the HR/POS admin pills (now "HR · on"/"POS · off"), the "HR: pro"/"POS: pro" tags on the admin dashboard, the `pos_plan` fallbacks in `FeatureAccessModal`, and both columns from the two `select()` lists that fetched them. The columns stay in the DB, vestigial and unread.
+
+**The sign-in render loop was a ping-pong between two guards, and it was pre-existing** (confirmed by stashing every change from this session and reproducing it). `ProtectedRoute`'s `if (!profile) -> /login` raced `Login`'s `if (ready && session) -> /dashboard`: on a fresh sign-in `session` is set the instant SIGNED_IN fires while `profile` is still null, because `fetchProfile` is deliberately not awaited there (the GoTrue deadlock fix). Each guard sent the user straight back to the other until the profile landed. Fixed on both sides so either alone breaks the cycle — `fetchProfile` now sets `loading` true up front and `ProtectedRoute` waits on it rather than concluding the user is signed out, and `Login`'s redirect additionally requires `profile`, so a session whose profile fetch genuinely failed lands on the sign-in form instead of looping.
+
+**One loop in this session's own code, caught only by logging in as a real client.** `setOutlets([])` in `fetchProfile` returned a fresh array on every call; React bails out of a re-render only when `Object.is(prev, next)` holds, so "set it to empty again" is a state *change*, and a new identity into the context value on every profile fetch cascaded until React gave up. It fires for non-admin accounts only, which is why an admin-session smoke test came back clean. `nextOutletsOrSame()` now returns the previous array when the outlet list has not changed — the ungrouped case being both the common one and the cheap path. Verified by bisect: baseline 0 errors on reload, 3 with the bug, 0 after the fix.
+
+**Tier names were left as Starter/Growth/Pro.** Bud/Bloom/Harvest and several other sets were explored and dropped — the naming research is clear that tier names should rank themselves and that "overly creative" ones measurably hurt conversion, and renaming would have touched marketing copy, the Guide's ~30 `plan:` strings and how existing clients describe themselves, for no structural gain. Only *which features sit in each tier* moved.
+
+---
 
 ### S545 — 2026-08-12 — Export / Import: a backup that can actually restore, and an Archive that can be undone
 

@@ -23,8 +23,8 @@ export default function PremiumGate({ children, featureKey, minPlan = 'growth' }
   const planNeeded = PLAN_LABEL[minPlan] || 'Growth'
 
   const upgradeDesc = minPlan === 'pro'
-    ? 'Upgrade to unlock Menu Engineering, FIFO/Expiry Tracking, Vendor Report, Supplier Price Tracker, Overheads & P&L, Period Comparison, Theoretical Variance, and Custom Settings.'
-    : 'Upgrade to unlock Sales Entry, Recipe Costing, Variance Report, Payment Summary, Budget vs Actual, Best & Worst Sellers, Dead Stock, Recipe Margin, and more.'
+    ? 'Upgrade to unlock Menu Engineering, FIFO/Expiry Tracking, Vendor Report, Supplier Price Tracker, Period Comparison, Theoretical Variance, and Shrinkage Report.'
+    : 'Upgrade to unlock Recipe Costing, Variance Report, Reorder Report, Stock Movements, Overheads & P&L, Budget vs Actual, Best & Worst Sellers, Dead Stock, Recipe Margin, and more.'
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>

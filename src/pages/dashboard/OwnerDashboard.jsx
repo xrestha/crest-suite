@@ -393,7 +393,7 @@ export default function OwnerDashboard() {
         </p>
       </div>
 
-      <SuiteGate minTier="growth" featureKey="owner_dashboard">
+      <SuiteGate featureKey="owner_dashboard">
         {/* A load failure used to be indistinguishable from "this figure is genuinely zero" —
             every sub-loader silently discarded Supabase's error field. Each one sets its own key
             here and clears it on a successful (re)load, so a real fetch failure shows a

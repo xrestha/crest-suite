@@ -195,7 +195,7 @@ export default function MonthlyOwnerReport() {
         <p className="page-subtitle">Frozen figures generated when each period closes — Crest IMS, HR &amp; POS combined.</p>
       </div>
 
-      <SuiteGate minTier="growth" featureKey="monthly_owner_report" featureLabel="Monthly Owner/Manager Report" requireModules={['ims']}>
+      <SuiteGate featureKey="monthly_owner_report" featureLabel="Monthly Owner/Manager Report" requireModules={['ims']}>
         <div className="no-print card" style={{ marginBottom: 16, display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <select
             className="form-select" style={{ maxWidth: 220 }}

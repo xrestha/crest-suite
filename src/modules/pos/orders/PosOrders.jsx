@@ -26,7 +26,7 @@ import {
 } from './posOrdersConstants'
 
 export default function PosOrders() {
-  const { clientId, profile, hasPosAccess, isAdmin, isOwner, posPlan, imsEnabled } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { colors } = useTheme()
   // Solid-amber badges (offline-pending dot, pending-items count, writeoff button) were hardcoded
@@ -40,18 +40,18 @@ export default function PosOrders() {
   const greenBadgeText  = contrastRatio(colors.green, '#ffffff') >= contrastRatio(colors.green, '#000000') ? '#ffffff' : '#000000'
   const redBadgeText    = contrastRatio(colors.red, '#ffffff')   >= contrastRatio(colors.red, '#000000')   ? '#ffffff' : '#000000'
 
-  // Upsell/Cross-sell suggestion-chip tiering (product-roadmap memory, built S210 but never
-  // actually gated by plan until now — every client got the full Pro+IMS experience for free).
-  // Driven by the POS plan since this is a POS feature; IMS is additionally required for the two
-  // layers that lean on cross-module data (co-occurrence is POS-only data technically, but IMS+
-  // is the sold bundle for it; the ME filter genuinely needs recipes.me_class, which only IMS's
-  // Menu Engineering report ever populates). Admin always sees the full Pro+IMS experience, same
-  // "admin bypasses gates" convention as hasFeature()/ModuleGate/PremiumGate elsewhere.
-  const posPlanTier           = isAdmin ? 'pro' : (posPlan || 'starter')
-  const imsAvailable          = isAdmin || imsEnabled
-  const allowManualSuggestions = posPlanTier !== 'starter'
-  const allowCoOccurrence      = allowManualSuggestions && imsAvailable
-  const allowMeFilter          = posPlanTier === 'pro' && imsAvailable
+  // Upsell/Cross-sell suggestion chips (built S210).
+  // These used to ladder off pos_plan (starter/growth/pro). Crest POS is sold as a yes/no module
+  // with no tiers at all, so that ladder gated on a tier the product never sold — and since
+  // ClientDrawer defaulted the column to 'starter', most POS clients silently got only the basic
+  // category nudge. Buying POS now buys the whole suggestion engine.
+  //
+  // The IMS dependency is a real axis and stays: co-occurrence is sold as the IMS+POS combination,
+  // and the Menu Engineering filter genuinely needs recipes.me_class, which only IMS's Menu
+  // Engineering report ever populates. Admin bypasses, same convention as everywhere else.
+  const imsAvailable      = isAdmin || imsEnabled
+  const allowCoOccurrence = imsAvailable
+  const allowMeFilter     = imsAvailable
 
   /* ── view ── */
   const [view, setView] = useState('floor')
@@ -897,9 +897,11 @@ export default function PosOrders() {
     computeSuggestions(recipe)
   }
 
-  // Starter-tier fallback: no manual pairings, no co-occurrence, no ME data to work with, so
-  // just nudge toward a category not yet represented in the order — one item per missing
-  // category, in menu order (no smart ranking, nothing data-driven).
+  // Fallback for when there is nothing data-driven to rank on — a POS-only client (no IMS, so no
+  // me_class and no co-occurrence) with no manual pairing on this item. rank() below filters to
+  // _score > 0, so without this the panel would come back empty for them. Was previously reached
+  // only via a pos_plan === 'starter' check, which gated it on a tier POS does not sell.
+  // Nudges toward a category not yet in the order — one item per missing category, in menu order.
   function categoryNudgeSuggestions(recipe, currentIds) {
     const presentCats = new Set([recipe.category || 'Other', ...orderItems.map(i => i.category || 'Other')])
     const seenCats = new Set()
@@ -918,15 +920,10 @@ export default function PosOrders() {
   async function computeSuggestions(recipe) {
     const currentIds = new Set([...orderItems.map(i => i.recipe_id), recipe.id])
 
-    if (posPlanTier === 'starter') {
-      setSuggestions(categoryNudgeSuggestions(recipe, currentIds))
-      return
-    }
-
     const hasMeData   = allowMeFilter && menu.some(r => r.me_class)
     const isPlowhorse = allowMeFilter && recipe.me_class === 'plowhorse'
     const triggerCat  = recipe.category || 'Other'
-    const manualIds   = new Set(manualSuggestions[recipe.id] || []) // allowManualSuggestions is true at this point
+    const manualIds   = new Set(manualSuggestions[recipe.id] || [])
 
     function calcScore(r, coMap = {}, maxCo = 0) {
       if (manualIds.has(r.id)) return 100
@@ -952,21 +949,30 @@ export default function PosOrders() {
         .slice(0, 4)
     }
 
-    // Manual pairings + ME filter: immediate suggestions from local data. An empty initial must
-    // NOT return early here — on tiers where co-occurrence is the only scoring layer (Growth+IMS
-    // with no manual pairing on this item, or Pro+IMS before Menu Engineering has ever run),
-    // every local score ties at zero and the panel only fills once the RPC below responds.
-    setSuggestions(rank())
+    // Manual pairings + ME filter: immediate suggestions from local data. An empty initial result
+    // must NOT return early — where co-occurrence is the only scoring layer (IMS enabled but no
+    // manual pairing on this item, or before Menu Engineering has ever run), every local score
+    // ties at zero and the panel only fills once the RPC below responds. So fall back to the
+    // category nudge only when co-occurrence isn't coming either.
+    const ranked = rank()
+    setSuggestions(ranked.length || allowCoOccurrence ? ranked : categoryNudgeSuggestions(recipe, currentIds))
 
     // Co-occurrence (async — re-ranks on arrival)
     if (!allowCoOccurrence || !clientId) return
     const { data: coData } = await supabase.rpc('get_cooccurrence', {
       p_client_id: clientId, p_recipe_id: recipe.id, p_days: 90,
     })
-    if (!coData?.length) return
+    if (!coData?.length) {
+      // No pairing history yet (a new client, or a dish never sold alongside anything). The
+      // initial rank() above deliberately didn't fall back because co-occurrence was still
+      // pending; now that it has come back empty, the nudge is all that's left.
+      if (!ranked.length) setSuggestions(categoryNudgeSuggestions(recipe, currentIds))
+      return
+    }
     const coMap = Object.fromEntries(coData.map(r => [r.paired_recipe_id, Number(r.co_count)]))
     const maxCo = Math.max(...Object.values(coMap))
-    setSuggestions(rank(coMap, maxCo))
+    const reranked = rank(coMap, maxCo)
+    setSuggestions(reranked.length ? reranked : categoryNudgeSuggestions(recipe, currentIds))
   }
 
   function setQty(idx, qty) {

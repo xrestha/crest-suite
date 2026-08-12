@@ -59,7 +59,7 @@ export const IMS_GUIDE_GROUPS = [
         ],
         fields: [
           { label: 'Menu Health tile', desc: 'Count of recipes priced under their target_fc_pct, with an estimated monthly NPR opportunity if repriced to target — the same underlying calculation as Menu Repricing, just summarized to one number.' },
-          { label: 'Fixed Costs % of Revenue / Est. Net Margin % (Pro)', desc: 'Pulls every overhead bucket (Fixed + Labor + Tax & Fees combined), unlike Recipe Costing\'s per-recipe allocation which uses only the Fixed Overheads bucket.' },
+          { label: 'Fixed Costs % of Revenue / Est. Net Margin % (Growth+)', desc: 'Pulls every overhead bucket (Fixed + Labor + Tax & Fees combined), unlike Recipe Costing\'s per-recipe allocation which uses only the Fixed Overheads bucket.' },
           { label: 'Projection dashed line', desc: 'Only appears on the current open BS month once ≥5 days of dated sales entries exist; a least-squares trendline extended to month-end, clamped to 1.25× the last 7 days\' actual peak so one wild day can\'t blow up the projection.' },
         ],
         formulas: [
@@ -68,7 +68,7 @@ export const IMS_GUIDE_GROUPS = [
           'Reorder shortfall = Par Qty − Current Stock, where Current Stock is the physical closing count if one exists, else max(0, Opening + Net Purchases − theoretical usage).',
         ],
         gotchas: [
-          'Gated tiles (Variance, Recipe Costing, Menu Repricing, Reorder, Overheads) don\'t just hide the number on a lower plan — the underlying query is skipped entirely, so a Starter browser never even holds the Growth-tier figures in memory.',
+          'Gated tiles (Variance, Recipe Costing, Menu Repricing, Reorder, Overheads — all Growth+) don\'t just hide the number on a lower plan — the underlying query is skipped entirely, so a Starter browser never even holds the Growth-tier figures in memory.',
           'The Dashboard\'s own "Close & Start Next" shortcut does NOT carry forward physical closing counts into next month\'s opening stock — only Periods\' own Close button does that. Always close periods from Periods, not this shortcut, if the physical count matters (it almost always does).',
         ],
         connections: 'Reads from Periods, Purchases, Sales Entry, Recipe Costing, Stock Count, and Overheads. Links out to all of them plus Variance Report and Reorder Report.',
@@ -428,7 +428,7 @@ export const IMS_GUIDE_GROUPS = [
         id: 'overheads',
         title: 'Overheads',
         route: '/overheads',
-        plan: 'Pro',
+        plan: 'Growth+',
         summary:
           'Enter the period\'s fixed costs across three buckets (Fixed Overheads, Labor, Tax & Fees), see a true P&L against revenue, and get a break-even calculation.',
         workflow: [
@@ -457,7 +457,7 @@ export const IMS_GUIDE_GROUPS = [
         id: 'fixed-assets',
         title: 'Fixed Assets',
         route: '/fixed-assets',
-        plan: 'Pro',
+        plan: 'Crest Suite Pro',
         summary:
           'Tracks equipment, furniture, vehicles, and kitchen machinery from purchase to disposal — book (straight-line) depreciation for internal accounts, plus a genuinely separate Nepal statutory pooled-WDV tax depreciation basis (Income Tax Act 2058) for annual IRD filing. Viewing is supervisor+, posting a depreciation/tax run is manager+ only.',
         workflow: [
@@ -609,7 +609,7 @@ export const IMS_GUIDE_GROUPS = [
         id: 'reorder-report',
         title: 'Reorder Report',
         route: '/reorder',
-        plan: 'Starter+',
+        plan: 'Growth+',
         summary: 'Auto-generates a purchase shopping list of items at/below their par level, with inline par-level editing.',
         workflow: [
           'Select period (default filter: Reorder Only). Click a Par Level cell to edit inline (Enter=save, Escape=cancel). Search/filter by category.',
@@ -633,7 +633,7 @@ export const IMS_GUIDE_GROUPS = [
         id: 'stock-movements',
         title: 'Stock Movements',
         route: '/stock-movements',
-        plan: 'Starter+',
+        plan: 'Growth+',
         summary: 'A raw, non-editable transactional ledger of every POS-driven stock depletion (sale or comp) for a period — the audit trail behind Book Stock and usage calculations. Two tabs: Raw Items (the ledger) and Sub-Recipes (a derived prep-level rollup).',
         workflow: [
           'Select period (or arrive via a deep link from Reorder Report). Search by item, filter by source (POS Sale / POS Comp). Export Excel.',
@@ -668,7 +668,7 @@ export const IMS_GUIDE_GROUPS = [
         id: 'demand-forecast',
         title: 'Demand Forecast',
         route: '/demand-forecast',
-        plan: 'Pro',
+        plan: 'Crest Suite Pro',
         summary:
           'Predicts covers, revenue, and per-dish quantity for the next 7 or 30 days for purchasing/prep planning, using a simple, auditable day-of-week moving average — explicitly not a trained AI model, by design, so results stay explainable.',
         workflow: [
@@ -888,7 +888,7 @@ export const IMS_GUIDE_GROUPS = [
         id: 'outstanding-payables',
         title: 'Outstanding Payables',
         route: '/payables',
-        plan: 'Growth+',
+        plan: 'Starter+',
         summary: 'Tracks unpaid Credit-method purchase bills, their age, and lets an admin record full or partial payments directly on the page.',
         workflow: [
           'Outstanding tab (unpaid bills) and Paid History tab. Bills are grouped by vendor + invoice ref + period + day.',
@@ -1072,7 +1072,7 @@ export const IMS_GUIDE_GROUPS = [
         id: 'vendor-balance-confirmation',
         title: 'Vendor Balance Confirmation',
         route: '/vendor-balance-confirmation',
-        plan: 'Pro',
+        plan: 'Starter+',
         summary:
           'A printable per-vendor balance confirmation letter for a Nepal BS fiscal year — built specifically for IRD Annexure 13 reconciliation, where a vendor confirms in writing what they show as owed to them. Pick a vendor and fiscal year to get an Opening Balance carried forward from before the year started, plus every bill/payment/return dated within the year shown as its own line.',
         workflow: [

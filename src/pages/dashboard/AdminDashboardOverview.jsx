@@ -6,7 +6,7 @@ import { supabase } from '../../supabaseClient'
 import Tip from '../../components/Tip'
 import { BS_MONTHS, adToBs } from '../../utils/bsCalendar'
 import { getSubStatus, getDateStatus } from '../../utils/subscription'
-import { DEFAULT_PLAN_PRICES, SUITE_BUNDLES } from '../../data/pricingPlans'
+import { DEFAULT_PLAN_PRICES, SUITE_ADDON } from '../../data/pricingPlans'
 
 // Cross-tenant admin overview — every client's periods/profiles in one unscoped read to build
 // the platform-wide table, so this stays on raw supabase.from() rather than scopedDb (there is
@@ -29,7 +29,7 @@ export default function AdminDashboardOverview() {
     const since24h = new Date(Date.now() - 86400000).toISOString()
     const [{ data: clients }, { data: periods }, { data: recentProfiles }] = await Promise.all([
       supabase.from('clients')
-        .select('id, name, plan, hr_plan, pos_plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, is_trial, subscribe_requested, trial_expires_at')
+        .select('id, name, plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, is_trial, subscribe_requested, trial_expires_at')
         .order('name'),
       supabase.from('monthly_periods')
         .select('client_id, bs_year, bs_month, status')
@@ -101,22 +101,19 @@ export default function AdminDashboardOverview() {
     const imsEnd = c.ims_ends_at || c.subscription_ends_at
     const imsActive = c.ims_enabled !== false && imsEnd && Math.ceil((new Date(imsEnd) - Date.now()) / 86400000) > 0
 
-    // Suite Bundle is a single discounted subscription covering IMS+HR+POS together, not an
-    // add-on — if it's set, it replaces the per-module sum entirely (summing on top of it would
-    // double-count). Tracked by its own suite_ends_at (added alongside suite_plan's own renewal
-    // schedule, independent of any single module's expiry) — falls back to IMS's active window
-    // only for pre-migration rows that have suite_plan set but predate suite_ends_at existing.
+    // Crest Suite Pro is an ADD-ON priced on top of the module sum, not a bundle that replaces
+    // it. It used to be the latter — three discounted tiers covering IMS+HR+POS together — so
+    // this branch returned early and ignored the modules entirely. Now it adds. Tracked by its
+    // own suite_ends_at (independent of any single module's expiry), falling back to IMS's
+    // active window only for pre-migration rows set before suite_ends_at existed.
     const suiteEnd = c.suite_ends_at || (imsActive ? imsEnd : null)
     const suiteActive = c.suite_plan && suiteEnd && Math.ceil((new Date(suiteEnd) - Date.now()) / 86400000) > 0
-    if (suiteActive) {
-      const bundle = SUITE_BUNDLES.find(b => b.key === c.suite_plan)
-      if (bundle) return c.billing_cycle === 'annual' ? bundle.annual : bundle.monthly
-    }
 
     let val = 0
     if (imsActive) val += monthlyRate(imsPrices[c.plan] || 0, c.billing_cycle)
     if (c.hr_enabled && c.hr_ends_at && Math.ceil((new Date(c.hr_ends_at) - Date.now()) / 86400000) > 0) val += monthlyRate(hrPrice, c.billing_cycle)
     if (c.pos_enabled && c.pos_ends_at && Math.ceil((new Date(c.pos_ends_at) - Date.now()) / 86400000) > 0) val += monthlyRate(posPrice, c.billing_cycle)
+    if (suiteActive) val += c.billing_cycle === 'annual' ? SUITE_ADDON.annual : SUITE_ADDON.monthly
     return val
   }
   const estMRR = active.reduce((sum, c) => sum + clientMRR(c), 0)
@@ -351,17 +348,13 @@ export default function AdminDashboardOverview() {
                           </div>
                         </td>
 
-                        {/* Plan badge(s) */}
+                        {/* Plan badge — IMS tier only. The "HR: pro"/"POS: pro" tags that used to
+                            sit beside it advertised tiers neither module sells; HR and POS are
+                            yes/no, and their presence is already shown by the module pills. */}
                         <td>
                           <span style={planBadge(c.plan)}>
                             {c.plan === 'pro' ? 'Pro' : c.plan === 'growth' ? 'Growth' : 'Starter'}
                           </span>
-                          {c.hr_enabled && c.hr_plan && c.hr_plan !== c.plan && (
-                            <span style={{ fontSize: 10, color: 'var(--theme-text3)', marginLeft: 5 }}>HR: {c.hr_plan}</span>
-                          )}
-                          {c.pos_enabled && c.pos_plan && c.pos_plan !== c.plan && (
-                            <span style={{ fontSize: 10, color: 'var(--theme-text3)', marginLeft: 5 }}>POS: {c.pos_plan}</span>
-                          )}
                         </td>
 
                         {/* Monthly Value (IMS + HR + POS) */}

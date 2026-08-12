@@ -443,9 +443,13 @@ export default function AdminClients() {
                   {/* Module pills */}
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
                     {[
-                      { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan,     color: 'var(--theme-accent)', borderRgba: 'var(--theme-focus-ring)' },
-                      { key: 'HR',  enabled: !!c.hr_enabled,          plan: c.hr_plan,  color: 'var(--theme-green)', borderRgba: 'rgba(52,211,153,0.35)' },
-                      { key: 'POS', enabled: !!c.pos_enabled,         plan: c.pos_plan, color: 'var(--theme-purple)', borderRgba: 'rgba(167,139,250,0.35)' },
+                      // Only IMS carries a tier. HR and POS are yes/no modules, so their pills
+                      // read "HR · on"/"POS · off" instead of a plan name neither module sells —
+                      // they used to show c.hr_plan/c.pos_plan, which made a vestigial column
+                      // look like something the client had bought.
+                      { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan, color: 'var(--theme-accent)', borderRgba: 'var(--theme-focus-ring)' },
+                      { key: 'HR',  enabled: !!c.hr_enabled,          plan: null,   color: 'var(--theme-green)', borderRgba: 'rgba(52,211,153,0.35)' },
+                      { key: 'POS', enabled: !!c.pos_enabled,         plan: null,   color: 'var(--theme-purple)', borderRgba: 'rgba(167,139,250,0.35)' },
                     ].map(m => (
                       // minWidth + centred text so IMS/HR/POS line up as three columns down the
                       // list. Without it the pills are content-width, so "IMS · Starter" and
@@ -460,7 +464,7 @@ export default function AdminClients() {
                         // so every pill is the same width and the three columns line up exactly.
                         minWidth: 100, textAlign: 'center', boxSizing: 'border-box',
                       }}>
-                        {m.key}{m.enabled ? ` · ${planLabel(m.plan || 'starter')}` : ' · off'}
+                        {m.key}{!m.enabled ? ' · off' : m.plan ? ` · ${planLabel(m.plan)}` : ' · on'}
                       </span>
                     ))}
                   </div>

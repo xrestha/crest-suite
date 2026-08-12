@@ -50,8 +50,10 @@ const NAV = [
   { to: '/recipes',          label: 'Recipe Costing',    icon: ChefHat, featureKey: 'recipe_costing',  minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/menu-pricing',     label: 'Menu Pricing',      icon: Tag, featureKey: 'menu_pricing',    minPlan: 'starter', minImsRole: 'manager' },
   { to: '/menu-engineering', label: 'Menu Engineering',  icon: PieChart, featureKey: 'menu_engineering',minPlan: 'pro', minImsRole: 'manager' },
-  { to: '/overheads',        label: 'Overheads',         icon: Receipt, featureKey: 'overheads',       minPlan: 'pro', minImsRole: 'manager' },
-  { to: '/fixed-assets',     label: 'Fixed Assets',      icon: Landmark, featureKey: 'fixed_asset_register', minPlan: 'pro', minImsRole: 'supervisor' },
+  { to: '/overheads',        label: 'Overheads',         icon: Receipt, featureKey: 'overheads',       minPlan: 'growth', minImsRole: 'manager' },
+  // Crest Suite Pro, not an IMS tier — no minPlan/featureKey, so the entry stays visible and the
+  // in-page SuiteGate renders the upsell (same treatment as Owner Dashboard / Monthly Report).
+  { to: '/fixed-assets',     label: 'Fixed Assets',      icon: Landmark, minImsRole: 'supervisor' },
 ]
 
 // cat: which characteristic report-group the item renders under in the sidebar
@@ -63,9 +65,10 @@ const REPORTS = [
   { to: '/budget',               label: 'Budget vs Actual',     icon: Target, featureKey: 'budget_vs_actual',  cat: 'summary', minPlan: 'growth', minImsRole: 'supervisor' },
   // Stock & variance
   { to: '/stock-report',         label: 'Stock Report',         icon: Boxes, featureKey: 'stock_report',         cat: 'stock', minImsRole: 'supervisor' },
-  { to: '/reorder',              label: 'Reorder Report',       icon: RefreshCw, featureKey: 'reorder_report',       cat: 'stock', minImsRole: 'supervisor' },
-  { to: '/stock-movements',      label: 'Stock Movements',      icon: History, featureKey: 'stock_movement_log',  cat: 'stock', minImsRole: 'supervisor' },
-  { to: '/demand-forecast',      label: 'Demand Forecast',      icon: LineChart, featureKey: 'demand_forecast',      cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
+  { to: '/reorder',              label: 'Reorder Report',       icon: RefreshCw, featureKey: 'reorder_report',       cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
+  { to: '/stock-movements',      label: 'Stock Movements',      icon: History, featureKey: 'stock_movement_log',  cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
+  // Crest Suite Pro — see the Fixed Assets note above; gated in-page, not here.
+  { to: '/demand-forecast',      label: 'Demand Forecast',      icon: LineChart, cat: 'stock', minImsRole: 'supervisor' },
   { to: '/wastage-report',       label: 'Wastage Report',       icon: Trash2, featureKey: 'wastage_report',       cat: 'stock', minImsRole: 'supervisor' },
   { to: '/dead-stock',           label: 'Dead Stock',           icon: PackageX, featureKey: 'dead_stock',           cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/variance',             label: 'Variance Report',      icon: ArrowUpDown, featureKey: 'variance_report',      cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
@@ -76,7 +79,7 @@ const REPORTS = [
   { to: '/vat-report',           label: 'VAT Report',           icon: Percent, featureKey: 'vat_report',           cat: 'money', minImsRole: 'manager' },
   { to: '/non-vat-report',      label: 'Non-VAT Report',       icon: ReceiptText, featureKey: 'non_vat_report',       cat: 'money', minImsRole: 'manager' },
   { to: '/payments',             label: 'Payment Summary',      icon: Wallet, featureKey: 'payment_summary',      cat: 'money', minPlan: 'starter', minImsRole: 'manager' },
-  { to: '/payables',             label: 'Outstanding Payables', icon: HandCoins, featureKey: 'outstanding_payables', cat: 'money', minPlan: 'growth', minImsRole: 'manager' },
+  { to: '/payables',             label: 'Outstanding Payables', icon: HandCoins, featureKey: 'outstanding_payables', cat: 'money', minImsRole: 'manager' },
   { to: '/purchase-one-lakh-report', label: 'Purchase 1L+ Report', icon: Banknote, featureKey: 'vat_report',       cat: 'money', minImsRole: 'manager' },
   // Menu & vendors
   { to: '/best-sellers',         label: 'Best & Worst Sellers', icon: Trophy, featureKey: 'best_sellers',   cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
@@ -85,7 +88,7 @@ const REPORTS = [
   { to: '/menu-repricing',       label: 'Menu Repricing',       icon: Tags, featureKey: 'menu_repricing', cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
   { to: '/supplier-prices',      label: 'Price Tracker',        icon: LineChart, featureKey: 'price_tracker',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
   { to: '/vendors-report',       label: 'Vendor Report',        icon: Building2, featureKey: 'vendor_report',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
-  { to: '/vendor-balance-confirmation', label: 'Vendor Balance Confirmation', icon: FileSignature, featureKey: 'vendor_balance_confirmation', cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
+  { to: '/vendor-balance-confirmation', label: 'Vendor Balance Confirmation', icon: FileSignature, featureKey: 'vendor_balance_confirmation', cat: 'menu', minImsRole: 'manager' },
 ]
 
 // Collapsible nav groups for the IMS sidebar (Dashboard stays pinned above; Settings below).
@@ -169,7 +172,8 @@ const HR_GROUPS = [
 export default function Layout() {
   const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient,
           isTrial, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
-          accessReason, graceDaysLeft,
+          accessReason, graceDaysLeft, clientId,
+          outlets, canSwitchOutlet, switchOutlet,
           hasPosAccess, posRole, posTeam, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
@@ -181,8 +185,40 @@ export default function Layout() {
   const [pendingTrialCount, setPendingTrialCount] = useState(0)
   const [newTrialCount, setNewTrialCount] = useState(0)
   const [subscribing, setSubscribing] = useState(false)
+  const [outletDropdownOpen, setOutletDropdownOpen] = useState(false)
+  const [switchingOutlet, setSwitchingOutlet] = useState(false)
+  const [outletError, setOutletError] = useState('')
   const dropdownRef = useRef(null)
+  const outletDropdownRef = useRef(null)
   const location = useLocation()
+
+  // Switching outlets re-points every scoped query at another tenant, so it must not happen while
+  // the POS offline queue still holds unsynced orders — those would flush against the wrong
+  // outlet. crest-offline is opened lazily here rather than imported at module scope so a client
+  // without POS never touches IndexedDB for this check.
+  async function handleSwitchOutlet(targetId) {
+    if (targetId === clientId) { setOutletDropdownOpen(false); return }
+    setOutletError('')
+    setSwitchingOutlet(true)
+    try {
+      const { getQueue, getPosOrderQueue } = await import('../utils/offlineQueue')
+      // Both queues matter: stock ops write against the current tenant just as POS orders do.
+      const [stockOps, posOrders] = await Promise.all([getQueue(), getPosOrderQueue()])
+      const pending = (stockOps?.length || 0) + (posOrders?.length || 0)
+      if (pending > 0) {
+        setOutletError(`${pending} offline change${pending === 1 ? '' : 's'} still syncing — reconnect and let them finish before switching outlet.`)
+        setSwitchingOutlet(false)
+        return
+      }
+    } catch {
+      // No offline store on this device: nothing queued, nothing to protect.
+    }
+    const { error } = await switchOutlet(targetId)
+    setSwitchingOutlet(false)
+    if (error) { setOutletError(error.message || 'Could not switch outlet.'); return }
+    setOutletDropdownOpen(false)
+    navigate('/dashboard')
+  }
 
   // Collapsible nav groups: defaults — Operations/Costing/HR open, report groups collapsed.
   const [openGroups, setOpenGroups] = useState(() => {
@@ -320,21 +356,28 @@ export default function Layout() {
     const reportItem = { to: '/owner-report', label: 'Report', icon: ScrollText }
     const dashItem = { ...dashNavItem, label: 'Dashboard' }
     return (
-      <div style={{ display: 'flex', gap: 4, margin: '1px 10px' }}>
-        {(isAdmin || isOwner) && (
+      <>
+        <div style={{ display: 'flex', gap: 4, margin: '1px 10px' }}>
+          {(isAdmin || isOwner) && (
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {renderNavItem(ownerItem, { pinnable: false, compact: true })}
+            </div>
+          )}
+          {(isAdmin || isOwner) && (
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {renderNavItem(reportItem, { pinnable: false, compact: true })}
+            </div>
+          )}
           <div style={{ flex: 1, minWidth: 0 }}>
-            {renderNavItem(ownerItem, { pinnable: false, compact: true })}
+            {renderNavItem(dashItem, { pinnable: false, compact: true })}
           </div>
-        )}
-        {(isAdmin || isOwner) && (
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {renderNavItem(reportItem, { pinnable: false, compact: true })}
-          </div>
-        )}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {renderNavItem(dashItem, { pinnable: false, compact: true })}
         </div>
-      </div>
+        {/* Group Console gets its own full-width row rather than a fourth compact slot above —
+            three items already fill a 240px sidebar at readable size, and this one only exists
+            for a multi-outlet client, so it should not shrink the other three for everyone. */}
+        {(isAdmin || isOwner) && outlets.length > 1 &&
+          renderNavItem({ to: '/group-dashboard', label: 'Group Console', icon: Building2 }, { pinnable: false })}
+      </>
     )
   }
 
@@ -413,6 +456,7 @@ export default function Layout() {
       dashNavItem,
       { to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown },
       { to: '/owner-report', label: 'Monthly Owner/Manager Report', icon: ScrollText },
+      ...(outlets.length > 1 ? [{ to: '/group-dashboard', label: 'Group Console', icon: Building2 }] : []),
       ...NAV.slice(1),
       ...REPORTS,
       ...IMS_GROUPS.find(g => g.key === 'ims-admin').items,
@@ -712,11 +756,31 @@ export default function Layout() {
                       {plan === 'pro' ? 'Pro' : plan === 'growth' ? 'Growth' : 'Starter'}
                     </span>
                   </span>
-                  <span className="sidebar-client-name">{clientName}</span>
+                  {/* Multi-outlet: the same dropdown mechanic the admin switcher above uses, but
+                      scoped to this owner's own group and written through set_active_outlet().
+                      canSwitchOutlet is false for every staff account and for anyone with fewer
+                      than two outlets, so an ungrouped client sees exactly what they see today. */}
+                  {canSwitchOutlet ? (
+                    <button
+                      type="button"
+                      className="sidebar-dropdown-trigger"
+                      onClick={() => setOutletDropdownOpen(o => !o)}
+                      aria-haspopup="listbox"
+                      aria-expanded={outletDropdownOpen}
+                      disabled={switchingOutlet}
+                    >
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                        {switchingOutlet ? 'Switching…' : clientName}
+                      </span>
+                      <ChevronDown size={13} strokeWidth={2.25} aria-hidden="true" className={`sidebar-dropdown-arrow${outletDropdownOpen ? ' sidebar-dropdown-arrow--open' : ''}`} />
+                    </button>
+                  ) : (
+                    <span className="sidebar-client-name">{clientName}</span>
+                  )}
                 </div>
                 {userInfoBlock}
               </div>
-              {(() => {
+              {!outletDropdownOpen && (() => {
                 const s = getSubStatus(profile?.clients)
                 if (!s.label) return null
                 return (
@@ -729,6 +793,39 @@ export default function Layout() {
                   </span>
                 )
               })()}
+              {outletDropdownOpen && canSwitchOutlet && (
+                <div className="sidebar-dropdown-panel" ref={outletDropdownRef} role="listbox">
+                  {outlets.map(o => {
+                    const s = getSubStatus(o)
+                    const active = o.id === clientId
+                    return (
+                      <button
+                        key={o.id}
+                        role="option"
+                        aria-selected={active}
+                        className={`sidebar-dropdown-item${active ? ' sidebar-dropdown-item--active' : ''}`}
+                        onClick={() => handleSwitchOutlet(o.id)}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name}</span>
+                        {/* A lapsed outlet inside a healthy group locks only itself
+                            (getAccessState/ProtectedRoute are per selected outlet), so the badge
+                            is the only warning before someone switches into a locked app. */}
+                        {s.label && (
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 3, flexShrink: 0,
+                            color: s.color, background: s.bg, border: `1px solid ${s.border}`
+                          }}>
+                            {s.label}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {outletError && (
+                <p role="alert" style={{ fontSize: 10, color: 'var(--theme-red)', margin: '6px 0 0' }}>{outletError}</p>
+              )}
             </div>
           ) : null
         ))()}

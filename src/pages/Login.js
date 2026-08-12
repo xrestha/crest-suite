@@ -95,7 +95,7 @@ export default function Login() {
   const [trialSuccess, setTrialSuccess] = useState(false)
   const [trialCaps, trialCapsHandlers] = useCapsLock()
 
-  const { signIn, session, ready } = useAuth()
+  const { signIn, session, ready, profile } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
 
@@ -183,7 +183,13 @@ export default function Login() {
   // via RootRedirect but `/login` had no equivalent, so a stale tab or a back-button press landed
   // on an empty login form for an authenticated session. Gated on `ready` so this never fires
   // during the auth-resolution window and bounces a genuinely logged-out visitor.
-  if (ready && session) return <Navigate to="/dashboard" replace />
+  //
+  // `profile` is required too, and that is the second half of the sign-in redirect loop fixed
+  // alongside ProtectedRoute: a session whose profile fetch FAILED would otherwise be sent to
+  // /dashboard, rejected back here for having no profile, and sent again forever. Requiring the
+  // profile means a broken session lands on the sign-in form — where it can actually be fixed —
+  // instead of ping-ponging.
+  if (ready && session && profile) return <Navigate to="/dashboard" replace />
 
   const trialFieldError = (id) => tFieldErr[id]
     ? <span className="login-field-error" id={`${id}-err`} role="alert">{tFieldErr[id]}</span>

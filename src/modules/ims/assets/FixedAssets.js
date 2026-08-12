@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import SuiteGate from '../../../components/SuiteGate'
 import AssetRegisterTab from './AssetRegisterTab'
 import DepreciationRunTab from './DepreciationRunTab'
 import ValuationReportTab from './ValuationReportTab'
@@ -62,6 +63,7 @@ export default function FixedAssets() {
         </div>
       </div>
 
+      <SuiteGate featureKey="fixed_asset_register" featureLabel="Fixed Assets" requireModules={['ims']}>
       <div className="tab-bar no-print" style={{ marginBottom: 20 }}>
         {TABS.map(t => (
           <button
@@ -95,6 +97,7 @@ export default function FixedAssets() {
           )}
         </>
       )}
+      </SuiteGate>
     </div>
   )
 }

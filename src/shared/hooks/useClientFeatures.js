@@ -1,20 +1,23 @@
 import { useAuth } from '../../context/AuthContext'
 
-// Derives Suite module flags from the clients table.
-// When shared_clients schema is live (ims_enabled, pos_enabled, hr_enabled columns),
-// swap the derivation below for direct reads from profile.clients.
+// Derives module flags from the clients table.
+//
+// NOTE: this hook appears to be dead code — a grep for the exact export name finds only this
+// definition and the `shared/hooks` barrel that re-exports it, and nothing imports that barrel
+// either. Left in place rather than deleted, but do not add callers without checking whether
+// useAuth() already gives you what you need.
+//
+// pos_plan/hr_plan were removed from the return shape: Crest HR and Crest POS are yes/no modules
+// with no tiers, so a "plan" for either is not something the product sells. ims_plan went too —
+// it read the derived `plan`, while the clients.ims_plan column it was named after has never
+// existed. Callers should use ims_enabled/pos_enabled/hr_enabled plus `plan` from useAuth().
 export function useClientFeatures() {
-  const { profile, plan, isAdmin } = useAuth()
+  const { profile, isAdmin } = useAuth()
   const client = profile?.clients ?? {}
 
   return {
     ims_enabled: isAdmin || !!client.id,
-    ims_plan:    plan ?? null,
-
     pos_enabled: isAdmin || (client.pos_enabled ?? false),
-    pos_plan:    client.pos_plan ?? null,
-
     hr_enabled:  isAdmin || (client.hr_enabled  ?? false),
-    hr_plan:     client.hr_plan  ?? null,
   }
 }

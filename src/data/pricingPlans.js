@@ -14,6 +14,10 @@ export const MODULE_COLORS = {
   pos: '#a78bfa',
 }
 
+// Each tier sells one job. Starter records and complies, Growth controls cost, Pro decides
+// strategy — see the same rule expressed as key sets in AuthContext.js. Keep these lists in step
+// with STARTER_KEYS/GROWTH_KEYS/PRO_KEYS there; this file is what the public pricing page, the
+// Help page's Pricing tab and the admin billing panel all read.
 const STARTER_FEATURES = [
   'Dashboard & KPI Overview',
   'Periods (BS Calendar)',
@@ -26,8 +30,9 @@ const STARTER_FEATURES = [
   'Payment Summary (Cash / Credit / FonePay)',
   'Monthly Summary & COGS by Category',
   'Annual Summary (BS Fiscal Year Rollup)',
-  'Reorder Report & Par Levels',
+  'Outstanding Payables with Aging Buckets',
   'VAT & Non-VAT Reports',
+  'Vendor Balance Confirmation (IRD Annexure 13)',
   'Wastage Report with Excel Export',
   'Settings & Outlet Customisation',
   'Staff Meals Tracking',
@@ -36,7 +41,9 @@ const STARTER_FEATURES = [
 const GROWTH_EXTRAS = [
   'Recipe Costing & Live FC%',
   'Variance Report (Theoretical vs Actual)',
-  'Outstanding Payables with Aging Buckets',
+  'Reorder Report & Par Levels',
+  'Stock Movements Ledger (Book vs Physical)',
+  'Overheads, P&L, and Break-Even Analysis',
   'Budget vs Actual per Category',
   'Internal Requisitions (Store to Department)',
   'Dead Stock & Slow Mover Detection',
@@ -55,9 +62,7 @@ const PRO_EXTRAS = [
   'FIFO / Expiry Batch Tracking',
   'Vendor Spend Report',
   'Supplier Price Tracker & Rate Alerts',
-  'Overheads, P&L, and Break-Even Analysis',
   'Theoretical Variance (Advanced Drill-Down)',
-  'Demand Forecast (7/30-Day Covers & Revenue Prediction)',
 ]
 
 export const IMS_TIERS = [
@@ -92,13 +97,29 @@ export const POS_PRICING = {
   ],
 }
 
-// Suite = IMS (at the matching tier) + HR + POS, bundled at a discount vs buying separately.
-// ~20% off the sum of buying each module at its listed price (2000+2600+2000=6600 / 2600+2600+2000=7200 / 3500+2600+2000=8100).
-export const SUITE_BUNDLES = [
-  { key: 'starter', label: 'Suite Starter', monthly: 5300, annual: 3975 },
-  { key: 'growth',  label: 'Suite Growth',  monthly: 5800, annual: 4350 },
-  { key: 'pro',     label: 'Suite Pro',     monthly: 6500, annual: 4875 },
-]
+// Crest Suite Pro — an ADD-ON bought on top of whatever modules a client already has, not a
+// bundle that contains them. It used to be three tiers priced at ~20% off the sum of all three
+// modules, which had two problems: Suite Starter unlocked no Suite feature at all (both
+// SuiteGate call sites were minTier="growth"), and Suite Pro added nothing over Suite Growth on
+// its own axis — the only difference was the bundled IMS tier. One SKU, one price, real features.
+//
+// Sold PER OUTLET. Six of the seven features are per-outlet by nature (each outlet has its own
+// Owner Dashboard, Monthly Report, Fixed Asset Register); Multi-Outlet is the group-level one,
+// and it resolves under the same rule — the group console rolls up exactly those outlets whose
+// suite_plan = 'pro' and names the ones it excluded.
+export const SUITE_ADDON = {
+  key: 'pro',
+  label: 'Crest Suite Pro',
+  monthly: 2000, annual: 1500,
+  requiresLabel: 'Requires Crest IMS · added on top of your modules',
+  features: [
+    'Owner Dashboard — live margin & labour cost % across modules',
+    'Monthly Owner/Manager Report — frozen snapshot per closed period',
+    'Multi-Outlet Group Console — every branch on one screen',
+    'Demand Forecast (7/30-Day Covers & Revenue Prediction)',
+    'Fixed Assets — depreciation, valuation & Nepal statutory tax pools',
+  ],
+}
 
 // Admin-analytics pricing table (Settings > Plan Pricing, used by AdminDashboardOverview.jsx's
 // MRR/ARR estimate) — derived from the same tiers/prices above so a fresh install's internal

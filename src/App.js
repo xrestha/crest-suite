@@ -18,6 +18,7 @@ const Login = lazy(() => import('./pages/Login'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const OwnerDashboard = lazy(() => import('./pages/dashboard/OwnerDashboard'))
+const GroupDashboard = lazy(() => import('./pages/dashboard/GroupDashboard'))
 const MonthlyOwnerReport = lazy(() => import('./pages/dashboard/MonthlyOwnerReport'))
 const Periods = lazy(() => import('./pages/Periods'))
 const Items = lazy(() => import('./modules/ims/items/Items'))
@@ -128,6 +129,9 @@ export default function App() {
               {/* Universal — all authenticated users regardless of module */}
               <Route path="/dashboard"        element={<Dashboard />} />
               <Route path="/owner-dashboard"  element={<OwnerDashboard />} />
+              {/* Crest Suite Pro — SuiteGate lives inside the page so the nav entry stays
+                  visible and an ineligible viewer gets an inline upsell, not a redirect. */}
+              <Route path="/group-dashboard"  element={<GroupDashboard />} />
               <Route path="/owner-report"     element={<MonthlyOwnerReport />} />
               <Route path="/periods"          element={<Periods />} />
               <Route path="/help"       element={<Help />} />
@@ -148,10 +152,13 @@ export default function App() {
                 element={<ModuleGate module="ims"><PremiumGate featureKey="monthly_summary" minPlan="starter"><MonthlySummary /></PremiumGate></ModuleGate>} />
               <Route path="/annual-summary"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="annual_summary" minPlan="starter"><AnnualSummary /></PremiumGate></ModuleGate>} />
+              {/* Both derive their core figure from recipe explosion (ReorderReport's
+                  explodeRecipeIngredients, StockMovements' subRecipeUsage), so neither can
+                  produce a number without recipe_costing — which is Growth. */}
               <Route path="/reorder"
-                element={<ModuleGate module="ims"><PremiumGate featureKey="reorder_report" minPlan="starter"><ReorderReport /></PremiumGate></ModuleGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="reorder_report" minPlan="growth"><ReorderReport /></PremiumGate></ModuleGate>} />
               <Route path="/stock-movements"
-                element={<ModuleGate module="ims"><PremiumGate featureKey="stock_movement_log" minPlan="starter"><StockMovements /></PremiumGate></ModuleGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="stock_movement_log" minPlan="growth"><StockMovements /></PremiumGate></ModuleGate>} />
               <Route path="/vat-report"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="vat_report" minPlan="starter"><VatReport /></PremiumGate></ModuleGate>} />
               <Route path="/purchase-one-lakh-report"
@@ -170,12 +177,16 @@ export default function App() {
                 element={<ModuleGate module="ims"><PremiumGate featureKey="recipe_costing" minPlan="growth"><Recipes /></PremiumGate></ModuleGate>} />
               <Route path="/variance"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="variance_report" minPlan="growth"><Variance /></PremiumGate></ModuleGate>} />
+              {/* Record-keeping, not analysis — knowing what you owe a vendor needs no recipes
+                  and is table stakes for anyone buying on credit. */}
               <Route path="/payables"
-                element={<ModuleGate module="ims"><PremiumGate featureKey="outstanding_payables" minPlan="growth"><OutstandingPayables /></PremiumGate></ModuleGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="outstanding_payables" minPlan="starter"><OutstandingPayables /></PremiumGate></ModuleGate>} />
               <Route path="/budget"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="budget_vs_actual" minPlan="growth"><BudgetVsActual /></PremiumGate></ModuleGate>} />
+              {/* Crest Suite Pro — genuinely cross-module (Roster.jsx overlays
+                  demand_forecast_daily onto the HR roster). SuiteGate lives inside the page. */}
               <Route path="/demand-forecast"
-                element={<ModuleGate module="ims"><PremiumGate featureKey="demand_forecast" minPlan="pro"><DemandForecast /></PremiumGate></ModuleGate>} />
+                element={<ModuleGate module="ims"><DemandForecast /></ModuleGate>} />
               <Route path="/combo-builder"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="combo_builder" minPlan="growth"><ComboBuilder /></PremiumGate></ModuleGate>} />
               <Route path="/requisitions"
@@ -204,14 +215,21 @@ export default function App() {
                 element={<ModuleGate module="ims"><PremiumGate featureKey="fifo_report" minPlan="pro"><FifoReport /></PremiumGate></ModuleGate>} />
               <Route path="/vendors-report"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="vendor_report" minPlan="pro"><VendorReport /></PremiumGate></ModuleGate>} />
+              {/* Statutory (IRD Annexure 13), same class as VAT/Non-VAT which are already
+                  Starter. A legal filing requirement does not gate above the base tier. */}
               <Route path="/vendor-balance-confirmation"
-                element={<ModuleGate module="ims"><PremiumGate featureKey="vendor_balance_confirmation" minPlan="pro"><VendorBalanceConfirmation /></PremiumGate></ModuleGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="vendor_balance_confirmation" minPlan="starter"><VendorBalanceConfirmation /></PremiumGate></ModuleGate>} />
               <Route path="/supplier-prices"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="price_tracker" minPlan="pro"><SupplierPriceTracker /></PremiumGate></ModuleGate>} />
+              {/* Data-entry page behind Fixed Costs %/Est. Net Margin on ClientDashboard and
+                  Recipes' True Cost allocation — it must not sit above the tier of figures that
+                  consume it, or those render blank with no explanation. */}
               <Route path="/overheads"
-                element={<ModuleGate module="ims"><PremiumGate featureKey="overheads" minPlan="pro"><Overheads /></PremiumGate></ModuleGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="overheads" minPlan="growth"><Overheads /></PremiumGate></ModuleGate>} />
+              {/* Crest Suite Pro, not an IMS tier — SuiteGate lives inside the page (it renders an
+                  inline upsell rather than redirecting, so the nav entry stays visible). */}
               <Route path="/fixed-assets"
-                element={<ModuleGate module="ims"><PremiumGate featureKey="fixed_asset_register" minPlan="pro"><FixedAssets /></PremiumGate></ModuleGate>} />
+                element={<ModuleGate module="ims"><FixedAssets /></ModuleGate>} />
               <Route path="/theoretical-variance"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="theoretical_variance" minPlan="pro"><TheoreticalVariance /></PremiumGate></ModuleGate>} />
               <Route path="/ims/staff" element={<ModuleGate module="ims"><ImsStaff /></ModuleGate>} />

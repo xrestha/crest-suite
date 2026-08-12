@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Hexagon, Check, Mail, Calculator, Users, CalendarDays } from 'lucide-react'
-import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_BUNDLES } from '../data/pricingPlans'
+import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
 
 // ── Change this to the contact email when ready ──────────────────────────────
 const CONTACT_EMAIL = 'hello@cresthospitality.com'
@@ -105,7 +105,7 @@ export default function Pricing() {
         </h1>
         <p style={{ fontSize: 16, color: 'var(--theme-text2)', margin: '0 auto 44px', maxWidth: 560, lineHeight: 1.7 }}>
           Built for Nepal's restaurants and cafes. Works in BS calendar, NPR, and FonePay, with no Western-SaaS workarounds needed.
-          Buy Crest IMS, Crest HR, and Crest POS separately, or bundle all three as Crest Suite for a discount.
+          Buy Crest IMS, Crest HR, and Crest POS separately, then add Crest Suite Pro on top for the owner-level view across all of them.
         </p>
 
         {/* Billing toggle */}
@@ -256,40 +256,47 @@ export default function Pricing() {
         })}
       </div>
 
-      {/* ── Crest Suite — bundle ── */}
+      {/* ── Crest Suite Pro — add-on, not a bundle ──
+          One SKU sitting on top of whatever modules a client bought, with a real feature list.
+          This section used to render three bundle cards showing only a strikethrough price and
+          no features at all — which was the entire pitch. */}
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
-        <SectionHeading color={GOLD} title="Crest Suite" subtitle="IMS + HR + POS together, at a discount vs buying each separately" />
+        <SectionHeading color={GOLD} title="Crest Suite Pro" subtitle="The owner layer — added on top of your modules, not a separate product" />
       </div>
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 80px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20 }}>
-        {SUITE_BUNDLES.map((bundle, i) => {
-          const imsTier = IMS_TIERS[i]
-          const price = annual ? bundle.annual : bundle.monthly
-          const sumMonthly = imsTier.monthly + HR_PRICING.monthly + POS_PRICING.monthly
-          const sumPrice = annual ? Math.round((imsTier.annual + HR_PRICING.annual + POS_PRICING.annual)) : sumMonthly
-          return (
-            <div key={bundle.key} style={{ background: CARD, border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 14, padding: '30px 24px', textAlign: 'center', position: 'relative' }}>
-              {i === 1 && (
-                <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', background: GOLD, color: '#0b0b0b', fontSize: 10, fontWeight: 800, padding: '4px 14px', borderRadius: 10, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                  Most Popular
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 80px' }}>
+        <div style={{ background: CARD, border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 14, padding: '32px 28px', position: 'relative' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 28, alignItems: 'start' }}>
+            <div>
+              <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 10 }}>
+                {SUITE_ADDON.label}
+              </div>
+              <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>
+                +NPR {(annual ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString()}
+                <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo per outlet</span>
+              </div>
+              {annual && (
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 10 }}>
+                  Billed annually · NPR {(SUITE_ADDON.annual * 12).toLocaleString()}/yr
                 </div>
               )}
-              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 12 }}>{bundle.label}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textDecoration: 'line-through', marginBottom: 2 }}>NPR {sumPrice.toLocaleString()}/mo separately</div>
-              <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>
-                NPR {price.toLocaleString()}<span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
-              </div>
-              {annual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 14 }}>Billed annually · NPR {(price * 12).toLocaleString()}/yr</div>}
-              <div style={{ fontSize: 11, fontWeight: 700, color: GREEN, marginBottom: 18 }}>
-                Save NPR {(sumMonthly - bundle.monthly).toLocaleString()}/mo vs buying separately
+              <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 20, lineHeight: 1.5 }}>
+                {SUITE_ADDON.requiresLabel}
               </div>
               <button
                 onClick={() => navigate('/login')}
-                style={{ background: i === 2 ? GOLD : `${GOLD}14`, border: `1px solid ${GOLD}`, color: i === 2 ? 'var(--theme-accent-text)' : GOLD, padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, width: '100%' }}>
-                Get {bundle.label} →
+                style={{ background: GOLD, border: `1px solid ${GOLD}`, color: 'var(--theme-accent-text)', padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, width: '100%' }}>
+                Add {SUITE_ADDON.label} →
               </button>
             </div>
-          )
-        })}
+            <div style={{ gridColumn: 'span 2', minWidth: 0 }}>
+              <FeatureList features={SUITE_ADDON.features} color={GOLD} />
+              <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '14px 0 0', lineHeight: 1.55 }}>
+                Running more than one outlet? Add Crest Suite Pro to each one and the Group Console
+                rolls them all up on a single screen.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* FAQ button */}
