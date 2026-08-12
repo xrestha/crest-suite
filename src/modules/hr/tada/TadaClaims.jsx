@@ -196,26 +196,30 @@ export default function TadaClaims() {
     load()
   }
 
-  // One definition of the decision buttons, rendered both on the table row and inside the expanded
-  // detail — a reviewer who trusts the claim never has to open the detail, and one who opened it to
-  // read the expense lines never has to look back up. Every handler stops propagation: the <tr>
-  // itself toggles the detail, so without it approving a claim would also collapse the panel.
-  function claimActions(c, { fontSize = 11, dash = false } = {}) {
+  // The decision buttons live on the table row and nowhere else. They were briefly rendered a
+  // second time inside the expanded detail too, on the reasoning that someone who opened the
+  // detail to read the expense lines shouldn't have to look back up for them — but that reasoning
+  // predates the detail moving inline. Now that the panel opens directly beneath its own row, the
+  // two sets sit about 60px apart and are visible at once, so the copy was pure duplication, and
+  // rendering it one step larger made the pair read as an inconsistency rather than a repeat.
+  // Every handler stops propagation: the <tr> toggles the detail, so without it acting on a claim
+  // would also collapse the panel underneath.
+  function claimActions(c) {
     const act = fn => e => { e.stopPropagation(); fn() }
     if (c.status === 'pending') return (
       <>
-        <button className="btn btn-ghost" style={{ fontSize, color: 'var(--theme-green)' }} onClick={act(() => handleApprove(c.id))}>✓ Approve</button>
-        <button className="btn btn-ghost" style={{ fontSize, color: 'var(--theme-red)' }} onClick={act(() => setRejectTarget(c))}>✕ Reject</button>
-        <button className="btn btn-ghost" style={{ fontSize, color: 'var(--theme-red)' }} onClick={act(() => handleDelete(c.id))}>Delete</button>
+        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green)' }} onClick={act(() => handleApprove(c.id))}>✓ Approve</button>
+        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }} onClick={act(() => setRejectTarget(c))}>✕ Reject</button>
+        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }} onClick={act(() => handleDelete(c.id))}>Delete</button>
       </>
     )
     if (c.status === 'approved') return (
-      <button className="btn btn-ghost" style={{ fontSize, color: 'var(--theme-green)' }}
+      <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green)' }}
         onClick={act(() => { setPayMethod('Cash'); setPayTarget(c) })}>
         💵 Mark Paid
       </button>
     )
-    return dash ? <span style={{ fontSize, color: 'var(--theme-text2)' }}>—</span> : null
+    return <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>—</span>
   }
 
   function renderClaimDetail(c) {
@@ -223,18 +227,15 @@ export default function TadaClaims() {
     const lines = itemsByClaimId[c.id] || []
     return (
       <div style={{ padding: '16px 18px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>
-              {emp.full_name} — {c.start_point ? `${c.start_point} → ${c.destination || 'Trip'}` : (c.destination || 'Trip')}
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 3 }}>
-              {fmtD(c.start_date)} → {fmtD(c.end_date)}
-              {c.trip_purpose && ` · ${c.trip_purpose}`}
-            </div>
-            {c.notes && <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 4 }}>{c.notes}</div>}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>
+            {emp.full_name} — {c.start_point ? `${c.start_point} → ${c.destination || 'Trip'}` : (c.destination || 'Trip')}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>{claimActions(c, { fontSize: 12 })}</div>
+          <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 3 }}>
+            {fmtD(c.start_date)} → {fmtD(c.end_date)}
+            {c.trip_purpose && ` · ${c.trip_purpose}`}
+          </div>
+          {c.notes && <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 4 }}>{c.notes}</div>}
         </div>
 
         {c.status === 'paid' && (
@@ -348,7 +349,7 @@ export default function TadaClaims() {
                     <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{fmtD(c.start_date)} → {fmtD(c.end_date)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{fmt(c.total_amount)}</td>
                     <td><span className={STATUS_BADGE[c.status]} style={{ textTransform: 'capitalize' }}>{c.status}</span></td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{claimActions(c, { dash: true })}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{claimActions(c)}</td>
                   </tr>
                   {isSel && (
                     <tr className="detail-row">

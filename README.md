@@ -150,6 +150,20 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S537 — 2026-08-12 — TADA Claims: the decision buttons were rendering twice, 60px apart
+
+Smoke-testing S535 against the real page. The row actions and the inline detail panel both worked, but a screenshot of an expanded row showed the problem the code review didn't: **Approve / Reject / Delete appear on the row and again in the detail panel immediately below it**, about 60px apart and both on screen at once — at 11px and 12px respectively, so the pair read as an inconsistency rather than a deliberate repeat.
+
+This was a stale justification, not an oversight in the layout. S535's comment argued the detail should keep its own copy "so someone who opened it to read the expense lines doesn't have to look back up" — which was true of the *old* panel that rendered after the entire table, and stopped being true the moment the same session moved that panel inline under its own row. The reasoning survived the change that invalidated it. Removed from the detail; the row is now the only place a decision is made.
+
+`claimActions` collapses accordingly — no more `fontSize`/`dash` options, since the row is the only caller and always wants both the 11px size and the em-dash placeholder on a terminal status. The detail header loses its `justify-content: space-between` flex wrapper too, which existed only to push the buttons right.
+
+**Verified:** `CI=true npm run build` clean, `npx eslint` clean. `CACHE_NAME` bumped to `crest-v62`. Confirmed against the live page by screenshot this time, not by inspection — which is what caught it.
+
+**Files:** `src/modules/hr/tada/TadaClaims.jsx`, `public/service-worker.js`, `README.md`
+
+---
+
 ### S536 — 2026-08-12 — `/impeccable document` refresh, and the three drifts the scan turned up
 
 Ran `/impeccable document` to clear the stale-sidecar warning the hook had been firing for a week. Chose the merge path over a regenerate: `DESIGN.md` carries ~14 sessions of hand-written audit history — the seven `#60a5fa` recurrences, the accent-text pairing bug, the Bright exception — none of which is derivable from code, so every existing paragraph and named rule was preserved verbatim.
