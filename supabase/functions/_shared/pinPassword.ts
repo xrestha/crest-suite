@@ -31,20 +31,20 @@
 //    password is 43 chars of base64url and passes trivially, which is what makes enabling the
 //    toggle safe.
 //
-// ── PIN_PEPPER ──────────────────────────────────────────────────────────────────────────────
-// Set with:  supabase secrets set PIN_PEPPER="$(openssl rand -base64 48)"
+// ── Where the pepper lives, and why it is no longer a thing you can lose ────────────────────
+// It is a column in the admin-only `app_secrets` singleton (migration 20260812110000), generated
+// by the database itself, NOT an Edge Function env var. There is no `supabase secrets set` step
+// and nothing to copy into a password manager -- the project's normal Supabase backups cover it.
 //
-// THIS SECRET IS NOT RECOVERABLE AND NOT ROTATABLE IN PLACE. Every PIN account's stored
-// password is derived from it, and the PINs themselves are not stored anywhere, so there is
-// nothing to re-derive from. Losing or changing it means every POS and Self-Service account
-// must have its PIN reset by hand. Back it up wherever the VAPID private key is kept.
+// The first draft of this file did use an env secret and warned that it was neither recoverable
+// nor rotatable in place: PINs were stored nowhere, so losing it meant hand-resetting every POS
+// and Self-Service account across every client. That was correct and it was unacceptable, which
+// is what `staff_pin_vault` (same migration) exists to fix. With the plaintext PINs recoverable,
+// a lost or rotated pepper is a bulk re-derivation (admin-user-ops' `rederive_pin_passwords`)
+// rather than a mass reset -- so the pepper IS now rotatable in place.
 //
-// derivePinPassword() throws rather than falling back when it is missing. That is deliberate
-// and fail-CLOSED, which is the opposite of the lockout RPCs' documented fail-open stance --
-// the reasoning differs because the failure modes differ. A silent fallback to the raw PIN
-// would write a brute-forceable password to a real account and look completely healthy while
-// doing it; an outright throw breaks login loudly and immediately, which gets noticed and
-// fixed in minutes. Never "helpfully" catch this and retry with the bare pin.
+// Storing it in the database does not weaken it against the attack it exists to stop: that
+// attacker holds only the anon key, and app_secrets has no anon grant. See getAppSecrets() below.
 // ════════════════════════════════════════════════════════════════════════════════════════════
 
 const encoder = new TextEncoder()
@@ -60,13 +60,12 @@ const encoder = new TextEncoder()
  * Output is 43 chars of base64url — comfortably under bcrypt's 72-byte truncation point, so
  * the whole value contributes to the hash.
  */
-export async function derivePinPassword(email: string, pin: string): Promise<string> {
-  const pepper = Deno.env.get('PIN_PEPPER')
+export async function derivePinPassword(email: string, pin: string, pepper: string): Promise<string> {
   if (!pepper) {
-    throw new Error(
-      'PIN_PEPPER is not set. PIN account passwords cannot be derived. ' +
-      'Run: supabase secrets set PIN_PEPPER="$(openssl rand -base64 48)"',
-    )
+    // Fail CLOSED. A silent fallback to the raw PIN would write a brute-forceable password to a
+    // real account and look completely healthy doing it; a throw breaks login loudly and gets
+    // fixed in minutes. Never "helpfully" catch this and retry with the bare pin.
+    throw new Error('No PIN pepper available - refusing to derive a PIN account password')
   }
 
   const key = await crypto.subtle.importKey(
@@ -82,6 +81,102 @@ export async function derivePinPassword(email: string, pin: string): Promise<str
   // can cause in transit, and keeps the value URL-safe if it is ever logged or diffed.
   return btoa(String.fromCharCode(...new Uint8Array(sig)))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+// ── App secrets ─────────────────────────────────────────────────────────────────────────────
+// Both the pepper and the vault key live in the admin-only `app_secrets` singleton
+// (20260812110000) rather than in Edge Function env vars. A vault encrypted with a key you must
+// not lose merely renames the problem, so neither is something a human has to back up: the
+// project's normal Supabase backups cover both.
+//
+// This does not weaken the pepper against the attack it exists to stop. That attacker holds only
+// the anon key, and app_secrets has no anon grant - so the pepper is still uncomputable
+// off-server and direct /token brute force is still impossible. It is reachable only by someone
+// who already has an admin session or the service-role key, who could call reset_pos_pin anyway.
+//
+// Cached in module scope so it costs one query per warm instance rather than one per login --
+// but with a SHORT TTL rather than forever, and that TTL is load-bearing. `rederive_pin_passwords`
+// can rotate the pepper, and every other warm Edge Function instance (pos-staff-login,
+// hr-selfservice-login) holds its own independent copy of this cache. Caching indefinitely would
+// leave those instances deriving with the old pepper until they happened to recycle, so a
+// rotation would break logins for an unbounded and unpredictable stretch. 60s bounds that to a
+// minute. Do not raise it without re-reading this.
+const SECRETS_TTL_MS = 60_000
+let cachedSecrets: { pepper: string; vaultKey: string } | null = null
+let cachedAt = 0
+
+/** Drops the cache immediately. Called by rederive_pin_passwords in the instance doing the rotation. */
+export function resetAppSecretsCache(): void {
+  cachedSecrets = null
+  cachedAt = 0
+}
+
+export async function getAppSecrets(
+  admin: { from: (t: string) => any },
+): Promise<{ pepper: string; vaultKey: string }> {
+  if (cachedSecrets && Date.now() - cachedAt < SECRETS_TTL_MS) return cachedSecrets
+
+  // Env override exists only so an environment that already deployed S538's
+  // `supabase secrets set PIN_PEPPER` keeps deriving the same passwords for accounts created
+  // under it. The intended end state is NOT to set it at all and let the DB value be canonical.
+  // If it is ever unset after accounts exist under it, that is exactly the scenario
+  // rederive_pin_passwords handles - the vault makes it recoverable instead of terminal.
+  const envPepper = Deno.env.get('PIN_PEPPER') || ''
+
+  const { data, error } = await admin
+    .from('app_secrets').select('pin_pepper, pin_vault_key').eq('id', 1).maybeSingle()
+
+  if (error || !data) {
+    if (envPepper) {
+      console.error('[pinPassword] app_secrets unreadable, falling back to PIN_PEPPER env:', error?.message)
+      return { pepper: envPepper, vaultKey: '' }
+    }
+    throw new Error(
+      'app_secrets is unreadable and no PIN_PEPPER env fallback is set - ' +
+      'PIN account passwords cannot be derived. Has migration 20260812110000 been applied?',
+    )
+  }
+
+  cachedSecrets = { pepper: envPepper || data.pin_pepper, vaultKey: data.pin_vault_key }
+  cachedAt = Date.now()
+  return cachedSecrets
+}
+
+// ── PIN vault encryption ────────────────────────────────────────────────────────────────────
+// AES-GCM via WebCrypto rather than pgcrypto, so the key never has to be passed into SQL where
+// it could end up in a query log. The 12-byte IV is random per write and prepended to the
+// ciphertext, so re-encrypting the same PIN twice never produces the same string.
+
+// SHA-256 of the stored secret, so the column's textual format is completely decoupled from
+// AES-256's hard 32-byte key-size requirement. Importing the raw text would make the two
+// coupled and brittle: app_secrets.pin_vault_key is 64 hex chars, which base64-decodes to 48
+// bytes, which importKey rejects outright -- and because every vault write is best-effort
+// (logged, never fatal), that would have surfaced as PINs silently not being stored while
+// everything looked healthy. Hashing removes the class of bug, not just this instance.
+async function importVaultKey(keySecret: string, usage: KeyUsage[]): Promise<CryptoKey> {
+  if (!keySecret) throw new Error('No PIN vault key available')
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(keySecret))
+  return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, usage)
+}
+
+export async function encryptPin(pin: string, keyB64: string): Promise<string> {
+  const key = await importVaultKey(keyB64, ['encrypt'])
+  const iv  = crypto.getRandomValues(new Uint8Array(12))
+  const ct  = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoder.encode(pin))
+
+  const out = new Uint8Array(iv.length + ct.byteLength)
+  out.set(iv, 0)
+  out.set(new Uint8Array(ct), iv.length)
+  return btoa(String.fromCharCode(...out))
+}
+
+export async function decryptPin(cipherB64: string, keyB64: string): Promise<string> {
+  const key = await importVaultKey(keyB64, ['decrypt'])
+  const raw = Uint8Array.from(atob(cipherB64), c => c.charCodeAt(0))
+  const pt  = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: raw.slice(0, 12) }, key, raw.slice(12),
+  )
+  return new TextDecoder().decode(pt)
 }
 
 /**

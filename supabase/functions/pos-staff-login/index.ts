@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { derivePinPassword } from '../_shared/pinPassword.ts'
+import { derivePinPassword, getAppSecrets, encryptPin } from '../_shared/pinPassword.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -100,7 +100,8 @@ Deno.serve(async (req) => {
     // who has the email and guesses the right PIN still cannot construct the string GoTrue expects,
     // so hammering /token directly with the anon key is no longer a route to a session at all.
     // Every path to a POS session now runs through this function, where the lockout is enforced.
-    const derived = await derivePinPassword(staff.pos_email, pin)
+    const { pepper, vaultKey } = await getAppSecrets(admin)
+    const derived = await derivePinPassword(staff.pos_email, pin, pepper)
     let { data: signInData } = await authClient.auth.signInWithPassword({
       email: staff.pos_email, password: derived,
     })
@@ -120,6 +121,23 @@ Deno.serve(async (req) => {
         email: staff.pos_email, password: pin,
       })
       if (legacyData?.session) {
+        // This branch is the ONLY place a pre-existing account's plaintext PIN is ever observable
+        // server-side — it was never stored, and nobody but the employee knows it. So it is also
+        // the only chance to backfill the vault (20260812110000) without making someone reset a
+        // PIN that works fine. Best-effort: a vault failure must not cost the employee their
+        // login. Accounts that never sign in and are never reset simply stay unrecoverable, which
+        // rederive_pin_passwords reports rather than hides.
+        try {
+          if (vaultKey) {
+            await admin.from('staff_pin_vault').upsert({
+              user_id: staff_id, client_id, kind: 'pos',
+              pin_cipher: await encryptPin(pin, vaultKey), updated_at: new Date().toISOString(),
+            }, { onConflict: 'user_id' })
+          }
+        } catch (e) {
+          console.error('[pos-staff-login] vault backfill failed:', e instanceof Error ? e.message : e)
+        }
+
         const { error: upgradeErr } = await admin.auth.admin.updateUserById(staff_id, { password: derived })
         if (upgradeErr) {
           console.error('[pos-staff-login] PIN password upgrade FAILED — account still on raw-PIN password:', upgradeErr.message)

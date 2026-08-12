@@ -1,5 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { derivePinPassword, isPasswordPwned } from '../_shared/pinPassword.ts'
+import {
+  derivePinPassword, isPasswordPwned, getAppSecrets, encryptPin, decryptPin, resetAppSecretsCache,
+} from '../_shared/pinPassword.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -27,6 +29,32 @@ Deno.serve(async (req) => {
 
     const body = await req.json()
     const { action, ...params } = body
+
+    // ── PIN vault write (20260812110000) ──────────────────────────────────────
+    // Deliberately best-effort: a vault failure must NEVER fail the operation that called it.
+    // The account is already valid without a vault row -- the PIN works, login works, only
+    // admin recovery is unavailable -- and the next reset, or the login functions' lazy-upgrade
+    // branch, repopulates it. Failing the create/reset here would trade a recovery convenience
+    // for an outage on the restaurant floor, which is the wrong way round.
+    const vaultPin = async (userId: string, clientId: string, kind: 'pos' | 'hr_self_service', pin: string) => {
+      try {
+        const { vaultKey } = await getAppSecrets(admin)
+        if (!vaultKey) {
+          console.error('[admin-user-ops] no vault key available — PIN not recoverable for', userId)
+          return
+        }
+        const { error } = await admin.from('staff_pin_vault').upsert({
+          user_id:    userId,
+          client_id:  clientId,
+          kind,
+          pin_cipher: await encryptPin(pin, vaultKey),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' })
+        if (error) console.error('[admin-user-ops] staff_pin_vault write failed:', error.message)
+      } catch (e) {
+        console.error('[admin-user-ops] staff_pin_vault encrypt failed:', e instanceof Error ? e.message : e)
+      }
+    }
 
     // ── Self-service trial signup — no admin auth required ────────────────────
     if (action === 'register_trial') {
@@ -280,9 +308,10 @@ Deno.serve(async (req) => {
       // The stored password is derived, never the PIN itself — see _shared/pinPassword.ts. The
       // account's own generated email is the salt, and both this call and pos-staff-login
       // compute the same value from it.
+      const { pepper: posPepper } = await getAppSecrets(admin)
       const { data: authData, error: authErr } = await admin.auth.admin.createUser({
         email,
-        password:      await derivePinPassword(email, pin),
+        password:      await derivePinPassword(email, pin, posPepper),
         email_confirm: true,
         user_metadata: { full_name },
       })
@@ -308,6 +337,8 @@ Deno.serve(async (req) => {
         await admin.auth.admin.deleteUser(authData.user.id)
         return json({ error: profileErr.message }, 400)
       }
+
+      await vaultPin(authData.user.id, targetClientId, 'pos', pin)
 
       return json({ success: true, userId: authData.user.id })
     }
@@ -336,9 +367,10 @@ Deno.serve(async (req) => {
 
       // Derived, not the raw PIN — same treatment as create_pos_staff above, and the reason
       // hr-selfservice-login must derive with this same email before signing in.
+      const { pepper: hrPepper } = await getAppSecrets(admin)
       const { data: authData, error: authErr } = await admin.auth.admin.createUser({
         email,
-        password:      await derivePinPassword(email, pin),
+        password:      await derivePinPassword(email, pin, hrPepper),
         email_confirm: true,
         user_metadata: { full_name: employee.full_name },
       })
@@ -360,6 +392,8 @@ Deno.serve(async (req) => {
         await admin.auth.admin.deleteUser(authData.user.id)
         return json({ error: profileErr.message }, 400)
       }
+
+      await vaultPin(authData.user.id, targetClientId, 'hr_self_service', pin)
 
       return json({ success: true, userId: authData.user.id })
     }
@@ -458,12 +492,150 @@ Deno.serve(async (req) => {
       // the HIBP corpus. Creating staff would have kept working while resetting their PIN
       // failed with "password is known to be weak" on every possible value. Deriving first is
       // what makes the toggle safe to enable.
+      const { pepper: resetPepper } = await getAppSecrets(admin)
       const { error: updateErr } = await admin.auth.admin.updateUserById(userId, {
-        password: await derivePinPassword(pinTarget.pos_email, pin),
+        password: await derivePinPassword(pinTarget.pos_email, pin, resetPepper),
       })
       if (updateErr) return json({ error: updateErr.message }, 400)
 
+      await vaultPin(userId, pinTarget.client_id, 'pos', pin)
+
       return json({ success: true })
+    }
+
+    // ── Reveal a staff member's PIN — PLATFORM ADMIN ONLY ─────────────────────
+    // Not available to the client Owner or a POS manager, deliberately. They already have a
+    // one-click Reset PIN on PosStaff.jsx, which stays the normal answer to "the waiter forgot
+    // their PIN" — this exists for recovery and audit, not as a helpdesk shortcut. Widening it
+    // to Owners is a one-line change to this gate, but it exposes every PIN to every client login.
+    if (action === 'view_staff_pin') {
+      if (!isCallerAdmin) return json({ error: 'Forbidden' }, 403)
+
+      const { userId } = params
+      if (!userId) return json({ error: 'userId is required' }, 400)
+
+      const { data: vaultRow } = await admin
+        .from('staff_pin_vault').select('pin_cipher, client_id, kind')
+        .eq('user_id', userId).maybeSingle()
+
+      // A missing row is normal, not an error state: accounts created before this feature have
+      // no stored PIN and never will until someone resets it or the owner signs in through the
+      // login functions' upgrade branch. Say so plainly rather than implying something broke.
+      if (!vaultRow) {
+        return json({
+          error: 'No stored PIN for this account. It predates the PIN vault and has not been reset since. Use Reset PIN to set a new one.',
+        }, 404)
+      }
+
+      const { vaultKey } = await getAppSecrets(admin)
+      let revealedPin: string
+      try {
+        revealedPin = await decryptPin(vaultRow.pin_cipher, vaultKey)
+      } catch {
+        return json({
+          error: 'The stored PIN could not be decrypted — app_secrets.pin_vault_key has changed since it was written. Use Reset PIN.',
+        }, 500)
+      }
+
+      // Revealing a credential must leave a trace. Note what is stored: who looked, at which
+      // account, when — never the PIN itself, which would put it in audit_logs in plaintext and
+      // undo the point of encrypting it.
+      const { data: vaultClient } = await admin
+        .from('clients').select('name').eq('id', vaultRow.client_id).maybeSingle()
+
+      await admin.from('audit_logs').insert({
+        client_id:   vaultRow.client_id,
+        client_name: vaultClient?.name ?? null,
+        user_id:     user.id,
+        user_name:   user.email,
+        table_name:  'staff_pin_vault',
+        action:      'VIEW',
+        record_id:   userId,
+        new_data:    { kind: vaultRow.kind, revealed: true },
+      })
+
+      return json({ pin: revealedPin })
+    }
+
+    // ── Rebuild every PIN account's password from the vault — PLATFORM ADMIN ONLY ─────────────
+    // This is the whole reason the vault exists. Before it, PIN_PEPPER was neither recoverable
+    // nor rotatable: PINs were stored nowhere, so losing or changing the pepper meant hand-
+    // resetting every POS and Self-Service account across every client. With the plaintext PINs
+    // recoverable, that becomes this one call.
+    //
+    // Run it when: the pepper is being rotated deliberately, or app_secrets was restored from a
+    // backup that disagrees with what accounts were created under.
+    if (action === 'rederive_pin_passwords') {
+      if (!isCallerAdmin) return json({ error: 'Forbidden' }, 403)
+
+      const { rotate_pepper } = params
+
+      // An env pepper wins over the DB one inside getAppSecrets, so rotating the DB column while
+      // PIN_PEPPER is set would silently do nothing and report success. Refuse instead.
+      if (rotate_pepper && Deno.env.get('PIN_PEPPER')) {
+        return json({
+          error: 'PIN_PEPPER is set as an Edge Function secret and overrides the database value. Unset it (supabase secrets unset PIN_PEPPER) before rotating.',
+        }, 400)
+      }
+
+      if (rotate_pepper) {
+        const fresh = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
+        const { error: rotErr } = await admin
+          .from('app_secrets').update({ pin_pepper: fresh, updated_at: new Date().toISOString() }).eq('id', 1)
+        if (rotErr) return json({ error: 'Failed to rotate pepper: ' + rotErr.message }, 500)
+        resetAppSecretsCache()
+      }
+
+      const { pepper, vaultKey } = await getAppSecrets(admin)
+
+      // Every vaulted account, with the email each derivation must be salted with. pos_email and
+      // hr_self_service_email are the two salts, picked by `kind` — using the wrong one produces
+      // a password nobody can ever reproduce.
+      const { data: vaulted } = await admin
+        .from('staff_pin_vault').select('user_id, kind, pin_cipher')
+      const { data: emails } = await admin
+        .from('profiles').select('id, pos_email, hr_self_service_email')
+        .in('id', (vaulted ?? []).map((v: { user_id: string }) => v.user_id))
+
+      const emailById = new Map(
+        (emails ?? []).map((p: { id: string; pos_email: string | null; hr_self_service_email: string | null }) => [p.id, p]),
+      )
+
+      let updated = 0
+      const failures: { user_id: string; reason: string }[] = []
+
+      for (const row of vaulted ?? []) {
+        try {
+          const prof  = emailById.get(row.user_id) as { pos_email: string | null; hr_self_service_email: string | null } | undefined
+          const salt  = row.kind === 'pos' ? prof?.pos_email : prof?.hr_self_service_email
+          if (!salt) { failures.push({ user_id: row.user_id, reason: 'no login email on profile' }); continue }
+
+          const pin = await decryptPin(row.pin_cipher, vaultKey)
+          const { error: upErr } = await admin.auth.admin.updateUserById(row.user_id, {
+            password: await derivePinPassword(salt, pin, pepper),
+          })
+          if (upErr) { failures.push({ user_id: row.user_id, reason: upErr.message }); continue }
+          updated++
+        } catch (e) {
+          failures.push({ user_id: row.user_id, reason: e instanceof Error ? e.message : 'unknown' })
+        }
+      }
+
+      // Accounts with no vault row cannot be rebuilt — their PIN was never observed. Reported
+      // rather than hidden, because those are exactly the ones that still need a manual reset.
+      const { count: totalPinAccounts } = await admin
+        .from('profiles').select('id', { count: 'exact', head: true })
+        .or('pos_email.not.is.null,hr_self_service.eq.true')
+
+      return json({
+        success:       true,
+        rotated:       !!rotate_pepper,
+        updated,
+        failures,
+        vaulted:       (vaulted ?? []).length,
+        pin_accounts:  totalPinAccounts ?? null,
+        unrecoverable: Math.max(0, (totalPinAccounts ?? 0) - (vaulted ?? []).length),
+      })
     }
 
     // ── Create an IMS staff member — real email + password (not a PIN like POS) ───────────────
@@ -1034,6 +1206,12 @@ Deno.serve(async (req) => {
       await del(admin.from('assets_categories').delete().eq('client_id', clientId), 'assets_categories')
       await del(admin.from('vendors').delete().eq('client_id', clientId), 'vendors')
       await del(admin.from('categories').delete().eq('client_id', clientId), 'categories')
+      // Cascades from both profiles and clients, so this is belt-and-braces rather than required —
+      // but CLAUDE.md step 7 asks for every client-scoped table to be listed explicitly, and a
+      // table that only ever cleans itself up implicitly is the kind that gets missed when the
+      // cascade is later changed. app_secrets is deliberately absent: it is app-wide, not
+      // per-client, and must never be touched by a client clear/delete path.
+      await del(admin.from('staff_pin_vault').delete().eq('client_id', clientId), 'staff_pin_vault')
 
       return json({ success: true })
     }

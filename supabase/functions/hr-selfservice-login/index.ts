@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { derivePinPassword } from '../_shared/pinPassword.ts'
+import { derivePinPassword, getAppSecrets, encryptPin } from '../_shared/pinPassword.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -85,7 +85,9 @@ Deno.serve(async (req) => {
 
     const { data: profile, error: profileErr } = await admin
       .from('profiles')
-      .select('hr_self_service_email')
+      // client_id is selected only so the vault backfill below can stamp it. It is never returned
+      // to the caller — this function's response is still tokens or an error, nothing else.
+      .select('hr_self_service_email, client_id')
       .eq('id', staff_id)
       .eq('hr_self_service', true)
       .maybeSingle()
@@ -110,7 +112,8 @@ Deno.serve(async (req) => {
     // always skip it by pointing signInWithPassword straight at GoTrue, needing just an email and
     // 10,000 guesses. With a peppered derivation that route stops working entirely, because the
     // password can no longer be computed from the PIN off-server.
-    const derived = await derivePinPassword(profile.hr_self_service_email, pin)
+    const { pepper, vaultKey } = await getAppSecrets(admin)
+    const derived = await derivePinPassword(profile.hr_self_service_email, pin, pepper)
     let { data: signInData } = await authClient.auth.signInWithPassword({
       email: profile.hr_self_service_email, password: derived,
     })
@@ -125,6 +128,20 @@ Deno.serve(async (req) => {
         email: profile.hr_self_service_email, password: pin,
       })
       if (legacyData?.session) {
+        // Same reasoning as pos-staff-login: this is the only point at which a pre-existing
+        // account's plaintext PIN is observable, so it is the only chance to backfill the vault
+        // without forcing a reset. Best-effort — never cost an employee their login over it.
+        try {
+          if (vaultKey) {
+            await admin.from('staff_pin_vault').upsert({
+              user_id: staff_id, client_id: profile.client_id, kind: 'hr_self_service',
+              pin_cipher: await encryptPin(pin, vaultKey), updated_at: new Date().toISOString(),
+            }, { onConflict: 'user_id' })
+          }
+        } catch (e) {
+          console.error('[hr-selfservice-login] vault backfill failed:', e instanceof Error ? e.message : e)
+        }
+
         const { error: upgradeErr } = await admin.auth.admin.updateUserById(staff_id, { password: derived })
         if (upgradeErr) {
           console.error('[hr-selfservice-login] PIN password upgrade FAILED — account still on raw-PIN password:', upgradeErr.message)

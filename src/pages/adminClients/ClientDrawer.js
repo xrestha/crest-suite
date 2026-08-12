@@ -55,6 +55,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [userError, setUserError]       = useState('')
   const [userSuccess, setUserSuccess]   = useState('')
 
+  // Staff PINs tab state. revealedPins is intentionally NOT seeded from any query — a PIN only
+  // ever enters this component as the response to an explicit, audited reveal.
+  const [pinAccounts, setPinAccounts]   = useState([])
+  const [loadingPins, setLoadingPins]   = useState(false)
+  const [revealedPins, setRevealedPins] = useState({})
+  const [revealingId, setRevealingId]   = useState(null)
+  const [pinErr, setPinErr]             = useState('')
+
   // Settings tab state
   const [clientSettings, setClientSettings]   = useState(SETTINGS_DEFAULTS)
   const [loadingSettings, setLoadingSettings] = useState(false)
@@ -120,8 +128,48 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   useEffect(() => {
     if (activeTab === 'settings' || activeTab === 'thresholds' || activeTab === 'qr') fetchClientSettings()
+    if (activeTab === 'pins') loadPinAccounts()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
+
+  // ── Staff PINs ──
+  // Reads profiles and staff_pin_vault directly rather than through an RPC: both are readable
+  // here because admin passes profiles_select's `is_admin()` branch and staff_pin_vault is an
+  // admin-only table. The PIN itself never comes from either query — only whether one is stored.
+  async function loadPinAccounts() {
+    setLoadingPins(true); setPinErr(''); setRevealedPins({})
+    const [{ data: profs }, { data: vaultRows }] = await Promise.all([
+      supabase.from('profiles')
+        .select('id, full_name, pos_email, hr_self_service')
+        .eq('client_id', client.id)
+        .or('pos_email.not.is.null,hr_self_service.eq.true'),
+      supabase.from('staff_pin_vault').select('user_id, updated_at').eq('client_id', client.id),
+    ])
+    const storedAt = new Map((vaultRows || []).map(v => [v.user_id, v.updated_at]))
+    setPinAccounts((profs || []).map(p => ({
+      id:        p.id,
+      full_name: p.full_name,
+      kind:      p.pos_email ? 'POS' : 'Self-Service',
+      storedAt:  storedAt.get(p.id) || null,
+    })).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '')))
+    setLoadingPins(false)
+  }
+
+  async function revealPin(userId) {
+    setRevealingId(userId); setPinErr('')
+    try {
+      const res = await adminOp('view_staff_pin', { userId })
+      setRevealedPins(prev => ({ ...prev, [userId]: res.pin }))
+      // Auto-mask. A PIN left on screen behind a drawer is a shoulder-surfing problem, and this
+      // drawer stays open across other admin work.
+      setTimeout(() => setRevealedPins(prev => {
+        const next = { ...prev }; delete next[userId]; return next
+      }), 30000)
+    } catch (e) {
+      setPinErr(e.message || 'Could not reveal PIN')
+    }
+    setRevealingId(null)
+  }
 
   // One-time reconciliation: a suite_plan that predates handleSuitePlanPick (or was edited
   // directly in the DB) can be inconsistent with the modules/plans it should imply — self-corrects
@@ -519,6 +567,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   const tabs = [
     { key: 'users',      label: 'Users' },
+    { key: 'pins',       label: 'Staff PINs' },
     { key: 'billing',    label: 'Billing' },
     { key: 'settings',   label: 'Settings' },
     { key: 'thresholds', label: 'Thresholds' },
@@ -696,6 +745,73 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* ── STAFF PINS TAB ── */}
+          {activeTab === 'pins' && (
+            <div>
+              <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
+                Staff PINs
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 16px', lineHeight: 1.5 }}>
+                POS and Self-Service PINs for this client. Revealing a PIN is recorded in the Audit Log
+                with your name. For a staff member who has simply forgotten theirs, the client&apos;s own
+                manager can already set a new one from POS Staff → Reset PIN — this is here for recovery,
+                not day-to-day support.
+              </p>
+
+              {pinErr && (
+                <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red)', margin: '0 0 12px' }}>{pinErr}</p>
+              )}
+
+              {loadingPins ? (
+                <p style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Loading…</p>
+              ) : pinAccounts.length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+                  This client has no POS or Self-Service PIN accounts.
+                </p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>PIN</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pinAccounts.map(a => (
+                        <tr key={a.id}>
+                          <td>{a.full_name || '—'}</td>
+                          <td><span className="badge-yellow">{a.kind}</span></td>
+                          <td style={{ fontFamily: 'monospace', fontSize: 14, letterSpacing: '0.12em' }}>
+                            {revealedPins[a.id] ? revealedPins[a.id] : '••••'}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {a.storedAt ? (
+                              <button
+                                className="btn btn-ghost"
+                                style={{ fontSize: 11 }}
+                                onClick={() => revealPin(a.id)}
+                                disabled={revealingId === a.id || !!revealedPins[a.id]}
+                              >
+                                {revealingId === a.id ? 'Revealing…' : revealedPins[a.id] ? 'Hides in 30s' : 'Reveal'}
+                              </button>
+                            ) : (
+                              <Tip text="This account predates the PIN vault, or has not been reset or signed in since. Its PIN was never observed, so there is nothing stored to reveal — reset it to make it recoverable.">
+                                <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Not stored</span>
+                              </Tip>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
