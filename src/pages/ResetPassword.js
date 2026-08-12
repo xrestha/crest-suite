@@ -20,6 +20,7 @@ export default function ResetPassword() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
+  const [linkFailed, setLinkFailed] = useState(false)
   const [capsOn, capsHandlers] = useCapsLock()
 
   useEffect(() => {
@@ -29,7 +30,14 @@ export default function ResetPassword() {
     // Covers the case where the recovery hash was already processed (and the event already
     // fired) before this listener was attached.
     supabase.auth.getSession().then(({ data }) => { if (data.session) setReady(true) })
-    return () => sub.subscription.unsubscribe()
+
+    // `ready` only ever flips TRUE, so without this the page had a terminal dead end: arriving
+    // here directly, with an expired token, or with the hash stripped by a mail client left
+    // "Waiting for the reset link to verify…" on screen forever — no timeout, no error, no way
+    // back to sign-in. This is a recovery flow, so the user is already here because something
+    // went wrong, and reset links expire routinely.
+    const timer = setTimeout(() => setLinkFailed(true), 8000)
+    return () => { sub.subscription.unsubscribe(); clearTimeout(timer) }
   }, [])
 
   async function handleSubmit(e) {
@@ -51,7 +59,10 @@ export default function ResetPassword() {
   return (
     <main className="login-root">
       <div className="login-split" style={{ maxWidth: 440, margin: '0 auto' }}>
-        <div className="login-right" style={{ padding: '48px 0' }}>
+        {/* 34px horizontal, matching .login-right's own padding — this overrode it to 0, so the
+            heading sat 1px from the card edge and physically intruded on the 24px corner radius.
+            First thing a user sees after clicking a link in an email. */}
+        <div className="login-right" style={{ padding: '48px 34px' }}>
           <div className="login-brand" style={{ marginBottom: 24 }}>
             <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />
             <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
@@ -66,7 +77,19 @@ export default function ResetPassword() {
           ) : !ready ? (
             <>
               <h1 className="login-heading">Reset your password</h1>
-              <p className="login-sub">Waiting for the reset link to verify…</p>
+              {linkFailed ? (
+                <>
+                  <p className="login-error" role="alert" style={{ marginBottom: 18 }}>
+                    This reset link didn't work. It may have expired, or already been used —
+                    reset links are single-use and time-limited.
+                  </p>
+                  <button type="button" className="login-btn" onClick={() => navigate('/login')}>
+                    Back to sign in →
+                  </button>
+                </>
+              ) : (
+                <p className="login-sub" role="status">Waiting for the reset link to verify…</p>
+              )}
             </>
           ) : (
             <>

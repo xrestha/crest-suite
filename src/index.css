@@ -12,6 +12,22 @@ body {
   background: var(--theme-bg, #0f1117);
 }
 
+/* Form controls do NOT inherit font-family from body — every browser substitutes its own UA
+   default instead. Measured before this rule existed: all 14 controls on the login page, all 13
+   CTAs on the pricing page and every `.btn` in the app rendered in Arial, not Poppins, so the
+   product's own typeface reached its prose and none of its controls. `Layout.css` had been
+   patching this one class at a time (10 `font-family: inherit` declarations on individual
+   selectors, none of them `.btn` or `.form-field input`), which is the tell that the intent was
+   always inheritance. One rule replaces the whole patching strategy.
+   `optgroup` is included because Firefox styles it separately from `select`. */
+input,
+button,
+select,
+textarea,
+optgroup {
+  font-family: inherit;
+}
+
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;

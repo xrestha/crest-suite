@@ -6,16 +6,23 @@ function fmt(days) {
   return `${days}d left`
 }
 
+// `color` is the full-opacity SIGNAL TEXT and must be a theme token, never a literal: it is
+// rendered as text on the card/sidebar surface, and the ten presets move that surface from
+// #0f1117 to #e6e9ef. Hardcoding the Dark preset's own #34d399 here put the subscription badge
+// at 1.58:1 on Latte — every light preset failed AA on the one line that says how long a client
+// has left. The `bg`/`border` alpha tints stay literal rgba: that is the codebase's documented
+// convention (DESIGN.md's tint pattern is "alpha fill + full-opacity signal text"), and a faint
+// tint reads correctly as red/amber/green on every preset because only the text carries meaning.
 function statusFromDays(days) {
-  if (days < 0)   return { label: 'Expired',  days, color: '#f87171', bg: 'rgba(248,113,113,0.12)', border: 'rgba(248,113,113,0.3)'  }
-  if (days <= 7)  return { label: fmt(days),   days, color: '#f87171', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.25)' }
-  if (days <= 30) return { label: fmt(days),   days, color: '#fbbf24', bg: 'rgba(251,191,36,0.10)',  border: 'rgba(251,191,36,0.25)'  }
-  return            { label: fmt(days),   days, color: '#34d399', bg: 'rgba(52,211,153,0.10)',  border: 'rgba(52,211,153,0.25)'  }
+  if (days < 0)   return { label: 'Expired',  days, color: 'var(--theme-red-text)',   bg: 'rgba(248,113,113,0.12)', border: 'rgba(248,113,113,0.3)'  }
+  if (days <= 7)  return { label: fmt(days),   days, color: 'var(--theme-red-text)',   bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.25)' }
+  if (days <= 30) return { label: fmt(days),   days, color: 'var(--theme-amber-text)', bg: 'rgba(251,191,36,0.10)',  border: 'rgba(251,191,36,0.25)'  }
+  return            { label: fmt(days),   days, color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.10)',  border: 'rgba(52,211,153,0.25)'  }
 }
 
 // Per-date status helper — pass any date string directly
 export function getDateStatus(endsAt) {
-  if (!endsAt) return { label: null, days: null, color: '#4b5563', bg: 'transparent', border: 'transparent' }
+  if (!endsAt) return { label: null, days: null, color: 'var(--theme-text3)', bg: 'transparent', border: 'transparent' }
   const days = Math.ceil((new Date(endsAt) - Date.now()) / 86400000)
   return statusFromDays(days)
 }
@@ -82,10 +89,10 @@ export function getSubStatus(client) {
   }
   if (client?.trial_ends_at) {
     const days = Math.ceil((new Date(client.trial_ends_at) - now) / 86400000)
-    if (days < 0) return { label: 'Trial expired', days, color: '#f87171', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.25)' }
+    if (days < 0) return { label: 'Trial expired', days, color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.25)' }
     const m = Math.floor(days / 30)
     const trialLabel = days >= 30 ? `Trial · ${m}mo` : `Trial · ${days}d`
-    return { label: trialLabel, days, color: '#c9a84c', bg: 'rgba(201,168,76,0.10)', border: 'rgba(201,168,76,0.25)' }
+    return { label: trialLabel, days, color: 'var(--theme-accent-ink)', bg: 'rgba(201,168,76,0.10)', border: 'rgba(201,168,76,0.25)' }
   }
-  return { label: null, days: null, color: '#4b5563', bg: 'transparent', border: 'transparent' }
+  return { label: null, days: null, color: 'var(--theme-text3)', bg: 'transparent', border: 'transparent' }
 }

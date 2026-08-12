@@ -214,7 +214,10 @@ export default function Login() {
                 <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />
                 <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
               </div>
+              {/* type="button" explicitly — a <button> with no type defaults to submit, which is
+                  harmless only for as long as this stays outside a <form>. */}
               <button
+                type="button"
                 onClick={() => navigate('/pricing')}
                 className="login-btn login-btn--trial login-btn--pricing">
                 View Pricing →
@@ -312,7 +315,11 @@ export default function Login() {
             divider above. ── */}
         <div className="login-hdivider" />
         <div className="login-trial-block">
-          <div className="login-divider-label">Start your free trial</div>
+          {/* A real heading, not a styled div: this block creates a live client account, and the
+              page's only heading was "Welcome back" — so the sign-in form and the account-creation
+              form were indistinguishable in the heading outline, and the conversion CTA sat under
+              the quietest text tier in the system. */}
+          <h2 className="login-divider-label">Start your free trial</h2>
 
           {trialSuccess ? (
             <div className="login-notice" role="status">
@@ -330,12 +337,16 @@ export default function Login() {
                   {trialFieldError('trial-biz')}
                 </div>
                 <div className="login-field">
-                  <label htmlFor="trial-email">Email *</label>
+                  {/* "Business email" / "Create a password", not "Email" / "Password": the
+                      sign-in form 300px above uses those exact labels with the same placeholder,
+                      and the two forms have opposite consequences — one signs you in, the other
+                      creates a real client record. Nothing but proximity distinguished them. */}
+                  <label htmlFor="trial-email">Business email *</label>
                   <input id="trial-email" type="email" autoComplete="email" value={tEmail} onChange={e => setTEmail(e.target.value)} placeholder="you@restaurant.com" required {...trialFieldAria('trial-email')} />
                   {trialFieldError('trial-email')}
                 </div>
                 <div className="login-field">
-                  <label htmlFor="trial-password">Password *</label>
+                  <label htmlFor="trial-password">Create a password *</label>
                   <input id="trial-password" type={tShowPass ? 'text' : 'password'} autoComplete="new-password" value={tPass} onChange={e => setTPass(e.target.value)} {...trialCapsHandlers} placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`} required {...trialFieldAria('trial-password')} />
                   {trialCaps && <span className="login-caps-hint" role="status">Caps Lock is on</span>}
                   {trialFieldError('trial-password')}

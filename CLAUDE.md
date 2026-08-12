@@ -297,7 +297,14 @@ All colors must use CSS variables, not hardcoded hex. The full token set:
 --theme-text1       --theme-text2       --theme-text3
 --theme-accent      --theme-green       --theme-red         --theme-amber       --theme-purple
 --theme-sidebar     --theme-input-bg    --theme-table-hover --theme-focus-ring
+--theme-green-text  --theme-red-text    --theme-amber-text  --theme-purple-text --theme-accent-ink
 ```
+
+**A signal color used as TEXT takes the `*-text` variant; used as a FILL it takes the base token (S549).** This is not a style preference — one value cannot do both jobs on a light preset. Measured across the five light presets, **23 of 25 signal-color/surface combinations failed WCAG AA**, and `--theme-text3` failed on all five. `ThemeContext.js` now emits a darkened, hue-preserving text variant per light preset (dark presets fall back to the base color, so nothing changes there), and the neutral ramp was corrected in place. The palettes themselves are deliberately untouched — Latte/Rosé Dawn/Solarized are faithful reproductions people pick *because* they recognise those values, and the base tokens are still correct for charts, tints, borders and dots.
+
+Practical rules: `.badge-*` classes already point at the variants, so anything using them is covered. Reach for a variant whenever you write `color:` with a signal token. **`--theme-accent-ink` is not `--theme-accent-text`** — `accent-ink` is the accent used *as* text (a link, an active nav item); `accent-text` is the foreground that sits *on* an accent fill. And when a constant is consumed by string concatenation for alpha (`${color}22`), a `var()` breaks it — use `color-mix()` or a tint helper, as `pricingPlans.js`'s `moduleTint()` does.
+
+**Form controls do not inherit `font-family`.** `body` sets Poppins; every browser substitutes its own default into `input`/`button`/`select`/`textarea`, so before S549 every control in the app rendered in Arial. `index.css` now sets `font-family: inherit` on all four (plus `optgroup`, which Firefox styles separately). Don't re-add the per-class patches `Layout.css` had accumulated.
 
 `--theme-purple` (added during the UI/UX audit pass) is for a genuine 4th/5th categorical color — e.g. Staff Meals in Stock.js/MonthlySummary.js, the sub-recipe tab underline in Recipes.js — that several files had previously hardcoded independently as the same violet hex with no shared source of truth. It is not a general-purpose semantic color like green/red/amber; reach for it only when a page already needs a distinct categorical hue beyond what accent/green/red/amber cover.
 

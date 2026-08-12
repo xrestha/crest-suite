@@ -4,15 +4,42 @@
 // three had their own independently hand-maintained copies of this data and had already drifted
 // out of sync with each other and with the real feature-tier assignments in AuthContext.js.
 //
-// Colors are by MODULE (blue=IMS, green=HR, violet=POS), matching the convention already used on
-// the Admin Dashboard's client-list module pills (AdminDashboardOverview.jsx) and Help.js's
-// Getting Started tab — not the old per-tier gold/green/indigo scheme, since pricing is now
-// organized by module (IMS has real tiers; HR/POS are flat single prices), not one universal ladder.
+// Colors are by MODULE, using the mapping DESIGN.md already establishes: IMS = accent, HR = green,
+// POS = purple.
+//
+// These were literal hex (`#60a5fa` / `#34d399` / `#a78bfa`) until 2026-08-12. Two problems, both
+// measured: `#60a5fa` was the eighth recorded occurrence of the undocumented indigo DESIGN.md
+// tracks by name — and it had become the primary brand colour of the public pricing page. And
+// because a literal cannot track the active preset, using these as TEXT failed AA badly on the
+// light presets: on Latte, "Crest HR" measured 1.92:1 and every plan name 2.54:1 against white.
+// The header comment used to cite AdminDashboardOverview.jsx as precedent for the indigo; DESIGN.md
+// records that file as having been FIXED, so the precedent had stopped existing.
+//
+// Two maps, because a signal colour does two jobs: COLORS fills (dots, borders, tints, solid
+// buttons), INK is the same role used as text and resolves to the darker, AA-passing variant on
+// light presets. Same split as ThemeContext's `*Text` tokens — see the block comment there.
+// Trial length, stated in one place. It used to be written out at four separate call sites and one
+// of them disagreed: the FAQ asked "Is the 1-month trial really free?" and answered "7 days", on a
+// page headlined "Simple, honest pricing". For a trust-led sale to a buyer who is not a software
+// buyer, a page contradicting itself about a number is expensive out of proportion to the fix.
+export const TRIAL_DAYS = 7
+
 export const MODULE_COLORS = {
-  ims: '#60a5fa',
-  hr:  '#34d399',
-  pos: '#a78bfa',
+  ims: 'var(--theme-accent)',
+  hr:  'var(--theme-green)',
+  pos: 'var(--theme-purple)',
 }
+
+export const MODULE_INK = {
+  ims: 'var(--theme-accent-ink)',
+  hr:  'var(--theme-green-text)',
+  pos: 'var(--theme-purple-text)',
+}
+
+// These are `var()` now, so the old `${MODULE_COLORS.ims}22` hex-alpha concatenation no longer
+// produces a valid colour. Use this instead — it is the one place the alpha maths lives.
+export const moduleTint = (key, pct) =>
+  `color-mix(in srgb, ${MODULE_COLORS[key] || MODULE_COLORS.ims} ${pct}%, transparent)`
 
 // Each tier sells one job. Starter records and complies, Growth controls cost, Pro decides
 // strategy — see the same rule expressed as key sets in AuthContext.js. Keep these lists in step

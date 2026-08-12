@@ -213,7 +213,7 @@ const IMS_FEATURE_TIERS = [
     ]
   },
   {
-    tier: 'pro', label: 'Pro Plan', planLabel: 'Pro', planColor: '#818cf8',
+    tier: 'pro', label: 'Pro Plan', planLabel: 'Pro', planColor: 'var(--theme-accent-ink)',
     features: [
       {
         icon: '≋', name: 'Period Comparison',
@@ -850,19 +850,31 @@ export default function Help() {
     const key = `${moduleKey}:${feat.name}`
     const isOpen = expandedModule === key
     return (
-      <div className="card" style={{ padding: 0, marginBottom: 6, cursor: 'pointer' }}>
-        <div
+      <div className="card" style={{ padding: 0, marginBottom: 6 }}>
+        {/* A real <button> with aria-expanded/aria-controls, not a <div onClick>. This page is a
+            Read surface whose entire structure is disclosure, and every accordion on it used to be
+            unreachable by keyboard — a keyboard or screen-reader user could tab to the search box
+            and nothing else, so the product's whole documentation was closed to them. The chevron
+            is aria-hidden: the expanded state is now exposed properly, so reading out "▼" adds
+            nothing. */}
+        <button
+          type="button"
+          aria-expanded={isOpen}
+          aria-controls={`feat-panel-${key}`}
           onClick={() => setExpandedModule(isOpen ? null : key)}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px' }}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px',
+            width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+          }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 15, width: 22, textAlign: 'center', flexShrink: 0 }}>{feat.icon}</span>
+            <span aria-hidden="true" style={{ fontSize: 15, width: 22, textAlign: 'center', flexShrink: 0 }}>{feat.icon}</span>
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{feat.name}</span>
           </div>
-          <span style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{isOpen ? '▲' : '▼'}</span>
-        </div>
+          <span aria-hidden="true" style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{isOpen ? '▲' : '▼'}</span>
+        </button>
         {isOpen && (
-          <div style={{ padding: '0 18px 16px', borderTop: '1px solid var(--theme-border)' }}>
+          <div id={`feat-panel-${key}`} role="region" style={{ padding: '0 18px 16px', borderTop: '1px solid var(--theme-border)' }}>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', marginTop: 14, lineHeight: 1.75 }}>{feat.guide || feat.desc}</p>
             {feat.tips?.length > 0 && (
               <div style={{ marginTop: 12 }}>
@@ -933,29 +945,53 @@ export default function Help() {
       </div>
 
       {/* Section tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 28, borderBottom: '1px solid var(--theme-border)' }}>
+      <div role="tablist" aria-label="Help sections" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 28, borderBottom: '1px solid var(--theme-border)' }}>
         {[
           { id: 'guide',   label: 'Getting Started' },
           { id: 'modules', label: 'Module Guide' },
           { id: 'glossary', label: 'Glossary' },
           { id: 'faq',     label: 'FAQ' },
           { id: 'pricing', label: '💎 Pricing' },
-        ].map(s => (
-          <button key={s.id} onClick={() => setActiveSection(s.id)} style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            padding: '10px 20px', fontSize: 13, fontWeight: 500,
-            color: activeSection === s.id ? 'var(--theme-accent)' : 'var(--theme-text2)',
-            borderBottom: activeSection === s.id ? '2px solid var(--theme-accent)' : '2px solid transparent',
-            marginBottom: -1
-          }}>{s.label}</button>
+        ].map((s, i, arr) => (
+          /* .panel-tab is the underline-tab family DESIGN.md added for exactly this shape, and it
+             brings the hover state and the coarse-pointer 44px floor an inline style cannot carry.
+             Roving tabIndex + arrow keys so the whole row is ONE stop in the page's tab order
+             rather than five — per DESIGN.md's Tabs rule. */
+          <button
+            key={s.id}
+            role="tab"
+            id={`help-tab-${s.id}`}
+            aria-selected={activeSection === s.id}
+            aria-controls="help-tabpanel"
+            tabIndex={activeSection === s.id ? 0 : -1}
+            onClick={() => setActiveSection(s.id)}
+            onKeyDown={e => {
+              const dir = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
+              if (dir) {
+                e.preventDefault()
+                const next = arr[(i + dir + arr.length) % arr.length]
+                setActiveSection(next.id)
+                document.getElementById(`help-tab-${next.id}`)?.focus()
+              } else if (e.key === 'Home') {
+                e.preventDefault(); setActiveSection(arr[0].id); document.getElementById(`help-tab-${arr[0].id}`)?.focus()
+              } else if (e.key === 'End') {
+                e.preventDefault(); setActiveSection(arr[arr.length - 1].id); document.getElementById(`help-tab-${arr[arr.length - 1].id}`)?.focus()
+              }
+            }}
+            className={`panel-tab${activeSection === s.id ? ' panel-tab--active' : ''}`}
+          >{s.label}</button>
         ))}
       </div>
 
       {/* Search — spans every tab's content (Module Guide, Glossary, FAQ) from one box, since
           a client has no way to know which of 5 tabs an answer lives in otherwise. */}
       <div style={{ marginBottom: 24 }}>
+        {/* Was an unlabeled input carrying .form-select — a <select> class on a text box, with a
+            placeholder standing in for a label (DESIGN.md forbids exactly that). */}
+        <label htmlFor="help-search" className="sr-only">Search help</label>
         <input
-          type="text"
+          id="help-search"
+          type="search"
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder="Search features, glossary terms, and FAQs…"
@@ -966,7 +1002,9 @@ export default function Help() {
 
       {searching && (
         <div style={{ marginBottom: 28 }}>
-          <p style={{ fontSize: 13, color: 'var(--theme-text2)', marginBottom: 16 }}>
+          {/* role="status" so the count is announced as it changes — a sighted user watches the
+              list shrink while typing; without this a screen-reader user gets nothing. */}
+          <p role="status" aria-live="polite" style={{ fontSize: 13, color: 'var(--theme-text2)', marginBottom: 16 }}>
             {searchResultCount} result{searchResultCount === 1 ? '' : 's'} for "{searchQuery}"
           </p>
           {matchedFeatures.length > 0 && (
@@ -1009,6 +1047,10 @@ export default function Help() {
           )}
         </div>
       )}
+
+      {/* One tabpanel wrapping all five section bodies — aria-labelledby points at whichever tab
+          is currently selected, so the panel is announced with its own section's name. */}
+      <div id="help-tabpanel" role="tabpanel" aria-labelledby={`help-tab-${activeSection}`} tabIndex={-1}>
 
       {!searching && <>
 
@@ -1140,7 +1182,7 @@ export default function Help() {
                         Crest HR runs payroll, attendance, and Nepal-compliant SSF/TDS deductions for your staff. The core idea is simple:
                       </p>
                       <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '10px 16px', display: 'inline-block', marginBottom: 8 }}>
-                        <span style={{ fontSize: 13, color: '#34d399', fontWeight: 600 }}>Attendance → Payroll: what you mark each day becomes what people get paid</span>
+                        <span style={{ fontSize: 13, color: 'var(--theme-green-text)', fontWeight: 600 }}>Attendance → Payroll: what you mark each day becomes what people get paid</span>
                       </div>
                     </>
                   )}
@@ -1215,7 +1257,7 @@ export default function Help() {
                         Crest POS runs your floor — tables, orders, billing, and shift reconciliation. The core idea is simple:
                       </p>
                       <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '10px 16px', display: 'inline-block' }}>
-                        <span style={{ fontSize: 13, color: '#a78bfa', fontWeight: 600 }}>Order → Bill → Shift Close: every sale reconciles back to the cash drawer at day's end</span>
+                        <span style={{ fontSize: 13, color: 'var(--theme-purple-text)', fontWeight: 600 }}>Order → Bill → Shift Close: every sale reconciles back to the cash drawer at day's end</span>
                       </div>
                     </>
                   )}
@@ -1462,7 +1504,7 @@ export default function Help() {
 
           {/* Crest IMS — 3 tiers */}
           <p style={{ fontSize: 11, color: MODULE_COLORS.ims, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest IMS</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
             {IMS_TIERS.map(plan => {
               const highlight = plan.key === 'growth'
               const price = pricingAnnual ? plan.annual : plan.monthly
@@ -1587,14 +1629,19 @@ export default function Help() {
       {activeSection === 'faq' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {FAQ.map((item, i) => (
-            <div key={i} className="card" style={{ padding: 0, cursor: 'pointer' }}>
-              <div onClick={() => setExpandedFaq(expandedFaq === i ? null : i)}
-                style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div key={i} className="card" style={{ padding: 0 }}>
+              <button
+                type="button"
+                aria-expanded={expandedFaq === i}
+                aria-controls={`faq-panel-${i}`}
+                onClick={() => setExpandedFaq(expandedFaq === i ? null : i)}
+                style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                         width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
                 <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--theme-text1)' }}>{item.q}</span>
-                <span style={{ color: 'var(--theme-text3)', fontSize: 14 }}>{expandedFaq === i ? '▲' : '▼'}</span>
-              </div>
+                <span aria-hidden="true" style={{ color: 'var(--theme-text3)', fontSize: 14 }}>{expandedFaq === i ? '▲' : '▼'}</span>
+              </button>
               {expandedFaq === i && (
-                <div style={{ padding: '0 20px 16px', borderTop: '1px solid var(--theme-border)' }}>
+                <div id={`faq-panel-${i}`} role="region" style={{ padding: '0 20px 16px', borderTop: '1px solid var(--theme-border)' }}>
                   <p style={{ fontSize: 13, color: 'var(--theme-text2)', marginTop: 12, lineHeight: 1.7 }}>{item.a}</p>
                 </div>
               )}
@@ -1604,6 +1651,7 @@ export default function Help() {
       )}
 
       </>}
+      </div>
     </div>
   )
 }

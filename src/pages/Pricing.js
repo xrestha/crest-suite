@@ -1,21 +1,21 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Hexagon, Check, Mail, Calculator, Users, CalendarDays } from 'lucide-react'
-import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
+import { MODULE_COLORS, MODULE_INK, moduleTint, TRIAL_DAYS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
 
 // ── Change this to the contact email when ready ──────────────────────────────
 const CONTACT_EMAIL = 'hello@cresthospitality.com'
 
 const GOLD   = 'var(--theme-accent)'
-const GREEN  = 'var(--theme-green)'
+const GREEN  = 'var(--theme-green-text)'   // text use only — see ThemeContext's PRESETS note
 const BG     = 'var(--theme-bg)'
 const CARD   = 'var(--theme-card)'
 const BORDER = 'var(--theme-border)'
 
 const FAQS = [
   {
-    q: 'Is the 1-month trial really free?',
-    a: 'Yes — the IMS Starter plan is completely free for the first 7 days with no credit card and no hidden fees. After that it continues at its listed monthly rate, or you can upgrade to Growth or Pro at any time.',
+    q: `Is the ${TRIAL_DAYS}-day trial really free?`,
+    a: `Yes — the IMS Starter plan is completely free for the first ${TRIAL_DAYS} days with no credit card and no hidden fees. After that it continues at its listed monthly rate, or you can upgrade to Growth or Pro at any time.`,
   },
   {
     q: 'Can I negotiate the price?',
@@ -58,7 +58,7 @@ function SectionHeading({ color, title, subtitle }) {
     <div style={{ textAlign: 'center', marginBottom: 28 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 6 }}>
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
-        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>{title}</h2>
+        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: 'var(--theme-text1)' }}>{title}</h2>
       </div>
       {subtitle && <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>{subtitle}</p>}
     </div>
@@ -80,7 +80,7 @@ export default function Pricing() {
   }, [showFaq])
 
   return (
-    <div style={{ minHeight: '100vh', background: BG, color: 'var(--theme-text1)', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: BG, color: 'var(--theme-text1)' }}>
 
       {/* Nav */}
       <nav style={{ background: CARD, borderBottom: `1px solid ${BORDER}`, padding: '0 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64, position: 'sticky', top: 0, zIndex: 100 }}>
@@ -90,17 +90,21 @@ export default function Pricing() {
         </div>
         <button
           onClick={() => navigate('/login')}
-          style={{ background: 'rgba(201,168,76,0.1)', border: `1px solid rgba(201,168,76,0.35)`, color: GOLD, padding: '8px 22px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+          style={{ background: 'rgba(201,168,76,0.1)', border: `1px solid rgba(201,168,76,0.35)`, color: GOLD, padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
           Login →
         </button>
       </nav>
 
+      {/* <main> — the page previously had a <nav> and no main landmark at all, so a screen-reader
+          user had no way to skip the sticky header to the content. */}
+      <main>
+
       {/* Hero */}
       <div style={{ textAlign: 'center', padding: '72px 32px 52px' }}>
-        <div style={{ display: 'inline-block', background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 20, padding: '5px 18px', fontSize: 12, color: GREEN, marginBottom: 24, letterSpacing: '0.06em', fontWeight: 600 }}>
-          1-week free trial · No credit card required
+        <div style={{ display: 'inline-block', background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 'var(--radius-full)', padding: '5px 18px', fontSize: 12, color: GREEN, marginBottom: 24, letterSpacing: '0.06em', fontWeight: 600 }}>
+          {TRIAL_DAYS}-day free trial · No credit card required
         </div>
-        <h1 style={{ fontSize: 44, fontWeight: 800, margin: '0 0 16px', fontFamily: 'Georgia, serif', lineHeight: 1.15, color: 'var(--theme-text1)' }}>
+        <h1 style={{ fontSize: 44, fontWeight: 800, margin: '0 0 16px', lineHeight: 1.15, color: 'var(--theme-text1)' }}>
           Simple, honest pricing
         </h1>
         <p style={{ fontSize: 16, color: 'var(--theme-text2)', margin: '0 auto 44px', maxWidth: 560, lineHeight: 1.7 }}>
@@ -109,17 +113,17 @@ export default function Pricing() {
         </p>
 
         {/* Billing toggle */}
-        <div style={{ display: 'inline-flex', background: CARD, border: `1px solid ${BORDER}`, borderRadius: 9, padding: 4, gap: 2 }}>
+        <div style={{ display: 'inline-flex', background: CARD, border: `1px solid ${BORDER}`, borderRadius: 'var(--radius-md)', padding: 4, gap: 2 }}>
           <button
             onClick={() => setAnnual(false)} aria-pressed={!annual}
-            style={{ background: !annual ? 'rgba(201,168,76,0.15)' : 'none', border: !annual ? `1px solid rgba(201,168,76,0.3)` : '1px solid transparent', color: !annual ? GOLD : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+            style={{ background: !annual ? 'rgba(201,168,76,0.15)' : 'none', border: !annual ? `1px solid rgba(201,168,76,0.3)` : '1px solid transparent', color: !annual ? GOLD : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
             Monthly
           </button>
           <button
             onClick={() => setAnnual(true)} aria-pressed={annual}
-            style={{ background: annual ? 'rgba(201,168,76,0.15)' : 'none', border: annual ? `1px solid rgba(201,168,76,0.3)` : '1px solid transparent', color: annual ? GOLD : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+            style={{ background: annual ? 'rgba(201,168,76,0.15)' : 'none', border: annual ? `1px solid rgba(201,168,76,0.3)` : '1px solid transparent', color: annual ? GOLD : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
             Annual
-            <span style={{ background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.25)', color: GREEN, fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 700, letterSpacing: '0.04em' }}>
+            <span style={{ background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.25)', color: GREEN, fontSize: 10, padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 700, letterSpacing: '0.04em' }}>
               Save 25%
             </span>
           </button>
@@ -146,7 +150,7 @@ export default function Pricing() {
 
       {/* ── Crest IMS — 3 tiers ── */}
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
-        <SectionHeading color={MODULE_COLORS.ims} title="Crest IMS" subtitle="Inventory, recipe costing & food-cost intelligence" />
+        <SectionHeading color={MODULE_INK.ims} title="Crest IMS" subtitle="Inventory, recipe costing & food-cost intelligence" />
       </div>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20 }}>
         {IMS_TIERS.map(plan => {
@@ -155,22 +159,25 @@ export default function Pricing() {
           return (
             <div key={plan.key} style={{
               background: CARD,
-              border: highlight ? `1px solid ${MODULE_COLORS.ims}70` : `1px solid ${BORDER}`,
-              borderRadius: 14, padding: '36px 28px 28px', position: 'relative',
+              border: highlight ? `1px solid ${moduleTint('ims', 45)}` : `1px solid ${BORDER}`,
+              borderRadius: 'var(--radius-lg)', padding: '36px 28px 28px', position: 'relative',
               display: 'flex', flexDirection: 'column',
-              boxShadow: highlight ? `0 4px 48px ${MODULE_COLORS.ims}22` : 'none',
+              boxShadow: highlight ? `0 4px 48px ${moduleTint('ims', 13)}` : 'none',
             }}>
               {highlight && (
-                <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', background: MODULE_COLORS.ims, color: '#0b0b0b', fontSize: 10, fontWeight: 800, padding: '4px 14px', borderRadius: 10, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', background: MODULE_COLORS.ims, color: 'var(--theme-accent-text)', fontSize: 11, fontWeight: 800, padding: '4px 14px', borderRadius: 'var(--radius-sm)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                   Most Popular
                 </div>
               )}
 
               <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 20, fontWeight: 700, color: MODULE_COLORS.ims, fontFamily: 'Georgia, serif' }}>{plan.label}</span>
+                {/* Georgia removed here and on every other heading but the wordmark — DESIGN.md's
+                    One Serif Rule allows exactly one serif element per screen, and this page had
+                    twelve. */}
+                <span style={{ fontSize: 20, fontWeight: 700, color: MODULE_INK.ims }}>{plan.label}</span>
                 {plan.key === 'starter' && !annual && (
-                  <span style={{ fontSize: 10, fontStyle: 'italic', fontWeight: 800, color: MODULE_COLORS.ims, background: `${MODULE_COLORS.ims}15`, border: `1px solid ${MODULE_COLORS.ims}40`, padding: '3px 8px', borderRadius: 8, letterSpacing: '0.05em' }}>
-                    FREE FOR 7 DAYS TRIAL
+                  <span style={{ fontSize: 11, fontStyle: 'italic', fontWeight: 800, color: MODULE_INK.ims, background: moduleTint('ims', 9), border: `1px solid ${moduleTint('ims', 25)}`, padding: '3px 8px', borderRadius: 'var(--radius-sm)', letterSpacing: '0.05em' }}>
+                    FREE FOR {TRIAL_DAYS} DAYS TRIAL
                   </span>
                 )}
               </div>
@@ -198,7 +205,7 @@ export default function Pricing() {
 
               <button
                 onClick={() => plan.key === 'starter' ? navigate('/login?trial=1') : navigate('/login')}
-                style={{ background: highlight ? MODULE_COLORS.ims : `${MODULE_COLORS.ims}14`, border: `1px solid ${highlight ? MODULE_COLORS.ims : MODULE_COLORS.ims + '40'}`, color: highlight ? '#0b0b0b' : MODULE_COLORS.ims, padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
+                style={{ background: highlight ? MODULE_COLORS.ims : moduleTint('ims', 8), border: `1px solid ${highlight ? MODULE_COLORS.ims : moduleTint('ims', 25)}`, color: highlight ? 'var(--theme-accent-text)' : MODULE_INK.ims, padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
                 {plan.key === 'starter' ? 'Start Free Trial' : `Get ${plan.label}`} →
               </button>
 
@@ -208,7 +215,7 @@ export default function Pricing() {
                     {plan.includesLabel}
                   </div>
                 )}
-                <FeatureList features={plan.features} color={MODULE_COLORS.ims} />
+                <FeatureList features={plan.features} color={MODULE_INK.ims} />
               </div>
             </div>
           )
@@ -217,18 +224,18 @@ export default function Pricing() {
 
       {/* ── Crest HR + Crest POS — flat modules ── */}
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
-        <SectionHeading color={MODULE_COLORS.hr} title="Crest HR & Crest POS" subtitle="Payroll and floor operations — buy either one on its own" />
+        <SectionHeading color={MODULE_INK.hr} title="Crest HR & Crest POS" subtitle="Payroll and floor operations — buy either one on its own" />
       </div>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
         {[
-          { key: 'hr',  name: 'Crest HR',  color: MODULE_COLORS.hr,  tagline: 'Nepal-compliant payroll, attendance, and staff management.', pricing: HR_PRICING },
-          { key: 'pos', name: 'Crest POS', color: MODULE_COLORS.pos, tagline: 'Tables, orders, billing, and shift reconciliation.',             pricing: POS_PRICING },
+          { key: 'hr',  name: 'Crest HR',  tagline: 'Nepal-compliant payroll, attendance, and staff management.', pricing: HR_PRICING },
+          { key: 'pos', name: 'Crest POS', tagline: 'Tables, orders, billing, and shift reconciliation.',             pricing: POS_PRICING },
         ].map(mod => {
           const price = annual ? mod.pricing.annual : mod.pricing.monthly
           return (
-            <div key={mod.key} style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: '36px 28px 28px', display: 'flex', flexDirection: 'column' }}>
+            <div key={mod.key} style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 'var(--radius-lg)', padding: '36px 28px 28px', display: 'flex', flexDirection: 'column' }}>
               <div style={{ marginBottom: 8 }}>
-                <span style={{ fontSize: 20, fontWeight: 700, color: mod.color, fontFamily: 'Georgia, serif' }}>{mod.name}</span>
+                <span style={{ fontSize: 20, fontWeight: 700, color: MODULE_INK[mod.key] }}>{mod.name}</span>
               </div>
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px', lineHeight: 1.5 }}>{mod.tagline}</p>
 
@@ -246,11 +253,11 @@ export default function Pricing() {
 
               <button
                 onClick={() => navigate('/login')}
-                style={{ background: `${mod.color}14`, border: `1px solid ${mod.color}40`, color: mod.color, padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
+                style={{ background: moduleTint(mod.key, 8), border: `1px solid ${moduleTint(mod.key, 25)}`, color: MODULE_INK[mod.key], padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
                 Get {mod.name} →
               </button>
 
-              <FeatureList features={mod.pricing.features} color={mod.color} />
+              <FeatureList features={mod.pricing.features} color={MODULE_INK[mod.key]} />
             </div>
           )
         })}
@@ -264,10 +271,10 @@ export default function Pricing() {
         <SectionHeading color={GOLD} title="Crest Suite Pro" subtitle="The owner layer — added on top of your modules, not a separate product" />
       </div>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 80px' }}>
-        <div style={{ background: CARD, border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 14, padding: '32px 28px', position: 'relative' }}>
+        <div style={{ background: CARD, border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 'var(--radius-lg)', padding: '32px 28px', position: 'relative' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 28, alignItems: 'start' }}>
             <div>
-              <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 10 }}>
+              <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 10 }}>
                 {SUITE_ADDON.label}
               </div>
               <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>
@@ -284,7 +291,7 @@ export default function Pricing() {
               </div>
               <button
                 onClick={() => navigate('/login')}
-                style={{ background: GOLD, border: `1px solid ${GOLD}`, color: 'var(--theme-accent-text)', padding: '11px 20px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700, width: '100%' }}>
+                style={{ background: GOLD, border: `1px solid ${GOLD}`, color: 'var(--theme-accent-text)', padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, width: '100%' }}>
                 Add {SUITE_ADDON.label} →
               </button>
             </div>
@@ -303,7 +310,7 @@ export default function Pricing() {
       <div style={{ textAlign: 'center', padding: '0 24px 80px' }}>
         <button
           onClick={() => setShowFaq(true)}
-          style={{ background: 'rgba(201,168,76,0.08)', border: `1px solid rgba(201,168,76,0.25)`, color: GOLD, padding: '11px 28px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+          style={{ background: 'rgba(201,168,76,0.08)', border: `1px solid rgba(201,168,76,0.25)`, color: GOLD, padding: '11px 28px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
           FAQ — Common Questions
         </button>
       </div>
@@ -316,9 +323,9 @@ export default function Pricing() {
           <div
             role="dialog" aria-modal="true" aria-labelledby="faq-title"
             onClick={e => e.stopPropagation()}
-            style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, width: '100%', maxWidth: 640, maxHeight: '80vh', overflow: 'auto', padding: '36px 32px' }}>
+            style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: 640, maxHeight: '80vh', overflow: 'auto', padding: '36px 32px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>
-              <h2 id="faq-title" style={{ margin: 0, fontSize: 22, fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>Common Questions</h2>
+              <h2 id="faq-title" style={{ margin: 0, fontSize: 22, color: 'var(--theme-text1)' }}>Common Questions</h2>
               <button onClick={() => setShowFaq(false)} aria-label="Close" style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
             {FAQS.map((faq, i) => (
@@ -333,7 +340,7 @@ export default function Pricing() {
 
       {/* Footer CTA */}
       <div style={{ background: CARD, borderTop: `1px solid ${BORDER}`, padding: '64px 32px', textAlign: 'center' }}>
-        <h2 style={{ fontSize: 28, margin: '0 0 12px', fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>
+        <h2 style={{ fontSize: 28, margin: '0 0 12px', color: 'var(--theme-text1)' }}>
           Ready to take control of your food costs?
         </h2>
         <p style={{ fontSize: 14, color: 'var(--theme-text2)', margin: '0 0 36px', lineHeight: 1.6 }}>
@@ -342,22 +349,24 @@ export default function Pricing() {
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 48 }}>
           <button
             onClick={() => navigate(-1)}
-            style={{ background: 'none', border: `1px solid ${BORDER}`, color: 'var(--theme-text2)', padding: '13px 24px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+            style={{ background: 'none', border: `1px solid ${BORDER}`, color: 'var(--theme-text2)', padding: '13px 24px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
             ← Back
           </button>
           <button
             onClick={() => navigate('/login?trial=1')}
-            style={{ background: GOLD, border: 'none', color: 'var(--theme-accent-text)', padding: '13px 32px', borderRadius: 7, cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
+            style={{ background: GOLD, border: 'none', color: 'var(--theme-accent-text)', padding: '13px 32px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
             Start Free Trial →
           </button>
           <a
             href={`mailto:${CONTACT_EMAIL}`}
-            style={{ background: 'none', border: `1px solid ${BORDER}`, color: 'var(--theme-text2)', padding: '13px 28px', borderRadius: 7, textDecoration: 'none', fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            style={{ background: 'none', border: `1px solid ${BORDER}`, color: 'var(--theme-text2)', padding: '13px 28px', borderRadius: 'var(--radius-md)', textDecoration: 'none', fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
             <Mail size={15} strokeWidth={2} aria-hidden="true" /> Email us
           </a>
         </div>
         <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>© 2083 BS · Crest Hospitality · Kathmandu, Nepal</p>
       </div>
+
+      </main>
     </div>
   )
 }

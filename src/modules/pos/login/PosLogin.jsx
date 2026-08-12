@@ -24,15 +24,27 @@ export default function PosLogin() {
   const [selected,  setSelected]  = useState(null)
   const [pin,       setPin]       = useState('')
   const [error,     setError]     = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [retryToken, setRetryToken] = useState(0)
   const [signingIn, setSigningIn] = useState(false)
 
   useEffect(() => {
     // No silent bounce — an unactivated device shows its own explanatory screen below
     // instead of instantly redirecting to /login with no indication of why.
     if (!clientId || !deviceSecret) { setLoading(false); return }
+    setLoadError('')
+    setLoading(true)
+    // The RPC's `error` used to be discarded, so a network failure fell through to the empty-state
+    // copy — a till mid-service was told "No staff accounts found. Ask your manager to add staff",
+    // which sends the manager to the wrong page to fix a problem that isn't there. Self-Service's
+    // equivalent screen already separated these two; this is that fix ported back.
     supabase.rpc('get_pos_staff', { p_client_id: clientId, p_device_secret: deviceSecret })
-      .then(({ data }) => { setStaff(data || []); setLoading(false) })
-  }, [clientId, deviceSecret])
+      .then(({ data, error }) => {
+        if (error) setLoadError("Couldn't reach the server. Check this device's connection and try again.")
+        else setStaff(data || [])
+        setLoading(false)
+      })
+  }, [clientId, deviceSecret, retryToken])
 
   const pressKey = useCallback((k) => {
     if (k === '⌫') { setPin(p => p.slice(0, -1)); setError(''); return }
@@ -170,6 +182,13 @@ const pinDots = Math.max(4, pin.length)
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 32 }}>
           {loading ? (
             <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
+          ) : loadError ? (
+            <div style={{ textAlign: 'center', maxWidth: 320 }}>
+              <p role="alert" style={{ color: 'var(--theme-red-text)', marginBottom: 14 }}>{loadError}</p>
+              <button type="button" className="btn btn-ghost" onClick={() => setRetryToken(t => t + 1)}>
+                Try again
+              </button>
+            </div>
           ) : staff.length === 0 ? (
             <p style={{ color: 'var(--theme-text3)', textAlign: 'center', maxWidth: 300 }}>
               No staff accounts found. Ask your manager to add staff in POS → POS Staff.

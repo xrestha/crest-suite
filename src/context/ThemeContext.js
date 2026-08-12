@@ -3,6 +3,27 @@ import { createContext, useContext, useState, useEffect } from 'react'
 // Curated, trending palettes (Tokyo Night, Dracula, Nord, Catppuccin, Rosé Pine, Solarized…).
 // `sidebar` is theme-appropriate (dark sidebar for dark themes, light for light) so the sidebar
 // follows the selected theme; sidebar text uses --theme-text* which contrast accordingly.
+//
+// ── The *Text variants, and why they exist (added 2026-08-12) ────────────────────────────────
+// A signal colour does two different jobs: it FILLS things (chart series, badge tints, borders,
+// dots) and it is TEXT (a status badge's label, a KPI figure, a variance number). On a dark
+// preset one value serves both, because a bright green on a near-black card clears AA easily.
+// On a LIGHT preset it cannot: measured against their own surfaces, 23 of the 25
+// signal-colour/preset combinations across the five light presets failed WCAG AA — Latte's amber
+// at 2.15:1, Rosé Dawn's at 1.87:1, its accent at 2.37:1. Every status badge and signal figure in
+// the product was affected on half the shipped themes.
+//
+// Darkening `green`/`red`/`amber` outright would have fixed the text and broken the identity:
+// Latte, Rosé Dawn and Solarized are faithful reproductions of palettes people choose *because*
+// they recognise those exact values, and the same tokens paint charts and tints where the lighter
+// value is correct. So the palettes are untouched and each light preset additionally declares a
+// darkened, hue-preserving TEXT variant, clearing 4.5:1 against that preset's worst surface (its
+// own sidebar). This mirrors the accent/accentText pairing that already exists.
+//
+// Note `accentInk` is NOT `accentText`, and the two are easy to confuse: `accentText` is the
+// foreground that sits ON an accent-coloured fill; `accentInk` is the accent itself used AS text.
+//
+// Dark presets declare none of these — applyTheme falls back to the base colour for each.
 export const PRESETS = {
   dark: {
     name: 'Dark', description: 'Classic charcoal & gold',
@@ -52,46 +73,56 @@ export const PRESETS = {
   latte: {
     name: 'Latte', description: 'Soft pastel light',
     bg: '#eff1f5', card: '#ffffff', border: '#ccd0da', borderLt: '#e6e9ef', sidebar: '#e6e9ef',
-    text1: '#4c4f69', text2: '#6c6f85', text3: '#71748a',
+    // Neutral ramp darkened 2026-08-12 for AA. Unlike the signal colours above, these tokens are
+    // ONLY ever text — there is no fill or chart use to preserve — so they are corrected in place
+    // rather than given variants. text3 failed on all five light presets (3.72–4.02:1); text2 also
+    // failed here on Latte. Targets keep three distinct tiers (~6.5 / ~5.6 / ~4.6) instead of
+    // flattening them all onto the 4.5 floor.
+    text1: '#4c4f69', text2: '#57596b', text3: '#64667a',
     accent: '#8839ef', accentHover: '#7a2fd8', accentText: '#ffffff',
     inputBg: '#f7f8fb', tableHover: '#e9ebf1', focusRing: 'rgba(136,57,239,0.12)',
     green: '#40a02b', red: '#d20f39', amber: '#df8e1d', purple: '#8839ef',
+    greenText: '#2f7620', redText: '#b00d30', amberText: '#925d13', purpleText: '#7c33d9', accentInk: '#7c33d9',
     cardShadow: '0 1px 2px rgba(76,79,105,0.06), 0 10px 24px -8px rgba(76,79,105,0.1)',
   },
   dawn: {
     name: 'Rosé Dawn', description: 'Warm rose light',
     bg: '#faf4ed', card: '#fffaf3', border: '#dfd9d3', borderLt: '#f2e9e1', sidebar: '#f2e9e1',
-    text1: '#575279', text2: '#66627d', text3: '#766f86',
+    text1: '#524d72', text2: '#5c5971', text3: '#6c657a',
     accent: '#d7827e', accentHover: '#c66e6a', accentText: '#ffffff',
     inputBg: '#fffaf3', tableHover: '#f4ece4', focusRing: 'rgba(215,130,126,0.16)',
     green: '#56949f', red: '#b4637a', amber: '#ea9d34', purple: '#907aa9',
+    greenText: '#417179', redText: '#965266', amberText: '#906020', purpleText: '#746389', accentInk: '#955a57',
     cardShadow: '0 1px 2px rgba(87,82,121,0.06), 0 10px 24px -8px rgba(87,82,121,0.1)',
   },
   solarized: {
     name: 'Solarized', description: 'Cream & ocean blue',
     bg: '#fdf6e3', card: '#fffbf0', border: '#e2dac0', borderLt: '#f0e9d6', sidebar: '#eee8d5',
-    text1: '#586e75', text2: '#5c6868', text3: '#677676',
+    text1: '#435359', text2: '#525c5c', text3: '#5c6a6a',
     accent: '#268bd2', accentHover: '#1f6fa8', accentText: '#ffffff',
     inputBg: '#fffbf0', tableHover: '#f3edda', focusRing: 'rgba(38,139,210,0.12)',
     green: '#859900', red: '#dc322f', amber: '#b58900', purple: '#6c71c4',
+    greenText: '#5f6d00', redText: '#c32c2a', amberText: '#816200', purpleText: '#5d61a8', accentInk: '#1e6da5',
     cardShadow: '0 1px 2px rgba(88,110,117,0.06), 0 10px 24px -8px rgba(88,110,117,0.1)',
   },
   light: {
     name: 'Light', description: 'Clean warm white',
     bg: '#f6f3ef', card: '#ffffff', border: '#ddd6cf', borderLt: '#ece6df', sidebar: '#ece6dd',
-    text1: '#1c1917', text2: '#5c554e', text3: '#7b746c',
+    text1: '#1c1917', text2: '#5c554e', text3: '#6b655e',
     accent: '#b07d2b', accentHover: '#946720', accentText: '#ffffff',
     inputBg: '#fbf9f6', tableHover: '#f3ede6', focusRing: 'rgba(176,125,43,0.14)',
     green: '#15803d', red: '#dc2626', amber: '#b45309', purple: '#7c3aed',
+    greenText: '#137538', redText: '#c92323', amberText: '#a44c08', purpleText: '#7c3aed', accentInk: '#865f21',
     cardShadow: '0 1px 2px rgba(28,25,23,0.06), 0 10px 24px -8px rgba(28,25,23,0.1)',
   },
   bright: {
     name: 'Bright', description: 'Crisp cool-bright blue',
     bg: '#f4f7fc', card: '#ffffff', border: '#dde4f0', borderLt: '#eaeff8', sidebar: '#eaf0fb',
-    text1: '#0f172a', text2: '#5b6b85', text3: '#667692',
+    text1: '#0f172a', text2: '#515f77', text3: '#5e6c86',
     accent: '#3a6df0', accentHover: '#2f5cdb', accentText: '#ffffff',
     inputBg: '#f8faff', tableHover: '#eaf0fc', focusRing: 'rgba(58,109,240,0.14)',
     green: '#16a34a', red: '#dc2626', amber: '#d97706', purple: '#7c3aed',
+    greenText: '#117c38', redText: '#cf2424', amberText: '#a55a05', purpleText: '#7c3aed', accentInk: '#3563db',
     cardShadow: '0 1px 2px rgba(15,23,42,0.05), 0 10px 26px -8px rgba(58,109,240,0.16), 0 3px 8px -3px rgba(15,23,42,0.06)',
   },
 }
@@ -116,6 +147,15 @@ function applyTheme(t) {
   r.style.setProperty('--theme-red', t.red)
   r.style.setProperty('--theme-amber', t.amber)
   r.style.setProperty('--theme-purple', t.purple)
+  // Text variants — see the block comment above PRESETS. A preset that does not declare one is a
+  // dark preset, where the base colour already clears AA against its own surfaces, so it falls
+  // back rather than needing 5 duplicate keys per preset. A custom theme built from a dark base
+  // inherits the same fallback, which is correct: it only ever darkens a value that needed it.
+  r.style.setProperty('--theme-green-text', t.greenText || t.green)
+  r.style.setProperty('--theme-red-text', t.redText || t.red)
+  r.style.setProperty('--theme-amber-text', t.amberText || t.amber)
+  r.style.setProperty('--theme-purple-text', t.purpleText || t.purple)
+  r.style.setProperty('--theme-accent-ink', t.accentInk || t.accent)
   r.style.setProperty('--theme-card-shadow', t.cardShadow)
 }
 

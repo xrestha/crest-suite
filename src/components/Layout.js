@@ -11,6 +11,8 @@ import CommandPalette from './CommandPalette'
 // Calculation nav entry.
 import QuickCalculator from './Calculator'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
+import { useScopedDb } from '../shared/hooks/useScopedDb'
+import { BS_MONTHS } from '../utils/bsCalendar'
 import {
   LayoutDashboard, CalendarRange, Package, Truck, ShoppingCart, ClipboardList, ClipboardCheck,
   ArrowRightLeft, TrendingUp, ChefHat, Tag, PieChart, Receipt,
@@ -176,6 +178,27 @@ export default function Layout() {
           outlets, canSwitchOutlet, switchOutlet,
           hasPosAccess, posRole, posTeam, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner } = useAuth()
   const { settings } = useSettings()
+  const { scopedFrom } = useScopedDb()
+
+  // ── Context bar ──────────────────────────────────────────────────────────────────────────────
+  // Which tenant and which BS period the figures on screen belong to. The shell never stated
+  // either: client/plan lived only inside .sidebar-content (display:none at 56px, behind a drawer
+  // on mobile) and the period was printed by whichever page happened to print it — ClientDashboard
+  // does, the ~35 report pages do not. Every IMS figure is period-scoped, an admin can be viewing
+  // as another tenant, and an Owner can switch outlets: three independent ways to read a real
+  // number off the wrong books, on a product whose thesis is trusting the number enough to act.
+  // monthly_periods carries a partial unique index allowing at most one open period per client,
+  // which is why this is a .limit(1) read rather than an ordered one.
+  const [activePeriod, setActivePeriod] = useState(null)
+  useEffect(() => {
+    if (!clientId || !clientModules.ims) { setActivePeriod(null); return }
+    let cancelled = false
+    scopedFrom('monthly_periods', 'bs_year, bs_month, status')
+      .eq('status', 'open').limit(1).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setActivePeriod(data || null) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, clientModules.ims])
   const navigate = useNavigate()
   const clientName = profile?.clients?.name
   const [collapsed, setCollapsed] = useState(false)
@@ -190,7 +213,40 @@ export default function Layout() {
   const [outletError, setOutletError] = useState('')
   const dropdownRef = useRef(null)
   const outletDropdownRef = useRef(null)
+  const sidebarRef = useRef(null)
+  const hamburgerRef = useRef(null)
   const location = useLocation()
+
+  // On a phone the sidebar IS a modal drawer — it covers the page behind a 55% scrim — but it had
+  // none of a modal's behavior: Escape did nothing, focus never entered it, and focus never came
+  // back to the trigger on close. Modal.js solves all three; this is the same contract applied to
+  // the one overlay that could not reuse it (the sidebar is always mounted, not portalled).
+  // Deliberately NOT a full focus trap: the drawer is dismissed by Escape, by the scrim, and by
+  // selecting any destination inside it, so the exit is never more than one key away.
+  useEffect(() => {
+    if (!mobileSidebarOpen) return
+    const restoreTo = hamburgerRef.current
+    // Land on the first control inside the drawer rather than leaving focus on the hamburger the
+    // drawer now covers.
+    sidebarRef.current?.querySelector('button, a[href]')?.focus()
+    function onKeyDown(e) {
+      if (e.key === 'Escape') {
+        setMobileSidebarOpen(false)
+        restoreTo?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [mobileSidebarOpen])
+
+  // The drawer opens at whatever scroll position the nav was last left at — measured 642px in on a
+  // real session, landing mid-list on the accountant's reports rather than at the top of the panel.
+  useEffect(() => {
+    if (mobileSidebarOpen && sidebarRef.current) {
+      const nav = sidebarRef.current.querySelector('.sidebar-nav')
+      if (nav) nav.scrollTop = 0
+    }
+  }, [mobileSidebarOpen])
 
   // Switching outlets re-points every scoped query at another tenant, so it must not happen while
   // the POS offline queue still holds unsynced orders — those would flush against the wrong
@@ -320,22 +376,28 @@ export default function Layout() {
     })
   }
 
-  function renderNavItem(item, { pinnable = true, style, compact = false } = {}) {
+  function renderNavItem(item, { pinnable = true, style } = {}) {
     const isPinned = pins.includes(item.to)
-    const mergedStyle = compact
-      ? { margin: 0, width: '100%', padding: '8px 8px', gap: 6, fontSize: 12, ...style }
-      : style
     return (
       <NavLink key={item.to} to={item.to}
         className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
-        style={mergedStyle}
+        style={style}
         onClick={() => setMobileSidebarOpen(false)}>
-        <span className="sidebar-icon"><item.icon size={compact ? 15 : 16} strokeWidth={1.75} /></span>
+        <span className="sidebar-icon"><item.icon size={16} strokeWidth={1.75} /></span>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
+        {/* Pins are the shell's own answer to a 41-destination nav, so they cannot be mouse-only.
+            role="button" + tabIndex rather than a real <button> because this sits inside the
+            NavLink's <a>, where a nested <button> would be invalid HTML; togglePin already calls
+            preventDefault/stopPropagation, so Space does not scroll and Enter does not navigate. */}
         {pinnable && (
           <span
+            role="button"
+            tabIndex={0}
+            aria-pressed={isPinned}
+            aria-label={isPinned ? `Unpin ${item.label}` : `Pin ${item.label} to top`}
             className={`sidebar-pin${isPinned ? ' sidebar-pin--active' : ''}`}
             onClick={e => togglePin(e, item.to)}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') togglePin(e, item.to) }}
             title={isPinned ? 'Unpin' : 'Pin to top'}
           >
             {isPinned ? '★' : '☆'}
@@ -345,36 +407,21 @@ export default function Layout() {
     )
   }
 
-  // Owner Dashboard + this panel's Dashboard link, side by side (equal width) instead of two
-  // full-width stacked rows — both are always-on utility links, not something worth pinning
-  // separately, so pinnable is off here to keep the half-width row uncluttered. Labels are
-  // shortened to single words (full label still used for the actual page title/command palette)
-  // since a ~100px-wide half of a 240px sidebar has no room for "Owner Dashboard"/"Inventory
-  // Dashboard" at readable size — the icon + position already disambiguate the two links.
+  // These were a three-across compact row with one-word labels ("Owner" / "Report" / "Dashboard")
+  // on the assumption that a single word fits a third of a 240px sidebar. Measured, it does not:
+  // each label box came out at 27px against 39/39/68px of text, so all three truncated to two
+  // characters — "Ow… / Re… / Da…" — and these are the owner's own primary destinations, two of
+  // them the product's most expensive SKU. Full-width rows with their real names, matching Group
+  // Console below and every other nav item. Costs two rows of vertical space at the top of a panel
+  // whose report groups are collapsed by default; recall cost is worse than scroll cost here.
   function renderDashboardRow() {
-    const ownerItem = { to: '/owner-dashboard', label: 'Owner', icon: Crown }
-    const reportItem = { to: '/owner-report', label: 'Report', icon: ScrollText }
-    const dashItem = { ...dashNavItem, label: 'Dashboard' }
     return (
       <>
-        <div style={{ display: 'flex', gap: 4, margin: '1px 10px' }}>
-          {(isAdmin || isOwner) && (
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {renderNavItem(ownerItem, { pinnable: false, compact: true })}
-            </div>
-          )}
-          {(isAdmin || isOwner) && (
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {renderNavItem(reportItem, { pinnable: false, compact: true })}
-            </div>
-          )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {renderNavItem(dashItem, { pinnable: false, compact: true })}
-          </div>
-        </div>
-        {/* Group Console gets its own full-width row rather than a fourth compact slot above —
-            three items already fill a 240px sidebar at readable size, and this one only exists
-            for a multi-outlet client, so it should not shrink the other three for everyone. */}
+        {(isAdmin || isOwner) &&
+          renderNavItem({ to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown }, { pinnable: false })}
+        {(isAdmin || isOwner) &&
+          renderNavItem({ to: '/owner-report', label: 'Owner Report', icon: ScrollText }, { pinnable: false })}
+        {renderNavItem(dashNavItem, { pinnable: false })}
         {(isAdmin || isOwner) && outlets.length > 1 &&
           renderNavItem({ to: '/group-dashboard', label: 'Group Console', icon: Building2 }, { pinnable: false })}
       </>
@@ -391,9 +438,15 @@ export default function Layout() {
     const open = groupOpen(group.key) || hasActive
     return (
       <div key={group.key}>
+        {/* aria-expanded/aria-controls, so this announces as a disclosure rather than as a plain
+            button whose only state cue is a CSS-rotated "▶" glyph. The chevron is aria-hidden for
+            the same reason: a screen reader reading out the arrow character adds nothing once the
+            expanded state is exposed properly. */}
         <button
           onClick={() => toggleGroup(group.key)}
           className="sidebar-group-header"
+          aria-expanded={open}
+          aria-controls={`navgroup-${group.key}`}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%',
             background: 'none', border: 'none', cursor: 'pointer', padding: '16px 14px 6px',
@@ -404,10 +457,10 @@ export default function Layout() {
           <span>{group.label}</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
             <span style={{ fontSize: 'var(--font-size-micro)', color: 'var(--theme-text3)', fontWeight: 600 }}>{items.length}</span>
-            <span style={{ fontSize: 'var(--font-size-chevron)', color: 'var(--theme-text3)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform var(--motion-fast) var(--ease-standard)' }}>▶</span>
+            <span aria-hidden="true" style={{ fontSize: 'var(--font-size-chevron)', color: 'var(--theme-text3)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform var(--motion-fast) var(--ease-standard)' }}>▶</span>
           </span>
         </button>
-        {open && items.map(renderNavItem)}
+        <div id={`navgroup-${group.key}`}>{open && items.map(renderNavItem)}</div>
       </div>
     )
   }
@@ -452,21 +505,28 @@ export default function Layout() {
   // 'panel' tag.
   const [paletteOpen, setPaletteOpen] = useState(false)
   const paletteItems = useMemo(() => {
+    // Each source is tagged with the module it belongs to. CommandPalette has rendered a
+    // right-hand `groupLabel` since it was written, but nothing ever set one — so searching
+    // "report" returned Stock Report / Sales Report / HR Reports / Vendor Report with nothing
+    // saying which module each came from.
+    const tag = (groupLabel, arr) => arr.map(i => ({ groupLabel, ...i }))
     const all = [
       dashNavItem,
-      { to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown },
-      { to: '/owner-report', label: 'Monthly Owner/Manager Report', icon: ScrollText },
-      ...(outlets.length > 1 ? [{ to: '/group-dashboard', label: 'Group Console', icon: Building2 }] : []),
-      ...NAV.slice(1),
-      ...REPORTS,
-      ...IMS_GROUPS.find(g => g.key === 'ims-admin').items,
-      ...(hrVisible ? [HR_DASHBOARD, ...HR_GROUPS.flatMap(g => g.items)] : []),
-      ...(posVisible ? POS_GROUPS.flatMap(g => g.items) : []),
-      ...(isAdmin ? [
+      ...tag('Suite', [
+        { to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown },
+        { to: '/owner-report', label: 'Monthly Owner/Manager Report', icon: ScrollText },
+        ...(outlets.length > 1 ? [{ to: '/group-dashboard', label: 'Group Console', icon: Building2 }] : []),
+      ]),
+      ...tag('IMS', NAV.slice(1)),
+      ...tag('IMS', REPORTS),
+      ...tag('IMS', IMS_GROUPS.find(g => g.key === 'ims-admin').items),
+      ...(hrVisible ? tag('HR', [HR_DASHBOARD, ...HR_GROUPS.flatMap(g => g.items)]) : []),
+      ...(posVisible ? tag('POS', POS_GROUPS.flatMap(g => g.items)) : []),
+      ...(isAdmin ? tag('Admin', [
         { to: '/admin/clients', label: 'Clients', icon: Building2 },
         { to: '/admin/guest-menu', label: 'Guest Menu', icon: QrCode },
         { to: '/admin/audit', label: 'Audit Log', icon: History },
-      ] : []),
+      ]) : []),
       { to: '/settings', label: 'Settings', icon: Settings, minImsRole: 'manager' },
     ]
     const seen = new Set()
@@ -526,7 +586,11 @@ export default function Layout() {
     if (isAdmin || plan === 'pro') return null
     const nextTier  = plan === 'growth' ? 'pro' : 'growth'
     const tierLabel = nextTier === 'growth' ? 'Growth' : 'Pro'
-    const tierColor = nextTier === 'growth' ? '#34d399' : '#c9a84c'
+    // Tokens, not the Dark preset's own hex — this CTA was painting brass/green literals on all
+    // ten presets. The companion alpha tints stay rgba literals per DESIGN.md's tint convention,
+    // so they are declared alongside rather than derived by string-concatenating the token.
+    const tierColor = nextTier === 'growth' ? 'var(--theme-green)' : 'var(--theme-accent)'
+    const tierTint  = nextTier === 'growth' ? 'rgba(52,211,153,' : 'rgba(201,168,76,'
     const locked = [...NAV.slice(1), ...REPORTS].filter(
       item => item.featureKey && !hasFeature(item.featureKey) && item.minPlan === nextTier
     )
@@ -535,7 +599,7 @@ export default function Layout() {
     const more  = locked.length - shown.length
 
     return (
-      <div style={{ margin: '4px 8px 2px', border: `1px solid ${tierColor}25`, borderRadius: 'var(--radius-lg)', padding: '10px 12px', background: `${tierColor}07` }}>
+      <div style={{ margin: '4px 8px 2px', border: `1px solid ${tierTint}0.15)`, borderRadius: 'var(--radius-lg)', padding: '10px 12px', background: `${tierTint}0.04)` }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
           <span style={{ fontSize: 9, fontWeight: 800, color: tierColor, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{tierLabel} Plan</span>
           <span style={{ fontSize: 9, color: 'var(--theme-text3)' }}>{locked.length} features</span>
@@ -549,7 +613,7 @@ export default function Layout() {
         {more > 0 && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 2, paddingLeft: 16 }}>and {more} more…</div>}
         <button
           onClick={() => navigate('/pricing')}
-          style={{ marginTop: 10, width: '100%', fontSize: 10, fontWeight: 700, color: tierColor, background: `${tierColor}15`, border: `1px solid ${tierColor}35`, borderRadius: 5, padding: '5px 0', cursor: 'pointer', letterSpacing: '0.04em' }}
+          style={{ marginTop: 10, width: '100%', fontSize: 12, fontWeight: 700, color: tierColor, background: `${tierTint}0.12)`, border: `1px solid ${tierTint}0.3)`, borderRadius: 'var(--radius-md)', padding: '7px 0', cursor: 'pointer', letterSpacing: '0.04em' }}
         >
           Upgrade to {tierLabel} ↑
         </button>
@@ -562,9 +626,14 @@ export default function Layout() {
   // Admin is kept in its own row, separate from the IMS/HR/POS row below it — it's a different
   // axis (which panel of the app, vs. which client module) and sharing one row made it look like
   // a 4th module competing for the same space (2026-07-14).
+  // Tokens, not literals — #f59e0b in particular was a second amber sitting five lines from the
+  // var(--theme-amber) the HR/POS dots below use for the identical "pending" semantic.
   const adminTab = isAdmin && {
-    key: 'admin', label: 'Admin', icon: ShieldCheck, tip: 'Admin',
-    dot: pendingTrialCount > 0 ? '#f87171' : newTrialCount > 0 ? '#f59e0b' : null,
+    key: 'admin', label: 'Admin', icon: ShieldCheck,
+    tip: pendingTrialCount > 0 ? `Admin — ${pendingTrialCount} want to subscribe`
+      : newTrialCount > 0 ? `Admin — ${newTrialCount} new trial${newTrialCount !== 1 ? 's' : ''}`
+      : 'Admin',
+    dot: pendingTrialCount > 0 ? 'var(--theme-red)' : newTrialCount > 0 ? 'var(--theme-amber)' : null,
   }
   const moduleTabs = [
     imsVisible && { key: 'ims', label: 'IMS', icon: Warehouse, tip: 'Crest IMS', dot: null },
@@ -585,15 +654,14 @@ export default function Layout() {
         <button
           className={`module-tab${panel === t.key && !collapsed ? ' module-tab--active' : ''}`}
           onClick={() => openPanel(t.key)}
+          aria-current={panel === t.key ? 'true' : undefined}
         >
           <span className="module-tab-icon" style={{ position: 'relative' }}>
-            <t.icon size={18} strokeWidth={1.75} />
-            {t.dot && (
-              <span style={{
-                position: 'absolute', top: -3, right: -5, width: 9, height: 9, borderRadius: '50%',
-                background: t.dot, boxShadow: '0 0 0 2px var(--theme-sidebar)', animation: 'pulse-dot 1.5s infinite',
-              }} />
-            )}
+            <t.icon size={18} strokeWidth={1.75} aria-hidden="true" />
+            {/* The dot's colour drives both its fill and its pulse ring via currentColor. The
+                animation lives in .module-tab-dot, not inline — an inline animation is unreachable
+                by prefers-reduced-motion, and this is the only infinite one in the shell. */}
+            {t.dot && <span className="module-tab-dot" style={{ color: t.dot }} />}
           </span>
           <span className="module-tab-label">{t.label}</span>
         </button>
@@ -615,8 +683,10 @@ export default function Layout() {
 
   return (
     <div className="layout-root">
+      {/* WCAG 2.4.1 — 41 sidebar controls precede the first control in <main> on every route. */}
+      <a href="#main-content" className="skip-link">Skip to content</a>
       {mobileSidebarOpen && <div className="sidebar-overlay" onClick={() => setMobileSidebarOpen(false)} />}
-      <div className={`sidebar-wrap${mobileSidebarOpen ? ' mobile-open' : ''}${collapsed ? ' sidebar-wrap--collapsed' : ''}`}>
+      <div ref={sidebarRef} className={`sidebar-wrap${mobileSidebarOpen ? ' mobile-open' : ''}${collapsed ? ' sidebar-wrap--collapsed' : ''}`}>
         <div className="sidebar-shell">
 
           {/* Brand — logo + wordmark + search trigger. Always visible; text hides when collapsed
@@ -630,12 +700,15 @@ export default function Layout() {
                 : <Hexagon size={22} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--theme-accent)' }} />}
             </div>
             <div className="sidebar-brand-text">
-              <div className="sidebar-brand-name">{settings?.app_name || 'Crest'}</div>
+              <div className="sidebar-brand-name" title={settings?.app_name || 'Crest'}>{settings?.app_name || 'Crest'}</div>
               <div className="sidebar-brand-sub">{PANEL_TITLES[panel] || 'Crest Suite'}</div>
             </div>
+            {/* Icon-only, matching the calculator button beside it. The "Ctrl K" text label spent
+                ~40px of a 239px row that the white-labeled client wordmark needed to render at all
+                — the shortcut now lives in the tooltip (the same call, and the same reasoning, the
+                calc button already documents) and in the palette's own footer hint. */}
             <button className="sidebar-search-btn" onClick={() => setPaletteOpen(true)} title="Search pages (Ctrl+K)" aria-label="Search pages">
               <Search size={13} strokeWidth={2} aria-hidden="true" />
-              <span className="sidebar-search-label">Ctrl K</span>
             </button>
             {/* Icon-only (no shortcut label) — the brand row can't fit a second "Alt C" chip
                 without squeezing the wordmark; the shortcut lives in the title tooltip. */}
@@ -653,8 +726,11 @@ export default function Layout() {
               same case where today's rail just shows that one module's icon alone). Admin gets its
               own row above IMS/HR/POS: it's a different axis (which panel of the app) from the
               module row (which client module), and sharing one row read as a 4th module. */}
+          {/* Its own landmark: this is the primary mode switch of the entire product, and it
+              previously sat outside every landmark on the page (the only two were the unlabeled
+              sidebar nav and main), so it was unreachable by landmark navigation. */}
           {totalTabCount > 1 && (
-            <>
+            <nav aria-label="Modules">
               {adminTab && (
                 <div className="module-switcher module-switcher--admin">
                   {renderModuleTab(adminTab)}
@@ -665,7 +741,7 @@ export default function Layout() {
                   {moduleTabs.map(renderModuleTab)}
                 </div>
               )}
-            </>
+            </nav>
           )}
 
         {/* Everything below hides when collapsed (CSS) — client badge, nav, footer. Kept mounted
@@ -705,7 +781,7 @@ export default function Layout() {
                 if (!s.label) return null
                 return (
                   <span style={{
-                    fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 3,
+                    fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)',
                     marginTop: 5, display: 'inline-block',
                     color: s.color, background: s.bg, border: `1px solid ${s.border}`
                   }}>
@@ -734,7 +810,7 @@ export default function Layout() {
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
                         {s.label && (
                           <span style={{
-                            fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 3, flexShrink: 0,
+                            fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)', flexShrink: 0,
                             color: s.color, background: s.bg, border: `1px solid ${s.border}`
                           }}>
                             {s.label}
@@ -752,7 +828,7 @@ export default function Layout() {
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <span className="sidebar-client-label">
                     Property ·{' '}
-                    <span style={{ color: plan === 'pro' ? 'var(--theme-accent)' : plan === 'growth' ? 'var(--theme-green)' : 'var(--theme-text3)', fontWeight: 700 }}>
+                    <span style={{ color: plan === 'pro' ? 'var(--theme-accent-ink)' : plan === 'growth' ? 'var(--theme-green-text)' : 'var(--theme-text3)', fontWeight: 700 }}>
                       {plan === 'pro' ? 'Pro' : plan === 'growth' ? 'Growth' : 'Starter'}
                     </span>
                   </span>
@@ -785,7 +861,7 @@ export default function Layout() {
                 if (!s.label) return null
                 return (
                   <span style={{
-                    fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 3,
+                    fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)',
                     marginTop: 5, display: 'inline-block',
                     color: s.color, background: s.bg, border: `1px solid ${s.border}`
                   }}>
@@ -812,7 +888,7 @@ export default function Layout() {
                             is the only warning before someone switches into a locked app. */}
                         {s.label && (
                           <span style={{
-                            fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 3, flexShrink: 0,
+                            fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)', flexShrink: 0,
                             color: s.color, background: s.bg, border: `1px solid ${s.border}`
                           }}>
                             {s.label}
@@ -830,7 +906,7 @@ export default function Layout() {
           ) : null
         ))()}
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" id="sidebar-nav" aria-label={`${PANEL_TITLES[panel] || 'Crest'} pages`}>
           {/* Owner Dashboard (cross-module, renders regardless of active panel — SuiteGate inside
               the page itself handles the ineligible-viewer upsell) + this panel's own Dashboard,
               paired side by side by renderDashboardRow() below instead of two stacked rows. */}
@@ -912,11 +988,11 @@ export default function Layout() {
             <button
               onClick={() => navigate('/pricing')}
               style={{
-                width: '100%', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
-                color: plan === 'growth' ? '#c9a84c' : '#34d399',
+                width: '100%', fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
+                color: plan === 'growth' ? 'var(--theme-accent)' : 'var(--theme-green)',
                 background: plan === 'growth' ? 'rgba(201,168,76,0.1)' : 'rgba(52,211,153,0.1)',
                 border: `1px solid ${plan === 'growth' ? 'rgba(201,168,76,0.25)' : 'rgba(52,211,153,0.25)'}`,
-                borderRadius: 4, padding: '4px 8px', cursor: 'pointer', display: 'block'
+                borderRadius: 'var(--radius-md)', padding: '7px 8px', cursor: 'pointer', display: 'block'
               }}
             >
               {plan === 'growth' ? 'Growth' : 'Starter'} · Upgrade ↑
@@ -927,7 +1003,7 @@ export default function Layout() {
 
         {/* Bottom-anchored, icon-only, always visible regardless of collapsed state — same three
             actions today's rail always kept visible at its bottom. */}
-        <div className="sidebar-bottom">
+        <nav className="sidebar-bottom" aria-label="Help and account">
           <RailTip label="Help">
             <NavLink to="/help" title="Help"
               className={({ isActive }) => `rail-btn${isActive ? ' rail-btn--active' : ''}`}
@@ -943,12 +1019,23 @@ export default function Layout() {
             <button className="rail-btn rail-btn--signout" title={posRole ? 'Lock POS' : 'Sign out'}
               onClick={handleSignOut}><LogOut size={18} strokeWidth={1.75} /></button>
           </RailTip>
-        </div>
+        </nav>
         </div>{/* /sidebar-shell */}
       </div>
 
-      <main className={`main-content${collapsed ? ' main-content--collapsed' : ''}`}>
-        <button className="mobile-hamburger" onClick={() => { setMobileSidebarOpen(true); setCollapsed(false) }}>☰</button>
+      <main id="main-content" tabIndex={-1} className={`main-content${collapsed ? ' main-content--collapsed' : ''}`}>
+        {/* "☰" is a glyph, not an accessible name — this button announced as the character itself,
+            with no indication it opens anything or whether it is currently open. */}
+        <button
+          ref={hamburgerRef}
+          className="mobile-hamburger"
+          aria-label="Open navigation menu"
+          aria-expanded={mobileSidebarOpen}
+          aria-controls="sidebar-nav"
+          onClick={() => { setMobileSidebarOpen(true); setCollapsed(false) }}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
 
         {/* Grace period — the subscription end date has passed but access is not cut yet. This is
             the only warning a paying client gets before SubscriptionLock replaces the whole app,
@@ -956,11 +1043,11 @@ export default function Layout() {
         {accessReason === 'grace' && (
           <div style={{
             background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.4)',
-            borderRadius: 8, padding: '12px 16px', marginBottom: 20,
+            borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
           }} role="status">
             <div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#f87171' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-red)' }}>
                 ⚠️ Your subscription has expired — access ends in {graceDaysLeft} day{graceDaysLeft !== 1 ? 's' : ''}
               </span>
               <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 10 }}>
@@ -971,11 +1058,11 @@ export default function Layout() {
               <button
                 onClick={async () => { setSubscribing(true); await requestSubscription(); setSubscribing(false) }}
                 disabled={subscribing}
-                style={{ background: 'var(--theme-accent)', border: 'none', color: 'var(--theme-accent-text)', padding: '7px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                style={{ background: 'var(--theme-accent)', border: 'none', color: 'var(--theme-accent-text)', padding: '7px 18px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' }}>
                 {subscribing ? 'Sending…' : 'Renew Now →'}
               </button>
             ) : (
-              <span style={{ fontSize: 12, color: '#f87171', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
+              <span style={{ fontSize: 12, color: 'var(--theme-red)', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
             )}
           </div>
         )}
@@ -984,9 +1071,9 @@ export default function Layout() {
         {isTrial && !trialExpired && trialDaysLeft <= 4 && (
           <div style={{
             background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.35)',
-            borderRadius: 8, padding: '12px 16px', marginBottom: 20,
+            borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
-          }}>
+          }} role="status">
             <div>
               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-amber)' }}>
                 ⏳ {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial
@@ -999,7 +1086,7 @@ export default function Layout() {
               <button
                 onClick={async () => { setSubscribing(true); await requestSubscription(); setSubscribing(false) }}
                 disabled={subscribing}
-                style={{ background: 'var(--theme-accent)', border: 'none', color: 'var(--theme-accent-text)', padding: '7px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                style={{ background: 'var(--theme-accent)', border: 'none', color: 'var(--theme-accent-text)', padding: '7px 18px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' }}>
                 {subscribing ? 'Sending…' : 'I Want to Subscribe →'}
               </button>
             ) : (
@@ -1012,6 +1099,36 @@ export default function Layout() {
             is now locked out by ProtectedRoute and never renders Layout at all, so they were
             unreachable. Their copy — including the trial_purge_at retention countdown — moved into
             SubscriptionLock's `trial` case. */}
+
+        {/* Renders on every route, at every width, in both collapse states — that is the whole
+            point of it, so it deliberately does not hide on the dashboard that happens to repeat
+            the same facts in its own subtitle. Quiet by construction: secondary text, one hairline,
+            no card. The period is the emphasised token because it is the one that silently changes
+            under you; POS/kitchen staff accounts and non-IMS clients simply get no period segment
+            rather than an empty one. */}
+        {clientName && (
+          <div className="context-bar">
+            <span className="context-bar-client">{clientName}</span>
+            {adminViewClientId && <span className="context-bar-tag">Viewing as admin</span>}
+            {activePeriod && (
+              <>
+                <span aria-hidden="true" className="context-bar-sep">·</span>
+                <span className="context-bar-period">
+                  {BS_MONTHS[activePeriod.bs_month - 1]} {activePeriod.bs_year}
+                </span>
+                <span className={`badge ${activePeriod.status === 'open' ? 'badge-green' : 'badge-gray'}`}>
+                  {activePeriod.status === 'open' ? 'Open' : 'Closed'}
+                </span>
+              </>
+            )}
+            {!isAdmin && (
+              <>
+                <span aria-hidden="true" className="context-bar-sep">·</span>
+                <span className="context-bar-plan">{plan === 'pro' ? 'Pro' : plan === 'growth' ? 'Growth' : 'Starter'}</span>
+              </>
+            )}
+          </div>
+        )}
 
         <Suspense fallback={<RouteFallback />}>
           <Outlet />

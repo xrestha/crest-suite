@@ -4,10 +4,31 @@
   scrollbar-color: var(--theme-border) var(--theme-bg);
 }
 
+/* The halo is currentColor, not a literal — the dot's own colour is set by whatever renders it
+   (var(--theme-amber) for HR/POS pending, var(--theme-red) for a pending trial), and the keyframe
+   previously hardcoded the red, so an amber dot pulsed inside a red ring. Setting `color` on the
+   element now drives both the fill and the ring. */
 @keyframes pulse-dot {
-  0%   { box-shadow: 0 0 0 0 rgba(248,113,113,0.7); }
-  70%  { box-shadow: 0 0 0 6px rgba(248,113,113,0);  }
-  100% { box-shadow: 0 0 0 0 rgba(248,113,113,0);    }
+  0%   { box-shadow: 0 0 0 0 currentColor; }
+  70%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent;   }
+}
+
+/* Applied as a CLASS, never as an inline `style={{ animation }}` — an inline animation cannot be
+   reached by the prefers-reduced-motion guard at the foot of this block, and this is the only
+   infinite animation in the shell, so inline meant it ran forever regardless of the OS setting. */
+.module-tab-dot {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  width: 13px;
+  height: 13px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  /* A border, not a box-shadow ring: the pulse animation animates box-shadow, so an animated
+     element cannot also carry a static one. box-sizing:border-box keeps the visible fill at 9px. */
+  border: 2px solid var(--theme-sidebar);
+  animation: pulse-dot 1.5s infinite;
 }
 
 /* ChartCard (src/components/ChartCard.js) — the expand sequence.
@@ -201,13 +222,17 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rail-btn, .sidebar-link, .sidebar-toggle {
+  /* .sidebar-shell/.main-content are the collapse pair — a 184px layout shift, and the largest
+     motion in the shell. They were missing here while `.sidebar-toggle`, a class with zero JSX
+     references, was being guarded. */
+  .rail-btn, .sidebar-link, .module-tab, .sidebar-search-btn, .sidebar-shell, .main-content,
+  .skip-link, .sidebar-pin {
     transition-duration: 0ms !important;
   }
   .rail-tip {
     animation-duration: 0ms !important;
   }
-  .guest-order-banner, .guest-order-glow {
+  .guest-order-banner, .guest-order-glow, .module-tab-dot {
     animation: none !important;
   }
 }
@@ -323,11 +348,10 @@
   color: var(--theme-text1);
   border-color: var(--theme-accent);
 }
-.sidebar-search-label {
-  font-size: var(--font-size-micro);
-}
-/* Icon-only sibling of the search trigger — square rather than inheriting the label-sized
-   horizontal padding it no longer has text to balance. */
+/* Both brand-row utility triggers are icon-only — square rather than carrying the horizontal
+   padding a text label would have balanced. The search button's "Ctrl K" chip was removed so the
+   white-labeled client wordmark has room to render without being sliced. */
+.sidebar-search-btn,
 .sidebar-calc-btn {
   padding: 5px 6px;
 }
@@ -388,7 +412,7 @@
   background: var(--theme-table-hover);
 }
 .module-tab--active {
-  color: var(--theme-accent);
+  color: var(--theme-accent-ink);
   background: var(--theme-focus-ring);
   box-shadow: 0 0 0 1px var(--theme-focus-ring);
 }
@@ -401,6 +425,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The 56px rail cannot hold a label — without this the tabs rendered "IM / HR / PO", clipped by
+   .sidebar-shell's overflow, contradicting DESIGN.md's Navigation spec ("collapses to a vertical
+   icon-only column"). RailTip already supplies the name on hover in this state. */
+.sidebar-wrap--collapsed .module-tab-label {
+  display: none;
 }
 
 /* Everything client-badge/nav/footer — hidden as a block when collapsed, rather than unmounted,
@@ -462,6 +492,12 @@
   line-height: 1;
 }
 
+/* app_name is white-labeled per client, so this is the CUSTOMER's brand, not ours, and it is the
+   first element on every screen. It previously rendered "BHATTI CHOILA" as "BHATT / CHOIL" — cut
+   mid-glyph — because the text wrapped freely inside a height-constrained, overflow-hidden parent.
+   Two lines, then an ellipsis: a two-word property name renders in full ("BHATTI / CHOILA"), and
+   anything genuinely too long degrades to "…" rather than to a sliced letter. Pairs with the row
+   growing (min-height, not height) and with the title attribute carrying the untruncated name. */
 .sidebar-brand-name {
   font-size: var(--font-size-brand);
   font-weight: 700;
@@ -469,6 +505,11 @@
   letter-spacing: 0.04em;
   font-family: 'Georgia', serif;
   line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .sidebar-brand-sub {
@@ -599,13 +640,24 @@
   font-size: var(--font-size-nav-icon);
   color: var(--theme-text3);
   flex-shrink: 0;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
   transition: opacity var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
 }
-.sidebar-link:hover .sidebar-pin {
+/* :focus-within on the row matters as much as :hover — the pin is keyboard-reachable now, and a
+   control revealed only by hover is invisible to the keyboard user who just focused it. */
+.sidebar-link:hover .sidebar-pin,
+.sidebar-link:focus-within .sidebar-pin,
+.sidebar-pin:focus-visible {
   opacity: 1;
 }
 .sidebar-pin:hover {
   color: var(--theme-accent);
+}
+.sidebar-pin:focus-visible {
+  outline: none;
+  color: var(--theme-accent);
+  box-shadow: 0 0 0 2px var(--theme-focus-ring);
 }
 .sidebar-pin--active {
   opacity: 1;
@@ -632,8 +684,11 @@
   background: var(--theme-table-hover);
 }
 
+/* accent-ink, not accent: on light presets the ACTIVE nav item measured 4.45:1 — below AA, and
+   less legible than the inactive items around it, inverting the one signal this state exists to
+   send. Resolves to the base accent on every dark preset. */
 .sidebar-link--active {
-  color: var(--theme-accent);
+  color: var(--theme-accent-ink);
   background: var(--theme-focus-ring);
   font-weight: 600;
 }
@@ -813,6 +868,80 @@ tr.interactive-row:focus-visible {
   border: 0;
 }
 
+/* Context bar — "which tenant, which period" on every route. A hairline and a row of text rather
+   than a card: it must be readable without ever competing with the page's own H1 directly below
+   it. Wraps rather than truncating, since on a phone it is the ONLY place this information
+   appears at all (the sidebar that otherwise carries it is off-canvas). */
+.context-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 10px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--theme-border-lt);
+  font-size: var(--font-size-micro);
+  color: var(--theme-text3);
+}
+.context-bar-client {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--theme-text2);
+}
+.context-bar-period {
+  font-weight: 700;
+  color: var(--theme-text1);
+}
+.context-bar-plan {
+  font-weight: 600;
+  color: var(--theme-accent-ink);
+}
+.context-bar-sep {
+  color: var(--theme-border);
+}
+.context-bar-tag {
+  font-weight: 600;
+  color: var(--theme-amber-text);
+}
+
+/* Skip to content — WCAG 2.4.1 (Level A). 41 focusable controls sit inside the sidebar before the
+   first control in <main>, on every one of the app's ~86 routes, so without this a keyboard user
+   pays 41 Tab presses per navigation. Hidden until focused, then a real, visible target. */
+.skip-link {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 500;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  background: var(--theme-accent);
+  color: var(--theme-accent-text);
+  font-size: var(--font-size-nav-item);
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* The shell had no focus styling of its own — it fell through to the browser's default outline,
+   while the design system defines a themed ring that ten other selectors already use. On the
+   sidebar's own dark surface the UA default is also the least visible it ever gets. */
+.sidebar-link:focus-visible,
+.sidebar-group-header:focus-visible,
+.module-tab:focus-visible,
+.rail-btn:focus-visible,
+.sidebar-search-btn:focus-visible,
+.sidebar-dropdown-trigger:focus-visible,
+.sidebar-dropdown-item:focus-visible,
+.mobile-hamburger:focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 2px;
+}
+
 /* Dashboard loading state — a shimmer bar instead of a static '—' or "Loading…" placeholder.
    .skeleton is sized inline via em units so it scales with whatever font-size its parent KPI
    value carries. .skeleton-block is a card-shaped placeholder for a whole KCard while its data
@@ -923,6 +1052,29 @@ tr.interactive-row:focus-visible {
   .btn-sm,
   table.data-table .btn {
     min-height: 32px;
+  }
+  /* The shell was left out of the original sweep, so on a tablet the entire navigation — the one
+     thing every route depends on — stayed at desktop density: nav links 37px, module tabs 35px,
+     the calculator trigger 27x25. These are the controls a finger reaches for first. */
+  .sidebar-link,
+  .sidebar-group-header,
+  .module-tab,
+  .rail-btn,
+  .sidebar-dropdown-trigger,
+  .sidebar-dropdown-item {
+    min-height: 44px;
+  }
+  .sidebar-search-btn {
+    min-height: 40px;
+    min-width: 40px;
+  }
+  /* The star sits inside a 44px row; it needs its own hit area, not just its glyph. */
+  .sidebar-pin {
+    min-width: 32px;
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 }
 
@@ -1102,14 +1254,19 @@ textarea:focus-visible {
   text-transform: capitalize;
 }
 
+/* Every badge's foreground is the *-text variant, not the base signal colour. The fill stays the
+   documented alpha tint. On dark presets the two resolve to the same value; on the five light
+   presets the base colour failed AA against its own surface (Latte amber 2.15:1, Rosé Dawn 1.87:1)
+   — see the block comment above PRESETS in ThemeContext.js. This one line covers most status text
+   in the product, since these classes back the badges on nearly every page. */
 .badge-green {
   background: rgba(52,211,153,0.10);
-  color: var(--theme-green);
+  color: var(--theme-green-text);
 }
 
 .badge-yellow {
   background: rgba(201,168,76,0.12);
-  color: var(--theme-accent);
+  color: var(--theme-accent-ink);
 }
 
 /* Guest QR self-ordering: an unmissable pulse on the new-order banner and the affected floor
@@ -1131,17 +1288,17 @@ textarea:focus-visible {
 
 .badge-amber {
   background: rgba(251,191,36,0.12);
-  color: var(--theme-amber);
+  color: var(--theme-amber-text);
 }
 
 .badge-purple {
   background: rgba(167,139,250,0.12);
-  color: var(--theme-purple);
+  color: var(--theme-purple-text);
 }
 
 .badge-red {
   background: rgba(248,113,113,0.10);
-  color: var(--theme-red);
+  color: var(--theme-red-text);
 }
 
 .badge-gray {
@@ -1600,8 +1757,9 @@ textarea:focus-visible {
     margin-left: 0 !important;
     padding: 16px !important;
   }
+  /* Clears the fixed hamburger (44px + 12px inset) so a page title never sits under it. */
   .page-header {
-    padding-left: 52px;
+    padding-left: 60px;
   }
   .mobile-hamburger {
     display: flex;
@@ -1616,8 +1774,10 @@ textarea:focus-visible {
     border-radius: var(--radius-md);
     color: var(--theme-text1);
     font-size: 18px;
-    width: 36px;
-    height: 36px;
+    /* 44px, not 36px: this is 100% of navigation on a phone and it is not a .btn, so the
+       coarse-pointer rule above never reached it. */
+    width: 44px;
+    height: 44px;
     cursor: pointer;
     flex-shrink: 0;
   }
