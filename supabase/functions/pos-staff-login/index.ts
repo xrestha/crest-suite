@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { derivePinPassword } from '../_shared/pinPassword.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -93,12 +94,52 @@ Deno.serve(async (req) => {
     if (!staff?.pos_email) return json({ error: 'Invalid credentials' }, 401)
 
     const authClient = createClient(url, anon, { auth: { autoRefreshToken: false, persistSession: false } })
-    const { data: signInData, error: signInErr } = await authClient.auth.signInWithPassword({
-      email: staff.pos_email,
-      password: pin,
+
+    // The PIN is no longer the password — the stored value is HMAC(PIN_PEPPER, email + ':' + pin).
+    // That is what finally closes the hole described in point 1 of this file's header: an attacker
+    // who has the email and guesses the right PIN still cannot construct the string GoTrue expects,
+    // so hammering /token directly with the anon key is no longer a route to a session at all.
+    // Every path to a POS session now runs through this function, where the lockout is enforced.
+    const derived = await derivePinPassword(staff.pos_email, pin)
+    let { data: signInData } = await authClient.auth.signInWithPassword({
+      email: staff.pos_email, password: derived,
     })
 
-    const succeeded = !signInErr && !!signInData?.session
+    // ── Lazy upgrade for accounts created before the derivation change ──────────────────────
+    // Their stored password is still the raw PIN. Migrating them eagerly is impossible: PINs are
+    // not stored anywhere, so there is nothing to re-derive from without the employee present.
+    // Instead the correct PIN, supplied here at login, is the one moment we can compute the new
+    // value — so we verify against the old password, then rewrite it.
+    //
+    // Note this leaves the direct-brute-force window open for any account that has not logged in
+    // since deploy. It narrows on its own as staff sign in, but it does not close by itself:
+    // delete this whole block once POS Staff shows no stale accounts, and force-reset whatever
+    // is left. Until then the window is real, just shrinking.
+    if (!signInData?.session) {
+      const { data: legacyData } = await authClient.auth.signInWithPassword({
+        email: staff.pos_email, password: pin,
+      })
+      if (legacyData?.session) {
+        const { error: upgradeErr } = await admin.auth.admin.updateUserById(staff_id, { password: derived })
+        if (upgradeErr) {
+          console.error('[pos-staff-login] PIN password upgrade FAILED — account still on raw-PIN password:', upgradeErr.message)
+          signInData = legacyData
+        } else {
+          // Re-sign-in rather than reusing legacyData's tokens: a password change can revoke
+          // refresh tokens issued before it, which would hand the device a session that dies at
+          // its first refresh — mid-service, on a till. One extra call, once per account, ever.
+          const { data: freshData } = await authClient.auth.signInWithPassword({
+            email: staff.pos_email, password: derived,
+          })
+          signInData = freshData?.session ? freshData : legacyData
+        }
+      }
+    }
+
+    // One attempt from the lockout's point of view, whichever branch above produced the session —
+    // the fallback must not let a wrong PIN cost two counts, or a fat-fingered employee locks out
+    // in 3 tries instead of 5.
+    const succeeded = !!signInData?.session
     const { data: attemptData, error: attemptErr } = await admin.rpc('record_pos_pin_attempt', {
       p_staff_id: staff_id, p_success: succeeded,
     })

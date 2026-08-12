@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { derivePinPassword, isPasswordPwned } from '../_shared/pinPassword.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -63,6 +64,31 @@ Deno.serve(async (req) => {
       // Recorded BEFORE the attempt, so a failing loop (duplicate email, weak password) burns
       // quota exactly like a succeeding one — otherwise the cheapest attack is to keep failing.
       await admin.from('trial_signup_attempts').insert({ ip, email })
+
+      // Breached-password screening, the server-side half of NIST SP 800-63B-4's blocklist
+      // control. weakPasswordReason() in the browser is the offline half (common passwords,
+      // repeats, runs, business-name/email derivations) and is explicitly NOT a boundary — an
+      // attacker just skips it. This is the half that isn't skippable.
+      //
+      // It has to live here rather than being delegated to Supabase's "Leaked Password
+      // Protection" toggle, because that toggle cannot see this call: GoTrue runs its HIBP
+      // check inside checkPasswordStrength(), and adminUserCreate — which is what
+      // auth.admin.createUser() hits — never calls it. Enabling the dashboard setting does
+      // nothing for the signup form. (It does cover ResetPassword.js and the IMS/HR resets,
+      // which go through the user-facing and adminUserUpdate paths respectively.)
+      //
+      // Fail-open on null, loudly: a HIBP outage must not take signups down. Same stance as the
+      // PIN lockout RPCs, and for the same reason — the availability cost of failing closed is
+      // certain while the security cost of failing open is probabilistic.
+      const pwned = await isPasswordPwned(password)
+      if (pwned === true) {
+        return json({
+          error: 'This password has appeared in a known data breach. Please choose a different one.',
+        }, 400)
+      }
+      if (pwned === null) {
+        console.error('[register_trial] HIBP check unavailable — signup allowed without breach screening')
+      }
 
       const { data: authData, error: authErr } = await admin.auth.admin.createUser({
         email,
@@ -251,9 +277,12 @@ Deno.serve(async (req) => {
       const suffix = Math.random().toString(36).slice(2, 7)
       const email  = `${slug}_${suffix}@pos.internal`
 
+      // The stored password is derived, never the PIN itself — see _shared/pinPassword.ts. The
+      // account's own generated email is the salt, and both this call and pos-staff-login
+      // compute the same value from it.
       const { data: authData, error: authErr } = await admin.auth.admin.createUser({
         email,
-        password:      pin,
+        password:      await derivePinPassword(email, pin),
         email_confirm: true,
         user_metadata: { full_name },
       })
@@ -305,9 +334,11 @@ Deno.serve(async (req) => {
       const suffix = Math.random().toString(36).slice(2, 7)
       const email  = `${slug}_${suffix}@hr.internal`
 
+      // Derived, not the raw PIN — same treatment as create_pos_staff above, and the reason
+      // hr-selfservice-login must derive with this same email before signing in.
       const { data: authData, error: authErr } = await admin.auth.admin.createUser({
         email,
-        password:      pin,
+        password:      await derivePinPassword(email, pin),
         email_confirm: true,
         user_metadata: { full_name: employee.full_name },
       })
@@ -416,7 +447,20 @@ Deno.serve(async (req) => {
       const pinDenied = requireStaffTarget(pinTarget, 'pos')
       if (pinDenied) return pinDenied
 
-      const { error: updateErr } = await admin.auth.admin.updateUserById(userId, { password: pin })
+      // Salt must be this account's existing email, not a freshly generated one — the login
+      // side derives from whatever pos_email currently holds, so a reset that salted with
+      // anything else would produce a password nobody can ever reproduce.
+      if (!pinTarget?.pos_email) return json({ error: 'This account has no POS login to reset' }, 400)
+
+      // This is the one call in the codebase that Supabase's leaked-password protection would
+      // have broken outright: updateUserById routes through GoTrue's adminUserUpdate, which
+      // DOES run checkPasswordStrength (unlike adminUserCreate), and every 4-6 digit PIN is in
+      // the HIBP corpus. Creating staff would have kept working while resetting their PIN
+      // failed with "password is known to be weak" on every possible value. Deriving first is
+      // what makes the toggle safe to enable.
+      const { error: updateErr } = await admin.auth.admin.updateUserById(userId, {
+        password: await derivePinPassword(pinTarget.pos_email, pin),
+      })
       if (updateErr) return json({ error: updateErr.message }, 400)
 
       return json({ success: true })
@@ -433,6 +477,20 @@ Deno.serve(async (req) => {
       let { full_name } = params
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: 'A valid email is required' }, 400)
       if (!password || password.length < 8) return json({ error: 'Password must be at least 8 characters' }, 400)
+
+      // createUser bypasses GoTrue's HIBP check (adminUserCreate never calls
+      // checkPasswordStrength), so the dashboard toggle cannot screen this path even when it is
+      // switched on — while the matching reset_*_password action below, which goes through
+      // adminUserUpdate, IS screened by it. Without this the two halves of the same feature
+      // disagree: a manager could set a breached password at creation and then be refused that
+      // exact password on reset. Fail-open on null and loudly, same stance as register_trial.
+      const createPwned = await isPasswordPwned(password)
+      if (createPwned === true) {
+        return json({ error: 'This password has appeared in a known data breach. Please choose a different one.' }, 400)
+      }
+      if (createPwned === null) {
+        console.error('[admin-user-ops] HIBP check unavailable — staff account created without breach screening')
+      }
 
       const validRoles = ['staff', 'supervisor', 'manager']
       if (ims_role && !validRoles.includes(ims_role)) return json({ error: 'Invalid ims_role' }, 400)
@@ -568,6 +626,20 @@ Deno.serve(async (req) => {
       let { full_name } = params
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: 'A valid email is required' }, 400)
       if (!password || password.length < 8) return json({ error: 'Password must be at least 8 characters' }, 400)
+
+      // createUser bypasses GoTrue's HIBP check (adminUserCreate never calls
+      // checkPasswordStrength), so the dashboard toggle cannot screen this path even when it is
+      // switched on — while the matching reset_*_password action below, which goes through
+      // adminUserUpdate, IS screened by it. Without this the two halves of the same feature
+      // disagree: a manager could set a breached password at creation and then be refused that
+      // exact password on reset. Fail-open on null and loudly, same stance as register_trial.
+      const createPwned = await isPasswordPwned(password)
+      if (createPwned === true) {
+        return json({ error: 'This password has appeared in a known data breach. Please choose a different one.' }, 400)
+      }
+      if (createPwned === null) {
+        console.error('[admin-user-ops] HIBP check unavailable — staff account created without breach screening')
+      }
 
       const validRoles = ['staff', 'supervisor', 'manager']
       if (hr_role && !validRoles.includes(hr_role)) return json({ error: 'Invalid hr_role' }, 400)

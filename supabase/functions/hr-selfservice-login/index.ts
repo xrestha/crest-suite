@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { derivePinPassword } from '../_shared/pinPassword.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -101,12 +102,46 @@ Deno.serve(async (req) => {
     // browser used to do directly with signInWithPassword, just relocated here so the email
     // argument never has to travel to the client first.
     const authClient = createClient(url, anon, { auth: { autoRefreshToken: false, persistSession: false } })
-    const { data: signInData, error: signInErr } = await authClient.auth.signInWithPassword({
-      email: profile.hr_self_service_email,
-      password: pin,
+
+    // The PIN is no longer the stored password — see _shared/pinPassword.ts. This matters more
+    // here than anywhere else in the app: the header above notes that Supabase's own rate limits
+    // can't help because attempts arrive from this function's egress IP, and that the lockout was
+    // therefore the only control. But the lockout only ever governed THIS path — a caller could
+    // always skip it by pointing signInWithPassword straight at GoTrue, needing just an email and
+    // 10,000 guesses. With a peppered derivation that route stops working entirely, because the
+    // password can no longer be computed from the PIN off-server.
+    const derived = await derivePinPassword(profile.hr_self_service_email, pin)
+    let { data: signInData } = await authClient.auth.signInWithPassword({
+      email: profile.hr_self_service_email, password: derived,
     })
 
-    const succeeded = !signInErr && !!signInData?.session
+    // Lazy upgrade for accounts enrolled before the change — identical in shape and rationale to
+    // pos-staff-login's, including the caveat: the direct-brute-force window stays open for any
+    // employee who has not signed in since deploy, and only a later force-reset closes it fully.
+    // There is no reset_hr_pin action, so "force-reset" here means re-enrolling the employee via
+    // create_hr_self_service_login — worth knowing before planning that cleanup.
+    if (!signInData?.session) {
+      const { data: legacyData } = await authClient.auth.signInWithPassword({
+        email: profile.hr_self_service_email, password: pin,
+      })
+      if (legacyData?.session) {
+        const { error: upgradeErr } = await admin.auth.admin.updateUserById(staff_id, { password: derived })
+        if (upgradeErr) {
+          console.error('[hr-selfservice-login] PIN password upgrade FAILED — account still on raw-PIN password:', upgradeErr.message)
+          signInData = legacyData
+        } else {
+          // Re-sign-in so the returned tokens postdate the password change; a refresh token
+          // issued before it can be revoked by it.
+          const { data: freshData } = await authClient.auth.signInWithPassword({
+            email: profile.hr_self_service_email, password: derived,
+          })
+          signInData = freshData?.session ? freshData : legacyData
+        }
+      }
+    }
+
+    // Still exactly one attempt against the lockout regardless of which branch ran.
+    const succeeded = !!signInData?.session
     const { data: attemptData, error: attemptErr } = await admin.rpc('record_hr_pin_attempt', {
       p_staff_id: staff_id, p_success: succeeded,
     })
