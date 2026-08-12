@@ -238,7 +238,7 @@ export default function Advances() {
                     {emp.employee_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{emp.employee_code}</div>}
                   </td>
                   <td>
-                    <span className={a.type === 'loan' ? 'badge-gold' : 'badge-gray'} style={{ textTransform: 'capitalize' }}>
+                    <span className={a.type === 'loan' ? 'badge-yellow' : 'badge-gray'} style={{ textTransform: 'capitalize' }}>
                       {a.type}
                     </span>
                   </td>

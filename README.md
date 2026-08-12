@@ -150,6 +150,26 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S536 — 2026-08-12 — `/impeccable document` refresh, and the three drifts the scan turned up
+
+Ran `/impeccable document` to clear the stale-sidecar warning the hook had been firing for a week. Chose the merge path over a regenerate: `DESIGN.md` carries ~14 sessions of hand-written audit history — the seven `#60a5fa` recurrences, the accent-text pairing bug, the Bright exception — none of which is derivable from code, so every existing paragraph and named rule was preserved verbatim.
+
+**Two structural fixes to DESIGN.md, both lossless.** The frontmatter carried a top-level `motion:` group, which the DESIGN.md schema does not accept (only `colors`/`typography`/`rounded`/`spacing`/`components`) — so it was silently invalid and would be dropped by any validator. Values moved to the sidecar's `extensions.motion`, with a comment where the block sat so it doesn't get re-added. Headings were numbered (`## 1. Overview`, `## 4. Elevation`); tooling parses these exactly, so they're now the canonical names.
+
+**Two canonical sections were missing entirely** and are now written from the real CSS: `## Layout` (the fixed-sidebar shell, the 4/8/16/24 rhythm — a usage convention, not tokens, since there are no `--spacing-*` properties — `.stat-grid`'s auto-fit behavior, the single 768px breakpoint, the mandatory `.table-wrap--fab-clear` pairing) and `## Shapes` (radius steps tied to size class rather than importance, why `full` is reserved, the two border weights). One new named rule each.
+
+**The sidecar was thin as well as stale:** colorMeta 14 → 28, typographyMeta 3 → 15, motion 3 → 7 (it was missing `--motion-slow`/`--ease-entrance` entirely, both shipped in S533), components 5 → 10 — including **Data Table**, the signature component the product is mostly built from, which the old sidecar didn't have at all. Tonal ramps are computed from each base color's own hue/saturation rather than eyeballed.
+
+**Then the scan found three real drifts, and the third was not a documentation problem.** `Layout.css`'s `:root` block is the pre-hydration copy of `PRESETS.dark`, and two values had drifted from it — `--theme-text2` was `#6b7280` against the preset's `#8a92a3` (so every label, table header and secondary line rendered a colder, darker gray on first paint) and `--theme-table-hover` was `0.02` alpha against `0.03`. Found by diffing the block against the preset programmatically, not by reading it. Same failure shape S534 recorded for `Login.css`'s `var(--theme-purple, #8b5cf6)`: a fallback drifts, reads as correct because the token name beside it is correct, and only paints in the instant nobody is looking hard.
+
+**The third was a live rendering bug that had been shipping silently.** This README and CLAUDE.md both listed `badge-gold` as a status-chip class. It does not exist in `Layout.css` and never has — but **7 real call sites used it**: the HR/IMS/POS Staff manager-rank pills, Advances' loan tag, KOT Log's BOT chip (×2), and POS Exception Report's discount row. A CSS class that doesn't exist fails silently, so all seven rendered as bare unstyled `<span>`s — no tint, no padding, no radius, no 11px size, just inherited text — for as long as they'd existed. Found only because the doc list was cross-checked against the stylesheet while updating it. All seven repointed to `badge-yellow`, which is what they actually meant: every one is a *categorical* distinction, and `badge-yellow` is the accent-tinted categorical-tag badge DESIGN.md already documents, not a warning (that's `badge-amber`). Repointed rather than defining a `.badge-gold` alias — a second name for one thing is the drift shape this codebase keeps getting bitten by. The complete real set is green / red / amber / yellow / purple / gray, now stated as complete in CLAUDE.md.
+
+**Verified:** `design.json` parses; `DESIGN.md`'s frontmatter parses as YAML with no invalid top-level groups; all 14 `{token.ref}` pointers resolve to real primitives; section order matches the spec; a full-codebase cross-check of every `badge-*` class used in JS against those defined in CSS now shows zero missing. `CI=true npm run build` clean, `npx eslint` clean on all six changed component files. `CACHE_NAME` bumped to `crest-v61` — the badge fix changes real rendering, so existing users need the new bundle. Not re-checked in a live browser.
+
+**Files:** `DESIGN.md`, `.impeccable/design.json`, `src/components/Layout.css`, `src/modules/hr/advances/Advances.jsx`, `src/modules/hr/staff/HrStaff.jsx`, `src/modules/ims/staff/ImsStaff.jsx`, `src/modules/pos/reports/KotLog.jsx`, `src/modules/pos/reports/PosExceptionReport.jsx`, `src/modules/pos/staff/PosStaff.jsx`, `CLAUDE.md`, `public/service-worker.js`, `README.md`
+
+---
+
 ### S535 — 2026-08-12 — TADA Claims: approving a claim required scrolling to the bottom of the page
 
 Reported from live use: with a long pending list, deciding on the first claim meant clicking the row, scrolling past every other claim to the detail panel at the bottom of the page, acting, then scrolling back up. Two separate causes, both in `TadaClaims.jsx`, and neither was really a layout problem.

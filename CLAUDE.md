@@ -277,7 +277,7 @@ Use these global classes from `Layout.css` — don't repeat inline styles:
 - `form-select` — styled `<select>`
 - `stat-grid` — horizontal KPI card row
 - `btn`, `btn-ghost`, `btn-primary` — button variants
-- `badge-green`, `badge-red`, `badge-amber`, `badge-gold`, `badge-gray` — status chips
+- `badge-green`, `badge-red`, `badge-amber`, `badge-yellow`, `badge-purple`, `badge-gray` — status chips. **That is the complete set — there is no `badge-gold`.** This list named one for a long time and 7 real call sites (HR/IMS/POS Staff rank pills, Advances' loan tag, KOT Log's BOT chip, POS Exception Report's discount row) used it, so all seven rendered as bare unstyled `<span>`s — no tint, no padding, no radius, no 11px size, just inherited text — with nothing to signal the class was missing. Fixed 2026-08-12 by repointing all seven to `badge-yellow`, which is what they meant: every one is a *categorical* distinction, and `badge-yellow` is the accent-tinted categorical-tag badge (see DESIGN.md), not a warning. `badge-amber` is the real warning color; don't reach for `badge-yellow` for a caution state. A class name that doesn't exist fails silently in CSS, so verify a badge class against `Layout.css` before using it rather than copying a nearby line.
 - `no-print` / `print-only` — print visibility
 
 ### Every `type="password"` input needs an explicit `autoComplete`

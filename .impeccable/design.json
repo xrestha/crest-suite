@@ -1,41 +1,444 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-05T00:00:00.000Z",
+  "generatedAt": "2026-08-12T00:00:00.000Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
-      "aged-brass": { "role": "primary", "displayName": "Aged Brass", "canonical": "oklch(74% 0.117 90)", "tonalRamp": ["oklch(15% 0.059 90)", "oklch(28% 0.088 90)", "oklch(40% 0.105 90)", "oklch(52% 0.117 90)", "oklch(63% 0.117 90)", "oklch(74% 0.117 90)", "oklch(85% 0.088 90)", "oklch(94% 0.047 90)"] },
-      "aged-brass-hover": { "role": "primary", "displayName": "Aged Brass Hover", "canonical": "oklch(79% 0.104 91)", "tonalRamp": ["oklch(15% 0.052 91)", "oklch(28% 0.078 91)", "oklch(40% 0.093 91)", "oklch(52% 0.104 91)", "oklch(63% 0.104 91)", "oklch(74% 0.104 91)", "oklch(85% 0.078 91)", "oklch(94% 0.041 91)"] },
-      "ink-bg": { "role": "neutral", "displayName": "Ink", "canonical": "oklch(18% 0.013 271)", "tonalRamp": ["oklch(15% 0.006 271)", "oklch(28% 0.010 271)", "oklch(40% 0.012 271)", "oklch(52% 0.013 271)", "oklch(63% 0.013 271)", "oklch(74% 0.013 271)", "oklch(85% 0.010 271)", "oklch(94% 0.005 271)"] },
-      "ink-card": { "role": "neutral", "displayName": "Ink Card", "canonical": "oklch(23% 0.022 269)", "tonalRamp": ["oklch(15% 0.011 269)", "oklch(28% 0.017 269)", "oklch(40% 0.020 269)", "oklch(52% 0.022 269)", "oklch(63% 0.022 269)", "oklch(74% 0.022 269)", "oklch(85% 0.017 269)", "oklch(94% 0.009 269)"] },
-      "ink-border": { "role": "neutral", "displayName": "Ink Border", "canonical": "oklch(31% 0.026 269)", "tonalRamp": ["oklch(15% 0.013 269)", "oklch(28% 0.020 269)", "oklch(40% 0.024 269)", "oklch(52% 0.026 269)", "oklch(63% 0.026 269)", "oklch(74% 0.026 269)", "oklch(85% 0.020 269)", "oklch(94% 0.011 269)"] },
-      "ink-border-lt": { "role": "neutral", "displayName": "Ink Border Light", "canonical": "oklch(26% 0.026 268)", "tonalRamp": ["oklch(15% 0.013 268)", "oklch(28% 0.019 268)", "oklch(40% 0.023 268)", "oklch(52% 0.026 268)", "oklch(63% 0.026 268)", "oklch(74% 0.026 268)", "oklch(85% 0.019 268)", "oklch(94% 0.010 268)"] },
-      "ink-sidebar": { "role": "neutral", "displayName": "Ink Sidebar", "canonical": "oklch(18% 0.013 264)", "tonalRamp": ["oklch(15% 0.007 264)", "oklch(28% 0.010 264)", "oklch(40% 0.012 264)", "oklch(52% 0.013 264)", "oklch(63% 0.013 264)", "oklch(74% 0.013 264)", "oklch(85% 0.010 264)", "oklch(94% 0.005 264)"] },
-      "text-primary": { "role": "neutral", "displayName": "Parchment Text", "canonical": "oklch(91% 0.023 85)", "tonalRamp": ["oklch(15% 0.012 85)", "oklch(28% 0.017 85)", "oklch(40% 0.021 85)", "oklch(52% 0.023 85)", "oklch(63% 0.023 85)", "oklch(74% 0.023 85)", "oklch(85% 0.017 85)", "oklch(94% 0.009 85)"] },
-      "text-secondary": { "role": "neutral", "displayName": "Slate Text", "canonical": "oklch(66% 0.027 265)", "tonalRamp": ["oklch(15% 0.013 265)", "oklch(28% 0.020 265)", "oklch(40% 0.024 265)", "oklch(52% 0.027 265)", "oklch(63% 0.027 265)", "oklch(74% 0.027 265)", "oklch(85% 0.020 265)", "oklch(94% 0.011 265)"] },
-      "text-tertiary": { "role": "neutral", "displayName": "Fog Text", "canonical": "oklch(71% 0.019 261)", "tonalRamp": ["oklch(15% 0.010 261)", "oklch(28% 0.014 261)", "oklch(40% 0.017 261)", "oklch(52% 0.019 261)", "oklch(63% 0.019 261)", "oklch(74% 0.019 261)", "oklch(85% 0.014 261)", "oklch(94% 0.008 261)"] },
-      "signal-success": { "role": "success", "displayName": "Success Green", "canonical": "oklch(77% 0.153 163)", "tonalRamp": ["oklch(15% 0.077 163)", "oklch(28% 0.115 163)", "oklch(40% 0.138 163)", "oklch(52% 0.153 163)", "oklch(63% 0.153 163)", "oklch(74% 0.153 163)", "oklch(85% 0.115 163)", "oklch(94% 0.061 163)"] },
-      "signal-danger": { "role": "danger", "displayName": "Danger Red", "canonical": "oklch(71% 0.166 22)", "tonalRamp": ["oklch(15% 0.083 22)", "oklch(28% 0.125 22)", "oklch(40% 0.150 22)", "oklch(52% 0.166 22)", "oklch(63% 0.166 22)", "oklch(74% 0.166 22)", "oklch(85% 0.125 22)", "oklch(94% 0.066 22)"] },
-      "signal-warning": { "role": "warning", "displayName": "Warning Amber", "canonical": "oklch(84% 0.164 84)", "tonalRamp": ["oklch(15% 0.082 84)", "oklch(28% 0.123 84)", "oklch(40% 0.148 84)", "oklch(52% 0.164 84)", "oklch(63% 0.164 84)", "oklch(74% 0.164 84)", "oklch(85% 0.123 84)", "oklch(94% 0.066 84)"] },
-      "signal-categorical": { "role": "categorical", "displayName": "Categorical Purple", "canonical": "oklch(71% 0.159 294)", "tonalRamp": ["oklch(15% 0.080 294)", "oklch(28% 0.119 294)", "oklch(40% 0.143 294)", "oklch(52% 0.159 294)", "oklch(63% 0.159 294)", "oklch(74% 0.159 294)", "oklch(85% 0.119 294)", "oklch(94% 0.064 294)"] }
+      "aged-brass": {
+        "role": "primary",
+        "displayName": "Aged Brass",
+        "canonical": "#c9a84c",
+        "purpose": "The one accent. Primary buttons, active nav and tab states, focus rings at low alpha, links. Deliberately rare: its scarcity is what makes it read as intentional rather than a default theme blue.",
+        "tonalRamp": [
+          "#3b3012",
+          "#66531f",
+          "#91762c",
+          "#bc9939",
+          "#cfb15e",
+          "#dcc689",
+          "#eaddb8",
+          "#f9f5eb"
+        ]
+      },
+      "aged-brass-hover": {
+        "role": "primary",
+        "displayName": "Aged Brass Light",
+        "canonical": "#d4b96a",
+        "purpose": "Hover step for any accent-filled surface. The only state change a primary button makes — no scale, no transform.",
+        "tonalRamp": [
+          "#3b3111",
+          "#67541e",
+          "#92782a",
+          "#be9c37",
+          "#d0b35d",
+          "#ddc788",
+          "#eadeb8",
+          "#f9f6eb"
+        ]
+      },
+      "ink-bg": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#0f1117",
+        "purpose": "App background, and the fill for input fields so a field reads as recessed from the card it sits on.",
+        "tonalRamp": [
+          "#1e222e",
+          "#343b50",
+          "#4a5472",
+          "#616e94",
+          "#808bac",
+          "#a2aac3",
+          "#c7ccdb",
+          "#f0f1f5"
+        ]
+      },
+      "ink-card": {
+        "role": "neutral",
+        "displayName": "Ink Card",
+        "canonical": "#181c27",
+        "purpose": "Cards, stat tiles, table containers. One step lighter than the page — the primary depth cue, with shadow layered on as secondary.",
+        "tonalRamp": [
+          "#1d222f",
+          "#333b52",
+          "#485475",
+          "#5d6d98",
+          "#7e8baf",
+          "#a0aac5",
+          "#c6ccdc",
+          "#eff1f5"
+        ]
+      },
+      "ink-border": {
+        "role": "neutral",
+        "displayName": "Ink Border",
+        "canonical": "#2a2f3d",
+        "purpose": "Structural borders: card edges, the table header rule, input outlines.",
+        "tonalRamp": [
+          "#1f232d",
+          "#363d4f",
+          "#4d5670",
+          "#647091",
+          "#838daa",
+          "#a4acc1",
+          "#c9cdda",
+          "#f0f1f5"
+        ]
+      },
+      "ink-border-lt": {
+        "role": "neutral",
+        "displayName": "Ink Border Light",
+        "canonical": "#1e2330",
+        "purpose": "Internal borders: table row dividers, ghost button edges. Using the structural weight here makes a dense table read as a grid of boxes.",
+        "tonalRamp": [
+          "#1d222f",
+          "#333c52",
+          "#495574",
+          "#5e6e97",
+          "#7e8caf",
+          "#a1abc4",
+          "#c7ccdc",
+          "#eff1f5"
+        ]
+      },
+      "ink-sidebar": {
+        "role": "neutral",
+        "displayName": "Ink Sidebar",
+        "canonical": "#0e1117",
+        "purpose": "The sidebar column, theme-matched so it never reads as a fixed dark strip on a light preset.",
+        "tonalRamp": [
+          "#1d2330",
+          "#323d52",
+          "#475775",
+          "#5d7098",
+          "#7d8eb0",
+          "#a0acc5",
+          "#c6cddc",
+          "#eff1f5"
+        ]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Parchment Text",
+        "canonical": "#e8e0d0",
+        "purpose": "Primary text — a warm off-white, deliberately not pure white.",
+        "tonalRamp": [
+          "#332b19",
+          "#594a2c",
+          "#7f693e",
+          "#a48850",
+          "#baa273",
+          "#cdbb98",
+          "#e1d6c1",
+          "#f7f4ee"
+        ]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Slate Text",
+        "canonical": "#8a92a3",
+        "purpose": "Secondary text: labels, metadata, table column headers.",
+        "tonalRamp": [
+          "#22252b",
+          "#3a3f4a",
+          "#535a6a",
+          "#6c7589",
+          "#8a92a3",
+          "#a9afbc",
+          "#cccfd7",
+          "#f1f2f4"
+        ]
+      },
+      "text-tertiary": {
+        "role": "neutral",
+        "displayName": "Fog Text",
+        "canonical": "#9ca3af",
+        "purpose": "The quietest tier: timestamps, disabled-adjacent copy, icon buttons at rest.",
+        "tonalRamp": [
+          "#22252a",
+          "#3b4049",
+          "#545c68",
+          "#6d7787",
+          "#8b94a2",
+          "#aab0bb",
+          "#ccd0d6",
+          "#f1f2f4"
+        ]
+      },
+      "signal-success": {
+        "role": "tertiary",
+        "displayName": "Success Green",
+        "canonical": "#34d399",
+        "purpose": "Paid, approved, healthy stock, positive variance.",
+        "tonalRamp": [
+          "#0e3f2d",
+          "#186d4e",
+          "#229b6f",
+          "#2cc990",
+          "#53daa9",
+          "#81e4c0",
+          "#b4efd9",
+          "#eafaf4"
+        ]
+      },
+      "signal-danger": {
+        "role": "tertiary",
+        "displayName": "Danger Red",
+        "canonical": "#f87171",
+        "purpose": "Overdue, rejected, negative variance, destructive actions.",
+        "tonalRamp": [
+          "#490404",
+          "#7e0606",
+          "#b40909",
+          "#e90c0c",
+          "#f53838",
+          "#f86d6d",
+          "#fba8a8",
+          "#fee7e7"
+        ]
+      },
+      "signal-warning": {
+        "role": "tertiary",
+        "displayName": "Warning Amber",
+        "canonical": "#fbbf24",
+        "purpose": "Pending, low stock, needs-attention. Distinct from the accent, which is never a status color.",
+        "tonalRamp": [
+          "#4b3701",
+          "#825f02",
+          "#b98703",
+          "#f0af04",
+          "#fbc332",
+          "#fcd369",
+          "#fde5a5",
+          "#fff8e6"
+        ]
+      },
+      "signal-categorical": {
+        "role": "secondary",
+        "displayName": "Categorical Purple",
+        "canonical": "#a78bfa",
+        "purpose": "The rationed 4th/5th categorical color, for when green/red/amber genuinely run out. Not a second accent.",
+        "tonalRamp": [
+          "#150349",
+          "#24057f",
+          "#3308b5",
+          "#430aeb",
+          "#6737f6",
+          "#906cf9",
+          "#bca7fb",
+          "#ece7fe"
+        ]
+      },
+      "chart-tick": {
+        "role": "exception",
+        "displayName": "Chart Tick",
+        "canonical": "#6b7280",
+        "purpose": "Recharts axis tick, label and reference-line fill. CSS var() does not resolve inside SVG presentation attributes, so this one is a literal by necessity, not by drift."
+      },
+      "toggle-knob": {
+        "role": "exception",
+        "displayName": "Toggle Knob",
+        "canonical": "#ffffff",
+        "purpose": "The sliding thumb inside a toggle switch. Always sits on a colored track, never directly on the page, so a fixed white holds contrast across all ten presets."
+      },
+      "print-ink": {
+        "role": "print",
+        "displayName": "Print Ink",
+        "canonical": "#000000",
+        "purpose": "Heading text and rule dividers on printed documents. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-text": {
+        "role": "print",
+        "displayName": "Print Text",
+        "canonical": "#333333",
+        "purpose": "Body copy needing more weight than a label. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-label": {
+        "role": "print",
+        "displayName": "Print Label",
+        "canonical": "#555555",
+        "purpose": "Secondary meta lines: dates, addresses, PAN/VAT. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-label-lt": {
+        "role": "print",
+        "displayName": "Print Label Light",
+        "canonical": "#777777",
+        "purpose": "Field labels and table body secondary text. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-notes": {
+        "role": "print",
+        "displayName": "Print Notes",
+        "canonical": "#444444",
+        "purpose": "Notes and callout box text. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-muted": {
+        "role": "print",
+        "displayName": "Print Muted",
+        "canonical": "#888888",
+        "purpose": "Uppercase section eyebrows, footer and index columns. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-faint": {
+        "role": "print",
+        "displayName": "Print Faint",
+        "canonical": "#aaaaaa",
+        "purpose": "Generated-by footers; the least emphasis on the page. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-rule": {
+        "role": "print",
+        "displayName": "Print Rule",
+        "canonical": "#cccccc",
+        "purpose": "Table header and footer rule lines. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-rule-strong": {
+        "role": "print",
+        "displayName": "Print Rule Strong",
+        "canonical": "#999999",
+        "purpose": "Bordered chips, e.g. a status pill outline. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-rule-lt": {
+        "role": "print",
+        "displayName": "Print Rule Light",
+        "canonical": "#dddddd",
+        "purpose": "Notes-box border. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-rule-xlt": {
+        "role": "print",
+        "displayName": "Print Rule Extra Light",
+        "canonical": "#eeeeee",
+        "purpose": "Table row divider. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "print-fill": {
+        "role": "print",
+        "displayName": "Print Fill",
+        "canonical": "#f3f3f3",
+        "purpose": "Table header row background. Valid only inside a print-only component or an @media print block; never on screen."
+      }
     },
     "typographyMeta": {
-      "wordmark": { "displayName": "Wordmark", "purpose": "The Crest brand mark only - sidebar and login screen. Never reused for a heading." },
-      "body": { "displayName": "Body", "purpose": "Default for every table cell, form value, and paragraph of UI copy." },
-      "label": { "displayName": "Label", "purpose": "Table column headers, stat card labels, form field labels - the uppercase-tracked tier." }
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "The \"Crest\" wordmark only — sidebar brand mark and the login screen. The one serif in an otherwise all-sans system, and it never appears on a second element."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Table cells, form values, and the default size for nearly everything a user reads."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Table column headers, stat card labels, section eyebrows. Uppercase at wide tracking, earning its place as a literal column header rather than a decorative kicker."
+      },
+      "stat-value-lg": {
+        "displayName": "Stat Value Large",
+        "purpose": "The single headline numeral on a dashboard hero tile."
+      },
+      "stat-value": {
+        "displayName": "Stat Value",
+        "purpose": "The numeral in a standard KPI card."
+      },
+      "numeral": {
+        "displayName": "Numeral",
+        "purpose": "Inline figures that need to outweigh their surrounding body text."
+      },
+      "page-title": {
+        "displayName": "Page Title",
+        "purpose": "The h1 at the top of a page."
+      },
+      "section-heading": {
+        "displayName": "Section Heading",
+        "purpose": "A major division inside a page."
+      },
+      "rail-icon": {
+        "displayName": "Rail Icon",
+        "purpose": "Sidebar module-switcher icons in the collapsed rail."
+      },
+      "card-heading": {
+        "displayName": "Card Heading",
+        "purpose": "The title bar of a card or modal."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card headings and section titles inside dense layouts."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Timestamps, secondary row detail, helper text under a field."
+      },
+      "micro": {
+        "displayName": "Micro",
+        "purpose": "The smallest tier — badge text and uppercase micro-labels, at 700 weight so it stays legible at 10px."
+      },
+      "chevron": {
+        "displayName": "Chevron",
+        "purpose": "Disclosure arrows in nav groups. Sized as an icon, not as text."
+      },
+      "print-monospace": {
+        "displayName": "Print Monospace",
+        "purpose": "Thermal-printer receipts and KOTs, where fixed-width columns must stay aligned. Never inside the live app UI."
+      }
     },
     "shadows": [
-      { "name": "card-elevation", "value": "var(--theme-card-shadow) - dark presets: inset 0 1px 0 0 rgba(text1,0.06), 0 10px 24px -8px rgba(bg,0.55), 0 3px 8px -3px rgba(bg,0.4); light presets: 0 1px 2px rgba(text1,0.06), 0 10px 24px -8px rgba(text1,0.1)", "purpose": "Uniform policy shadow on every .card/.stat-card, added 2026-07-12 - retired the old flat-by-default model. Generated per-preset from that preset's own bg/text1 (or accent, for Bright) so the shadow's cast color matches the theme instead of flattening to generic black. Background-lightness shift is still the primary depth cue; this is a secondary layer, not a decoration budget - don't invent a stronger version to mean 'important'." },
-      { "name": "floating-action", "value": "0 4px 16px rgba(0,0,0,0.3)", "purpose": "For content genuinely fixed above the page (e.g. the bottom-anchored Fab / cart button) - unchanged since before the elevation model rewrite." },
-      { "name": "live-pulse-ring", "value": "0 0 0 0 rgba(var(--signal-rgb), 0.5) -> 0 0 0 6px rgba(var(--signal-rgb), 0.18)", "purpose": "Breathing ring animation on elements needing real-time attention (new order banner, live badge). Uses the relevant signal color's own alpha - unchanged since before the elevation model rewrite." }
+      {
+        "name": "card-elevation",
+        "value": "inset 0 1px 0 0 rgba(232,224,208,0.06), 0 10px 24px -8px rgba(15,17,23,0.55), 0 3px 8px -3px rgba(15,17,23,0.4)",
+        "purpose": "The default for .card / .stat-card, exposed as --theme-card-shadow. Generated per preset from that preset's own bg and text1 rather than a flat black, so a theme's color cast survives into its shadow. Dark presets get this rim-highlight-plus-deep-shadow form; light presets get a simpler 0 1px 2px + 0 10px 24px -8px pair tinted from their own ink."
+      },
+      {
+        "name": "floating-action",
+        "value": "0 4px 16px rgba(0,0,0,0.3)",
+        "purpose": "An element genuinely floating above the page: the Fab, the bottom-anchored guest cart button. One of only two shadows that still carry a distinct meaning now that card elevation is uniform policy."
+      },
+      {
+        "name": "live-pulse-ring",
+        "value": "0 0 0 0 rgba(<signal>,0.5) -> 0 0 0 6px rgba(<signal>,0.18)",
+        "purpose": "An animated breathing ring on something needing real-time attention (a new guest order, a live status dot), using the relevant signal color's own alpha. The second meaning-carrying shadow."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 3px var(--theme-focus-ring)",
+        "purpose": "Themed focus indicator on inputs, selects and icon buttons. An alpha-blended version of the active preset's accent, so it changes hue with the theme instead of falling back to browser blue."
+      }
     ],
     "motion": [
-      { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "The one formalized easing curve, used for sidebar nav hover/active transitions." },
-      { "name": "motion-fast", "value": "160ms", "purpose": "Duration paired with ease-standard for sidebar interactions." },
-      { "name": "button-transition", "value": "0.13s linear (background, color)", "purpose": "Default button/tab/badge state-change speed. No bounce, no elastic, no transform-on-press." }
+      {
+        "name": "motion-fast",
+        "value": "160ms",
+        "purpose": "Duration for a state change in place: hover, active, focus, a nav item lighting up."
+      },
+      {
+        "name": "ease-standard",
+        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Paired with motion-fast. Symmetrical, because nothing is arriving or leaving."
+      },
+      {
+        "name": "motion-slow",
+        "value": "260ms",
+        "purpose": "Duration for something arriving that was not on screen: a modal panel, a stat pill resolving in."
+      },
+      {
+        "name": "ease-entrance",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Paired with motion-slow. The near-flat tail reads as settling rather than stopping."
+      },
+      {
+        "name": "button-transition",
+        "value": "0.13s linear (background, color)",
+        "purpose": "Predates the token pair and is deliberately quicker — a button should feel immediate. No scale, no bounce, no elastic easing anywhere in the product."
+      },
+      {
+        "name": "sidebar-collapse",
+        "value": "0.22s ease (width, margin-left)",
+        "purpose": "The one accepted layout-property animation. .sidebar-wrap is position:fixed so real space must be reserved; a transform-only version would slide the sidebar over the content instead of resizing the column. Fires only on a rare manual toggle."
+      },
+      {
+        "name": "chart-series",
+        "value": "450ms ease-out (Recharts, via src/shared/chartMotion.js)",
+        "purpose": "A second motion system that shares none of the CSS tokens on purpose. Recharts interpolates SVG attributes in JavaScript, so no CSS rule — including the prefers-reduced-motion guard — reaches a chart series; chartMotion.js is the only place that gate can live. It cannot express ease-entrance, since Recharts accepts only ease|ease-in|ease-out|ease-in-out|linear. Aligned with the shell on duration band, deliberately not on curve."
+      }
     ],
     "breakpoints": [
-      { "name": "mobile", "value": "768px" }
+      {
+        "name": "mobile",
+        "value": "768px"
+      }
     ]
   },
   "components": [
@@ -43,72 +446,162 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The single call-to-action button style. Accent background, theme-paired foreground, 700 weight, 12px radius.",
-      "html": "<button class=\"ds-btn-primary\">Save Changes</button>",
-      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 700; cursor: pointer; border: none; background: var(--theme-accent); color: var(--theme-accent-text); transition: background 0.13s, color 0.13s; } .ds-btn-primary:hover { background: var(--theme-accent-hover); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring); }"
+      "description": "The single accent-filled action on a screen. Foreground is always the paired accent-text token, never a hardcoded white or black.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Save Changes</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn-primary { background: var(--theme-accent, #c9a84c); color: var(--theme-accent-text, #0f1117); font-weight: 700; }\n.ds-btn-primary:hover { background: var(--theme-accent-hover, #d4b96a); }\n.ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }"
     },
     {
       "name": "Ghost Button",
       "kind": "button",
       "refersTo": "button-ghost",
-      "description": "The default secondary/tertiary action button - quiet until hovered. Same 12px radius as Primary.",
-      "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
-      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; cursor: pointer; background: var(--theme-input-bg); color: var(--theme-text1); border: 1px solid var(--theme-border-lt); transition: background 0.13s, color 0.13s, border-color 0.13s; } .ds-btn-ghost:hover { background: var(--theme-table-hover); border-color: var(--theme-accent); }"
+      "description": "The default button. Sits at page-background fill with a quiet internal border; hover steps the border to the accent — a restrained way of saying \"this became interactive.\"",
+      "html": "<button class=\"ds-btn ds-btn-ghost\">Export Excel</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn-ghost { background: var(--theme-input-bg, #0f1117); color: var(--theme-text1, #e8e0d0); border: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-btn-ghost:hover { background: var(--theme-table-hover, rgba(255,255,255,0.03)); border-color: var(--theme-accent, #c9a84c); }\n.ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive actions only — delete, void. Never used to mean \"important\". Red text on a tinted fill rather than a solid red fill, because --theme-red ranges from light to dark across the ten presets and no single foreground contrasts on all of them.",
+      "html": "<button class=\"ds-btn ds-btn-danger\">Void Bill</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn-danger { background: var(--theme-input-bg, #0f1117); color: var(--theme-red, #f87171); border: 1px solid rgba(248,113,113,0.45); }\n.ds-btn-danger:hover { background: rgba(248,113,113,0.12); border-color: var(--theme-red, #f87171); }"
     },
     {
       "name": "Status Badge",
       "kind": "chip",
       "refersTo": "badge",
-      "description": "Alpha-tinted status chip, 8px radius. Shown here in the success variant; danger/warning/gray follow the same shape with their own signal color - never a solid fill with white text.",
-      "html": "<span class=\"ds-badge ds-badge-green\">Paid</span>",
-      "css": ".ds-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 500; text-transform: capitalize; } .ds-badge-green { background: rgba(52,211,153,0.10); color: var(--theme-green); }"
+      "description": "Every semantic color renders as a ~10-12% alpha tint of itself with full-opacity text — never a solid fill with white text. That is what keeps a table calm when every row carries one.",
+      "html": "<span class=\"ds-badge ds-badge-green\">Paid</span> <span class=\"ds-badge ds-badge-amber\">Pending</span> <span class=\"ds-badge ds-badge-red\">Overdue</span> <span class=\"ds-badge ds-badge-gray\">Cancelled</span>",
+      "css": ".ds-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 500; text-transform: capitalize; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-badge-green { background: rgba(52,211,153,0.10); color: var(--theme-green, #34d399); }\n.ds-badge-amber { background: rgba(251,191,36,0.12); color: var(--theme-amber, #fbbf24); }\n.ds-badge-red { background: rgba(248,113,113,0.10); color: var(--theme-red, #f87171); }\n.ds-badge-gray { background: rgba(138,146,163,0.10); color: var(--theme-text2, #8a92a3); }"
     },
     {
       "name": "Card",
       "kind": "card",
       "refersTo": "card",
-      "description": "The base surface for grouped content - 18px radius, one tone lighter than the page, plus the per-preset card-elevation shadow (see extensions.shadows) added 2026-07-12. Depth is background-shift + border + shadow now, not border-only.",
-      "html": "<div class=\"ds-card\"><p class=\"ds-card-title\">Basic Salary</p><p class=\"ds-card-value\">NPR 25,000</p></div>",
-      "css": ".ds-card { background: var(--theme-card); border: 1px solid var(--theme-border); border-radius: 18px; padding: 24px; box-shadow: var(--theme-card-shadow); } .ds-card-title { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--theme-text3); } .ds-card-value { margin: 0; font-size: 15px; font-weight: 700; color: var(--theme-text1); }"
+      "description": "The standard surface. One tone lighter than the page as the primary depth cue, with a per-preset shadow layered on top. No gradient, no tint toward the accent.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-title\">Period Summary</div><p class=\"ds-card-body\">Net purchases, revenue and food cost for the open period.</p></div>",
+      "css": ".ds-card { background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 18px; box-shadow: inset 0 1px 0 0 rgba(232,224,208,0.06), 0 10px 24px -8px rgba(15,17,23,0.55), 0 3px 8px -3px rgba(15,17,23,0.4); padding: 24px; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-card-title { font-size: 15px; font-weight: 600; color: var(--theme-text1, #e8e0d0); margin-bottom: 8px; }\n.ds-card-body { font-size: 13px; line-height: 1.5; color: var(--theme-text3, #9ca3af); margin: 0; }"
+    },
+    {
+      "name": "Stat Card",
+      "kind": "card",
+      "refersTo": "stat-card",
+      "description": "A KPI tile: uppercase micro-label over a large numeral. Padding is 20px rather than the card default 24px — a label-and-numeral pair has no internal composition to breathe around, and a row of them reads better slightly denser.",
+      "html": "<div class=\"ds-stat-card\"><div class=\"ds-stat-label\">Food Cost %</div><div class=\"ds-stat-value\">32.4%</div></div>",
+      "css": ".ds-stat-card { background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 18px; box-shadow: inset 0 1px 0 0 rgba(232,224,208,0.06), 0 10px 24px -8px rgba(15,17,23,0.55), 0 3px 8px -3px rgba(15,17,23,0.4); padding: 20px; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-stat-label { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--theme-text3, #9ca3af); margin-bottom: 6px; }\n.ds-stat-value { font-size: 24px; font-weight: 700; color: var(--theme-text1, #e8e0d0); }"
     },
     {
       "name": "Text Input",
       "kind": "input",
       "refersTo": "input",
-      "description": "Labeled form field with the theme-colored focus ring, 12px radius - label always sits above, never a placeholder standing in for it.",
-      "html": "<div class=\"ds-field\"><label class=\"ds-field-label\">Vendor Name</label><input class=\"ds-field-input\" type=\"text\" placeholder=\"e.g. Big Mart\" /></div>",
-      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; } .ds-field-label { font-size: 12px; font-weight: 500; color: var(--theme-text2); letter-spacing: 0.04em; } .ds-field-input { background: var(--theme-input-bg); border: 1px solid var(--theme-border); border-radius: 12px; padding: 9px 12px; font-size: 13px; color: var(--theme-text1); outline: none; transition: border-color 0.14s; } .ds-field-input:focus { border-color: var(--theme-accent); box-shadow: 0 0 0 3px var(--theme-focus-ring); } .ds-field-input::placeholder { color: var(--theme-text3); }"
+      "description": "Label always sits above the field — a placeholder never stands in for a label. Focus steps the border to the accent and adds a themed 3px ring, not a browser-blue outline.",
+      "html": "<div class=\"ds-field\"><label class=\"ds-label\" for=\"ds-vendor\">Vendor</label><input class=\"ds-input\" id=\"ds-vendor\" type=\"text\" placeholder=\"e.g. Big Mart\" /></div>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 4px; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-label { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--theme-text3, #9ca3af); }\n.ds-input { background: var(--theme-input-bg, #0f1117); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 12px; padding: 8px 12px; font-size: 13px; font-family: inherit; color: var(--theme-text1, #e8e0d0); outline: none; }\n.ds-input::placeholder { color: var(--theme-text2, #8a92a3); }\n.ds-input:focus { border-color: var(--theme-accent, #c9a84c); box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }\n.ds-input[aria-invalid=\"true\"] { border-color: var(--theme-red, #f87171); }"
+    },
+    {
+      "name": "Tab Pill",
+      "kind": "chip",
+      "refersTo": "tab-btn",
+      "description": "The filter/sort control on nearly every list page. Active reads as selected, not pressed — accent text, accent border at 50% alpha, focus-ring token as fill. Deliberately at the standard 12px radius rather than full-pill, which is reserved for the sidebar module switcher.",
+      "html": "<div class=\"ds-tab-bar\"><button class=\"ds-tab\">All</button><button class=\"ds-tab ds-tab-active\">Pending</button><button class=\"ds-tab\">Paid</button></div>",
+      "css": ".ds-tab-bar { display: flex; gap: 8px; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-tab { appearance: none; background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 12px; padding: 4px 12px; font-size: 12px; font-weight: 500; font-family: inherit; color: var(--theme-text2, #8a92a3); cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s; }\n.ds-tab:hover { color: var(--theme-text1, #e8e0d0); border-color: rgba(201,168,76,0.25); }\n.ds-tab-active { color: var(--theme-accent, #c9a84c); border-color: rgba(201,168,76,0.5); background: var(--theme-focus-ring, rgba(201,168,76,0.15)); font-weight: 600; }"
+    },
+    {
+      "name": "Data Table",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "The signature component — most of the product is built around it. 11px uppercase headers at wide tracking, 13px rows, light dividers, and a barely-there hover tint rather than a solid highlight. Actionable rows carry a right-aligned Actions column so a long queue never has to be scrolled to act on.",
+      "html": "<div class=\"ds-table-wrap\"><table class=\"ds-table\"><thead><tr><th>Employee</th><th>Trip</th><th class=\"ds-num\">Total</th><th>Status</th><th class=\"ds-num\">Actions</th></tr></thead><tbody><tr><td>Ronish Dangol</td><td>Cafe &rarr; Big Mart</td><td class=\"ds-num\">15</td><td><span class=\"ds-badge ds-badge-amber\">Pending</span></td><td class=\"ds-num\"><button class=\"ds-row-btn ds-row-approve\">Approve</button><button class=\"ds-row-btn ds-row-reject\">Reject</button></td></tr><tr><td>Sujan Rai</td><td>Cafe &rarr; Bhatbhateni</td><td class=\"ds-num\">240</td><td><span class=\"ds-badge ds-badge-green\">Paid</span></td><td class=\"ds-num\">&mdash;</td></tr></tbody></table></div>",
+      "css": ".ds-table-wrap { overflow-x: auto; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }\n.ds-table th { text-align: left; padding: 10px 5px; color: var(--theme-text2, #8a92a3); font-weight: 500; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--theme-border, #2a2f3d); white-space: nowrap; }\n.ds-table td { padding: 11px 5px; color: var(--theme-text1, #e8e0d0); border-bottom: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-table tr:last-child td { border-bottom: none; }\n.ds-table tbody tr:hover td { background: var(--theme-table-hover, rgba(255,255,255,0.03)); }\n.ds-num { text-align: right; white-space: nowrap; }\n.ds-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 500; }\n.ds-badge-amber { background: rgba(251,191,36,0.12); color: var(--theme-amber, #fbbf24); }\n.ds-badge-green { background: rgba(52,211,153,0.10); color: var(--theme-green, #34d399); }\n.ds-row-btn { background: var(--theme-input-bg, #0f1117); border: 1px solid var(--theme-border-lt, #1e2330); border-radius: 12px; padding: 4px 10px; margin-left: 6px; font-size: 11px; font-family: inherit; cursor: pointer; transition: background 0.13s, border-color 0.13s; }\n.ds-row-approve { color: var(--theme-green, #34d399); }\n.ds-row-reject { color: var(--theme-red, #f87171); }\n.ds-row-btn:hover { border-color: currentColor; }"
+    },
+    {
+      "name": "Sidebar Nav Link",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "A nav row in the unified 240px sidebar column. Active state is accent text on the focus-ring tint at weight 600 — the same treatment the active tab pill uses, so \"selected\" reads identically everywhere.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-link\" href=\"#\">Purchases</a><a class=\"ds-nav-link ds-nav-link-active\" href=\"#\">Stock Count</a><a class=\"ds-nav-link\" href=\"#\">Recipes</a></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; background: var(--theme-sidebar, #0e1117); padding: 8px 0; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-nav-link { display: flex; align-items: center; gap: 10px; margin: 1px 10px; padding: 8px 12px; border-radius: 12px; font-size: 13px; color: var(--theme-text2, #8a92a3); text-decoration: none; white-space: nowrap; transition: color 160ms cubic-bezier(0.4,0,0.2,1), background 160ms cubic-bezier(0.4,0,0.2,1); }\n.ds-nav-link:hover { color: var(--theme-text1, #e8e0d0); background: var(--theme-table-hover, rgba(255,255,255,0.03)); }\n.ds-nav-link-active { color: var(--theme-accent, #c9a84c); background: var(--theme-focus-ring, rgba(201,168,76,0.15)); font-weight: 600; }"
     }
   ],
   "narrative": {
     "northStar": "The Back-of-House Command Center",
-    "overview": "Crest Suite is operated, not visited. An owner is checking margin between service rushes; an accountant is reconciling TDS figures before a filing deadline. Neither has time for the interface to perform. The system is built around legibility under pressure: dense tables that stay scannable, a single restrained accent, and status communicated through color and position rather than decoration. This deliberately rejects two things named in PRODUCT.md: the dated, hierarchy-less density of legacy Nepali ERP software, and the templated purple-gradient look of generic AI-generated SaaS. The product runs across ten interchangeable theme presets (dark charcoal-and-gold is the shipped default; Bright, a crisp cool-blue light theme, is the newest), all built from the same token set; every rule is written against the default preset's values, but the relationships between tokens hold across all ten, even where literal shape/shadow values don't.",
+    "overview": "Crest Suite is operated, not visited. An owner is checking margin between service rushes; an accountant is reconciling TDS figures before a filing deadline. Neither has time for the interface to perform. The system is built around legibility under pressure: dense tables that stay scannable, a single restrained accent, and status communicated through color and position rather than decoration.\n\nThis deliberately rejects two things named in PRODUCT.md: the dated, hierarchy-less density of legacy Nepali ERP software, and the templated purple-gradient look of generic AI-generated SaaS. The system solves density the same problem legacy ERPs were trying to solve, but with real typographic hierarchy, a single accent used sparingly, and consistent spacing instead of cramming.\n\nThe product runs across ten interchangeable theme presets (dark charcoal-and-gold is the shipped default; Tokyo Night, Dracula, Nord, Catppuccin, Latte, Rosé Dawn, Solarized, and Light are the other nine; Bright — a crisp cool-blue light theme, added 2026-07-12 — is the newest). All ten are built from the same token set. Every rule is written against the default preset's values, but the relationships between tokens hold across all ten, even where the literal shape values (radius, shadow) no longer do.",
     "keyCharacteristics": [
-      "Depth comes primarily from a one-step background-lightness shift, with a per-preset shadow as a secondary cue (elevation model rewritten 2026-07-12 - previously flat-only, shadows are now uniform policy on every card, not a decoration budget)",
-      "One accent color per screen, applied sparingly, never as a wash - Bright's ClientDashboard.jsx KPI badges are the one named, scoped exception",
+      "Depth comes primarily from a one-step background-lightness shift, with a per-preset shadow as a secondary cue",
+      "One accent color per screen, applied sparingly (buttons, active states, focus rings) never as a wash — Bright is a deliberate, scoped exception",
       "A serif wordmark is the one deliberate ornamental choice in an otherwise all-sans, all-functional system",
-      "Status is color-coded consistently, with a rationed 4th color (purple) reserved for genuine 4th/5th categories"
+      "Status (paid / pending / overdue, veg / non-veg, stock health) is color-coded consistently: green success, red danger, amber caution, gray neutral, with a rationed 4th color (purple) reserved for a genuine fourth or fifth category when green/red/amber aren't enough"
     ],
     "rules": [
-      { "name": "The One Accent Rule", "body": "Aged Brass is the only non-semantic color on any screen. If a second brand color shows up anywhere outside the rationed purple exception, it's a mistake, not a design choice. A 2026-08-05 audit found a second undocumented accent (an indigo/blue, #60a5fa/#818cf8) had spread into three files across two separate sessions before being caught - treat any unfamiliar saturated color next to Aged Brass as a near-certain instance of this drift, not a one-off.", "section": "colors" },
-      { "name": "The Accent-Text Pairing Rule", "body": "Any element with an Aged-Brass background uses the theme's paired accent-text token for its foreground, never a hardcoded white or black - the accent color changes per theme preset and a hardcoded foreground will fail contrast on at least one of the ten. Shipped and fixed twice as a real bug (a FAB label, then an admin page's badge) - on its second recurrence, treat any hardcoded #000/#fff next to var(--theme-accent) as the bug on sight.", "section": "colors" },
-      { "name": "The One Serif Rule", "body": "Georgia appears exactly once per screen (the wordmark, if visible at all). Never used for a heading, callout, or emphasis.", "section": "typography" },
-      { "name": "Card elevation is uniform policy, not a decoration budget", "body": "Every card gets the same per-preset card-elevation shadow (see extensions.shadows). This retired the old Flat-By-Default Rule (2026-07-12). Don't invent a stronger or different shadow to mean 'important' or 'premium' - floating-action and live-pulse-ring are the only two shadows that still carry extra meaning.", "section": "elevation" },
-      { "name": "Badges are alpha-tint, never solid fill", "body": "Each semantic color renders as a ~10-12% alpha tint of itself as background, full-opacity as text - never a solid fill with white text. Found and fixed as a real recurrence on an admin page's Trial Accounts panel (2026-08-05).", "section": "components" }
+      {
+        "name": "The One Accent Rule",
+        "section": "colors",
+        "body": "Aged Brass (or the active preset's own accent) is the only non-semantic color on any screen. If a second \"brand\" color shows up anywhere outside the rationed purple exception, it's a mistake, not a design choice. Seven separate recurrences of an undocumented indigo (#60a5fa / #818cf8 / a drifted #8b5cf6 var() fallback) have been found and fixed across AdminClients.js, SuiteGate.js, AuditLog.js, AdminDashboardOverview.jsx, HolidayCalendar.jsx, MenuEngineering.js and Login.css — grep for those literals before shipping any new categorical badge or pill, and check the fallback halves of var() calls, not just standalone literals."
+      },
+      {
+        "name": "The Accent-Text Pairing Rule",
+        "section": "colors",
+        "body": "Any element with an accent-colored background uses the theme's paired accent-text token for its foreground, never a hardcoded white or black. Because the accent changes per preset, a hardcoded foreground will silently fail contrast on at least one of the ten. Shipped and fixed twice — treat any hardcoded #000/#fff sitting next to var(--theme-accent) as a near-certain instance on sight."
+      },
+      {
+        "name": "The One Serif Rule",
+        "section": "typography",
+        "body": "Georgia appears exactly once per screen (the wordmark, if visible at all). It is never used for a heading, a callout, or emphasis — that would dilute it from signature to affectation."
+      },
+      {
+        "name": "The Auto-Fit-First Rule",
+        "section": "layout",
+        "body": "Reach for repeat(auto-fit, minmax(<floor>, 1fr)) before declaring a column count. A fixed count is a claim that the grouping matters at every width; if it doesn't, the fixed count is just a media query you now have to maintain."
+      },
+      {
+        "name": "Shadow tells you what surface you're on, not that a page is \"polished\"",
+        "section": "elevation",
+        "body": "Card elevation is uniform policy (every preset, every card), so it no longer functions as a special signal the way the floating-action and live-pulse shadows still do. Don't invent a third meaning for it. If something needs to stand out, that's a job for the accent color or position."
+      },
+      {
+        "name": "The Proportional Corner Rule",
+        "section": "shapes",
+        "body": "If a new element needs a radius, pick the step by asking how big the box is, not how important it is. An \"important\" card does not get a larger corner; it gets the accent color or a better position."
+      },
+      {
+        "name": "Badges are alpha-tint, never solid fill",
+        "section": "components",
+        "body": "Each semantic color renders as a ~10-12% alpha tint of itself as background with full-opacity text. A solid signal fill needs a paired foreground token and only --theme-accent has one, so red/amber/green must use the tint pattern. This keeps a table full of status badges calm even when every row has one."
+      },
+      {
+        "name": "Row actions belong on the row",
+        "section": "components",
+        "body": "A table whose rows can be acted on carries a right-aligned Actions column of ghost buttons tinted with the semantic color of what they do. Putting the only actions in a detail panel below the table means the distance between the row you decided about and the button that acts on it grows with the list."
+      },
+      {
+        "name": "Every animation must be switch-off-able by prefers-reduced-motion, which means it cannot be an inline style",
+        "section": "motion",
+        "body": "Inline style={{ animation }} beats any stylesheet rule, so a media query cannot reach it — the animation is then unconditional for every user regardless of their OS preference. Put animations in a class; put the class in the reduced-motion block at the foot of its section in Layout.css."
+      },
+      {
+        "name": "Recharts is a second motion system that shares none of these tokens, on purpose",
+        "section": "motion",
+        "body": "It interpolates SVG attributes in JavaScript, so no CSS rule — including the reduced-motion guard — reaches a chart series. Every series goes through src/shared/chartMotion.js, the only place that gate can live. It cannot use ease-entrance: Recharts accepts only ease|ease-in|ease-out|ease-in-out|linear. The two systems align on duration band and deliberately not on curve."
+      },
+      {
+        "name": "Stagger describes a list, or it is decoration",
+        "section": "motion",
+        "body": "The only staggered sequence in the app is ChartCard's expanded stat strip (three steps at 60/105/150ms) — a row of peers that genuinely appears as a row. Cap the total delay. Do not reinterpret scrolled sections, table rows, or card grids as staggered lists."
+      }
     ],
     "dos": [
-      "Do use the theme's accent-text token as the foreground on any accent-colored background",
-      "Do keep tonal alpha-tints at 2-18% opacity",
-      "Do wrap every wide table in the horizontal-scroll container",
-      "Do reserve the rationed 4th color (purple) for a genuine 4th/5th categorical need",
-      "Do put labels above form fields, always"
+      "Do use the theme's accent-text token as the foreground on any accent-colored background - it changes per preset and a hardcoded color will fail contrast on at least one of the ten themes.",
+      "Do keep tonal alpha-tints (table-hover, focus-ring, badge backgrounds) at 2-18% opacity - enough to register as a state, never opaque enough to compete with real content.",
+      "Do wrap every wide table in the horizontal-scroll container rather than shrinking columns.",
+      "Do reserve the rationed 4th color (purple) for a genuine 4th/5th categorical need, not as a second accent.",
+      "Do put labels above form fields, always - never a placeholder standing in for a label."
     ],
     "donts": [
-      "Don't build dense, hierarchy-less layouts in the name of fitting more in",
-      "Don't reach for purple gradients, Inter-everywhere, or a templated hero-plus-three-cards layout",
-      "Don't invent a stronger/different shadow to mean important or premium - card elevation is uniform policy now, not a decoration budget",
-      "Don't hardcode white or black as text on an accent background",
-      "Don't use a second saturated brand color alongside Aged Brass on the same screen"
+      "Don't build dense, hierarchy-less layouts in the name of \"fitting more in\" - that's the legacy-ERP failure mode this product is explicitly positioned against.",
+      "Don't reach for purple gradients, Inter-everywhere, or a templated hero-plus-three-cards layout - the generic-AI-SaaS look PRODUCT.md names directly as an anti-reference.",
+      "Don't invent a stronger/different shadow to mean \"important\" or \"premium.\" Card elevation (--theme-card-shadow) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning.",
+      "Don't hardcode white or black as text on an accent background - use the paired accent-text token.",
+      "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (Bright's colorful KPI badges on ClientDashboard.jsx are the one named exception.)"
     ]
   }
 }

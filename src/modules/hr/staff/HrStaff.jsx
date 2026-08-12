@@ -21,7 +21,7 @@ const DEFAULT_ROLES = [
   { label: 'Supervisor', level: 'supervisor' },
   { label: 'Manager',    level: 'manager' },
 ]
-const LEVEL_BADGE = { staff: 'badge-green', supervisor: 'badge-amber', manager: 'badge-gold' }
+const LEVEL_BADGE = { staff: 'badge-green', supervisor: 'badge-amber', manager: 'badge-yellow' }
 const EMPTY_ADD   = { full_name: '', email: '', password: '', job_title: '', employee_id: '', existing_user_id: '' }
 const EMPTY_ROLE  = { label: '', level: 'staff' }
 

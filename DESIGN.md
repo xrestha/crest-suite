@@ -133,20 +133,14 @@ spacing:
   sm: "8px"
   md: "16px"
   lg: "24px"
-# Motion. A closed set of two duration/easing pairs, mirroring the --motion-*/--ease-* custom
-# properties at the top of Layout.css. Documented 2026-08-11 (see the Motion section) — the
-# 160ms/ease-standard pair had shipped since the 2026-07-12 sidebar rewrite but was never in the
-# frontmatter, and the entrance pair was living as an inline literal in ChartCard.js. Recharts
-# series animation is deliberately NOT on this scale: it takes only ease|ease-in|ease-out|
-# ease-in-out|linear, so it cannot express ease-entrance, and it is configured in
-# src/shared/chartMotion.js instead.
-motion:
-  fast:
-    duration: "160ms"
-    easing: "cubic-bezier(0.4, 0, 0.2, 1)"
-  slow:
-    duration: "260ms"
-    easing: "cubic-bezier(0.16, 1, 0.3, 1)"
+# Motion tokens are NOT in this frontmatter, and their absence is deliberate rather than an
+# omission: the DESIGN.md schema accepts only colors / typography / rounded / spacing /
+# components at the top level, so a `motion:` group here is invalid and gets dropped by any
+# DESIGN.md-aware tool that validates the file. They lived here from 2026-08-11 until the
+# 2026-08-12 refresh, which relocated them to `.impeccable/design.json`'s extensions.motion —
+# the layer built to hold exactly what this schema can't. The Motion section below is still the
+# normative prose; nothing about the token values changed, only where the machine-readable copy
+# lives. Same reason shadows and breakpoints are not up here either.
 components:
   button-primary:
     backgroundColor: "{colors.aged-brass}"
@@ -160,15 +154,45 @@ components:
     textColor: "{colors.text-primary}"
     rounded: "{rounded.md}"
     padding: "8px 16px"
+  button-danger:
+    backgroundColor: "{colors.ink-bg}"
+    textColor: "{colors.signal-danger}"
+    rounded: "{rounded.md}"
+    padding: "8px 16px"
   card:
     backgroundColor: "{colors.ink-card}"
     rounded: "{rounded.lg}"
     padding: "{spacing.lg}"
+  # One step tighter than .card's 24px. Not drift: a stat tile is a label-plus-numeral pair with
+  # no internal composition to breathe around, and a row of them reads better slightly denser.
+  stat-card:
+    backgroundColor: "{colors.ink-card}"
+    rounded: "{rounded.lg}"
+    padding: "20px"
+  # Badges carry an alpha tint of their own signal color as background, which this schema's
+  # 8-prop set cannot express as a token ref — the literal per-variant values live in the
+  # sidecar's component snippets. textColor is the honest half of the pair.
+  badge:
+    textColor: "{colors.text-secondary}"
+    rounded: "{rounded.sm}"
+    padding: "2px 8px"
+  input:
+    backgroundColor: "{colors.ink-bg}"
+    textColor: "{colors.text-primary}"
+    rounded: "{rounded.md}"
+    padding: "8px 12px"
+  tab-btn:
+    backgroundColor: "{colors.ink-card}"
+    textColor: "{colors.text-secondary}"
+    rounded: "{rounded.md}"
+    padding: "4px 12px"
+  tab-btn-active:
+    textColor: "{colors.aged-brass}"
 ---
 
 # Design System: Crest Suite
 
-## 1. Overview
+## Overview
 
 **Creative North Star: "The Back-of-House Command Center"**
 
@@ -184,7 +208,7 @@ The product runs across ten interchangeable theme presets (dark charcoal-and-gol
 - A serif wordmark is the one deliberate ornamental choice in an otherwise all-sans, all-functional system
 - Status (paid / pending / overdue, veg / non-veg, stock health) is color-coded consistently: green success, red danger, amber caution, gray neutral, with a rationed 4th color (purple) reserved for a genuine fourth or fifth category when green/red/amber aren't enough
 
-## 2. Colors
+## Colors
 
 The palette is a dark charcoal neutral scale with a single warm accent; every other color is a semantic signal, not a decorative choice.
 
@@ -213,7 +237,7 @@ The palette is a dark charcoal neutral scale with a single warm accent; every ot
 
 **The Accent-Text Pairing Rule.** Any element with an accent-colored background uses the theme's paired `accent-text` token for its foreground (`#0f1117` in the Dark preset, `#ffffff` in Bright), never a hardcoded white or black. Because the accent color changes per theme preset, a hardcoded foreground color will silently fail contrast on at least one of the ten presets. This is a real bug the codebase shipped and fixed once already (a floating action button used a hardcoded white label) - treat it as the standing rule, not a one-off fix. A 2026-07-12 audit found the same class of bug in four more shared components (`SearchableSelect.js`, `BsCalendarPicker.js`, `PremiumGate.js`, `ProtectedRoute.js`) that had been hardcoding the Dark preset's exact hex values since before the theme system existed - fixed to read theme tokens, so they now actually respect every preset instead of only working by coincidence on Dark. **It recurred once more** (2026-08-05, `AdminClients.js`'s "Annual" badge, hardcoded `#000` on `var(--theme-accent)`) - fixed to `var(--theme-accent-text)`. Given it's now shipped-and-fixed twice, treat any hardcoded `#000`/`#fff`/`white`/`black` sitting next to `var(--theme-accent)` as a near-certain instance of this bug on sight, not just a style-review nit.
 
-## 3. Typography
+## Typography
 
 **Display Font:** Georgia, serif (fallback: serif) - reserved for the wordmark only.
 **Body Font:** Poppins (Google Font, weights 400/500/600/700 + italic 400), falling back to -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, sans-serif if the webfont fails to load.
@@ -230,7 +254,25 @@ The palette is a dark charcoal neutral scale with a single warm accent; every ot
 ### Named Rules
 **The One Serif Rule.** Georgia appears exactly once per screen (the wordmark, if visible at all). It is never used for a heading, a callout, or emphasis - that would dilute it from signature to affectation.
 
-## 4. Elevation
+## Layout
+
+*Section added 2026-08-12. The spatial model was always real in the code but had never been written down in one place — radius and density notes were scattered across Components, and the responsive behavior was documented nowhere at all.*
+
+**The shell is a fixed sidebar plus a flowing content column.** `.sidebar-wrap` is `position: fixed` at 240px (56px collapsed), and `.main-content` reserves that space with a matching `margin-left` on the same two values — the two animate in lockstep (see Navigation for why this is a layout-property animation and stays one). Content padding is 32px on every page; nothing is centred in a max-width reading measure, because every screen here is a working surface rather than a document.
+
+**Spacing rhythm is a 4/8/16/24 scale**, applied by convention rather than by token — there are no `--spacing-*` custom properties, so the scale lives in the frontmatter and in usage, not in CSS. 16px is the default gap between peers (grid gaps, button rows, form field stacks); 24px is `.card`'s internal padding and the gap between major sections; 8px and 4px are for chip-level and intra-control spacing. A value off this scale in new work is drift, the same way an off-ramp font size is.
+
+**KPI rows are auto-fitting grids, not fixed columns.** `.stat-grid` is `repeat(auto-fit, minmax(180px, 1fr))` with a 16px gap and 28px bottom margin, so a row of 4 stat cards reflows to 2×2 and then to a single column without a media query. Prefer this over hand-declared column counts — the dashboards that do declare columns (`.dash-3col-*`, for the IMS/HR/POS split) do it because the *content grouping* is meaningful, not because the widths needed pinning, and each of those collapses to `1fr` at the breakpoint.
+
+**One breakpoint: 768px.** There is no tablet tier and no desktop max-width. Below 768px the sidebar leaves the flow entirely (`transform: translateX(-100%)` plus a hamburger and a 55%-black overlay), `.main-content` drops its reserved margin, and the multi-column dashboard grids go single-column. Touch sizing is handled separately and deliberately by `@media (pointer: coarse)` rather than by width — see Inputs / Fields for why that distinction matters.
+
+**Wide tables scroll, they do not compress.** `.table-wrap` is `overflow-x: auto` around every wide table; the data keeps its native column widths and the container takes the scrollbar. Pair it with `.table-wrap--fab-clear` (88px bottom padding) on any page that also renders a `Fab` — the Fab is `position: fixed` with no reserved space, so without the modifier it sits on top of the last row's action buttons. That was found live on 11 pages at once; treat the pairing as mandatory rather than a polish step.
+
+### Named Rules
+
+**The Auto-Fit-First Rule.** Reach for `repeat(auto-fit, minmax(<floor>, 1fr))` before declaring a column count. A fixed count is a claim that the grouping matters at every width; if it doesn't, the fixed count is just a media query you now have to maintain.
+
+## Elevation & Depth
 
 **History note (2026-07-12):** this section previously documented a strict "Flat-By-Default Rule" — no card shadows anywhere, depth from background-lightness and borders only. That rule is retired as of the Bright theme + sidebar redesign session: every preset now gets a real `box-shadow` on cards via a per-preset `--theme-card-shadow` token, at the user's explicit request. What's below is the model that replaced it — read this section as current, not the old rule plus an exception list.
 
@@ -250,7 +292,25 @@ Shadow was already in real use before this change beyond the two cases previousl
 ### Named Rules
 **Shadow tells you what surface you're on, not that a page is "polished."** Card elevation is now uniform policy (every preset, every card), so it no longer functions as a special signal the way the floating-action and live-pulse shadows still do — don't invent a *third* meaning for it (e.g. a stronger shadow to mean "important"). If something needs to stand out, that's a job for the accent color or position, same as always.
 
-## 5. Components
+## Shapes
+
+*Section added 2026-08-12. The radius scale itself was already in the frontmatter and the per-component values were already in Components; what was missing was the rule tying a step to a size class, which is the part that actually prevents drift.*
+
+**Five radius steps, and they are a closed set:** 8px (`--radius-sm`), 12px (`--radius-md`), 18px (`--radius-lg`), 24px (`--radius-xl`), 999px (`--radius-full`). The whole scale was stepped up on 2026-07-12 from a much tighter one (4/5/6/10px) — the product reads noticeably softer than it did, and that was a deliberate move away from the hard-cornered legacy-ERP look PRODUCT.md names as an anti-reference.
+
+**Radius tracks the element's size class, not its importance.** Chip-sized things take `sm` (badges, small icon buttons); control-sized things take `md` (buttons, inputs, selects, tab pills, nav links); surface-sized things take `lg` (cards, stat cards, table containers); `xl` is for the largest panels only. This is why a badge and a card don't share a radius even though both are "containers" — the corner has to stay proportional to the box, or a small chip reads as a lozenge and a large card reads as a rectangle.
+
+**`full` (999px) is reserved, not available.** It belongs to the sidebar module switcher's pill signature and to shapes whose radius is genuinely half their own height (the 6px scrollbar thumb). `.tab-btn` deliberately stays at `md` rather than going full-pill — two pill treatments on one screen would dilute the switcher from a signature into a pattern. See Tabs.
+
+**Borders carry structure; there are two weights and they are not interchangeable.** `--theme-border` is structural (card edges, the table header rule, input outlines); `--theme-border-lt` is internal (table row dividers, ghost button edges). Using the structural weight for a row divider makes a dense table read as a grid of boxes, which is precisely the legacy-ERP failure mode.
+
+**No clipping, no masks, no non-rectangular silhouettes anywhere in the product.** Every surface is a rounded rectangle. The one recurring non-rectangular shape is the circular status dot / pulse ring, which is a signal rather than a container.
+
+### Named Rules
+
+**The Proportional Corner Rule.** If a new element needs a radius, pick the step by asking how big the box is, not how important it is. An "important" card does not get a larger corner; it gets the accent color or a better position.
+
+## Components
 
 ### Buttons
 - **Shape:** 12px radius (`--radius-md`; bumped from 6px 2026-07-12), no exceptions across variants.
@@ -273,7 +333,7 @@ Shadow was already in real use before this change beyond the two cases previousl
 - **Background:** one step lighter than the page background; no gradient, no tint toward the accent. A 2026-08-05 audit found `AdminClients.js`'s Trial Accounts panel header using a `linear-gradient()` — the one confirmed instance of this rule being broken found so far. Fixed to a flat `rgba(248,113,113,0.10)` wash (the same literal `.badge-red` background tint, scaled up for a section header rather than an inline chip).
 - **Shadow strategy:** `var(--theme-card-shadow)` (added 2026-07-12 - see Elevation). Depth is background-shift + border + a per-preset-tuned shadow, no longer border-only.
 - **Border:** 1px, structural border color.
-- **Internal padding:** 24px, consistent regardless of card content density.
+- **Internal padding:** 24px on `.card`; 20px on `.stat-card`. Corrected 2026-08-12 — this line previously read "24px, consistent regardless of card content density," which was never true of the stat tile. The tighter step is deliberate and worth keeping: a stat card is a label-plus-numeral pair with no internal composition to breathe around, and a row of them reads better slightly denser. Anything with real content inside it takes 24px.
 
 ### Inputs / Fields
 - **Style:** input-bg background (typically matches or nears the page background, one step darker than card), 1px border, 12px radius (`--radius-md`; bumped from 6px 2026-07-12), 13px text, label sits above the field (never a placeholder standing in for a label).
@@ -297,7 +357,11 @@ Shadow was already in real use before this change beyond the two cases previousl
 ### Data Tables (signature component)
 Dense, functional, and the component most of the product's screens are actually built around. Column headers are 11px uppercase labels at wide tracking; rows are 13px body text with a light bottom border between them (no border on the last row); row hover applies a barely-there tint (`table-hover`, 2-8% alpha depending on theme) rather than a solid highlight. Wide tables always live inside a horizontal-scroll wrapper rather than compressing columns to fit - the data stays legible at native width instead of getting cramped to avoid a scrollbar.
 
-## 6. Motion
+**Row actions belong on the row.** A table whose rows can be acted on carries a right-aligned, `white-space: nowrap` Actions column of `.btn-ghost` buttons at 11px, tinted with the semantic color of what they do (green approve, red reject/delete) rather than filled. `LeaveManagement.jsx` is the reference implementation. The failure mode this prevents is real and shipped twice: putting the only actions inside a detail panel rendered *below* the table means the distance between "the row I decided about" and "the button that acts on it" grows with the list, so a 20-row approval queue becomes 20 round trips to the bottom of the page.
+
+**Expanding a row shows detail in place, directly beneath it** — a `<tr className="detail-row">` with a full-width `colSpan` cell, never a panel appended after the table (added 2026-08-12, `TadaClaims.jsx`). Two cascade notes, because both bit on the first implementation: `table.data-table tr:hover td` is a *descendant* selector, so without the two `.detail-row` overrides in `Layout.css` hovering an expanded detail tints its own cell **and** every cell of any table nested inside it, lighting the whole panel up as though it were one hoverable row. And if the parent row toggles the expansion on click, every control inside the row must call `stopPropagation()` or acting on the record also collapses the panel you were reading.
+
+## Motion
 
 Motion is functional here, not expressive: this is an Operate surface, so it acknowledges an action, explains a state change, or preserves continuity — and otherwise stays out of the way. There is no page-load choreography anywhere in the app, and adding some to a data screen would be a regression, not a polish pass.
 
@@ -310,6 +374,8 @@ A closed set of four, defined in `Layout.css`'s `:root` (added to the system in 
 
 Anything longer than `--motion-slow` on a working screen reads as latency, not motion. Exit faster than entrance, or instantly — a dismissal that makes you wait is worse than one that just happens.
 
+*This prose is the normative source for motion. The machine-readable copy lives in `.impeccable/design.json` under `extensions.motion`, not in this file's frontmatter — the DESIGN.md schema has no top-level `motion:` group, so a copy up there is silently invalid. See the note above the `components:` key.*
+
 ### Named Rules
 
 **Every animation must be switch-off-able by `prefers-reduced-motion`, which means it cannot be an inline style.** Inline `style={{ animation }}` beats any stylesheet rule, so a media query cannot reach it — the animation is then unconditional for every user regardless of their OS preference. `ChartCard`'s expand sequence shipped this way and went unguarded until 2026-08-11. Put animations in a class; put the class in the reduced-motion block at the foot of its section in `Layout.css`.
@@ -320,7 +386,7 @@ Anything longer than `--motion-slow` on a working screen reads as latency, not m
 
 **One accepted exception, unchanged:** the sidebar collapse animates `width`/`margin-left` (layout properties) rather than `transform`. See Navigation for why — `.sidebar-wrap` is `position: fixed`, so real space has to be reserved, and the animation fires only on a rare manual toggle. The `/impeccable` hook flags both lines on every edit to `Layout.css`; they are correct as written.
 
-## 7. Do's and Don'ts
+## Do's and Don'ts
 
 ### Do:
 - **Do** use the theme's `accent-text` token as the foreground on any accent-colored background - it changes per preset and a hardcoded color will fail contrast on at least one of the ten themes.

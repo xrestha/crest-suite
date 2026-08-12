@@ -312,7 +312,7 @@ export default function KotLog() {
                     </td>
                     <td>{r.table_name || 'Takeaway'}</td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{r.order_no}</td>
-                    <td><span className={r.station === 'BOT' ? 'badge-gold' : 'badge-green'} style={{ fontSize: 11 }}>{r.station}</span></td>
+                    <td><span className={r.station === 'BOT' ? 'badge-yellow' : 'badge-green'} style={{ fontSize: 11 }}>{r.station}</span></td>
                     <td>{(r.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}</td>
                     <td>{staffNames[r.sent_by] || '—'}</td>
                     <td style={{ textAlign: 'right', color: overEst ? 'var(--theme-red)' : undefined }}>
@@ -362,7 +362,7 @@ export default function KotLog() {
                                 {row.logs.map(log => (
                                   <tr key={log.id}>
                                     <td>{new Date(log.sent_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</td>
-                                    <td><span className={log.station === 'BOT' ? 'badge-gold' : 'badge-green'} style={{ fontSize: 11 }}>{log.station}</span></td>
+                                    <td><span className={log.station === 'BOT' ? 'badge-yellow' : 'badge-green'} style={{ fontSize: 11 }}>{log.station}</span></td>
                                     <td>{(log.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}</td>
                                     <td>{staffNames[log.sent_by] || '—'}</td>
                                   </tr>

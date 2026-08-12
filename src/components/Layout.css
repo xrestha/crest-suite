@@ -123,6 +123,17 @@
 
 /* ── THEME VARIABLES ─────────────────────────────────────────────────────────
    Default: dark theme. ThemeContext overrides via style.setProperty()
+
+   These must stay byte-identical to PRESETS.dark in src/context/ThemeContext.js. They are not
+   an independent set of defaults — they are the pre-hydration copy of that preset, painting in
+   the window before ThemeContext runs, which is exactly when a wrong value is on screen and
+   nothing has overwritten it yet. Two had silently drifted (found 2026-08-12 while regenerating
+   DESIGN.md's sidecar, by diffing this block against the preset rather than by looking at it):
+   --theme-text2 was #6b7280 against the preset's #8a92a3, so every label, table header and
+   secondary line rendered a colder, darker gray for the first paint; --theme-table-hover was
+   0.02 alpha against 0.03. Same failure shape DESIGN.md's One Accent Rule records for
+   Login.css's var(--theme-purple, #8b5cf6): a fallback drifts, reads as correct because the
+   token name beside it is correct, and only shows for the instant nobody is looking hard.
 ────────────────────────────────────────────────────────────────────────────── */
 :root {
   --theme-bg:           #0f1117;
@@ -131,13 +142,13 @@
   --theme-border-lt:    #1e2330;
   --theme-sidebar:      #0e1117;
   --theme-text1:        #e8e0d0;
-  --theme-text2:        #6b7280;
+  --theme-text2:        #8a92a3;
   --theme-text3:        #9ca3af;
   --theme-accent:       #c9a84c;
   --theme-accent-hover: #d4b96a;
   --theme-accent-text:  #0f1117;
   --theme-input-bg:     #0f1117;
-  --theme-table-hover:  rgba(255,255,255,0.02);
+  --theme-table-hover:  rgba(255,255,255,0.03);
   --theme-focus-ring:   rgba(201,168,76,0.15);
   --theme-green:        #34d399;
   --theme-red:          #f87171;

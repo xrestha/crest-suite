@@ -13,7 +13,7 @@ import { viewPosBill } from '../../../utils/viewPosBill'
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 
 const TYPE_META = {
-  discount: { label: 'Discount', badge: 'badge-gold'  },
+  discount: { label: 'Discount', badge: 'badge-yellow'  },
   void:     { label: 'Void',     badge: 'badge-red'   },
   writeoff: { label: 'Comp',     badge: 'badge-amber' },
 }

@@ -16,7 +16,7 @@ const DEFAULT_ROLES = [
   { label: 'Supervisor', level: 'supervisor' },
   { label: 'Manager',    level: 'manager' },
 ]
-const LEVEL_BADGE = { staff: 'badge-green', supervisor: 'badge-amber', manager: 'badge-gold' }
+const LEVEL_BADGE = { staff: 'badge-green', supervisor: 'badge-amber', manager: 'badge-yellow' }
 // Orthogonal to the role/rank system above (S431) — which physical station this login works.
 // A 'kitchen'/'bar' team account keeps whatever pos_role rank it has (still governs voids/comps/
 // reports the same as always) but sees only the ticket display in its sidebar, locked to that
