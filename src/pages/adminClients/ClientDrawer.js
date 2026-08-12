@@ -9,6 +9,7 @@ import BsCalendarPicker from '../../components/BsCalendarPicker'
 import { getDateStatus } from '../../utils/subscription'
 import { validateEmvQr } from '../../utils/emvQr'
 import Tip from '../../components/Tip'
+import Modal from '../../components/Modal'
 import { adminOp } from './adminOp'
 import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_BUNDLES } from '../../data/pricingPlans'
 import { runBackup } from '../../modules/admin/dataExport/runBackup'
@@ -487,8 +488,15 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       setBackupState(state)
       setBackupMsg(state === 'granted' ? 'ok:Backup folder set.' : 'error:Folder chosen but write permission was not granted.')
     } catch (err) {
-      // The picker throws AbortError when the user closes it — not worth reporting as a failure.
-      if (err.name !== 'AbortError') setBackupMsg('error:' + err.message)
+      // AbortError covers BOTH "user closed the picker" and "the environment refused the call"
+      // — Chrome throws it verbatim when something intercepts the file-chooser dialog (an
+      // automation harness, certain embedded webviews). Treating it purely as a cancel meant a
+      // blocked picker produced a button that did nothing and said nothing, which is how this
+      // was found. There is no way to tell the two apart, so say something that covers both
+      // rather than staying silent on a failure.
+      setBackupMsg(err.name === 'AbortError'
+        ? 'error:Folder selection was cancelled, or blocked by this browser. Exports will download instead.'
+        : 'error:' + err.message)
     }
   }
 
@@ -723,73 +731,69 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     { key: 'settings',   label: 'Settings' },
     { key: 'thresholds', label: 'Thresholds' },
     { key: 'qr',         label: 'QR' },
-    { key: 'data',       label: 'Export / Import' },
+    { key: 'data',       label: 'Backup' },
     { key: 'danger',     label: '⚠ Danger' },
   ]
 
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 200
-        }}
-      />
-
-      {/* Drawer */}
-      <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: 520,
-        background: 'var(--theme-card)', borderLeft: '1px solid var(--theme-border)',
-        zIndex: 201, display: 'flex', flexDirection: 'column',
-        boxShadow: '-8px 0 32px rgba(0,0,0,0.12)'
+  // The client name + plan badge, handed to Modal as its title so the shared header row
+  // (title left, × right) stays the one implementation.
+  const modalTitle = (
+    <span style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>
+        {client.name}
+      </span>
+      <span style={{ fontSize: 12, color: 'var(--theme-text3)', fontWeight: 400 }}>
+        {client.location || 'No location'}
+      </span>
+      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-full)',
+        color: client.plan === 'pro' ? 'var(--theme-accent)' : client.plan === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)',
+        background: client.plan === 'pro' ? 'rgba(201,168,76,0.12)' : client.plan === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(138,146,163,0.10)',
+        border: `1px solid ${client.plan === 'pro' ? 'rgba(201,168,76,0.25)' : client.plan === 'growth' ? 'rgba(52,211,153,0.20)' : 'rgba(138,146,163,0.25)'}`,
       }}>
-        {/* Drawer header */}
-        <div style={{
-          padding: '20px 24px 0',
-          borderBottom: '1px solid var(--theme-border)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{client.name}</h2>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
-                {client.location || 'No location'} ·{' '}
-                <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 4,
-                  color: client.plan === 'pro' ? 'var(--theme-accent)' : client.plan === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)',
-                  background: client.plan === 'pro' ? 'rgba(201,168,76,0.12)' : client.plan === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(138,146,163,0.10)',
-                  border: `1px solid ${client.plan === 'pro' ? 'rgba(201,168,76,0.25)' : client.plan === 'growth' ? 'rgba(52,211,153,0.20)' : 'rgba(138,146,163,0.25)'}`,
-                }}>
-                  {client.plan === 'pro' ? 'Pro' : client.plan === 'growth' ? 'Growth' : 'Starter'}
-                </span>
-              </p>
-            </div>
-            <button
-              onClick={onClose}
-              style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 20, cursor: 'pointer', padding: 4, lineHeight: 1 }}
-            >✕</button>
-          </div>
+        {client.plan === 'pro' ? 'Pro' : client.plan === 'growth' ? 'Growth' : 'Starter'}
+      </span>
+    </span>
+  )
 
-          {/* Tabs */}
-          <div style={{ display: 'flex', gap: 0, marginTop: 16 }}>
-            {tabs.map(t => (
-              <button key={t.key} onClick={() => { setActiveTab(t.key); setDeleteMsg('') }} style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                padding: '8px 16px', fontSize: 13,
-                color: activeTab === t.key
-                  ? (t.key === 'danger' ? 'var(--theme-red)' : 'var(--theme-accent)')
-                  : (t.key === 'danger' ? '#9b5555' : 'var(--theme-text2)'),
-                borderBottom: activeTab === t.key
-                  ? `2px solid ${t.key === 'danger' ? 'var(--theme-red)' : 'var(--theme-accent)'}`
-                  : '2px solid transparent',
-                fontWeight: activeTab === t.key ? 600 : 400,
-                transition: 'color 0.15s'
-              }}>{t.label}</button>
-            ))}
-          </div>
-        </div>
+  // Was a fixed 520px right-hand drawer. Now a centered modal, which fixes the problem that
+  // prompted the change: seven tabs could not fit 520px, so the tab row silently pushed
+  // "⚠ Danger" — the destructive one — off the end where nobody could see it. Reusing the
+  // shared Modal also brings Escape-to-close, a Tab focus trap, focus restoration and dialog
+  // ARIA, none of which the hand-rolled drawer had.
+  return (
+    <Modal onClose={onClose} title={modalTitle} maxWidth={880}>
+      {/* Tabs. The negative margins pull the row out to the card's edges so the underline and
+          the divider run the full width, rather than stopping short at the 24px padding. */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: 2,
+        margin: '-6px -24px 0', padding: '0 18px',
+        borderBottom: '1px solid var(--theme-border)',
+      }}>
+        {tabs.map(t => {
+          const active = activeTab === t.key
+          const danger = t.key === 'danger'
+          return (
+            <button key={t.key} onClick={() => { setActiveTab(t.key); setDeleteMsg('') }} style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '10px 14px', fontSize: 13, whiteSpace: 'nowrap',
+              color: active ? (danger ? 'var(--theme-red)' : 'var(--theme-accent)')
+                            : (danger ? 'var(--theme-red)' : 'var(--theme-text2)'),
+              opacity: !active && danger ? 0.7 : 1,
+              borderBottom: `2px solid ${active ? (danger ? 'var(--theme-red)' : 'var(--theme-accent)') : 'transparent'}`,
+              marginBottom: -1,
+              fontWeight: active ? 600 : 400,
+              transition: 'color var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard)',
+            }}>{t.label}</button>
+          )
+        })}
+      </div>
 
-        {/* Drawer body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+      {/* Body scrolls inside the panel rather than the whole page, so the header and tabs stay
+          put on the long tabs (Billing, Settings). */}
+      <div style={{
+        margin: '0 -24px -24px', padding: '20px 24px',
+        maxHeight: 'min(64vh, 680px)', overflowY: 'auto',
+      }}>
 
           {/* ── USERS TAB ── */}
           {activeTab === 'users' && (
@@ -1667,8 +1671,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
             </div>
           )}
 
-        </div>
       </div>
-    </>
+    </Modal>
   )
 }

@@ -272,6 +272,12 @@ The palette is a dark charcoal neutral scale with a single warm accent; every ot
 
 **The Auto-Fit-First Rule.** Reach for `repeat(auto-fit, minmax(<floor>, 1fr))` before declaring a column count. A fixed count is a claim that the grouping matters at every width; if it doesn't, the fixed count is just a media query you now have to maintain.
 
+**The Measured-Floor Rule** (added 2026-08-12, from the Admin → Clients list). When a row of chips or badges repeats down a list, give each a `minWidth` taken from the **measured** widest real label, plus `textAlign: 'center'`. Content-width chips vary on incidental things — `IMS · Starter` is wider than `IMS · Pro` — so the columns, and everything anchored after them, slide from row to row for no meaningful reason and the list reads ragged. Measure in the browser (`getBoundingClientRect().width`) rather than guessing a number: the client cards' pill floor is 100px against a measured 96px, and the subscription badge's is 112px against 108px.
+
+**`space-between` on two controls in a wide container is an anti-pattern.** It does not distribute, it *banishes* — the two items end up at opposite edges of however wide the container happens to be, with the entire remainder as dead space. The client cards had a full-width action bar holding exactly two 10px buttons flung to either end of a ~1000px card. Group related controls with a `gap` and let the container's own alignment place the group.
+
+**No interactive control below 12px.** The same bar's buttons were 10px with 2px vertical padding — legible in a mockup, a squint in use, and a poor hit target. Chips and buttons in dense list rows sit at 12–12.5px with roughly 5–7px vertical padding; 10px is for genuinely non-interactive micro-labels only.
+
 ## Elevation & Depth
 
 **History note (2026-07-12):** this section previously documented a strict "Flat-By-Default Rule" — no card shadows anywhere, depth from background-lightness and borders only. That rule is retired as of the Bright theme + sidebar redesign session: every preset now gets a real `box-shadow` on cards via a per-preset `--theme-card-shadow` token, at the user's explicit request. What's below is the model that replaced it — read this section as current, not the old rule plus an exception list.

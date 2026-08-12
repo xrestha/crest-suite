@@ -75,7 +75,7 @@ Four rules, each of which cost something to learn:
 
 ### Client data Export / Import (S545)
 
-`src/modules/admin/dataExport/` — admin-only, reached from Admin → Clients → Manage → **Export / Import**. Works for any client regardless of subscription state; nothing in the engine reads trial or purge status.
+`src/modules/admin/dataExport/` — admin-only, reached from Admin → Clients → Manage → **Backup**. Works for any client regardless of subscription state; nothing in the engine reads trial or purge status.
 
 - **`exportClientData.js`** walks ~65 tables and emits **two artifacts, and the pair is the point**: an `.xlsx` (one sheet per table, for a human) and a `.json` (the one that can actually restore). Excel is lossy — `jsonb` such as `monthly_owner_reports.snapshot` collapses to `[object Object]` in a cell, and nulls/dates/numbers do not round-trip faithfully. **Never ship the workbook alone**; it looks like a backup and cannot restore.
 - **Every read raises `fetchAllRows`' `maxRows` to 500k.** The 100k default would silently truncate `pos_order_items` on a busy client — the S528 failure mode, in the one place it is least survivable. The table inventory imports `CLIENT_SCOPED_TABLES` from `scopedDb.js` rather than re-listing it, plus the period-scoped seven and four parent-scoped children lifted from `deleteClientData`'s own sequence.
@@ -89,6 +89,11 @@ Four rules, each of which cost something to learn:
 **Restore refuses to write into a non-empty client** — these are inserts, not upserts, so restoring over a live client would duplicate every row and double their books. Account re-provisioning likewise only runs when the target has no logins, so restoring an *archived* client never creates a second set.
 
 `trial_purge_at` **still deletes nothing** after all of this. That was the deliberate scope call: build the parachute before the jump.
+
+Two failure modes this feature produced, both worth remembering because neither announces itself:
+
+- **A silent `catch` on a user-initiated action is a bug, even when the swallowed error is usually benign.** `showDirectoryPicker()` throws `AbortError` when the user closes the picker — but Chrome throws the *same* error when the environment refuses the call (`Intercepted by Page.setInterceptFileChooserDialog()` under automation; likewise in some embedded webviews). Treating it purely as a cancel gave a button that did nothing and said nothing. The two cases are indistinguishable, so the handler now reports a message covering both rather than staying quiet.
+- **An overflowing tab bar hides its LAST tab.** `ClientDrawer`'s tab row was a bare `display:flex` with no `flexWrap` and no overflow handling, so adding a seventh tab pushed `⚠ Danger` — the destructive one — clean off the 520px drawer with no scrollbar or ellipsis to hint at it. The drawer is now an 880px centred `Modal` (which also gains Escape-to-close, a Tab focus trap, focus restoration and dialog ARIA that the hand-rolled drawer never had), and the row carries `flexWrap` + `whiteSpace:nowrap` so a future eighth tab wraps visibly instead of vanishing. **Any fixed-width container holding a variable number of controls needs a wrap or scroll strategy, or the newest one disappears.**
 
 ### Three dashboards, deliberately not one (as of S330 analysis)
 

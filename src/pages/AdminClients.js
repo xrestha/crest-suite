@@ -14,9 +14,13 @@ function SubBadge({ client }) {
   if (!s.label) return <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>—</span>
   return (
     <span style={{
-      fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+      fontSize: 12, fontWeight: 700, padding: '5px 10px', borderRadius: 'var(--radius-sm)',
       color: s.color, background: s.bg, border: `1px solid ${s.border}`,
-      whiteSpace: 'nowrap', display: 'inline-block'
+      whiteSpace: 'nowrap', display: 'inline-block',
+      // Fixed width so the action cluster starts at the same x on every row. Labels range from
+      // "4d left" (61px) to "10 months left" (108px), and without this the whole right-hand
+      // group slides left and right down the list purely on how long the remaining term reads.
+      minWidth: 112, textAlign: 'center', boxSizing: 'border-box',
     }}>
       {s.label}
     </span>
@@ -413,77 +417,82 @@ export default function AdminClients() {
                 onMouseEnter={e => e.currentTarget.style.borderColor = '#3a3f4d'}
                 onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--theme-border)'}
               >
-                {/* Main row */}
-                <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                {/* One row, not two. The old secondary bar held Features and Deactivate at
+                    opposite ends via space-between, so two 10px buttons were flung across the
+                    full width of a ~1000px card with nothing between them — that band was most
+                    of the card's empty space, and its buttons were the smallest hit targets on
+                    the page. Folding them into the action cluster removes the void and lets
+                    everything grow. flexWrap keeps it honest on a narrow viewport. */}
+                <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                   {/* Name + status */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{c.name}</span>
+                  <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{c.name}</span>
                       <span className={`badge ${c.is_active ? 'badge-green' : 'badge-gray'}`}>{c.is_active ? 'Active' : 'Inactive'}</span>
                       {rel && (
-                        <span style={{ fontSize: 11, color: isRecent ? 'var(--theme-green)' : 'var(--theme-text3)', fontWeight: isRecent ? 600 : 400 }}>
+                        <span style={{ fontSize: 12, color: isRecent ? 'var(--theme-green)' : 'var(--theme-text3)', fontWeight: isRecent ? 600 : 400 }}>
                           {rel}{lastUser && <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}> · {lastUser}</span>}
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 2 }}>
+                    <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 3 }}>
                       {[c.location, c.contact_person, c.contact_phone].filter(Boolean).join(' · ') || '—'}
                     </div>
                   </div>
 
                   {/* Module pills */}
-                  <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
                     {[
                       { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan,     color: 'var(--theme-accent)', borderRgba: 'var(--theme-focus-ring)' },
                       { key: 'HR',  enabled: !!c.hr_enabled,          plan: c.hr_plan,  color: 'var(--theme-green)', borderRgba: 'rgba(52,211,153,0.35)' },
                       { key: 'POS', enabled: !!c.pos_enabled,         plan: c.pos_plan, color: 'var(--theme-purple)', borderRgba: 'rgba(167,139,250,0.35)' },
                     ].map(m => (
+                      // minWidth + centred text so IMS/HR/POS line up as three columns down the
+                      // list. Without it the pills are content-width, so "IMS · Starter" and
+                      // "IMS · Pro" start at different x on adjacent rows and the whole block
+                      // reads ragged — the widths vary by plan name, not by anything meaningful.
                       <span key={m.key} style={{
-                        fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+                        fontSize: 12, fontWeight: 700, padding: '5px 10px', borderRadius: 'var(--radius-sm)',
                         border: `1px solid ${m.enabled ? m.borderRgba : 'var(--theme-border)'}`,
                         color: m.enabled ? m.color : 'var(--theme-text3)',
-                        background: 'transparent',
+                        background: 'transparent', whiteSpace: 'nowrap',
+                        // 100 clears the widest real label ("IMS · Starter", measured at 96px)
+                        // so every pill is the same width and the three columns line up exactly.
+                        minWidth: 100, textAlign: 'center', boxSizing: 'border-box',
                       }}>
                         {m.key}{m.enabled ? ` · ${planLabel(m.plan || 'starter')}` : ' · off'}
                       </span>
                     ))}
                   </div>
 
-                  {/* Sub badge + Manage */}
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                  {/* Subscription + actions */}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
                     {c.billing_cycle === 'annual' && (c.ims_ends_at || c.subscription_ends_at) && (
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4, color: 'var(--theme-accent-text)', background: 'var(--theme-accent)' }}>Annual</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, padding: '5px 10px', borderRadius: 'var(--radius-sm)', color: 'var(--theme-accent-text)', background: 'var(--theme-accent)' }}>Annual</span>
                     )}
                     <SubBadge client={c} />
                     <button
                       className="btn btn-ghost"
-                      style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.3)' }}
+                      style={{ fontSize: 12.5, padding: '7px 13px' }}
+                      onClick={e => { e.stopPropagation(); setFeatureModalClient(c) }}
+                    >
+                      Features ⊞
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ fontSize: 12.5, padding: '7px 13px' }}
+                      onClick={e => toggleActive(c, e)}
+                    >
+                      {c.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ fontSize: 12.5, padding: '7px 15px', fontWeight: 600, color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.35)' }}
                       onClick={e => { e.stopPropagation(); setActiveDrawer(c) }}
                     >
                       Manage →
                     </button>
                   </div>
-                </div>
-
-                {/* Secondary action bar */}
-                <div
-                  style={{ padding: '6px 16px', borderTop: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.15)' }}
-                  onClick={e => e.stopPropagation()}
-                >
-                  <button
-                    className="btn btn-ghost"
-                    style={{ fontSize: 10, padding: '2px 8px' }}
-                    onClick={e => { e.stopPropagation(); setFeatureModalClient(c) }}
-                  >
-                    Features ⊞
-                  </button>
-                  <button
-                    className="btn btn-ghost"
-                    style={{ fontSize: 10, padding: '2px 8px' }}
-                    onClick={e => toggleActive(c, e)}
-                  >
-                    {c.is_active ? 'Deactivate' : 'Activate'}
-                  </button>
                 </div>
               </div>
             )
