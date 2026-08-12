@@ -75,8 +75,12 @@ export default function PosLogin() {
         // Locked/incorrect comes back non-2xx, so supabase-js puts the body on error.context.
         let lockedUntil = null
         try { const b = await err?.context?.json(); lockedUntil = b?.locked ? b.locked_until : null } catch (_) { /* keep the generic message */ }
+        // Names the way out, not just the wall. The lockout clears on its own, but 15 minutes is
+        // a long time mid-service, and the person who can fix it immediately is standing in the
+        // same building: any POS manager can reset a PIN from POS Staff. Deliberately "your
+        // manager" rather than support — this never needs to reach Crest.
         setError(lockedUntil
-          ? `Too many incorrect attempts. Try again ${formatLockRemaining(lockedUntil)}.`
+          ? `Too many incorrect attempts. Try again ${formatLockRemaining(lockedUntil)}, or ask your manager to reset your PIN.`
           : 'Incorrect PIN. Try again.')
         setPin('')
         return

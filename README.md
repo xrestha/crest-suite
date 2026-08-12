@@ -150,6 +150,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S541 — 2026-08-12 — The PIN lockout message named the wall but not the way out
+
+Both PIN pads said `Too many incorrect attempts. Try again in 14 minutes.` and stopped there. Correct, and not much use to a waiter locked out mid-service — the lockout clears on its own, but 14 minutes is a long time on a busy floor, and the person who can fix it in seconds is in the same building. Any POS manager can reset a PIN from POS Staff.
+
+Now: `Too many incorrect attempts. Try again in 14 minutes, or ask your manager to reset your PIN.`
+
+Deliberately **"your manager", not support** — this never needs to reach Crest, and pointing staff at the platform admin would turn every forgotten PIN into an inbound ticket. Identical wording in `PosLogin.jsx` and `SelfServiceLogin.jsx` even though the mechanism differs beneath them (there is no `reset_hr_pin` action — Self-Service is re-enrolled rather than reset): the employee needs to know who to ask, not how it works. The plain wrong-PIN path is untouched, and nothing new is disclosed — the lockout response already told the caller the account exists.
+
+**Verified:** `CI=true npm run build` exits 0. `CACHE_NAME` v64 → v65.
+
+**Files:** `src/modules/pos/login/PosLogin.jsx`, `src/modules/hr/selfservice/SelfServiceLogin.jsx`, `public/service-worker.js`, `README.md`.
+
 ### S540 — 2026-08-12 — Three greys for one role: unifying the neutral tint
 
 Clearing a loose end left deliberately unfixed in S539 — the design hook had flagged `ClientDrawer.js`'s plan badge, but folding a design fix into a security commit was the wrong call at the time.

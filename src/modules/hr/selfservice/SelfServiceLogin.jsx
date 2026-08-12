@@ -99,8 +99,11 @@ export default function SelfServiceLogin() {
         // error.context rather than in `data` — same unwrap the shared invokeEdge() helper does.
         let lockedUntil = null
         try { const b = await err?.context?.json(); lockedUntil = b?.locked ? b.locked_until : null } catch (_) { /* keep the generic message */ }
+        // Same wording as PosLogin.jsx on purpose — one lockout message across the product. The
+        // employee doesn't need to know the mechanism differs (there is no reset_hr_pin action;
+        // Self-Service is re-enrolled rather than reset), only who to ask.
         setError(lockedUntil
-          ? `Too many incorrect attempts. Try again ${formatLockRemaining(lockedUntil)}.`
+          ? `Too many incorrect attempts. Try again ${formatLockRemaining(lockedUntil)}, or ask your manager to reset your PIN.`
           : 'Incorrect PIN. Try again.')
         setPin(''); return
       }
