@@ -854,13 +854,21 @@ tr.interactive-row:focus-visible {
   transition: background 0.13s, color 0.13s;
 }
 
+/* One disabled treatment for every variant. Each call site used to carry its own
+   `opacity: busy ? 0.6 : 1` inline, so a button that reached for the class alone had no disabled
+   state at all — it simply stopped responding while looking exactly as it had. */
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .btn-primary {
   background: var(--theme-accent);
   color: var(--theme-accent-text);
   font-weight: 700;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: var(--theme-accent-hover);
 }
 
@@ -870,7 +878,7 @@ tr.interactive-row:focus-visible {
   border: 1px solid var(--theme-border-lt);
 }
 
-.btn-ghost:hover {
+.btn-ghost:hover:not(:disabled) {
   background: var(--theme-table-hover);
   color: var(--theme-text1);
   border-color: var(--theme-accent);
@@ -882,9 +890,104 @@ tr.interactive-row:focus-visible {
   border: 1px solid rgba(248,113,113,0.45);
 }
 
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background: rgba(248,113,113,0.12);
   border-color: var(--theme-red);
+}
+
+/* The escalated step of the same variant, for the one action in a destructive group that is
+   irreversible in a way the others are not (Danger Zone's "Delete Client" beside the reversible
+   Clear/Archive actions). Deliberately still a tint rather than a solid red fill: --theme-red
+   ranges from light to dark across the ten presets, so no single foreground contrasts on all of
+   them, and there is no --theme-red-text token to pair with a fill. */
+.btn-danger--strong {
+  background: rgba(248,113,113,0.16);
+  border-color: rgba(248,113,113,0.55);
+  font-weight: 700;
+}
+
+.btn-danger--strong:hover:not(:disabled) {
+  background: rgba(248,113,113,0.24);
+  border-color: var(--theme-red);
+}
+
+/* WCAG 2.2 SC 2.5.8 sizing, scoped to the input method rather than to a width breakpoint — the
+   trigger is a finger, not a small screen, so a narrow desktop window is left at its own density.
+   This mirrors what Login.css has always done for the signed-out pages; before this it was the
+   only surface in the product that did it, so the entire authenticated app stayed desktop-density
+   on a tablet. 44px is the target; 24px is the hard floor the small in-row buttons must clear. */
+@media (pointer: coarse) {
+  .btn {
+    min-height: 44px;
+  }
+  .btn-sm,
+  table.data-table .btn {
+    min-height: 32px;
+  }
+}
+
+/* Underline tabs inside a modal panel (ClientDrawer). A class rather than inline styles so the
+   coarse-pointer rule above can reach them and so the hover state exists at all — an inline
+   style cannot carry :hover, which is why this row previously had none. */
+.panel-tab {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 11px 14px;
+  min-height: 40px;
+  font-size: 13px;
+  font-weight: 400;
+  white-space: nowrap;
+  color: var(--theme-text2);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--motion-fast) var(--ease-standard),
+              border-color var(--motion-fast) var(--ease-standard);
+}
+
+.panel-tab:hover {
+  color: var(--theme-text1);
+}
+
+.panel-tab--active {
+  color: var(--theme-accent);
+  border-bottom-color: var(--theme-accent);
+  font-weight: 600;
+}
+
+.panel-tab--danger {
+  color: var(--theme-red);
+}
+
+.panel-tab--danger:hover {
+  color: var(--theme-red);
+}
+
+.panel-tab--danger.panel-tab--active {
+  color: var(--theme-red);
+  border-bottom-color: var(--theme-red);
+}
+
+@media (pointer: coarse) {
+  .panel-tab {
+    min-height: 44px;
+  }
+}
+
+/* Visually hidden but still focusable and still announced — for a real control that a styled
+   element stands in front of (the logo file input). display:none would remove it from the tab
+   order entirely, which is exactly the bug this replaces. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .table-wrap {

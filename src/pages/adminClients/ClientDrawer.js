@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { supabase } from '../../supabaseClient'
 import { scopedFrom, scopedUpdate, scopedDelete } from '../../shared/scopedDb'
@@ -10,6 +10,7 @@ import { getDateStatus } from '../../utils/subscription'
 import { validateEmvQr } from '../../utils/emvQr'
 import Tip from '../../components/Tip'
 import Modal from '../../components/Modal'
+import { MIN_PASSWORD_LENGTH } from '../../utils/weakPasswords'
 import { adminOp } from './adminOp'
 import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_BUNDLES } from '../../data/pricingPlans'
 import { runBackup } from '../../modules/admin/dataExport/runBackup'
@@ -19,6 +20,15 @@ import {
 } from '../../modules/admin/dataExport/backupDirectory'
 
 const EMPTY_USER = { email: '', password: '', full_name: '' }
+
+// Auto-fit instead of a declared column count (DESIGN.md's Auto-Fit-First Rule). This drawer is a
+// centred modal that is 880px on a desktop and ~340px on a phone; the hardcoded `1fr 1fr` this
+// replaces left every field about 149px wide at the narrow end, with no breakpoint to rescue it.
+const FIELD_GRID = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+  gap: 12,
+}
 
 const SETTINGS_DEFAULTS = {
   app_name: '', app_tagline: '', property_address: '', property_phone: '',
@@ -53,6 +63,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const { loadClientSettings, saveClientSettings } = useSettings()
   const [activeTab, setActiveTab] = useState('users')
 
+  // Every input in this drawer needs an id its <label> can point at — 22 fields shipped with a
+  // label that was a sibling of its input and connected to it by nothing, so a screen reader
+  // announced each one as an unnamed edit box and clicking a label focused nothing.
+  const uid = useId()
+  const fid = name => `${uid}-${name}`
+
   // Users tab state
   const [users, setUsers]               = useState([])
   const [loadingUsers, setLoadingUsers] = useState(false)
@@ -68,22 +84,36 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [revealedPins, setRevealedPins] = useState({})
   const [revealingId, setRevealingId]   = useState(null)
   const [pinErr, setPinErr]             = useState('')
+  const revealTimersRef                 = useRef({})
+  useEffect(() => () => {
+    Object.values(revealTimersRef.current).forEach(clearTimeout)
+  }, [])
 
   // Settings tab state
   const [clientSettings, setClientSettings]   = useState(SETTINGS_DEFAULTS)
   const [loadingSettings, setLoadingSettings] = useState(false)
   const [savingSettings, setSavingSettings]   = useState(false)
   const [settingsMsg, setSettingsMsg]         = useState('')
+  // Settings, Thresholds and QR are three views of one `clientSettings` object, so fetching on
+  // every switch between them re-ran two network calls to rebuild state the drawer already held.
+  const settingsLoadedRef = useRef(false)
   const [webhookSecret, setWebhookSecret]     = useState('') // client_secrets, not settings — see SETTINGS_DEFAULTS
 
-  // QR tab state
+  // QR tab state. Both the parse and the encode are keyed off the payload only — they used to run
+  // on every render and every keystroke respectively, re-encoding a ~200-character payload once
+  // per typed character while the admin pasted it in.
   const [qrPreview, setQrPreview] = useState('')
-  const qrCheck = validateEmvQr(clientSettings.payment_qr_data || '')
+  const qrPayload = clientSettings.payment_qr_data || ''
+  const qrCheck = useMemo(() => validateEmvQr(qrPayload), [qrPayload])
   useEffect(() => {
     if (!qrCheck.ok) { setQrPreview(''); return }
-    QRCode.toDataURL(clientSettings.payment_qr_data.trim(), { margin: 1, width: 180 })
-      .then(setQrPreview).catch(() => setQrPreview(''))
-  }, [clientSettings.payment_qr_data]) // eslint-disable-line
+    // Debounced: a paste settles in one encode, and typing does not queue one per character.
+    const t = setTimeout(() => {
+      QRCode.toDataURL(qrPayload.trim(), { margin: 1, width: 180 })
+        .then(setQrPreview).catch(() => setQrPreview(''))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [qrPayload, qrCheck.ok])
 
   // Modules state
   const [imsEnabled, setImsEnabled] = useState(client.ims_enabled !== false)
@@ -107,6 +137,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [subMsg, setSubMsg]       = useState('')
 
   // Logo upload state (Settings tab)
+  const logoInputRef = useRef(null)
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoMsg, setLogoMsg] = useState('')
 
@@ -145,7 +176,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }, [client.id])
 
   useEffect(() => {
-    if (activeTab === 'settings' || activeTab === 'thresholds' || activeTab === 'qr') fetchClientSettings()
+    if ((activeTab === 'settings' || activeTab === 'thresholds' || activeTab === 'qr') && !settingsLoadedRef.current) {
+      fetchClientSettings()
+    }
     if (activeTab === 'pins') loadPinAccounts()
     // request:false — this runs on tab switch, not on a click, and requestPermission() outside a
     // user gesture is rejected. Reading the state is enough to decide what to render.
@@ -184,8 +217,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       const res = await adminOp('view_staff_pin', { userId })
       setRevealedPins(prev => ({ ...prev, [userId]: res.pin }))
       // Auto-mask. A PIN left on screen behind a drawer is a shoulder-surfing problem, and this
-      // drawer stays open across other admin work.
-      setTimeout(() => setRevealedPins(prev => {
+      // drawer stays open across other admin work. Tracked so closing the drawer mid-window
+      // cancels the timer instead of leaving it to fire into an unmounted component.
+      revealTimersRef.current[userId] = setTimeout(() => setRevealedPins(prev => {
         const next = { ...prev }; delete next[userId]; return next
       }), 30000)
     } catch (e) {
@@ -242,8 +276,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     if (!userForm.email.trim() || !userForm.password.trim()) {
       setUserError('Email and password are required.'); return
     }
-    if (userForm.password.length < 6) {
-      setUserError('Password must be at least 6 characters.'); return
+    // MIN_PASSWORD_LENGTH, not a local literal. This form hardcoded 6 while the shared constant
+    // (and Login/ResetPassword, which both render it into their own hints) said 8 — so a
+    // 7-character password passed here, on the form that creates a tenant's Owner login.
+    if (userForm.password.length < MIN_PASSWORD_LENGTH) {
+      setUserError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`); return
     }
     setSavingUser(true); setUserError(''); setUserSuccess('')
 
@@ -376,10 +413,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         return merged
       })
     }
+    settingsLoadedRef.current = true
     setLoadingSettings(false)
   }
 
-  async function handleSaveSettings() {
+  // `what` names what the admin actually pressed — the three tabs share one save handler, so a
+  // "Save Thresholds" or "Save QR" click used to report back "Settings saved."
+  async function handleSaveSettings(what = 'Settings') {
     setSavingSettings(true); setSettingsMsg('')
     try {
       await saveClientSettings(client.id, clientSettings)
@@ -390,7 +430,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         .upsert({ client_id: client.id, pos_webhook_secret: webhookSecret.trim() || null, updated_at: new Date().toISOString() },
                 { onConflict: 'client_id' })
       if (secretErr) throw new Error(secretErr.message)
-      setSettingsMsg('ok:Settings saved.')
+      setSettingsMsg(`ok:${what} saved.`)
     } catch (e) {
       setSettingsMsg('error:' + e.message)
     }
@@ -735,6 +775,31 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     { key: 'danger',     label: '⚠ Danger' },
   ]
 
+  function selectTab(key) {
+    setActiveTab(key)
+    // Both messages are shared across tabs, so without this a "Settings saved." or a Danger Zone
+    // result follows the admin onto an unrelated tab and reads as a response to whatever is there.
+    setDeleteMsg('')
+    setSettingsMsg('')
+  }
+
+  // Arrow keys move within the tab row, Home/End jump to its ends — the standard tablist keyboard
+  // contract that goes with the roving tabIndex below.
+  function onTabKeyDown(e) {
+    const keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }
+    let nextIndex = null
+    if (e.key in keys) {
+      const i = tabs.findIndex(t => t.key === activeTab)
+      nextIndex = (i + keys[e.key] + tabs.length) % tabs.length
+    } else if (e.key === 'Home') nextIndex = 0
+    else if (e.key === 'End') nextIndex = tabs.length - 1
+    if (nextIndex === null) return
+    e.preventDefault()
+    const next = tabs[nextIndex]
+    selectTab(next.key)
+    document.getElementById(fid(`tab-${next.key}`))?.focus()
+  }
+
   // The client name + plan badge, handed to Modal as its title so the shared header row
   // (title left, × right) stays the one implementation.
   const modalTitle = (
@@ -764,36 +829,54 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     <Modal onClose={onClose} title={modalTitle} maxWidth={880}>
       {/* Tabs. The negative margins pull the row out to the card's edges so the underline and
           the divider run the full width, rather than stopping short at the 24px padding. */}
-      <div style={{
-        display: 'flex', flexWrap: 'wrap', gap: 2,
-        margin: '-6px -24px 0', padding: '0 18px',
-        borderBottom: '1px solid var(--theme-border)',
-      }}>
+      <div
+        role="tablist"
+        aria-label="Client management sections"
+        onKeyDown={onTabKeyDown}
+        style={{
+          display: 'flex', flexWrap: 'wrap', gap: 2,
+          margin: '-6px -24px 0', padding: '0 18px',
+          borderBottom: '1px solid var(--theme-border)',
+        }}
+      >
         {tabs.map(t => {
           const active = activeTab === t.key
           const danger = t.key === 'danger'
           return (
-            <button key={t.key} onClick={() => { setActiveTab(t.key); setDeleteMsg('') }} style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              padding: '10px 14px', fontSize: 13, whiteSpace: 'nowrap',
-              color: active ? (danger ? 'var(--theme-red)' : 'var(--theme-accent)')
-                            : (danger ? 'var(--theme-red)' : 'var(--theme-text2)'),
-              opacity: !active && danger ? 0.7 : 1,
-              borderBottom: `2px solid ${active ? (danger ? 'var(--theme-red)' : 'var(--theme-accent)') : 'transparent'}`,
-              marginBottom: -1,
-              fontWeight: active ? 600 : 400,
-              transition: 'color var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard)',
-            }}>{t.label}</button>
+            <button
+              key={t.key}
+              id={fid(`tab-${t.key}`)}
+              role="tab"
+              type="button"
+              aria-selected={active}
+              aria-controls={fid('tabpanel')}
+              // Roving tabindex: the row is one stop in the page's tab order and the arrow keys
+              // move within it, which is what a tablist is expected to do. Without it, reaching
+              // the Danger tab by keyboard meant eight Tab presses through the other seven.
+              tabIndex={active ? 0 : -1}
+              className={
+                'panel-tab' +
+                (active ? ' panel-tab--active' : '') +
+                (danger ? ' panel-tab--danger' : '')
+              }
+              onClick={() => selectTab(t.key)}
+            >{t.label}</button>
           )
         })}
       </div>
 
       {/* Body scrolls inside the panel rather than the whole page, so the header and tabs stay
           put on the long tabs (Billing, Settings). */}
-      <div style={{
-        margin: '0 -24px -24px', padding: '20px 24px',
-        maxHeight: 'min(64vh, 680px)', overflowY: 'auto',
-      }}>
+      <div
+        id={fid('tabpanel')}
+        role="tabpanel"
+        aria-labelledby={fid(`tab-${activeTab}`)}
+        tabIndex={-1}
+        style={{
+          margin: '0 -24px -24px', padding: '20px 24px',
+          maxHeight: 'min(64vh, 680px)', overflowY: 'auto',
+        }}
+      >
 
           {/* ── USERS TAB ── */}
           {activeTab === 'users' && (
@@ -803,26 +886,27 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
                   Client Details
                 </p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div style={{ ...FIELD_GRID, marginBottom: 12 }}>
                   <div className="form-field">
-                    <label>Property Name *</label>
-                    <input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
+                    <label htmlFor={fid('client-name')}>Property Name *</label>
+                    <input id={fid('client-name')} value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
                   </div>
                   <div className="form-field">
-                    <label><Tip text="City or area where this property operates. Shown on reports and helps identify multi-location clients.">Location</Tip></label>
-                    <input value={editForm.location} onChange={e => setEditForm({ ...editForm, location: e.target.value })} />
+                    <label htmlFor={fid('client-location')}><Tip text="City or area where this property operates. Shown on reports and helps identify multi-location clients.">Location</Tip></label>
+                    <input id={fid('client-location')} value={editForm.location} onChange={e => setEditForm({ ...editForm, location: e.target.value })} />
                   </div>
                   <div className="form-field">
-                    <label><Tip text="Primary contact — owner or manager name used for billing and support correspondence.">Contact Person</Tip></label>
-                    <input value={editForm.contact_person} onChange={e => setEditForm({ ...editForm, contact_person: e.target.value })} />
+                    <label htmlFor={fid('client-contact')}><Tip text="Primary contact — owner or manager name used for billing and support correspondence.">Contact Person</Tip></label>
+                    <input id={fid('client-contact')} value={editForm.contact_person} onChange={e => setEditForm({ ...editForm, contact_person: e.target.value })} />
                   </div>
                   <div className="form-field">
-                    <label>Phone</label>
-                    <input value={editForm.contact_phone} onChange={e => setEditForm({ ...editForm, contact_phone: e.target.value })} />
+                    <label htmlFor={fid('client-phone')}>Phone</label>
+                    <input id={fid('client-phone')} value={editForm.contact_phone} onChange={e => setEditForm({ ...editForm, contact_phone: e.target.value })} />
                   </div>
                 </div>
                 {clientMsg && (
-                  <p style={{ fontSize: 12, margin: '0 0 8px', color: clientMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                  <p role={clientMsg.startsWith('ok:') ? 'status' : 'alert'}
+                    style={{ fontSize: 12, margin: '0 0 8px', color: clientMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
                     {clientMsg.replace(/^(ok|error):/, '')}
                   </p>
                 )}
@@ -835,39 +919,48 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
                   Add New User
                 </p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div style={{ ...FIELD_GRID, marginBottom: 12 }}>
                   <div className="form-field" style={{ gridColumn: '1 / -1' }}>
-                    <label>Full Name</label>
+                    <label htmlFor={fid('new-name')}>Full Name</label>
                     <input
+                      id={fid('new-name')}
                       value={userForm.full_name}
                       onChange={e => setUserForm({ ...userForm, full_name: e.target.value })}
                       placeholder="e.g. Ram Sharma"
                     />
                   </div>
                   <div className="form-field">
-                    <label>Email *</label>
+                    <label htmlFor={fid('new-email')}>Email *</label>
                     <input
+                      id={fid('new-email')}
                       type="email"
+                      autoComplete="off"
+                      aria-describedby={fid('new-email-hint')}
                       value={userForm.email}
                       onChange={e => setUserForm({ ...userForm, email: e.target.value })}
                       placeholder="user@restaurant.com"
                     />
-                    <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4, display: 'block' }}>
+                    <span id={fid('new-email-hint')} style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4, display: 'block' }}>
                       A login lives on one client at a time. If this email already has a client login, creating it here <strong>moves</strong> it to this client. To keep separate logins on the same inbox, add <code style={{ color: 'var(--theme-text3)' }}>+name</code> before the @ (e.g. you+casa@gmail.com).
                     </span>
                   </div>
                   <div className="form-field">
-                    <label>Password *</label>
+                    <label htmlFor={fid('new-password')}>Password *</label>
+                    {/* Shown in the clear on purpose — the admin is reading this out to the client,
+                        not typing their own secret. autoComplete="new-password" regardless, so
+                        Chrome never offers a saved login for the field beside it. */}
                     <input
+                      id={fid('new-password')}
                       type="text"
+                      autoComplete="new-password"
                       value={userForm.password}
                       onChange={e => setUserForm({ ...userForm, password: e.target.value })}
-                      placeholder="min 6 characters"
+                      placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`}
                     />
                   </div>
                 </div>
-                {userError   && <p style={{ color: 'var(--theme-red)', fontSize: 12, margin: '0 0 8px' }}>{userError}</p>}
-                {userSuccess && <p style={{ color: 'var(--theme-green)', fontSize: 12, margin: '0 0 8px' }}>{userSuccess}</p>}
+                {userError   && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 12, margin: '0 0 8px' }}>{userError}</p>}
+                {userSuccess && <p role="status" style={{ color: 'var(--theme-green)', fontSize: 12, margin: '0 0 8px' }}>{userSuccess}</p>}
                 <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={createUser} disabled={savingUser}>
                   {savingUser ? 'Creating…' : '+ Create User'}
                 </button>
@@ -889,14 +982,15 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     <div>
                       <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600 }}>{u.full_name || '—'}</span>
                       <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 8 }}>{u.email}</span>
-                      <span style={{ fontSize: 11, color: 'var(--theme-accent)', marginLeft: 8, background: 'rgba(201,168,76,0.1)', padding: '1px 6px', borderRadius: 3 }}>
+                      <span style={{ fontSize: 11, color: 'var(--theme-accent)', marginLeft: 8, background: 'rgba(201,168,76,0.1)', padding: '2px 8px', borderRadius: 'var(--radius-sm)' }}>
                         {u.role}
                       </span>
                     </div>
                     <button
-                      className="btn btn-ghost"
-                      style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)' }}
+                      className="btn btn-danger btn-sm"
+                      style={{ fontSize: 11, padding: '6px 12px' }}
                       onClick={() => deleteUser(u)}
+                      aria-label={`Delete ${u.full_name || u.email}`}
                     >Delete</button>
                   </div>
                 ))}
@@ -995,9 +1089,34 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         <p style={{ margin: '0 0 1px', fontSize: 13, fontWeight: 700, color: mod.enabled ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{mod.label}</p>
                         <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text2)' }}>{mod.sub}</p>
                       </div>
-                      <div onClick={mod.toggle} style={{ position: 'relative', width: 38, height: 22, borderRadius: 11, cursor: suitePlan ? 'not-allowed' : 'pointer', flexShrink: 0, background: mod.enabled ? 'var(--theme-accent)' : '#374151', transition: 'background 0.2s' }}>
-                        <div style={{ position: 'absolute', top: 3, left: mod.enabled ? 19 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.35)' }} />
-                      </div>
+                      {/* A real button with switch semantics. This was a bare <div onClick>: not
+                          focusable, no role, no state exposed — three unreachable-by-keyboard
+                          switches that turn paid modules on and off with an immediate DB write.
+                          The off-state track was also a hardcoded #374151, a dark slab on the five
+                          light presets. */}
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={mod.enabled}
+                        aria-label={`${mod.label} enabled`}
+                        onClick={mod.toggle}
+                        disabled={!!suitePlan}
+                        style={{
+                          position: 'relative', width: 38, height: 22, padding: 0,
+                          borderRadius: 'var(--radius-full)', flexShrink: 0,
+                          cursor: suitePlan ? 'not-allowed' : 'pointer',
+                          background: mod.enabled ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
+                          border: `1px solid ${mod.enabled ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+                          transition: 'background var(--motion-fast) var(--ease-standard)',
+                        }}
+                      >
+                        <span style={{
+                          position: 'absolute', top: 2, left: mod.enabled ? 18 : 2,
+                          width: 16, height: 16, borderRadius: 'var(--radius-full)',
+                          background: mod.enabled ? 'var(--theme-accent-text)' : 'var(--theme-text3)',
+                          transition: 'left var(--motion-fast) var(--ease-standard)',
+                        }} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -1016,8 +1135,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   {[{ key: null, label: 'Not Subscribed' }, ...SUITE_BUNDLES].map(opt => {
                     const active = suitePlan === opt.key
                     return (
-                      <button key={opt.key ?? 'none'} onClick={() => handleSuitePlanPick(opt.key)} style={{
-                        padding: '8px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
+                      <button key={opt.key ?? 'none'} type="button" aria-pressed={active} onClick={() => handleSuitePlanPick(opt.key)} style={{
+                        padding: '8px 14px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
                         border: active ? '1px solid var(--theme-accent)' : '1px solid var(--theme-border)',
                         background: active ? 'rgba(201,168,76,0.1)' : 'none',
                         color: active ? 'var(--theme-accent)' : 'var(--theme-text3)',
@@ -1032,7 +1151,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     )
                   })}
                 </div>
-                <p style={{ fontSize: 11, color: '#fff', margin: '0 0 24px' }}>
+                {/* Was color:'#fff' — every light preset has card:#ffffff, so this line was white
+                    on white and literally invisible on five of the ten themes. */}
+                <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
                   Selecting a bundle disables individual module pricing below.
                 </p>
 
@@ -1046,7 +1167,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                         <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Suite Bundle</p>
                         {s.label && (
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 3, color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
                             {s.label}
                           </span>
                         )}
@@ -1073,16 +1194,25 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>
                   <Tip text="Whether this client pays monthly or annually. Annual plans discount the monthly rate by 25%.">Billing Cycle</Tip>
                 </p>
-                <div style={{ display: 'flex', gap: 0, marginBottom: 24, background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)', padding: 4, width: 'fit-content' }}>
-                  {[{ key: 'monthly', label: 'Monthly' }, { key: 'annual', label: 'Annual · Save 25%' }].map(opt => (
-                    <button key={opt.key} onClick={() => setBillingCycle(opt.key)} style={{
-                      padding: '5px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, border: 'none',
-                      background: billingCycle === opt.key ? (opt.key === 'annual' ? 'var(--theme-accent)' : 'var(--theme-card)') : 'transparent',
-                      color: billingCycle === opt.key ? (opt.key === 'annual' ? '#000' : 'var(--theme-text1)') : 'var(--theme-text3)',
-                      boxShadow: billingCycle === opt.key ? '0 1px 4px rgba(0,0,0,0.18)' : 'none',
-                      transition: 'all 0.15s',
-                    }}>{opt.label}</button>
-                  ))}
+                {/* Segmented control. Two fixes here: the selected "Annual" tab hardcoded #000 on
+                    var(--theme-accent) — 3.85:1 on Latte's violet accent, below AA, and the exact
+                    bug --theme-accent-text exists to prevent — and it carried an invented
+                    box-shadow, which DESIGN.md reserves for floating and live-status elements
+                    rather than as a "this one is selected" cue. The border does that job. */}
+                <div role="group" aria-label="Billing cycle"
+                  style={{ display: 'flex', gap: 4, marginBottom: 24, background: 'var(--theme-bg)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--theme-border)', padding: 4, width: 'fit-content' }}>
+                  {[{ key: 'monthly', label: 'Monthly' }, { key: 'annual', label: 'Annual · Save 25%' }].map(opt => {
+                    const on = billingCycle === opt.key
+                    return (
+                      <button key={opt.key} type="button" aria-pressed={on} onClick={() => setBillingCycle(opt.key)} style={{
+                        padding: '6px 16px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                        border: `1px solid ${on ? 'var(--theme-accent)' : 'transparent'}`,
+                        background: on ? 'var(--theme-focus-ring)' : 'transparent',
+                        color: on ? 'var(--theme-accent)' : 'var(--theme-text3)',
+                        transition: 'background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard)',
+                      }}>{opt.label}</button>
+                    )
+                  })}
                 </div>
 
                 {/* Per-module subscription sections */}
@@ -1105,18 +1235,18 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                         <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: accentBase, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{mod.label}</p>
                         {lockedBySuite ? (
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 3, color: 'var(--theme-text3)', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)' }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text3)', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)' }}>
                             Controlled by Suite Bundle
                           </span>
                         ) : s.label && (
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 3, color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
                             {s.label}
                           </span>
                         )}
                       </div>
                       {flatPricing ? (
                         /* HR/POS — flat single price, no tier picker (hr_plan/pos_plan aren't wired to any feature gating) */
-                        <div style={{ padding: '10px 12px', borderRadius: 6, border: `1px solid ${accentBase}40`, background: `${accentBase}12`, marginBottom: 12 }}>
+                        <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', border: `1px solid ${accentBase}40`, background: `${accentBase}12`, marginBottom: 12 }}>
                           <div style={{ fontSize: 15, fontWeight: 700, color: accentBase }}>
                             NPR {(billingCycle === 'annual' ? flatPricing.annual : flatPricing.monthly).toLocaleString('en-NP')}/mo
                           </div>
@@ -1129,14 +1259,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       ) : (
                         <>
                           {/* Plan cards — IMS only, real tiers */}
-                          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                          <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
                             {IMS_TIERS.map(p => {
                               const price = billingCycle === 'annual' ? p.annual : p.monthly
                               const active = mod.plan === p.key
                               const accentColor = MODULE_COLORS.ims
                               return (
-                                <button key={p.key} disabled={lockedBySuite} onClick={() => mod.setPlan(p.key)} style={{
-                                  flex: 1, padding: '8px 4px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
+                                <button key={p.key} type="button" aria-pressed={active} disabled={lockedBySuite} onClick={() => mod.setPlan(p.key)} style={{
+                                  flex: '1 1 120px', padding: '8px 6px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
                                   border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
                                   background: active ? `${accentColor}1a` : 'none',
                                   color: active ? accentColor : 'var(--theme-text3)',
@@ -1177,7 +1307,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 })}
 
                 {subMsg && (
-                  <p style={{ fontSize: 12, margin: '0 0 12px', color: subMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                  <p role={subMsg.startsWith('ok:') ? 'status' : 'alert'}
+                    style={{ fontSize: 12, margin: '0 0 12px', color: subMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
                     {subMsg.replace(/^(ok|error):/, '')}
                   </p>
                 )}
@@ -1201,104 +1332,120 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
                   {/* Logo */}
                   <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginBottom: 16 }}>
-                    <div style={{ width: 64, height: 64, borderRadius: 8, border: '1px solid var(--theme-border)', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div style={{ width: 64, height: 64, borderRadius: 'var(--radius-lg)', border: '1px solid var(--theme-border)', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       {clientSettings.logo_url
-                        ? <img src={clientSettings.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 6 }} />
-                        : <span style={{ fontSize: 26, color: 'var(--theme-accent)' }}>⬢</span>
+                        ? <img src={clientSettings.logo_url} alt={`${client.name} logo`} style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 'var(--radius-md)' }} />
+                        : <span aria-hidden="true" style={{ fontSize: 26, color: 'var(--theme-accent)' }}>⬢</span>
                       }
                     </div>
                     <div style={{ flex: 1 }}>
-                      <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Logo — square PNG/JPG/SVG, max 2MB</p>
+                      <p id={fid('logo-hint')} style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Logo — square PNG/JPG/SVG, max 2MB</p>
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <label style={{ cursor: logoUploading ? 'not-allowed' : 'pointer' }}>
-                          <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }}
-                            disabled={logoUploading}
-                            onChange={e => { if (e.target.files[0]) handleLogoUpload(e.target.files[0]) }}
-                          />
-                          <span className="btn btn-ghost" style={{ fontSize: 11, opacity: logoUploading ? 0.6 : 1, pointerEvents: 'none' }}>
-                            {logoUploading ? 'Uploading…' : '↑ Upload Logo'}
-                          </span>
-                        </label>
+                        {/* The file input was display:none behind a <span> carrying
+                            pointerEvents:'none' — display:none takes an element out of the tab
+                            order, so there was no keyboard path to this control at all. It is now
+                            a real button that forwards the click to a hidden-but-focusable input. */}
+                        <input
+                          ref={logoInputRef}
+                          id={fid('logo-file')}
+                          type="file"
+                          accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                          className="visually-hidden"
+                          tabIndex={-1}
+                          disabled={logoUploading}
+                          onChange={e => { if (e.target.files[0]) handleLogoUpload(e.target.files[0]); e.target.value = '' }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: 11 }}
+                          disabled={logoUploading}
+                          aria-describedby={fid('logo-hint')}
+                          onClick={() => logoInputRef.current?.click()}
+                        >
+                          {logoUploading ? 'Uploading…' : '↑ Upload Logo'}
+                        </button>
                         {clientSettings.logo_url && (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleLogoRemove}>
+                          <button type="button" className="btn btn-danger" style={{ fontSize: 11 }} onClick={handleLogoRemove}>
                             Remove
                           </button>
                         )}
                       </div>
-                      {logoMsg && <p style={{ fontSize: 11, margin: '6px 0 0', color: logoMsg.startsWith('error') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{logoMsg.replace(/^(ok|error):/, '')}</p>}
+                      {logoMsg && <p role={logoMsg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 11, margin: '6px 0 0', color: logoMsg.startsWith('error') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{logoMsg.replace(/^(ok|error):/, '')}</p>}
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 20 }}>
                     <div className="form-field">
-                      <label>Property Name</label>
-                      <input value={clientSettings.app_name || ''} onChange={e => setClientSettings({ ...clientSettings, app_name: e.target.value })} placeholder="e.g. Casa Acai Cafe" />
+                      <label htmlFor={fid('s-app-name')}>Property Name</label>
+                      <input id={fid('s-app-name')} value={clientSettings.app_name || ''} onChange={e => setClientSettings({ ...clientSettings, app_name: e.target.value })} placeholder="e.g. Casa Acai Cafe" />
                     </div>
                     <div className="form-field">
-                      <label>Tagline</label>
-                      <input value={clientSettings.app_tagline || ''} onChange={e => setClientSettings({ ...clientSettings, app_tagline: e.target.value })} placeholder="e.g. Fresh bowls, made daily." />
+                      <label htmlFor={fid('s-tagline')}>Tagline</label>
+                      <input id={fid('s-tagline')} value={clientSettings.app_tagline || ''} onChange={e => setClientSettings({ ...clientSettings, app_tagline: e.target.value })} placeholder="e.g. Fresh bowls, made daily." />
                     </div>
                     <div className="form-field">
-                      <label><Tip text="Client's VAT registration number, printed on invoices and used for IRD compliance reporting.">VAT Number</Tip></label>
-                      <input value={clientSettings.vat_number || ''} onChange={e => setClientSettings({ ...clientSettings, vat_number: e.target.value })} />
+                      <label htmlFor={fid('s-vat')}><Tip text="Client's VAT registration number, printed on invoices and used for IRD compliance reporting.">VAT Number</Tip></label>
+                      <input id={fid('s-vat')} value={clientSettings.vat_number || ''} onChange={e => setClientSettings({ ...clientSettings, vat_number: e.target.value })} />
                     </div>
                     <div className="form-field">
-                      <label><Tip text="On = POS bills print as a Tax Invoice with VAT breakdown (invoice numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). Matches whether this client is actually VAT-registered with IRD.">VAT Registered</Tip></label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 34 }}>
-                        <input type="checkbox" checked={clientSettings.is_vat_registered ?? true}
+                      <label htmlFor={fid('s-vatreg')}><Tip text="On = POS bills print as a Tax Invoice with VAT breakdown (invoice numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). Matches whether this client is actually VAT-registered with IRD.">VAT Registered</Tip></label>
+                      <label htmlFor={fid('s-vatreg')} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 34 }}>
+                        <input id={fid('s-vatreg')} type="checkbox" checked={clientSettings.is_vat_registered ?? true}
                           onChange={e => setClientSettings({ ...clientSettings, is_vat_registered: e.target.checked })}
                           style={{ width: 16, height: 16, padding: 0, margin: 0, flexShrink: 0, background: 'none', border: 'none', accentColor: 'var(--theme-accent)', cursor: 'pointer' }} />
                         <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{(clientSettings.is_vat_registered ?? true) ? 'Yes — issues Tax Invoices' : 'No — PAN Bill only'}</span>
                       </label>
                     </div>
                     <div className="form-field">
-                      <label><Tip text="Short client code used in POS invoice numbers, e.g. TI2238-CAC-82/83. Auto-suggested from the property name; edit if you want something different.">Invoice Prefix</Tip></label>
-                      <input value={clientSettings.invoice_prefix || ''} onChange={e => setClientSettings({ ...clientSettings, invoice_prefix: e.target.value.toUpperCase() })} placeholder="e.g. CAC" />
+                      <label htmlFor={fid('s-prefix')}><Tip text="Short client code used in POS invoice numbers, e.g. TI2238-CAC-82/83. Auto-suggested from the property name; edit if you want something different.">Invoice Prefix</Tip></label>
+                      <input id={fid('s-prefix')} value={clientSettings.invoice_prefix || ''} onChange={e => setClientSettings({ ...clientSettings, invoice_prefix: e.target.value.toUpperCase() })} placeholder="e.g. CAC" />
                     </div>
                   </div>
 
                   <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 16px', borderTop: '1px solid var(--theme-border)', paddingTop: 16 }}>
                     Property Details
                   </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 20 }}>
                     <div className="form-field" style={{ gridColumn: '1 / -1' }}>
-                      <label>Address</label>
-                      <input value={clientSettings.property_address || ''} onChange={e => setClientSettings({ ...clientSettings, property_address: e.target.value })} />
+                      <label htmlFor={fid('s-address')}>Address</label>
+                      <input id={fid('s-address')} value={clientSettings.property_address || ''} onChange={e => setClientSettings({ ...clientSettings, property_address: e.target.value })} />
                     </div>
                     <div className="form-field">
-                      <label>Phone</label>
-                      <input value={clientSettings.property_phone || ''} onChange={e => setClientSettings({ ...clientSettings, property_phone: e.target.value })} />
+                      <label htmlFor={fid('s-phone')}>Phone</label>
+                      <input id={fid('s-phone')} value={clientSettings.property_phone || ''} onChange={e => setClientSettings({ ...clientSettings, property_phone: e.target.value })} />
                     </div>
                     <div className="form-field">
-                      <label>Email</label>
-                      <input value={clientSettings.property_email || ''} onChange={e => setClientSettings({ ...clientSettings, property_email: e.target.value })} />
+                      <label htmlFor={fid('s-email')}>Email</label>
+                      <input id={fid('s-email')} value={clientSettings.property_email || ''} onChange={e => setClientSettings({ ...clientSettings, property_email: e.target.value })} />
                     </div>
                   </div>
 
                   <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 16px', borderTop: '1px solid var(--theme-border)', paddingTop: 16 }}>
                     Upgrade Contact
                   </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 24 }}>
                     <div className="form-field">
-                      <label>Contact Phone</label>
-                      <input value={clientSettings.contact_phone || ''} onChange={e => setClientSettings({ ...clientSettings, contact_phone: e.target.value })} />
+                      <label htmlFor={fid('s-cphone')}>Contact Phone</label>
+                      <input id={fid('s-cphone')} value={clientSettings.contact_phone || ''} onChange={e => setClientSettings({ ...clientSettings, contact_phone: e.target.value })} />
                     </div>
                     <div className="form-field">
-                      <label>Contact Email</label>
-                      <input value={clientSettings.contact_email || ''} onChange={e => setClientSettings({ ...clientSettings, contact_email: e.target.value })} />
+                      <label htmlFor={fid('s-cemail')}>Contact Email</label>
+                      <input id={fid('s-cemail')} value={clientSettings.contact_email || ''} onChange={e => setClientSettings({ ...clientSettings, contact_email: e.target.value })} />
                     </div>
                     <div className="form-field" style={{ gridColumn: '1 / -1' }}>
-                      <label>Website</label>
-                      <input value={clientSettings.contact_website || ''} onChange={e => setClientSettings({ ...clientSettings, contact_website: e.target.value })} />
+                      <label htmlFor={fid('s-web')}>Website</label>
+                      <input id={fid('s-web')} value={clientSettings.contact_website || ''} onChange={e => setClientSettings({ ...clientSettings, contact_website: e.target.value })} />
                     </div>
                   </div>
 
                   {settingsMsg && (
-                    <p style={{ fontSize: 12, margin: '0 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                    <p role={settingsMsg.startsWith('ok:') ? 'status' : 'alert'}
+                      style={{ fontSize: 12, margin: '0 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
                       {settingsMsg.replace(/^(ok|error):/, '')}
                     </p>
                   )}
-                  <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={handleSaveSettings} disabled={savingSettings}>
+                  <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={() => handleSaveSettings('Settings')} disabled={savingSettings}>
                     {savingSettings ? 'Saving…' : 'Save Settings'}
                   </button>
                 </>
@@ -1319,14 +1466,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 16px', lineHeight: 1.5 }}>
                     Controls the warning/critical colouring on the Dashboard Food Cost % KPI card and reports.
                   </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 24 }}>
                     <div className="form-field">
-                      <label><Tip text="When a recipe's food cost percentage exceeds this, the FC badge turns yellow in Recipe Costing and reports." width={280}>FC Warning % (yellow)</Tip></label>
-                      <input type="number" value={clientSettings.fc_warning_pct || 35} onChange={e => setClientSettings({ ...clientSettings, fc_warning_pct: parseFloat(e.target.value) })} />
+                      <label htmlFor={fid('t-fcwarn')}><Tip text="When a recipe's food cost percentage exceeds this, the FC badge turns yellow in Recipe Costing and reports." width={280}>FC Warning % (yellow)</Tip></label>
+                      <input id={fid('t-fcwarn')} type="number" value={clientSettings.fc_warning_pct || 35} onChange={e => setClientSettings({ ...clientSettings, fc_warning_pct: parseFloat(e.target.value) })} />
                     </div>
                     <div className="form-field">
-                      <label><Tip text="When a recipe's food cost exceeds this, the badge turns red — the item is unprofitable at its current selling price." width={280}>FC Critical % (red)</Tip></label>
-                      <input type="number" value={clientSettings.fc_critical_pct || 45} onChange={e => setClientSettings({ ...clientSettings, fc_critical_pct: parseFloat(e.target.value) })} />
+                      <label htmlFor={fid('t-fccrit')}><Tip text="When a recipe's food cost exceeds this, the badge turns red — the item is unprofitable at its current selling price." width={280}>FC Critical % (red)</Tip></label>
+                      <input id={fid('t-fccrit')} type="number" value={clientSettings.fc_critical_pct || 45} onChange={e => setClientSettings({ ...clientSettings, fc_critical_pct: parseFloat(e.target.value) })} />
                     </div>
                   </div>
 
@@ -1336,23 +1483,24 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 16px', lineHeight: 1.5 }}>
                     Controls when items are flagged in the Expiry and Variance reports.
                   </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 24 }}>
                     <div className="form-field">
-                      <label><Tip text="Items expiring within this many days are flagged amber in the Expiry Tracker.">Expiry Warning (days)</Tip></label>
-                      <input type="number" value={clientSettings.expiry_warning_days || 7} onChange={e => setClientSettings({ ...clientSettings, expiry_warning_days: parseInt(e.target.value) })} />
+                      <label htmlFor={fid('t-expiry')}><Tip text="Items expiring within this many days are flagged amber in the Expiry Tracker.">Expiry Warning (days)</Tip></label>
+                      <input id={fid('t-expiry')} type="number" value={clientSettings.expiry_warning_days || 7} onChange={e => setClientSettings({ ...clientSettings, expiry_warning_days: parseInt(e.target.value) })} />
                     </div>
                     <div className="form-field">
-                      <label><Tip text="Variance Report highlights items where actual vs. theoretical consumption differs by more than this percentage." width={280}>Variance Flag %</Tip></label>
-                      <input type="number" value={clientSettings.variance_flag_pct || 10} onChange={e => setClientSettings({ ...clientSettings, variance_flag_pct: parseFloat(e.target.value) })} />
+                      <label htmlFor={fid('t-variance')}><Tip text="Variance Report highlights items where actual vs. theoretical consumption differs by more than this percentage." width={280}>Variance Flag %</Tip></label>
+                      <input id={fid('t-variance')} type="number" value={clientSettings.variance_flag_pct || 10} onChange={e => setClientSettings({ ...clientSettings, variance_flag_pct: parseFloat(e.target.value) })} />
                     </div>
                   </div>
 
                   {settingsMsg && (
-                    <p style={{ fontSize: 12, margin: '0 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                    <p role={settingsMsg.startsWith('ok:') ? 'status' : 'alert'}
+                      style={{ fontSize: 12, margin: '0 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
                       {settingsMsg.replace(/^(ok|error):/, '')}
                     </p>
                   )}
-                  <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={handleSaveSettings} disabled={savingSettings}>
+                  <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={() => handleSaveSettings('Thresholds')} disabled={savingSettings}>
                     {savingSettings ? 'Saving…' : 'Save Thresholds'}
                   </button>
                 </>
@@ -1370,24 +1518,26 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 6px' }}>
                     Payment QR
                   </p>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text3)', display: 'block', marginBottom: 6 }}>
+                  <label htmlFor={fid('qr-payload')} style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text3)', display: 'block', marginBottom: 6 }}>
                     <Tip text="Paste the raw text from this business's payment QR (FonePay / NepalPay / eSewa merchant QR). Scan the counter standee with any QR-reader app — it yields a long text string starting with 000201 — and paste it here. POS bills will then show a per-bill dynamic QR with the exact amount pre-filled, so customers can't mistype it." width={320}>
                       Payment QR (merchant payload)
                     </Tip>
                   </label>
                   <textarea
+                    id={fid('qr-payload')}
+                    aria-describedby={qrPayload.trim() ? fid('qr-status') : undefined}
                     value={clientSettings.payment_qr_data || ''}
                     onChange={e => setClientSettings({ ...clientSettings, payment_qr_data: e.target.value })}
                     placeholder="e.g. 00020101021129370016...6304ABCD — scan the standee QR with a QR-reader app and paste the text here"
                     rows={3}
-                    style={{ width: '100%', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', color: 'var(--theme-text1)', outline: 'none', resize: 'vertical' }}
+                    style={{ width: '100%', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', color: 'var(--theme-text1)', outline: 'none', resize: 'vertical' }}
                   />
                   {(clientSettings.payment_qr_data || '').trim() && (
                     qrCheck.ok ? (
                       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginTop: 10 }}>
-                        {qrPreview && <img src={qrPreview} alt="Payment QR preview" style={{ width: 120, height: 120, borderRadius: 6, background: '#fff', padding: 4 }} />}
+                        {qrPreview && <img src={qrPreview} alt={`Payment QR code for ${qrCheck.merchantName || client.name} — scan to verify`} style={{ width: 120, height: 120, /* literal white, not a token: a QR needs a light quiet zone to scan */ borderRadius: 'var(--radius-md)', background: '#fff', padding: 4 }} />}
                         <div>
-                          <p style={{ fontSize: 12, color: 'var(--theme-green)', margin: '0 0 4px', fontWeight: 600 }}>✓ Valid payment QR — merchant: {qrCheck.merchantName}</p>
+                          <p id={fid('qr-status')} role="status" style={{ fontSize: 12, color: 'var(--theme-green)', margin: '0 0 4px', fontWeight: 600 }}>✓ Valid payment QR — merchant: {qrCheck.merchantName}</p>
                           <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0, maxWidth: 420, lineHeight: 1.6 }}>
                             Scan this preview with a banking app to test it before saving. Once saved, every POS bill shows a dynamic
                             version of this QR with that bill's exact amount pre-filled.
@@ -1395,11 +1545,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         </div>
                       </div>
                     ) : (
-                      <p style={{ fontSize: 12, color: 'var(--theme-red)', margin: '8px 0 0' }}>✗ {qrCheck.error}</p>
+                      <p id={fid('qr-status')} role="alert" style={{ fontSize: 12, color: 'var(--theme-red)', margin: '8px 0 0' }}>✗ {qrCheck.error}</p>
                     )
                   )}
 
-                  <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 16 }} onClick={handleSaveSettings} disabled={savingSettings}>
+                  <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 16 }} onClick={() => handleSaveSettings('Payment QR')} disabled={savingSettings}>
                     {savingSettings ? 'Saving…' : 'Save QR'}
                   </button>
 
@@ -1408,22 +1558,24 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 6px' }}>
                     Payment Webhook <span style={{ textTransform: 'none', letterSpacing: 0 }}>(advanced)</span>
                   </p>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text3)', display: 'block', marginBottom: 6 }}>
+                  <label htmlFor={fid('qr-webhook')} style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text3)', display: 'block', marginBottom: 6 }}>
                     <Tip text="Verifies incoming calls to the pos-payment-webhook Edge Function so a QR payment can auto-confirm without staff tapping Pay. Only matters once a real FonePay/eSewa merchant webhook is onboarded and configured to sign its calls with this secret — until then it just sits here unused. Leave blank if this client has no such integration yet." width={340}>
                       Webhook Secret
                     </Tip>
                   </label>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <input
+                      id={fid('qr-webhook')}
                       type="text"
+                      autoComplete="off"
                       value={webhookSecret}
                       onChange={e => setWebhookSecret(e.target.value)}
                       placeholder="blank = auto-confirmation disabled for this client"
-                      style={{ flex: 1, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', color: 'var(--theme-text1)', outline: 'none' }}
+                      style={{ flex: 1, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', color: 'var(--theme-text1)', outline: 'none' }}
                     />
                     <button
                       type="button"
-                      className="btn-ghost"
+                      className="btn btn-ghost"
                       style={{ fontSize: 12, whiteSpace: 'nowrap' }}
                       onClick={() => setWebhookSecret(generateWebhookSecret())}
                     >
@@ -1432,11 +1584,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   </div>
 
                   {settingsMsg && (
-                    <p style={{ fontSize: 12, margin: '16px 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                    <p role={settingsMsg.startsWith('ok:') ? 'status' : 'alert'}
+                      style={{ fontSize: 12, margin: '16px 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
                       {settingsMsg.replace(/^(ok|error):/, '')}
                     </p>
                   )}
-                  <button className="btn btn-primary" style={{ fontSize: 13, marginTop: settingsMsg ? 0 : 16 }} onClick={handleSaveSettings} disabled={savingSettings}>
+                  <button className="btn btn-primary" style={{ fontSize: 13, marginTop: settingsMsg ? 0 : 16 }} onClick={() => handleSaveSettings('Webhook secret')} disabled={savingSettings}>
                     {savingSettings ? 'Saving…' : 'Save Webhook Secret'}
                   </button>
                 </>
@@ -1454,7 +1607,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               </p>
 
               {/* Backup folder */}
-              <div style={{ padding: '12px 14px', marginBottom: 16, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8 }}>
+              <div style={{ padding: '12px 14px', marginBottom: 16, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>
@@ -1488,31 +1641,45 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 </span>
               </div>
               {backupMsg && (
-                <p style={{ fontSize: 12, margin: '8px 0 0', color: backupMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                <p role={backupMsg.startsWith('ok:') ? 'status' : 'alert'}
+                  style={{ fontSize: 12, margin: '8px 0 0', color: backupMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
                   {backupMsg.replace(/^(ok|error):/, '')}
                 </p>
               )}
+              {/* Progress is announced politely rather than only shown, since an export of a busy
+                  client runs long enough that "did I actually press it" is a real question. */}
+              <span role="status" aria-live="polite" className="visually-hidden">{backupProgress}</span>
 
               {/* Restore */}
               <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--theme-border)' }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 6 }}>
+                <label htmlFor={fid('restore-file')} style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 6 }}>
                   <Tip text="Only into an empty client. These are inserts, not merges — restoring over a client that still has data would duplicate every row.">
                     Restore from a .json backup
                   </Tip>
-                </div>
+                </label>
+                {/* This paragraph used to say staff logins are in no backup and cannot be exported.
+                    That has not been true since the PIN vault shipped: staff_pin_vault is exported
+                    as ciphertext, and a restore into a client with no logins rebuilds the PIN
+                    accounts with their original PINs — which the success message below then reports.
+                    An admin planning an Archive around the old sentence would have planned around a
+                    constraint that no longer exists. */}
                 <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 10px', lineHeight: 1.6 }}>
-                  Restores business data only. Staff logins are not in any backup — passwords live in the auth
-                  system and cannot be exported. Attribution ("who did it") is cleared on restore, but the names
-                  are preserved in the backup files themselves.
+                  Restores business data, and — only when the client has no logins left — rebuilds POS and
+                  Self-Service PIN accounts with their <strong style={{ color: 'var(--theme-text2)' }}>original PINs</strong>.
+                  Password logins (IMS, HR and Owner) come back as a named list to recreate by hand, since their
+                  login is a real email the backup deliberately does not carry. Attribution ("who did it") is
+                  cleared on restore, though the names stay readable in the backup files themselves.
                 </p>
                 <input
+                  id={fid('restore-file')}
                   type="file" accept=".json"
                   disabled={restoreBusy}
                   onChange={e => { handleRestoreFile(e.target.files?.[0]); e.target.value = '' }}
                   style={{ fontSize: 12, color: 'var(--theme-text2)' }}
                 />
                 {restoreMsg && (
-                  <p style={{ fontSize: 12, margin: '10px 0 0', color: restoreMsg.startsWith('ok:') ? 'var(--theme-green)' : restoreMsg.startsWith('info:') ? 'var(--theme-text2)' : 'var(--theme-red)' }}>
+                  <p role={restoreMsg.startsWith('error:') ? 'alert' : 'status'}
+                    style={{ fontSize: 12, margin: '10px 0 0', color: restoreMsg.startsWith('ok:') ? 'var(--theme-green)' : restoreMsg.startsWith('info:') ? 'var(--theme-text2)' : 'var(--theme-red)' }}>
                     {restoreMsg.replace(/^(ok|error|info):/, '')}
                   </p>
                 )}
@@ -1527,7 +1694,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 padding: '12px 14px', marginBottom: 16,
                 background: skipBackup ? 'rgba(248,113,113,0.06)' : 'rgba(52,211,153,0.06)',
                 border: `1px solid ${skipBackup ? 'rgba(248,113,113,0.25)' : 'rgba(52,211,153,0.25)'}`,
-                borderRadius: 8,
+                borderRadius: 'var(--radius-lg)',
               }}>
                 <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
                   {skipBackup
@@ -1543,7 +1710,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               {/* Archive — presented above Delete because it is the right answer far more often. */}
               <div style={{
                 padding: '14px 16px', marginBottom: 24,
-                background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 8
+                background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 'var(--radius-lg)'
               }}>
                 <p style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 700, margin: '0 0 6px' }}>Archive Client</p>
                 <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px', lineHeight: 1.65 }}>
@@ -1563,7 +1730,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
               <div style={{
                 padding: '14px 16px', marginBottom: 24,
-                background: 'rgba(248,113,113,0.04)', border: '1px solid rgba(248,113,113,0.15)', borderRadius: 8
+                background: 'rgba(248,113,113,0.04)', border: '1px solid rgba(248,113,113,0.15)', borderRadius: 'var(--radius-lg)'
               }}>
                 <p style={{ fontSize: 13, color: 'var(--theme-red)', fontWeight: 700, margin: '0 0 6px' }}>⚠ Danger Zone</p>
                 <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.65 }}>
@@ -1577,7 +1744,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               </div>
 
               {deleteMsg && (
-                <p style={{ fontSize: 12, margin: '0 0 16px', color: deleteMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                <p role={deleteMsg.startsWith('ok:') ? 'status' : 'alert'}
+                  style={{ fontSize: 12, margin: '0 0 16px', color: deleteMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
                   {deleteMsg.replace(/^(ok|error):/, '')}
                 </p>
               )}
@@ -1588,34 +1756,19 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
                 <Tip text="Deletes IMS activity: purchases, stock counts, wastage, staff meals, sales, budgets, payables, POs, requisitions, overheads, stock movements, demand forecast runs. Keeps items, vendors, categories, recipes, par levels, and periods (periods are shared with HR payroll). Cannot be undone.">
                   <button onClick={() => handleClearModule('ims')} disabled={deleting}
-                    style={{
-                      background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.15)',
-                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
-                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
-                      opacity: deleting ? 0.6 : 1
-                    }}>
+                    className="btn btn-danger" style={{ fontSize: 13 }}>
                     {deletingAction === 'ims' ? 'Working…' : 'Clear IMS Transactions'}
                   </button>
                 </Tip>
                 <Tip text="Deletes HR activity: attendance, payroll runs, payslips, leave requests, overtime, advances + repayments, festival allowances, roster, TADA claims, incentive runs + configs, roster publish state, shift swap requests. Keeps employees, salary components, leave types, holiday calendar, and shift types. Cannot be undone.">
                   <button onClick={() => handleClearModule('hr')} disabled={deleting}
-                    style={{
-                      background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.15)',
-                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
-                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
-                      opacity: deleting ? 0.6 : 1
-                    }}>
+                    className="btn btn-danger" style={{ fontSize: 13 }}>
                     {deletingAction === 'hr' ? 'Working…' : 'Clear HR Transactions'}
                   </button>
                 </Tip>
                 <Tip text="Deletes POS activity: orders, order items, shifts, customers, credit notes, payment confirmations, guest order requests, POS-sourced sales entries, and the stock-movements ledger. Keeps tables, floor plan, and staff accounts/PINs; occupied tables are freed. Invoice numbering restarts. Cannot be undone.">
                   <button onClick={() => handleClearModule('pos')} disabled={deleting}
-                    style={{
-                      background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.15)',
-                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
-                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
-                      opacity: deleting ? 0.6 : 1
-                    }}>
+                    className="btn btn-danger" style={{ fontSize: 13 }}>
                     {deletingAction === 'pos' ? 'Working…' : 'Clear POS Transactions'}
                   </button>
                 </Tip>
@@ -1629,12 +1782,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   <button
                     onClick={handleClearConversions}
                     disabled={deleting}
-                    style={{
-                      background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.15)',
-                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
-                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
-                      opacity: deleting ? 0.6 : 1
-                    }}
+                    className="btn btn-danger" style={{ fontSize: 13 }}
                   >
                     {deletingAction === 'conversions' ? 'Working…' : 'Clear All Conversions'}
                   </button>
@@ -1643,12 +1791,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   <button
                     onClick={handleDeleteClientData}
                     disabled={deleting}
-                    style={{
-                      background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.20)',
-                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
-                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600,
-                      opacity: deleting ? 0.6 : 1
-                    }}
+                    className="btn btn-danger" style={{ fontSize: 13 }}
                   >
                     {deletingAction === 'clientData' ? 'Working…' : 'Clear Client Data'}
                   </button>
@@ -1657,12 +1800,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   <button
                     onClick={handleDeleteClient}
                     disabled={deleting}
-                    style={{
-                      background: 'rgba(248,113,113,0.18)', border: '1px solid rgba(248,113,113,0.40)',
-                      color: 'var(--theme-red)', borderRadius: 6, padding: '9px 18px',
-                      cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700,
-                      opacity: deleting ? 0.6 : 1
-                    }}
+                    className="btn btn-danger btn-danger--strong" style={{ fontSize: 13 }}
                   >
                     {deletingAction === 'deleteClient' ? 'Working…' : 'Delete Client'}
                   </button>
