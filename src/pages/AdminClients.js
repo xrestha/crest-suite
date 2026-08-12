@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { scopedInsert } from '../shared/scopedDb'
 import { getBsToday } from '../utils/bsCalendar'
-import { getSubStatus } from '../utils/subscription'
+import { getSubStatus, GRACE_DAYS } from '../utils/subscription'
+import { useAutoPurgeBackup, refreshBackupPermission } from '../modules/admin/dataExport/useAutoPurgeBackup'
 import Tip from '../components/Tip'
 import ClientDrawer from './adminClients/ClientDrawer'
 import FeatureAccessModal from './adminClients/FeatureAccessModal'
@@ -50,6 +51,9 @@ export default function AdminClients() {
   const [lastUserMap, setLastUserMap] = useState({})
   const [search, setSearch]           = useState('')
 
+  // Pre-purge backup: fires opportunistically for any trial whose purge deadline is within 72h.
+  const autoBackup = useAutoPurgeBackup(clients, () => loadClients())
+
   useEffect(() => { loadClients(); loadLastSeen() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadLastSeen() {
@@ -69,7 +73,12 @@ export default function AdminClients() {
   async function loadClients() {
     setLoading(true)
     const { data } = await supabase.from('clients').select('*').order('name')
-    const now = new Date().toISOString()
+    // Auto-deactivation waits out the same GRACE_DAYS the lock screen honours. Without this the
+    // grace period would be defeated by the admin simply opening this page: is_active=false is an
+    // immediate lock in getAccessState, so sweeping at the raw expiry date would cut a client off
+    // days early, at a moment that has nothing to do with them. Admin's own Deactivate button is
+    // unaffected — a deliberate act still locks at once.
+    const cutoff = new Date(Date.now() - GRACE_DAYS * 86400000).toISOString()
     const expired = (data || []).filter(c => {
       if (!c.is_active) return false
       // Check module-specific dates (+ Suite Bundle's own independent expiry); fall back to
@@ -77,10 +86,10 @@ export default function AdminClients() {
       const moduleDates = [c.ims_ends_at, c.hr_ends_at, c.pos_ends_at, c.suite_ends_at].filter(Boolean)
       if (moduleDates.length > 0) {
         // Active if ANY module still has time remaining
-        return moduleDates.every(d => d < now)
+        return moduleDates.every(d => d < cutoff)
       }
-      if (c.subscription_ends_at) return c.subscription_ends_at < now
-      return !!(c.trial_ends_at && c.trial_ends_at < now)
+      if (c.subscription_ends_at) return c.subscription_ends_at < cutoff
+      return !!(c.trial_ends_at && c.trial_ends_at < cutoff)
     })
     if (expired.length > 0) {
       await Promise.all(expired.map(c =>
@@ -210,6 +219,36 @@ export default function AdminClients() {
             <button className="btn btn-ghost" onClick={() => { setShowNewForm(false); setNewForm(EMPTY_CLIENT_FORM) }}>Cancel</button>
             <button className="btn btn-primary" onClick={createClient} disabled={saving}>{saving ? 'Creating…' : 'Create Client'}</button>
           </div>
+        </div>
+      )}
+
+      {/* Pre-purge backup status. Deliberately rendered whenever a backup is pending, blocked or
+          running — a backup that did not happen must be visible, never a silent no-op. */}
+      {(autoBackup.pending.length > 0 || autoBackup.busy) && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 20, borderRadius: 8,
+          background: autoBackup.blocked ? 'rgba(251,191,36,0.1)' : 'rgba(52,211,153,0.08)',
+          border: `1px solid ${autoBackup.blocked ? 'rgba(251,191,36,0.35)' : 'rgba(52,211,153,0.3)'}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+        }} role="status">
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+            <strong style={{ color: autoBackup.blocked ? 'var(--theme-amber)' : 'var(--theme-green)', fontSize: 13 }}>
+              {autoBackup.blocked
+                ? `🗂 ${autoBackup.pending.length} trial account${autoBackup.pending.length !== 1 ? 's' : ''} near the purge deadline need a backup`
+                : autoBackup.busy ? '🗂 Backing up…' : '🗂 Pre-purge backup pending'}
+            </strong>
+            <div style={{ marginTop: 3 }}>
+              {autoBackup.message || (autoBackup.blocked
+                ? 'Choose a backup folder to capture their data before the deadline.'
+                : `${autoBackup.pending.map(c => c.name).join(', ')}`)}
+            </div>
+          </div>
+          {autoBackup.blocked && (
+            <button className="btn btn-ghost" style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+              onClick={() => refreshBackupPermission().then(() => loadClients())}>
+              Choose backup folder…
+            </button>
+          )}
         </div>
       )}
 

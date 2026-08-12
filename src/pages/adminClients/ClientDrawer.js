@@ -11,6 +11,11 @@ import { validateEmvQr } from '../../utils/emvQr'
 import Tip from '../../components/Tip'
 import { adminOp } from './adminOp'
 import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_BUNDLES } from '../../data/pricingPlans'
+import { runBackup } from '../../modules/admin/dataExport/runBackup'
+import { restoreClientData } from '../../modules/admin/dataExport/restoreClientData'
+import {
+  pickBackupDirectory, ensureBackupDirectory, isFileSystemAccessSupported,
+} from '../../modules/admin/dataExport/backupDirectory'
 
 const EMPTY_USER = { email: '', password: '', full_name: '' }
 
@@ -110,6 +115,18 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const deleting = !!deletingAction
   const [deleteMsg, setDeleteMsg] = useState('')
 
+  // Export / Import state
+  const [backupState, setBackupState] = useState('none')   // 'none' | 'granted' | 'prompt' | 'denied'
+  const [backupBusy, setBackupBusy]   = useState(false)
+  const [backupMsg, setBackupMsg]     = useState('')
+  const [backupProgress, setBackupProgress] = useState('')
+  const [lastBackupAt, setLastBackupAt] = useState(client?.last_backup_at || null)
+  // Escape hatch for the pre-flight backup. Without it, an admin on Firefox/Safari — or on a
+  // machine where no folder has been chosen — could never run a Danger Zone action at all.
+  const [skipBackup, setSkipBackup]   = useState(false)
+  const [restoreMsg, setRestoreMsg]   = useState('')
+  const [restoreBusy, setRestoreBusy] = useState(false)
+
   // Edit client state
   const [editForm, setEditForm]   = useState({
     name: client.name,
@@ -129,6 +146,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   useEffect(() => {
     if (activeTab === 'settings' || activeTab === 'thresholds' || activeTab === 'qr') fetchClientSettings()
     if (activeTab === 'pins') loadPinAccounts()
+    // request:false — this runs on tab switch, not on a click, and requestPermission() outside a
+    // user gesture is rejected. Reading the state is enough to decide what to render.
+    if (activeTab === 'data' || activeTab === 'danger') {
+      ensureBackupDirectory({ request: false }).then(({ state }) => setBackupState(state))
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
@@ -456,6 +478,100 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setSavingSub(false)
   }
 
+  // ── Export / Import ──
+  async function handleChooseFolder() {
+    setBackupMsg('')
+    try {
+      await pickBackupDirectory()
+      const { state } = await ensureBackupDirectory({ request: true })
+      setBackupState(state)
+      setBackupMsg(state === 'granted' ? 'ok:Backup folder set.' : 'error:Folder chosen but write permission was not granted.')
+    } catch (err) {
+      // The picker throws AbortError when the user closes it — not worth reporting as a failure.
+      if (err.name !== 'AbortError') setBackupMsg('error:' + err.message)
+    }
+  }
+
+  async function handleExportNow(reason = 'manual') {
+    setBackupBusy(true)
+    setBackupMsg('')
+    setBackupProgress('')
+    try {
+      const { location, manifest, method } = await runBackup(client.id, client.name, reason, {
+        onProgress: (label, done, total) => setBackupProgress(`${label} (${done}/${total})`),
+      })
+      setLastBackupAt(new Date().toISOString())
+      setBackupMsg(`ok:${manifest.totalRows.toLocaleString()} rows written to ${location}${method === 'download' ? ' (downloaded — file it manually)' : ''}`)
+      onClientUpdated()
+      return true
+    } catch (err) {
+      setBackupMsg('error:' + err.message)
+      return false
+    } finally {
+      setBackupBusy(false)
+      setBackupProgress('')
+    }
+  }
+
+  // Gate in front of every destructive action. Returns false to abort.
+  //
+  // Blocking by default and never blocking absolutely: if the backup cannot run, the admin is
+  // told exactly why and can tick "I have backed up elsewhere" to proceed. A gate with no
+  // override would make Danger Zone unreachable on any browser without the File System Access
+  // API, which is a worse outcome than the risk it guards against.
+  async function preflightBackup(reason) {
+    if (skipBackup) return true
+    setDeleteMsg('')
+    const ok = await handleExportNow(reason)
+    if (!ok) {
+      setDeleteMsg('error:Backup failed, so nothing was deleted. Fix the backup, or tick "I have backed up elsewhere" to proceed anyway.')
+    }
+    return ok
+  }
+
+  async function handleRestoreFile(file) {
+    if (!file) return
+    setRestoreBusy(true)
+    setRestoreMsg('')
+    try {
+      const parsed = JSON.parse(await file.text())
+      const result = await restoreClientData(client.id, parsed, {
+        onProgress: (label, done, total) => setRestoreMsg(`info:Restoring ${label} (${done}/${total})…`),
+      })
+      let note = ''
+
+      // Only rebuild logins when the target has none. After an Archive the accounts were never
+      // deleted, so re-provisioning would create a second set of PIN logins for the same people;
+      // after a full Delete there are none, which is exactly when this is wanted.
+      const { count: existingLogins } = await supabase
+        .from('profiles').select('id', { count: 'exact', head: true })
+        .eq('client_id', client.id).not('pos_email', 'is', null)
+      if ((existingLogins || 0) > 0) {
+        note = ' Existing staff logins were left untouched.'
+      } else {
+        setRestoreMsg('info:Rebuilding staff logins…')
+        const accounts = await adminOp('restore_staff_accounts', {
+          client_id: client.id,
+          roster: parsed.data?.profiles || [],
+          vault:  parsed.data?.staff_pin_vault || [],
+        })
+        const restoredCount = accounts.restored?.length || 0
+        note = restoredCount ? ` ${restoredCount} PIN login${restoredCount !== 1 ? 's' : ''} restored with their original PINs.` : ''
+        if (accounts.manual?.length) {
+          note += ` ${accounts.manual.length} account${accounts.manual.length !== 1 ? 's' : ''} must be recreated by hand: ` +
+            accounts.manual.map(m => `${m.full_name} (${m.kind})`).join(', ') + '.'
+        }
+      }
+
+      setRestoreMsg(`ok:Restored ${result.inserted.toLocaleString()} rows across ${result.tables} tables.${note}` +
+        (result.skipped.length ? ` Skipped: ${result.skipped.join(', ')}.` : ''))
+      onClientUpdated()
+    } catch (err) {
+      setRestoreMsg('error:' + err.message)
+    }
+    setRestoreBusy(false)
+  }
+
   // ── Danger Zone ──
   async function handleClearConversions() {
     const { data: withConv } = await scopedFrom('items', client.id, 'id').not('purchase_unit', 'is', null)
@@ -487,6 +603,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setDeletingAction(module)
     setDeleteMsg('')
     try {
+      if (!await preflightBackup('predelete')) { setDeletingAction(null); return }
       await adminOp('clearModuleData', { clientId: client.id, module })
       setDeleteMsg(`ok:${module.toUpperCase()} transactions cleared. Setup data was kept.`)
     } catch (err) {
@@ -508,8 +625,39 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setDeletingAction('clientData')
     setDeleteMsg('')
     try {
+      if (!await preflightBackup('predelete')) { setDeletingAction(null); return }
       await adminOp('deleteClientData', { clientId: client.id })
       setDeleteMsg('ok:All client data has been permanently erased.')
+    } catch (err) {
+      setDeleteMsg('error:' + err.message)
+    }
+    setDeletingAction(null)
+  }
+
+  // Archive — the recommended path for a client who leaves.
+  //
+  // Composed entirely from things that already exist: a backup, the existing deleteClientData
+  // (which keeps the client row, settings, feature flags, profiles and every auth login), and
+  // is_active=false. That last step only became meaningful in S544, where is_active stopped
+  // being a badge colour and started locking the app via SubscriptionLock.
+  //
+  // The result is fully reversible: a restore brings the data back and the logins never left.
+  async function handleArchiveClient() {
+    if (!window.confirm(
+      `Archive "${client.name}"?\n\n` +
+      `A backup is taken first, then all operational data is cleared and the client is deactivated.\n\n` +
+      `Their user accounts, logins, settings and the client record are KEPT — so this can be fully ` +
+      `reversed by restoring the backup. Use this rather than Delete for a client who is leaving.`
+    )) return
+    setDeletingAction('archive')
+    setDeleteMsg('')
+    try {
+      if (!await preflightBackup('archive')) { setDeletingAction(null); return }
+      await adminOp('deleteClientData', { clientId: client.id })
+      const { error } = await supabase.from('clients').update({ is_active: false }).eq('id', client.id)
+      if (error) throw new Error(error.message)
+      setDeleteMsg('ok:Client archived — data cleared, logins kept, account locked. Restore the backup to reverse this.')
+      onClientUpdated()
     } catch (err) {
       setDeleteMsg('error:' + err.message)
     }
@@ -525,6 +673,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setDeletingAction('deleteClient')
     setDeleteMsg('')
     try {
+      // Must run before the auth users go — the backup's account roster is read from `profiles`,
+      // and this sequence deletes those first.
+      if (!await preflightBackup('predelete')) { setDeletingAction(null); return }
       // Delete all user auth accounts for this client
       const { data: profiles } = await supabase.from('profiles').select('id').eq('client_id', client.id)
       for (const p of (profiles || [])) {
@@ -572,6 +723,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     { key: 'settings',   label: 'Settings' },
     { key: 'thresholds', label: 'Thresholds' },
     { key: 'qr',         label: 'QR' },
+    { key: 'data',       label: 'Export / Import' },
     { key: 'danger',     label: '⚠ Danger' },
   ]
 
@@ -1289,8 +1441,122 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
           )}
 
           {/* ── DANGER ZONE TAB ── */}
+          {activeTab === 'data' && (
+            <div>
+              <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 20px', lineHeight: 1.65 }}>
+                Writes a complete copy of <strong style={{ color: 'var(--theme-text1)' }}>{client.name}</strong>'s data
+                to a folder you choose — an <strong>.xlsx</strong> workbook to read, and a <strong>.json</strong> file
+                that can be restored. Works for any client, on a live subscription or not.
+              </p>
+
+              {/* Backup folder */}
+              <div style={{ padding: '12px 14px', marginBottom: 16, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>
+                      <Tip text="Chosen once and remembered. Install Crest as a desktop app (Chrome/Edge → Install) and the write permission persists silently; in an ordinary tab you may be asked each session.">
+                        Backup folder
+                      </Tip>
+                    </div>
+                    <div style={{ fontSize: 11, color: backupState === 'granted' ? 'var(--theme-green)' : 'var(--theme-text3)', marginTop: 3 }}>
+                      {!isFileSystemAccessSupported()
+                        ? 'This browser cannot write to a folder — exports will download instead.'
+                        : backupState === 'granted' ? '✓ Ready'
+                        : backupState === 'none'    ? 'Not chosen yet — exports will download instead.'
+                        : 'Chosen, but permission needs re-granting.'}
+                    </div>
+                  </div>
+                  {isFileSystemAccessSupported() && (
+                    <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleChooseFolder}>
+                      {backupState === 'none' ? 'Choose folder…' : 'Change folder…'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Export */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+                <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={() => handleExportNow('manual')} disabled={backupBusy}>
+                  {backupBusy ? 'Exporting…' : 'Export Now'}
+                </button>
+                <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                  {backupProgress || (lastBackupAt ? `Last backup: ${formatAd(new Date(lastBackupAt))}` : 'Never backed up')}
+                </span>
+              </div>
+              {backupMsg && (
+                <p style={{ fontSize: 12, margin: '8px 0 0', color: backupMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                  {backupMsg.replace(/^(ok|error):/, '')}
+                </p>
+              )}
+
+              {/* Restore */}
+              <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--theme-border)' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 6 }}>
+                  <Tip text="Only into an empty client. These are inserts, not merges — restoring over a client that still has data would duplicate every row.">
+                    Restore from a .json backup
+                  </Tip>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 10px', lineHeight: 1.6 }}>
+                  Restores business data only. Staff logins are not in any backup — passwords live in the auth
+                  system and cannot be exported. Attribution ("who did it") is cleared on restore, but the names
+                  are preserved in the backup files themselves.
+                </p>
+                <input
+                  type="file" accept=".json"
+                  disabled={restoreBusy}
+                  onChange={e => { handleRestoreFile(e.target.files?.[0]); e.target.value = '' }}
+                  style={{ fontSize: 12, color: 'var(--theme-text2)' }}
+                />
+                {restoreMsg && (
+                  <p style={{ fontSize: 12, margin: '10px 0 0', color: restoreMsg.startsWith('ok:') ? 'var(--theme-green)' : restoreMsg.startsWith('info:') ? 'var(--theme-text2)' : 'var(--theme-red)' }}>
+                    {restoreMsg.replace(/^(ok|error|info):/, '')}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'danger' && (
             <div>
+              {/* Pre-flight backup status — every action below takes a backup first. */}
+              <div style={{
+                padding: '12px 14px', marginBottom: 16,
+                background: skipBackup ? 'rgba(248,113,113,0.06)' : 'rgba(52,211,153,0.06)',
+                border: `1px solid ${skipBackup ? 'rgba(248,113,113,0.25)' : 'rgba(52,211,153,0.25)'}`,
+                borderRadius: 8,
+              }}>
+                <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+                  {skipBackup
+                    ? <>⚠ <strong style={{ color: 'var(--theme-red)' }}>Backups are off.</strong> The actions below will run with no safety copy.</>
+                    : <>🛡 A full backup is written <strong style={{ color: 'var(--theme-text1)' }}>before</strong> any action below runs. If it fails, nothing is deleted.</>}
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9, fontSize: 11, color: 'var(--theme-text3)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={skipBackup} onChange={e => setSkipBackup(e.target.checked)} />
+                  I have backed up elsewhere — proceed without a backup
+                </label>
+              </div>
+
+              {/* Archive — presented above Delete because it is the right answer far more often. */}
+              <div style={{
+                padding: '14px 16px', marginBottom: 24,
+                background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 8
+              }}>
+                <p style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 700, margin: '0 0 6px' }}>Archive Client</p>
+                <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px', lineHeight: 1.65 }}>
+                  The recommended way to close out a client who has left. Takes a backup, clears their operational
+                  data, and locks the account — but <strong style={{ color: 'var(--theme-text1)' }}>keeps their user
+                  accounts, logins, settings and client record</strong>, so restoring the backup fully reverses it.
+                </p>
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: 12, color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.35)' }}
+                  onClick={handleArchiveClient}
+                  disabled={deleting}
+                >
+                  {deletingAction === 'archive' ? 'Archiving…' : 'Archive Client'}
+                </button>
+              </div>
+
               <div style={{
                 padding: '14px 16px', marginBottom: 24,
                 background: 'rgba(248,113,113,0.04)', border: '1px solid rgba(248,113,113,0.15)', borderRadius: 8

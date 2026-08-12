@@ -150,6 +150,62 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S545 — 2026-08-12 — Export / Import: a backup that can actually restore, and an Archive that can be undone
+
+Follow-on from S544. Asking what `trial_purge_at` would do if it were made real surfaced that the codebase had **no export of a client's data at all**, and three destructive buttons that were already live, already irreversible, and had no undo.
+
+**What was built.** `exportClientData.js` walks ~65 tables — `CLIENT_SCOPED_TABLES` from `scopedDb.js` (imported, not re-enumerated), the period-scoped seven, and four parent-scoped children — and emits **two artifacts**: an `.xlsx` workbook per table for a human, and a `.json` that `restoreClientData.js` can actually put back. Shipping only the spreadsheet would have produced something that looks like a backup and cannot restore: `monthly_owner_reports.snapshot` is `jsonb` and renders as `[object Object]` in a cell, and nulls/numbers/dates do not round-trip faithfully through a sheet.
+
+**Every read raises `fetchAllRows`' cap to 500k.** The default is 100,000, and `pos_order_items` is one row per line per bill — so a busy client would have produced a **silently short backup**, the S528 failure mode in the one place it would be least survivable.
+
+**Three things the research settled that inspection would have got wrong:**
+
+- **A browser genuinely can write to `C:\CrestBackups\<Client>\`** — but only through the File System Access API, and only durably for an **installed PWA**: Chrome 122+ auto-persists the permission for installed apps and skips the three-way prompt entirely. Crest already ships `display: standalone`, so installing it to the desktop is what makes the unattended path work; in a plain tab expect a prompt per session. Firefox/Safari fall back to an ordinary download.
+- **Every client-scoped table has an `id`** — verified by regex over the migrations rather than assumed, because `readAll` orders by it and `staff_pin_vault` (PK `user_id`) turned out to be the sole exception. It is read on a separate path, so it was never affected.
+- **The PIN vault belongs in the backup after all.** The first design excluded it on the grounds that PINs must not sit on a local disk. That was right about plaintext and wrong about ciphertext: `staff_pin_vault` rows are AES-GCM encrypted under `app_secrets.pin_vault_key`, which stays in the database and never enters the file. The backup is inert to anyone who finds it — and it is what lets POS/Self-Service staff keep their **original PINs** through a restore.
+
+**Attribution survives a delete, via the project's own S435 rule.** Every `*_by`/`custodian_user_id` UUID gets a `*_by_name` resolved through `get_client_profile_names()` **at export time**. On restore the UUIDs are nulled — they reference `profiles` rows a full delete already removed, and restoring them verbatim raises FK violations across most tables — but "who did it" is still readable in the artifact forever. Nulling is safe on S543's own evidence: a grep proved no `*_by` column is ever filtered on.
+
+**Archive Client is the real answer to churn, and it cost almost nothing.** It composes three existing things: a backup, the existing `deleteClientData` (which already keeps the client row, settings, flags, profiles and every auth login), and `is_active = false`. That third step only became meaningful in S544, where `is_active` stopped being a badge colour and started locking the app. So the common case — a client leaves — is now **fully reversible including logins**, and the partial path stops being the default. `Delete Client` remains for genuine erasure, with its limitation stated in the UI rather than discovered mid-recovery.
+
+**Restore after a full delete is deliberately partial, and says so.** PIN accounts come back exactly: the generated `*@pos.internal` email is in the backup, the PIN is in the vault, and the same email + same PIN yields the same derived password, so staff sign in unchanged (`restore_staff_accounts`, admin-only). Password accounts — IMS staff, HR staff, Owner — come back as a **named to-recreate list**, because their login is a real human email the export deliberately does not carry and their passwords are user-chosen and never vaulted (S539). Re-provisioning only runs when the target has no logins, so restoring an *archived* client never creates a duplicate set.
+
+**The pre-flight backup blocks by default and never blocks absolutely.** All four destructive actions export first and abort if it fails. A "I have backed up elsewhere" checkbox exists because without it Danger Zone would be unreachable on any browser lacking the File System Access API — a worse outcome than the risk being guarded.
+
+**The T-72h trigger is opportunistic and honest about it.** A browser cannot run while closed, so it fires on an admin page load inside the window, serialised to **one client per load** (five concurrent 65-table exports would mean hundreds of parallel queries and five workbooks in memory). When it cannot run it renders a banner rather than failing silently. `clients.last_backup_at` exists to stop it re-exporting on every load — and is deliberately the gate any future purge must check, which is what would make a purge recoverable by construction rather than by timing.
+
+**Still true after this session: `trial_purge_at` deletes nothing.** That was the explicit scope decision — build the parachute before the jump.
+
+**Files:** `src/modules/admin/dataExport/{exportClientData,backupDirectory,runBackup,restoreClientData,useAutoPurgeBackup}.js` (all new), `src/pages/adminClients/ClientDrawer.js`, `src/pages/AdminClients.js`, `supabase/functions/admin-user-ops/index.ts` (`restore_staff_accounts`), `supabase/migrations/20260812150000_client_last_backup_at.sql`, `src/pages/Help.js`, `public/service-worker.js` (`crest-v67`), `README.md`.
+
+**Deploy order:** apply `20260812150000` first (the drawer writes `last_backup_at` on every export), then `supabase functions deploy admin-user-ops`, then the frontend. **Verified by build only** — `CI=true npm run build` compiles clean and the main bundle moved +5 B, confirming the new modules code-split behind the lazy admin route. The runtime checklist in the plan file (folder write, PWA permission persistence, truncation count against `select count(*)`, archive and full-delete round-trips) has **not** been run.
+
+### S544 — 2026-08-12 — A lapsed subscription now actually locks the app
+
+Started as a question about one client on Admin → Clients — a trial account showing **Inactive · 4d left**, not renewing. The answer was that *nothing would happen*, and that turned out to be the finding.
+
+**`clients.is_active` enforced nothing whatsoever.** The Activate/Deactivate button on the client card writes the column ([`AdminClients.js:162`](src/pages/AdminClients.js#L162)) and that is the end of it. Grepped project-wide: the column is read in exactly two places — the badge and toggle on that card, and a count on `AdminDashboardOverview.jsx`. It appears in **no RLS policy**, no route guard, and nowhere in `AuthContext`/`Login`/`ProtectedRoute`. A client marked Inactive could log in and use the full product, unchanged, forever. The same held for every `*_ends_at` column: the only code that reads them is the auto-sweep in `loadClients()`, which sets… `is_active = false`. A cosmetic flag setting another cosmetic flag.
+
+The trial half had the same shape from the other direction. `trialExpired` was computed properly in `AuthContext` but consumed **only** by two banners in `Layout.js` — a client whose 7-day trial ended read "🔒 Trial ended" at the top of a fully working app. And `trial_purge_at`, set to +22d at signup and rendered as a retention countdown in two places, has **no consumer at all** — no cron, no Edge Function, nothing that deletes anything. It was a countdown to an event that does not exist.
+
+**Enforcement goes at one choke point, not on pages.** Every in-app route — IMS, HR, POS alike — mounts through the single `<ProtectedRoute><Layout /></ProtectedRoute>` in `App.js`, so that is where the lock lives. A per-page check would reopen the entire product the first time someone adds a route and forgets the guard, which is precisely how `is_active` came to mean nothing.
+
+`getAccessState(client)` in `src/utils/subscription.js` is the one place the decision is made, sharing the existing "farthest end date across all modules" logic with `getSubStatus`. It **fails open** on purpose: a client with no end date on any module has never been given one — most of the existing book predates per-module dates — and must keep working. Only a date that exists *and* has passed locks anything.
+
+**A 7-day grace period, and the reason for it.** Cutting a restaurant off at midnight on the due date strands a service in progress, and a lapsed invoice here is usually a collection delay rather than a decision to leave. So expiry first shows a red countdown banner naming the day access stops, and only then does `SubscriptionLock` replace the app. Trials get no grace — their expiry date *is* the decision point, and the retention window that follows is about keeping the data, not about continued access. An explicit admin deactivation outranks every date and locks immediately; that switch now means something.
+
+Two follow-through details rather than loose ends: `AuthContext`'s client query was missing both `is_active` and `suite_ends_at` (so the Suite bundle's own expiry was invisible to the app), and the two post-expiry trial banners in `Layout.js` became **unreachable** the moment the lock shipped — a trial-expired client never renders `Layout` now. Removed rather than left looking live; their copy, including the retention countdown, moved into `SubscriptionLock`'s trial case.
+
+**What this is not: a security boundary.** This is a UI gate. RLS still permits a locked client's JWT to read and write its own rows, so anyone willing to call PostgREST directly is unaffected. Real enforcement means a `client_id`-scoped expiry check inside the RESTRICTIVE policy families on ~50 tables — a much larger and riskier change, deliberately not attempted here. For the actual business case (a restaurant that stops paying) the UI gate is the whole product; for a determined ex-customer it is not.
+
+**The grace period was defeated by the admin page, and nearly shipped that way.** `loadClients()` in `AdminClients.js` auto-deactivates any client whose module dates have all passed — at the raw expiry date, with no grace — and it runs on every visit to Admin → Clients. Since `is_active = false` is an immediate lock, a client one day past expiry would keep their countdown banner only until an admin happened to open that page, then be cut off early at a moment having nothing to do with them. The sweep now measures against `now − GRACE_DAYS`, so auto-deactivation and the lock screen agree on one date. Admin's own Deactivate button is untouched — a deliberate act still locks at once. Caught by asking what happens to one specific client four days out, not by reading the diff.
+
+**On deploy this takes effect immediately and retroactively** — any client already toggled Inactive, or lapsed more than 7 days, is locked on their next page load. Review Admin → Clients before shipping.
+
+**Not verified by a build.** The `CI=true npm run build` was not run this session, so the lint-clean/compile status of these five files is unconfirmed.
+
+**Files:** `src/utils/subscription.js` (`GRACE_DAYS`, `getAccessState`), `src/components/SubscriptionLock.js` (new), `src/components/ProtectedRoute.js`, `src/context/AuthContext.js`, `src/components/Layout.js`, `src/pages/AdminClients.js`, `src/pages/Help.js`, `public/service-worker.js` (`crest-v66`), `README.md`.
+
 ### S543 — 2026-08-12 — Indexed 36 of 79 unindexed FKs, and the evidence for not doing the other 43
 
 The Performance Advisor's remaining **88 Info suggestions**: 79 `unindexed_foreign_keys` + 9 `unused_index`. Indexed 36; dropped none.

@@ -36,6 +36,10 @@ Serve two literacy levels on one screen: the same page has to satisfy an operati
 
 Modernize the category on Crest's own terms: differentiate from both the dated local-ERP look and the generic AI-template look, rather than drifting toward either by default.
 
+## Data Ownership
+
+A client's data is theirs and is never destroyed silently. Any client can be exported in full to an Excel workbook plus a restorable file, on request and regardless of subscription state; every destructive admin action takes a backup first and aborts if it cannot; and a departing client is archived (data cleared, logins and record kept, fully restorable) rather than deleted. This is a positioning asset as much as a safety one — "what happens to my data if I stop paying?" is a real objection in this market, and the answer is that it is kept, and can be handed back.
+
 ## Accessibility & Inclusion
 
 Standard WCAG AA baseline (contrast, keyboard operability, touch targets). No specific accommodation or regulatory requirement has come up yet.

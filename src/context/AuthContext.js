@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
+import { getAccessState } from '../utils/subscription'
 
 const AuthContext = createContext({})
 
@@ -121,7 +122,7 @@ export function AuthProvider({ children }) {
         const [{ data: client }, { data: flags }] = await Promise.all([
           supabase
             .from('clients')
-            .select('id, name, location, is_premium, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, ims_enabled, hr_enabled, hr_plan, pos_enabled, pos_plan, suite_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
+            .select('id, name, location, is_active, is_premium, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, ims_enabled, hr_enabled, hr_plan, pos_enabled, pos_plan, suite_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
             .eq('id', data.client_id)
             .single(),
           supabase
@@ -297,6 +298,16 @@ export function AuthProvider({ children }) {
                               : null
   const subscribeRequested = !!(profile?.clients?.subscribe_requested)
 
+  // Subscription access — a lapsed client used to keep full access forever, since clients.is_active
+  // and every *_ends_at column were read only by the admin UI and enforced literally nowhere.
+  // Admin is exempt (they must be able to reach a locked client to fix or convert it); every
+  // account type belonging to the client — Owner, IMS/HR/POS staff, POS PIN tills — is not.
+  const clientRecord  = profile?.clients
+  const accessState   = useMemo(() => getAccessState(clientRecord), [clientRecord])
+  const accessLocked  = !isAdmin && accessState.locked
+  const accessReason  = accessState.reason
+  const graceDaysLeft = accessState.graceLeft
+
   async function requestSubscription() {
     await supabase.rpc('request_subscription')
     if (session?.user?.id) fetchProfile(session.user.id)
@@ -320,6 +331,7 @@ export function AuthProvider({ children }) {
       clientId, isAdmin, isPremium,
       plan, isTrialing, trialEndsAt,
       isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
+      accessLocked, accessReason, graceDaysLeft,
       featureFlags, hasFeature,
       imsEnabled,
       hrEnabled,

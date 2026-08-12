@@ -168,7 +168,8 @@ const HR_GROUPS = [
 
 export default function Layout() {
   const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient,
-          isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
+          isTrial, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
+          accessReason, graceDaysLeft,
           hasPosAccess, posRole, posTeam, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
@@ -852,6 +853,36 @@ export default function Layout() {
       <main className={`main-content${collapsed ? ' main-content--collapsed' : ''}`}>
         <button className="mobile-hamburger" onClick={() => { setMobileSidebarOpen(true); setCollapsed(false) }}>☰</button>
 
+        {/* Grace period — the subscription end date has passed but access is not cut yet. This is
+            the only warning a paying client gets before SubscriptionLock replaces the whole app,
+            so it states the exact date access stops rather than just "expired". */}
+        {accessReason === 'grace' && (
+          <div style={{
+            background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.4)',
+            borderRadius: 8, padding: '12px 16px', marginBottom: 20,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+          }} role="status">
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#f87171' }}>
+                ⚠️ Your subscription has expired — access ends in {graceDaysLeft} day{graceDaysLeft !== 1 ? 's' : ''}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 10 }}>
+                Renew to keep using Crest. Your data stays exactly as it is.
+              </span>
+            </div>
+            {!subscribeRequested ? (
+              <button
+                onClick={async () => { setSubscribing(true); await requestSubscription(); setSubscribing(false) }}
+                disabled={subscribing}
+                style={{ background: 'var(--theme-accent)', border: 'none', color: 'var(--theme-accent-text)', padding: '7px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                {subscribing ? 'Sending…' : 'Renew Now →'}
+              </button>
+            ) : (
+              <span style={{ fontSize: 12, color: '#f87171', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
+            )}
+          </div>
+        )}
+
         {/* Trial banners — shown from day 4 onwards and after expiry */}
         {isTrial && !trialExpired && trialDaysLeft <= 4 && (
           <div style={{
@@ -880,47 +911,10 @@ export default function Layout() {
           </div>
         )}
 
-        {isTrial && trialExpired && trialPurgeInDays !== null && trialPurgeInDays > 0 && (
-          <div style={{
-            background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.4)',
-            borderRadius: 8, padding: '12px 16px', marginBottom: 20,
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
-          }}>
-            <div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#f87171' }}>
-                🔒 Trial ended — your data is retained for {trialPurgeInDays} more day{trialPurgeInDays !== 1 ? 's' : ''}
-              </span>
-              <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 10 }}>
-                Subscribe before the deadline to keep your data permanently.
-              </span>
-            </div>
-            {!subscribeRequested ? (
-              <button
-                onClick={async () => { setSubscribing(true); await requestSubscription(); setSubscribing(false) }}
-                disabled={subscribing}
-                style={{ background: 'var(--theme-accent)', border: 'none', color: 'var(--theme-accent-text)', padding: '7px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' }}>
-                {subscribing ? 'Sending…' : 'Subscribe Now →'}
-              </button>
-            ) : (
-              <span style={{ fontSize: 12, color: '#f87171', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
-            )}
-          </div>
-        )}
-
-        {isTrial && trialExpired && (trialPurgeInDays === null || trialPurgeInDays <= 0) && (
-          <div style={{
-            background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.5)',
-            borderRadius: 8, padding: '14px 18px', marginBottom: 20,
-            textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#f87171', marginBottom: 4 }}>
-              Your free trial has ended and the data retention period has expired.
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
-              Contact us to discuss reactivation.
-            </div>
-          </div>
-        )}
+        {/* The two post-expiry trial banners that used to sit here are gone: a trial-expired client
+            is now locked out by ProtectedRoute and never renders Layout at all, so they were
+            unreachable. Their copy — including the trial_purge_at retention countdown — moved into
+            SubscriptionLock's `trial` case. */}
 
         <Suspense fallback={<RouteFallback />}>
           <Outlet />

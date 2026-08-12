@@ -343,6 +343,113 @@ Deno.serve(async (req) => {
       return json({ success: true, userId: authData.user.id })
     }
 
+    // ── Rebuild PIN logins from a backup's roster + vault ────────────────────────────────────
+    //
+    // Restores POS and HR Self-Service accounts after a full client delete, from the roster and
+    // ciphertext captured by the frontend export. Platform admin only — this creates accounts in
+    // bulk with known credentials, which is not something a client-side manager should be able
+    // to drive.
+    //
+    // Faithful rather than approximate, because both halves of the original derivation survive
+    // in the backup: the account's generated *.pos.internal / *.hr.internal email is exported
+    // verbatim, and the PIN is recoverable from the vault ciphertext. Recreating with the same
+    // email + same PIN yields the same derived password, so staff sign in exactly as before.
+    //
+    // Password accounts (IMS staff, HR staff, Owner) are deliberately NOT handled here: their
+    // login is a real human email address that the export intentionally does not carry, and
+    // their passwords are user-chosen 8+ character secrets that are never vaulted (S539). They
+    // come back as a named to-recreate list instead.
+    if (action === 'restore_staff_accounts') {
+      if (!isCallerAdmin) return json({ error: 'Forbidden' }, 403)
+
+      const { client_id, roster, vault } = params
+      if (!client_id || !Array.isArray(roster)) {
+        return json({ error: 'client_id and roster are required' }, 400)
+      }
+
+      const { pepper, vaultKey } = await getAppSecrets(admin)
+      const cipherByUser: Record<string, string> = Object.fromEntries(
+        (vault || []).map((v: { user_id: string; pin_cipher: string }) => [v.user_id, v.pin_cipher]),
+      )
+
+      const restored: Array<{ full_name: string; kind: string }> = []
+      const manual:   Array<{ full_name: string; kind: string; reason: string }> = []
+
+      for (const p of roster) {
+        const isPos = !!p.pos_email
+        const isSelfService = !!p.hr_self_service_email
+        if (!isPos && !isSelfService) {
+          manual.push({
+            full_name: p.full_name || '(unnamed)',
+            kind: p.ims_role ? 'IMS staff' : p.hr_role ? 'HR staff' : 'Owner / admin',
+            reason: 'password account — email and password are not in the backup',
+          })
+          continue
+        }
+
+        const cipher = cipherByUser[p.id]
+        if (!cipher || !vaultKey) {
+          manual.push({ full_name: p.full_name, kind: isPos ? 'POS' : 'Self-Service', reason: 'no vaulted PIN in this backup' })
+          continue
+        }
+
+        let pin: string
+        try {
+          pin = await decryptPin(cipher, vaultKey)
+        } catch {
+          // Almost always means pin_vault_key was rotated after this backup was taken.
+          manual.push({ full_name: p.full_name, kind: isPos ? 'POS' : 'Self-Service', reason: 'vaulted PIN could not be decrypted (vault key rotated?)' })
+          continue
+        }
+
+        const email = isPos ? p.pos_email : p.hr_self_service_email
+        const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+          email,
+          password:      await derivePinPassword(email, pin, pepper),
+          email_confirm: true,
+          user_metadata: { full_name: p.full_name },
+        })
+        if (authErr || !authData?.user) {
+          manual.push({ full_name: p.full_name, kind: isPos ? 'POS' : 'Self-Service', reason: authErr?.message || 'account creation failed' })
+          continue
+        }
+
+        const { error: profileErr } = await admin.from('profiles').upsert({
+          id:        authData.user.id,
+          full_name: p.full_name,
+          role:      'client',
+          client_id,
+          ...(isPos ? {
+            pos_role:            p.pos_role || null,
+            pos_job_title:       p.pos_job_title || null,
+            pos_email:           email,
+            pos_discount_limit:  p.pos_discount_limit ?? null,
+            pos_allow_void:      p.pos_allow_void ?? false,
+            // Omitted when absent so the column's own DEFAULT 'foh' applies rather than a null
+            // colliding with NOT NULL — same reasoning as create_pos_staff.
+            ...(p.pos_team ? { pos_team: p.pos_team } : {}),
+          } : {
+            hr_self_service:       true,
+            hr_self_service_email: email,
+          }),
+          // hr_employee_id points at the restored hr_employees row, which keeps its original id
+          // because restoreClientData inserts rows verbatim.
+          hr_employee_id: p.hr_employee_id || null,
+        }, { onConflict: 'id' })
+
+        if (profileErr) {
+          await admin.auth.admin.deleteUser(authData.user.id)
+          manual.push({ full_name: p.full_name, kind: isPos ? 'POS' : 'Self-Service', reason: profileErr.message })
+          continue
+        }
+
+        await vaultPin(authData.user.id, client_id, isPos ? 'pos' : 'hr_self_service', pin)
+        restored.push({ full_name: p.full_name, kind: isPos ? 'POS' : 'Self-Service' })
+      }
+
+      return json({ success: true, restored, manual })
+    }
+
     // ── Enable HR Employee Self-Service — PIN login, mirrors create_pos_staff exactly ────────
     // Restricted to admin or the client owner (not POS managers — HR access isn't necessarily
     // delegated to a floor manager the way POS staff management is).

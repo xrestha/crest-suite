@@ -20,6 +20,49 @@ export function getDateStatus(endsAt) {
   return statusFromDays(days)
 }
 
+// Days of continued access after the last module end date passes. A lapsed invoice here is
+// usually a collection delay (cheque/cash pickup), not a decision to leave — cutting a live
+// restaurant off at midnight on the due date would strand a service in progress, so expiry
+// warns for a week first and only then locks.
+export const GRACE_DAYS = 7
+
+// The single source of truth behind the app-wide lock — see ProtectedRoute.
+//
+// Deliberately fails OPEN: a client carrying no end date on any module has never been given
+// one (most of the existing book predates per-module dates), and must keep working. Only a
+// date that exists AND has passed, or an explicit admin deactivation, locks anything.
+export function getAccessState(client) {
+  const open = { locked: false, reason: null, daysLeft: null, graceLeft: null }
+  if (!client) return open
+
+  // An explicit admin deactivation outranks every date in both directions — it locks a client
+  // whose dates are still valid, and it is the switch that actually means something now.
+  if (client.is_active === false) return { ...open, locked: true, reason: 'deactivated' }
+
+  // Self-service trial. The retention window that follows expiry (trial_purge_at) is about how
+  // long the DATA is kept, not about continued access, so the lock lands on the expiry date.
+  if (client.is_trial && client.trial_expires_at && new Date(client.trial_expires_at) < new Date()) {
+    return { ...open, locked: true, reason: 'trial' }
+  }
+
+  const ends = [
+    client.ims_ends_at,
+    client.hr_ends_at,
+    client.pos_ends_at,
+    client.suite_ends_at,
+    client.subscription_ends_at,
+  ].filter(Boolean).map(d => new Date(d).getTime())
+
+  if (ends.length === 0) return open
+
+  const daysLeft = Math.ceil((Math.max(...ends) - Date.now()) / 86400000)
+  if (daysLeft >= 0) return { ...open, daysLeft }
+  if (-daysLeft <= GRACE_DAYS) {
+    return { ...open, reason: 'grace', daysLeft, graceLeft: GRACE_DAYS + daysLeft }
+  }
+  return { ...open, locked: true, reason: 'expired', daysLeft }
+}
+
 // Client-level badge — uses the latest active end date across all modules, falls back to trial
 export function getSubStatus(client) {
   const now = Date.now()
