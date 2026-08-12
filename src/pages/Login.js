@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { Hexagon } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
+import { useCapsLock } from '../shared/hooks/useCapsLock'
+import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../utils/weakPasswords'
 import { supabase } from '../supabaseClient'
 import './Login.css'
 
@@ -17,6 +19,39 @@ async function edgeOp(action, params = {}) {
   }
   if (data?.error) throw new Error(data.error.message || data.error || 'Failed')
   return data
+}
+
+// Mirrors the `register_trial` Edge Function's own check exactly, so the form never accepts an
+// address the server is about to reject.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// Every sign-in failure used to collapse into "Invalid email or password." That generic string is
+// the right answer for a *credential* failure — it's what stops this form being used to enumerate
+// which addresses have accounts (OWASP) — but it was also swallowing rate limits, server errors and
+// the 15s auth-fetch timeout from authFetchTimeout.js. Telling someone who has been rate-limited
+// that their password is wrong makes them retry harder, which is the opposite of what the limit is
+// for. So: keep one indistinguishable message across every credential outcome (wrong password, no
+// such account, disabled account), and separate out only the failures that aren't about credentials
+// at all and where the user's correct next action is genuinely different.
+function signInErrorMessage(err) {
+  const status = err?.status
+  const code   = String(err?.code || '')
+  const name   = String(err?.name || '')
+  const msg    = String(err?.message || '')
+
+  if (status === 429 || /rate|too many/i.test(code + msg)) {
+    return 'Too many sign-in attempts. Please wait a minute and try again.'
+  }
+  // AuthRetryableFetchError is what auth-js returns for a network failure — including the abort
+  // fired by makeAuthTimeoutFetch when /auth/v1/ exceeds 15s.
+  if (name === 'AuthRetryableFetchError' || status === 0 || status >= 500 ||
+      /fetch|network|aborted|timeout|failed to send/i.test(msg)) {
+    return "Couldn't reach the server. Check your connection and try again."
+  }
+  if (code === 'email_not_confirmed') {
+    return 'Please confirm your email address first, then sign in.'
+  }
+  return 'Invalid email or password.'
 }
 
 const HIGHLIGHTS = [
@@ -38,6 +73,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError]               = useState('')
   const [loading, setLoading]           = useState(false)
+  const [signInCaps, signInCapsHandlers] = useCapsLock()
 
   // Forgot-password state
   const [forgotMode, setForgotMode]     = useState(false)
@@ -54,10 +90,12 @@ export default function Login() {
   const [tPass, setTPass]       = useState('')
   const [tShowPass, setTShowPass] = useState(false)
   const [tError, setTError]     = useState('')
+  const [tFieldErr, setTFieldErr] = useState({})
   const [tLoading, setTLoading] = useState(false)
   const [trialSuccess, setTrialSuccess] = useState(false)
+  const [trialCaps, trialCapsHandlers] = useCapsLock()
 
-  const { signIn } = useAuth()
+  const { signIn, session, ready } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
 
@@ -67,7 +105,7 @@ export default function Login() {
     setLoading(true)
     const { error } = await signIn(email, password)
     if (error) {
-      setError('Invalid email or password.')
+      setError(signInErrorMessage(error))
       setLoading(false)
     } else {
       navigate('/dashboard')
@@ -92,10 +130,28 @@ export default function Login() {
   async function handleTrialSignup(e) {
     e.preventDefault()
     setTError('')
-    if (!tBiz.trim())    { setTError('Business name is required.'); return }
-    if (!tPhone.trim())  { setTError('Phone number is required.'); return }
-    if (!tEmail.trim())  { setTError('Email is required.'); return }
-    if (tPass.length < 6){ setTError('Password must be at least 6 characters.'); return }
+
+    // Validated per field rather than as one message at the bottom of the form: a single shared
+    // error line means someone who missed Phone reads about it nowhere near Phone. The first
+    // offending field also takes focus, so keyboard and screen-reader users land on the thing
+    // they need to fix instead of hunting for it.
+    const errs = {}
+    if (!tBiz.trim())                        errs['trial-biz']   = 'Business name is required.'
+    if (!tEmail.trim())                      errs['trial-email'] = 'Email is required.'
+    else if (!EMAIL_RE.test(tEmail.trim()))  errs['trial-email'] = 'Enter a valid email address.'
+    if (!tPhone.trim())                      errs['trial-phone'] = 'Phone number is required.'
+    if (!tPass)                              errs['trial-password'] = 'Password is required.'
+    else if (tPass.length < MIN_PASSWORD_LENGTH) {
+      errs['trial-password'] = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+    } else {
+      const weak = weakPasswordReason(tPass, { businessName: tBiz, email: tEmail })
+      if (weak) errs['trial-password'] = weak
+    }
+
+    setTFieldErr(errs)
+    const firstInvalid = ['trial-biz', 'trial-email', 'trial-password', 'trial-phone'].find(id => errs[id])
+    if (firstInvalid) { document.getElementById(firstInvalid)?.focus(); return }
+
     setTLoading(true)
     try {
       await edgeOp('register_trial', {
@@ -123,22 +179,38 @@ export default function Login() {
     }
   }
 
+  // Someone who is already signed in has no business being shown a sign-in form — `/` redirects
+  // via RootRedirect but `/login` had no equivalent, so a stale tab or a back-button press landed
+  // on an empty login form for an authenticated session. Gated on `ready` so this never fires
+  // during the auth-resolution window and bounces a genuinely logged-out visitor.
+  if (ready && session) return <Navigate to="/dashboard" replace />
+
+  const trialFieldError = (id) => tFieldErr[id]
+    ? <span className="login-field-error" id={`${id}-err`} role="alert">{tFieldErr[id]}</span>
+    : null
+
+  // aria-invalid tells assistive tech the field is the problem; aria-describedby points at the
+  // message explaining why. Without both, an inline error is visible but not announced.
+  const trialFieldAria = (id) => ({
+    'aria-invalid': tFieldErr[id] ? 'true' : undefined,
+    'aria-describedby': tFieldErr[id] ? `${id}-err` : undefined,
+  })
+
   return (
-    <div className="login-root">
+    <main className="login-root">
       <div className="login-split">
 
         <div className="login-top">
           {/* ── Left: Pitch ── */}
           <div className="login-left">
-            <div className="login-brand" style={{ justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <div className="login-brand login-brand--split">
+              <div className="login-brand-mark">
                 <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />
                 <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
               </div>
               <button
                 onClick={() => navigate('/pricing')}
-                className="login-btn login-btn--trial"
-                style={{ padding: '7px 16px', fontSize: 12, marginTop: 0 }}>
+                className="login-btn login-btn--trial login-btn--pricing">
                 View Pricing →
               </button>
             </div>
@@ -168,7 +240,7 @@ export default function Login() {
                 <h1 className="login-heading">Reset password</h1>
                 <p className="login-sub">We'll email you a link to set a new one</p>
                 {forgotSent ? (
-                  <div style={{ padding: '16px', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--theme-green)', lineHeight: 1.6 }}>
+                  <div className="login-notice" role="status">
                     If an account exists for that email, a reset link is on its way. Check your inbox.
                   </div>
                 ) : (
@@ -177,7 +249,7 @@ export default function Login() {
                       <label htmlFor="forgot-email">Email</label>
                       <input id="forgot-email" type="email" autoComplete="username" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus />
                     </div>
-                    {forgotError && <p className="login-error">{forgotError}</p>}
+                    {forgotError && <p className="login-error" role="alert">{forgotError}</p>}
                     <button type="submit" className="login-btn" disabled={forgotLoading}>
                       {forgotLoading ? 'Sending…' : 'Send Reset Link'}
                     </button>
@@ -203,18 +275,20 @@ export default function Login() {
                       type={showPassword ? 'text' : 'password'}
                       autoComplete="current-password"
                       value={password} onChange={e => setPassword(e.target.value)}
+                      {...signInCapsHandlers}
                       placeholder="••••••••" required />
+                    {signInCaps && <span className="login-caps-hint" role="status">Caps Lock is on</span>}
                     <label className="login-show-pw">
                       <input type="checkbox" checked={showPassword} onChange={e => setShowPassword(e.target.checked)} />
                       Show password
                     </label>
                   </div>
                   <button
-                    type="button" onClick={() => { setForgotMode(true); setForgotEmail(email) }}
-                    style={{ background: 'none', border: 'none', padding: 0, fontSize: 12, color: 'var(--theme-accent)', cursor: 'pointer', alignSelf: 'flex-end', textDecoration: 'underline' }}>
+                    type="button" className="login-forgot"
+                    onClick={() => { setForgotMode(true); setForgotEmail(email) }}>
                     Forgot password?
                   </button>
-                  {error && <p className="login-error">{error}</p>}
+                  {error && <p className="login-error" role="alert">{error}</p>}
                   <button type="submit" className="login-btn" disabled={loading}>
                     {loading ? 'Signing in…' : 'Sign in'}
                   </button>
@@ -235,23 +309,30 @@ export default function Login() {
           <div className="login-divider-label">Start your free trial</div>
 
           {trialSuccess ? (
-            <div style={{ padding: '16px', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--theme-green)', lineHeight: 1.6 }}>
+            <div className="login-notice" role="status">
               Account created! Sign in above with your email and password.
             </div>
           ) : (
-            <form onSubmit={handleTrialSignup} className="login-form">
+            // noValidate so our own per-field messages are what the user sees, rather than the
+            // browser's native bubbles firing first and pre-empting them. `required` stays on the
+            // inputs regardless — it's what conveys "this field is mandatory" to assistive tech.
+            <form onSubmit={handleTrialSignup} className="login-form" noValidate>
               <div className="login-row-top">
                 <div className="login-field">
                   <label htmlFor="trial-biz">Business Name *</label>
-                  <input id="trial-biz" value={tBiz} onChange={e => setTBiz(e.target.value)} placeholder="e.g. Sunrise Café" autoFocus={startOnTrial} />
+                  <input id="trial-biz" value={tBiz} onChange={e => setTBiz(e.target.value)} placeholder="e.g. Sunrise Café" required {...trialFieldAria('trial-biz')} autoFocus={startOnTrial} />
+                  {trialFieldError('trial-biz')}
                 </div>
                 <div className="login-field">
                   <label htmlFor="trial-email">Email *</label>
-                  <input id="trial-email" type="email" autoComplete="email" value={tEmail} onChange={e => setTEmail(e.target.value)} placeholder="you@restaurant.com" />
+                  <input id="trial-email" type="email" autoComplete="email" value={tEmail} onChange={e => setTEmail(e.target.value)} placeholder="you@restaurant.com" required {...trialFieldAria('trial-email')} />
+                  {trialFieldError('trial-email')}
                 </div>
                 <div className="login-field">
                   <label htmlFor="trial-password">Password *</label>
-                  <input id="trial-password" type={tShowPass ? 'text' : 'password'} autoComplete="new-password" value={tPass} onChange={e => setTPass(e.target.value)} placeholder="Min. 6 characters" />
+                  <input id="trial-password" type={tShowPass ? 'text' : 'password'} autoComplete="new-password" value={tPass} onChange={e => setTPass(e.target.value)} {...trialCapsHandlers} placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`} required {...trialFieldAria('trial-password')} />
+                  {trialCaps && <span className="login-caps-hint" role="status">Caps Lock is on</span>}
+                  {trialFieldError('trial-password')}
                 </div>
                 <label className="login-show-pw login-show-pw--inline">
                   <input type="checkbox" checked={tShowPass} onChange={e => setTShowPass(e.target.checked)} />
@@ -265,19 +346,23 @@ export default function Login() {
                 </div>
                 <div className="login-field">
                   <label htmlFor="trial-phone">Phone *</label>
-                  <input id="trial-phone" type="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="98XXXXXXXX" />
+                  <input id="trial-phone" type="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="98XXXXXXXX" required {...trialFieldAria('trial-phone')} />
+                  {trialFieldError('trial-phone')}
                 </div>
                 <button type="submit" className="login-btn login-btn--trial login-btn--inline" disabled={tLoading}>
                   {tLoading ? 'Creating your account…' : 'Start Free Trial →'}
                 </button>
               </div>
-              {tError && <p className="login-error">{tError}</p>}
+              {tError && <p className="login-error" role="alert">{tError}</p>}
               <p className="login-trial-note">7-day free trial · Starter plan · No credit card needed</p>
+              <p className="login-consent">
+                By starting a trial you agree to our Terms of Service and Privacy Policy.
+              </p>
             </form>
           )}
         </div>
 
       </div>
-    </div>
+    </main>
   )
 }

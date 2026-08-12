@@ -66,6 +66,21 @@
   margin-bottom: 12px;
 }
 
+/* Brand mark on the left, View Pricing pushed to the right. Both of these were inline styles on
+   the elements themselves; moved here whole rather than in part, since an inline style outranks a
+   class and a half-migrated element fails silently on exactly the properties left behind. */
+.login-brand--split {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.login-brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
 .login-brand-name {
   font-size: 17px;
   font-weight: 700;
@@ -80,7 +95,7 @@
 }
 
 .login-pitch-headline {
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 800;
   color: var(--theme-text1);
   letter-spacing: -0.02em;
@@ -215,17 +230,23 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 24px;
+  align-self: flex-start;
   font-size: 12px;
   color: var(--theme-text2, #6b7280);
   cursor: pointer;
   user-select: none;
 }
 
+/* The label wraps the checkbox, so the clickable target is the whole row — but at a 12px box and
+   a 12px font that row was only 18px tall, under WCAG 2.2 SC 2.5.8's 24x24 floor. The min-height
+   does the work; the box itself is bumped to 16px so it doesn't look lost inside it. */
 .login-show-pw input[type="checkbox"] {
   accent-color: var(--theme-accent, #c9a84c);
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .login-error {
@@ -237,12 +258,45 @@
   border-radius: var(--radius-md, 12px);
 }
 
+/* Per-field validation message, sitting directly under the input it belongs to. Carries role=alert
+   in the markup so it's announced, not just shown. */
+.login-field-error {
+  font-size: 12px;
+  color: var(--theme-red, #f87171);
+  line-height: 1.4;
+}
+
+.login-field input[aria-invalid="true"] {
+  border-color: var(--theme-red, #f87171);
+}
+
+/* Caps Lock is the most common cause of a password that's typed correctly and still rejected.
+   Amber rather than red — it's a heads-up about the keyboard, not an error in the form. */
+.login-caps-hint {
+  font-size: 12px;
+  color: var(--theme-amber, #fbbf24);
+  line-height: 1.4;
+}
+
+/* Confirmation panel (reset link sent / trial account created). Was an inline style object
+   duplicated at both call sites; both now render this class with role="status". */
+.login-notice {
+  padding: 16px;
+  background: color-mix(in srgb, var(--theme-green, #34d399) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-green, #34d399) 25%, transparent);
+  border-radius: var(--radius-sm, 8px);
+  font-size: 13px;
+  color: var(--theme-green, #34d399);
+  line-height: 1.6;
+}
+
 .login-btn {
   background: var(--theme-accent, #c9a84c);
   color: var(--theme-accent-text, #0f1117);
   border: none;
   border-radius: var(--radius-md, 12px);
   padding: 9px 20px;
+  min-height: 40px;
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
@@ -265,6 +319,31 @@
   background: color-mix(in srgb, var(--theme-green, #34d399) 20%, var(--theme-input-bg, #0f1117));
 }
 
+/* View Pricing is a secondary link-weight action sitting inside the brand row, not a form CTA —
+   it keeps its own smaller sizing rather than inheriting .login-btn's 40px min-height. Still
+   clears WCAG 2.2 SC 2.5.8's 24x24 target floor. Declared after .login-btn so it wins on order,
+   both rules being single-class specificity. Previously an inline style prop on the element. */
+.login-btn--pricing {
+  padding: 7px 16px;
+  min-height: 32px;
+  font-size: 12px;
+  margin-top: 0;
+}
+
+/* Was an inline style prop; every one of its properties moved here together. The padding is the
+   point — as a bare unpadded button this was a 96x14px target, under the 24x24 floor. */
+.login-forgot {
+  align-self: flex-end;
+  background: none;
+  border: none;
+  padding: 6px 2px;
+  min-height: 24px;
+  font-size: 12px;
+  color: var(--theme-accent, #c9a84c);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .login-btn:hover:not(:disabled) {
   filter: brightness(1.1);
 }
@@ -281,8 +360,16 @@
   margin: 0;
 }
 
+.login-consent {
+  font-size: 11px;
+  color: var(--theme-text3);
+  text-align: center;
+  margin: 0;
+  line-height: 1.5;
+}
+
 .login-heading {
-  font-size: 23px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--theme-text1);
   margin: 0 0 4px 0;
@@ -298,11 +385,12 @@
    than solid (2026-07-14 audit) — same One Accent Rule reasoning as .login-btn--trial above;
    purple is the rationed 4th-color token, not a second general-purpose CTA fill. ── */
 .login-staff-btn {
-  background: color-mix(in srgb, var(--theme-purple, #8b5cf6) 12%, var(--theme-input-bg, #0f1117));
-  color: var(--theme-purple, #8b5cf6);
-  border: 1px solid color-mix(in srgb, var(--theme-purple, #8b5cf6) 40%, transparent);
+  background: color-mix(in srgb, var(--theme-purple, #a78bfa) 12%, var(--theme-input-bg, #0f1117));
+  color: var(--theme-purple, #a78bfa);
+  border: 1px solid color-mix(in srgb, var(--theme-purple, #a78bfa) 40%, transparent);
   border-radius: var(--radius-md, 12px);
   padding: 9px 20px;
+  min-height: 40px;
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
@@ -312,7 +400,41 @@
 }
 
 .login-staff-btn:hover {
-  background: color-mix(in srgb, var(--theme-purple, #8b5cf6) 20%, var(--theme-input-bg, #0f1117));
+  background: color-mix(in srgb, var(--theme-purple, #a78bfa) 20%, var(--theme-input-bg, #0f1117));
+}
+
+/* ── Touch devices ──────────────────────────────────────────────────────────────────────────
+   Two separate problems, one media query. iOS Safari zooms the viewport when a focused input's
+   font-size is under 16px and never zooms back out, which on a phone turns "tap the email field"
+   into "now pan the whole page sideways to find the password field". And 32px inputs / 30px
+   buttons, while past WCAG 2.2 SC 2.5.8's 24x24 floor, are well under the 44x44 that Apple and
+   Material both call for on a finger target.
+   Scoped to `pointer: coarse` rather than a width breakpoint, on purpose: the trigger is the input
+   method, not the screen size, and the desktop layout's carefully balanced two-column height (see
+   .login-row-top's note) stays exactly as it was. ── */
+@media (pointer: coarse) {
+  .login-field input {
+    font-size: 16px;
+    padding: 11px 12px;
+  }
+
+  .login-btn,
+  .login-staff-btn {
+    min-height: 44px;
+  }
+
+  .login-btn--pricing {
+    min-height: 36px;
+  }
+
+  .login-forgot {
+    padding: 10px 4px;
+    min-height: 32px;
+  }
+
+  .login-show-pw {
+    min-height: 32px;
+  }
 }
 
 /* ── Just above the mobile breakpoint, the trial-form rows (Business Name/Email/Password/Show
@@ -327,11 +449,27 @@
   }
 }
 
-/* ── Mobile: stack vertically ── */
+/* ── Mobile: stack vertically ──
+   Order is sign-in → free trial → pitch, which needs the two-column wrapper to stop being a box
+   of its own: `display: contents` promotes .login-left/.login-vdivider/.login-right to direct
+   children of .login-split, so all five blocks sit in one column flex context and `order` can
+   interleave the trial block between them. (Safe here — .login-top is a presentational div with
+   no role of its own, which is the case `display: contents` is fine for.)
+   The old rule was `flex-direction: column-reverse` on .login-top alone. That got sign-in above
+   the pitch, which is right for a returning user, but it also left the marketing pitch sitting
+   BETWEEN sign-in and "Start your free trial" — so a first-time visitor had to scroll past ~600px
+   of feature bullets to reach the form this page exists to drive. Now both audiences get their
+   destination first and the pitch backs them up underneath. ── */
 @media (max-width: 640px) {
   .login-top {
-    flex-direction: column-reverse;
+    display: contents;
   }
+
+  .login-right       { order: 1; }
+  .login-hdivider    { order: 2; }
+  .login-trial-block { order: 3; }
+  .login-vdivider    { order: 4; }
+  .login-left        { order: 5; }
 
   .login-vdivider {
     width: 100%;
@@ -347,5 +485,12 @@
   .login-row-top,
   .login-row-second {
     grid-template-columns: 1fr;
+  }
+
+  /* "View Pricing" and a long white-label app_name were colliding at 390px and wrapping the
+     brand name mid-phrase. Let the row wrap as a row instead. */
+  .login-brand--split {
+    flex-wrap: wrap;
+    row-gap: 10px;
   }
 }

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Hexagon } from 'lucide-react'
 import { useSettings } from '../context/SettingsContext'
+import { useCapsLock } from '../shared/hooks/useCapsLock'
+import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../utils/weakPasswords'
 import { supabase } from '../supabaseClient'
 import './Login.css'
 
@@ -18,6 +20,7 @@ export default function ResetPassword() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
+  const [capsOn, capsHandlers] = useCapsLock()
 
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
@@ -32,7 +35,11 @@ export default function ResetPassword() {
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`); return
+    }
+    const weak = weakPasswordReason(password)
+    if (weak) { setError(weak); return }
     if (password !== confirm) { setError('Passwords do not match.'); return }
     setLoading(true)
     const { error } = await supabase.auth.updateUser({ password })
@@ -42,7 +49,7 @@ export default function ResetPassword() {
   }
 
   return (
-    <div className="login-root">
+    <main className="login-root">
       <div className="login-split" style={{ maxWidth: 440, margin: '0 auto' }}>
         <div className="login-right" style={{ padding: '48px 0' }}>
           <div className="login-brand" style={{ marginBottom: 24 }}>
@@ -73,7 +80,9 @@ export default function ResetPassword() {
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="new-password"
                     value={password} onChange={e => setPassword(e.target.value)}
-                    placeholder="Min. 6 characters" required autoFocus />
+                    {...capsHandlers}
+                    placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`} required autoFocus />
+                  {capsOn && <span className="login-caps-hint" role="status">Caps Lock is on</span>}
                 </div>
                 <div className="login-field">
                   <label htmlFor="confirm-password">Confirm Password</label>
@@ -88,7 +97,7 @@ export default function ResetPassword() {
                     Show password
                   </label>
                 </div>
-                {error && <p className="login-error">{error}</p>}
+                {error && <p className="login-error" role="alert">{error}</p>}
                 <button type="submit" className="login-btn" disabled={loading}>
                   {loading ? 'Updating…' : 'Update Password'}
                 </button>
@@ -97,6 +106,6 @@ export default function ResetPassword() {
           )}
         </div>
       </div>
-    </div>
+    </main>
   )
 }
