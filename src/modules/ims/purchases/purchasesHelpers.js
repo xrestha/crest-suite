@@ -31,8 +31,8 @@ export function billKeyOf(e, period) {
 
 // Aging bucket for a Credit bill's remaining balance, by calendar days since the bill date.
 export function aging(days) {
-  if (days <= 30) return { label: 'Current',    color: 'var(--theme-green)' }
-  if (days <= 60) return { label: '31–60 days', color: 'var(--theme-accent)' }
-  if (days <= 90) return { label: '61–90 days', color: 'var(--theme-amber)' }
-  return                 { label: '90+ days',   color: 'var(--theme-red)' }
+  if (days <= 30) return { label: 'Current',    color: 'var(--theme-green-text)' }
+  if (days <= 60) return { label: '31–60 days', color: 'var(--theme-accent-ink)' }
+  if (days <= 90) return { label: '61–90 days', color: 'var(--theme-amber-text)' }
+  return                 { label: '90+ days',   color: 'var(--theme-red-text)' }
 }

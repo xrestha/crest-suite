@@ -51,7 +51,7 @@ export default function DisposalReportTab({ assets }) {
                       <td>{fmtDate(a.disposal_date)}</td>
                       <td style={{ textAlign: 'right' }}>{fmt(nbvAtDisposal)}</td>
                       <td style={{ textAlign: 'right' }}>{fmt(a.disposal_proceeds)}</td>
-                      <td style={{ textAlign: 'right', color: a.disposal_gain_loss >= 0 ? 'var(--theme-green)' : 'var(--theme-red)', fontWeight: 600 }}>
+                      <td style={{ textAlign: 'right', color: a.disposal_gain_loss >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)', fontWeight: 600 }}>
                         {a.disposal_gain_loss >= 0 ? '+' : '−'}{fmt(Math.abs(a.disposal_gain_loss))}
                       </td>
                       <td style={{ color: 'var(--theme-text2)' }}>{a.disposal_reason || '—'}</td>
@@ -63,7 +63,7 @@ export default function DisposalReportTab({ assets }) {
                 <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
                   <td colSpan={5}>Total</td>
                   <td style={{ textAlign: 'right' }}>{fmt(totalProceeds)}</td>
-                  <td style={{ textAlign: 'right', color: totalGainLoss >= 0 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                  <td style={{ textAlign: 'right', color: totalGainLoss >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     {totalGainLoss >= 0 ? '+' : '−'}{fmt(Math.abs(totalGainLoss))}
                   </td>
                   <td></td>

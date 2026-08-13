@@ -288,7 +288,7 @@ export default function ImsStaff() {
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', padding: '8px 10px',
     background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-    borderRadius: 6, color: 'var(--theme-text1)', fontSize: 13, outline: 'none',
+    borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)', fontSize: 13, outline: 'none',
   }
   const labelStyle = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block' }
 
@@ -298,7 +298,7 @@ export default function ImsStaff() {
       {/* Header */}
       <div style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
         <div>
-          <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>IMS Staff</h2>
+          <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 18 }}>IMS Staff</h2>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
             Assign roles to your team. Staff log in with their email and password, same as you do.
           </p>
@@ -321,13 +321,13 @@ export default function ImsStaff() {
       <div className="card" style={{ padding: '14px 18px', marginBottom: 24, display: 'flex', flexWrap: 'wrap', gap: 20 }}>
         {PERMISSION_LEVELS.map(l => (
           <div key={l.value} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span className={LEVEL_BADGE[l.value]} style={{ fontSize: 11 }}>{l.label}</span>
+            <span className={`badge ${LEVEL_BADGE[l.value]}`}>{l.label}</span>
             <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{l.desc}</span>
           </div>
         ))}
       </div>
 
-      {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red)', marginBottom: 16 }}>{msg}</p>}
+      {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red-text)', marginBottom: 16 }}>{msg}</p>}
 
       {loading ? (
         <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
@@ -390,7 +390,7 @@ export default function ImsStaff() {
                     </td>
                     <td>
                       {p.ims_role
-                        ? <span className={LEVEL_BADGE[p.ims_role] || 'badge-gray'} style={{ fontSize: 11 }}>
+                        ? <span className={`badge ${LEVEL_BADGE[p.ims_role] || 'badge-gray'}`}>
                             {p.ims_role.charAt(0).toUpperCase() + p.ims_role.slice(1)}
                           </span>
                         : <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>—</span>
@@ -408,7 +408,7 @@ export default function ImsStaff() {
                         </button>
                         <button
                           className="btn btn-ghost"
-                          style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red)', borderColor: 'var(--theme-red)' }}
+                          style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
                           onClick={() => deleteStaff(p)}
                         >
                           Delete
@@ -433,7 +433,7 @@ export default function ImsStaff() {
               Define custom role names for your team. Each maps to a permission level.
             </p>
 
-            {rolesError && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 12, margin: '-8px 0 12px' }}>{rolesError}</p>}
+            {rolesError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: '-8px 0 12px' }}>{rolesError}</p>}
 
             {customRoles.length === 0 ? (
               <p style={{ fontSize: 13, color: 'var(--theme-text3)', fontStyle: 'italic', marginBottom: 16 }}>
@@ -457,7 +457,7 @@ export default function ImsStaff() {
                     </select>
                     <button
                       className="btn btn-ghost"
-                      style={{ fontSize: 12, padding: '3px 8px', color: 'var(--theme-red)', borderColor: 'var(--theme-red)' }}
+                      style={{ fontSize: 12, padding: '3px 8px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
                       onClick={() => deleteCustomRole(i)}
                       disabled={rolesSaving}
                     >
@@ -471,8 +471,8 @@ export default function ImsStaff() {
             {/* Add new role */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 20 }}>
               <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Role Name</label>
-                <input
+                <label style={labelStyle} htmlFor="imssta-f1">Role Name</label>
+                <input id="imssta-f1"
                   style={inputStyle}
                   placeholder="e.g. Store Keeper, Purchasing Clerk…"
                   value={newRole.label}
@@ -481,8 +481,8 @@ export default function ImsStaff() {
                 />
               </div>
               <div style={{ width: 140 }}>
-                <label style={labelStyle}>Permission Level</label>
-                <select
+                <label style={labelStyle} htmlFor="imssta-f2">Permission Level</label>
+                <select id="imssta-f2"
                   className="form-select"
                   style={{ width: '100%' }}
                   value={newRole.level}
@@ -581,8 +581,8 @@ export default function ImsStaff() {
 
             {addMode === 'manual' && (
               <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>Full Name</label>
-                <input
+                <label style={labelStyle} htmlFor="imssta-f3">Full Name</label>
+                <input id="imssta-f3"
                   style={inputStyle}
                   placeholder="e.g. Ram Bahadur"
                   value={addForm.full_name}
@@ -595,10 +595,10 @@ export default function ImsStaff() {
             {addMode !== 'existing' && (
               <>
                 <div style={{ marginBottom: 14 }}>
-                  <label style={labelStyle}>
+                  <label style={labelStyle} htmlFor="imssta-f4">
                     <Tip text="Staff log in with this email and password — same login mechanism as your own account.">Email</Tip>
                   </label>
-                  <input
+                  <input id="imssta-f4"
                     style={inputStyle}
                     type="email"
                     autoComplete="new-password"
@@ -609,8 +609,8 @@ export default function ImsStaff() {
                 </div>
 
                 <div style={{ marginBottom: 14 }}>
-                  <label style={labelStyle}>Initial Password (8+ characters)</label>
-                  <input
+                  <label style={labelStyle} htmlFor="imssta-f5">Initial Password (8+ characters)</label>
+                  <input id="imssta-f5"
                     style={inputStyle}
                     type="password"
                     autoComplete="new-password"
@@ -623,10 +623,10 @@ export default function ImsStaff() {
             )}
 
             <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}>
+              <label style={labelStyle} htmlFor="imssta-f6">
                 <Tip text="The role shown for this staff member. Permission level is shown in brackets.">Role</Tip>
               </label>
-              <select
+              <select id="imssta-f6"
                 className="form-select"
                 style={{ width: '100%' }}
                 value={addForm.job_title}
@@ -640,7 +640,7 @@ export default function ImsStaff() {
               </select>
             </div>
 
-            {addMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red)', marginBottom: 12 }}>{addMsg}</p>}
+            {addMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginBottom: 12 }}>{addMsg}</p>}
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setAddModal(false)} disabled={adding}>Cancel</button>
@@ -662,8 +662,8 @@ export default function ImsStaff() {
               New password for <strong style={{ color: 'var(--theme-text1)' }}>{pwTarget.full_name}</strong>
             </p>
             <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}>New Password (8+ characters)</label>
-              <input
+              <label style={labelStyle} htmlFor="imssta-f7">New Password (8+ characters)</label>
+              <input id="imssta-f7"
                 style={inputStyle}
                 type="password"
                 autoComplete="new-password"
@@ -673,7 +673,7 @@ export default function ImsStaff() {
                 onChange={e => setNewPassword(e.target.value)}
               />
             </div>
-            {pwMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red)', marginBottom: 12 }}>{pwMsg}</p>}
+            {pwMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginBottom: 12 }}>{pwMsg}</p>}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setPwTarget(null)} disabled={resetting}>Cancel</button>
               <button className="btn btn-primary" onClick={resetPassword} disabled={resetting}>

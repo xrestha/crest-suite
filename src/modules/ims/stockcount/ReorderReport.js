@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -306,6 +307,7 @@ export default function ReorderReport() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="the reorder report" />
 
   return (
     <div>
@@ -323,7 +325,7 @@ export default function ReorderReport() {
               <button className="btn btn-ghost" onClick={shareReorderListWhatsApp} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>📱 Share via WhatsApp</button>
             </Tip>
             {selectedIds.size > 0 && (
-              <span style={{ fontSize: 12, color: 'var(--theme-accent)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {selectedIds.size} selected
                 <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setSelectedIds(new Set())}>Clear</button>
               </span>
@@ -334,7 +336,7 @@ export default function ReorderReport() {
               <button className="btn btn-ghost" onClick={() => { setPrintMode('par'); setTimeout(() => { printWithTitle(`Par Level Sheet - ${periodLabel}`); setPrintMode(null) }, 80) }} style={{ fontSize: 12 }}>🖨 Print Par Sheet</button>
             </Tip>
             <Tip text="Exports the current Category/Status/Search view to Excel — or just the checked rows, if any are checked." width={260}>
-              <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
+              <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>Export Excel</button>
             </Tip>
           </div>
           <select className="form-select" style={{ marginLeft: 'auto' }} value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
@@ -346,7 +348,7 @@ export default function ReorderReport() {
       <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
         <div className="stat-card">
           <div className="stat-label">Items to Reorder</div>
-          <div className="stat-value" style={{ color: reorderCount > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>{reorderCount}</div>
+          <div className="stat-value" style={{ color: reorderCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{reorderCount}</div>
           <div className="stat-sub">at or below par level</div>
         </div>
         <div className="stat-card">
@@ -361,19 +363,19 @@ export default function ReorderReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Period</div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-accent)' }}>{periodLabel}</div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-accent-ink)' }}>{periodLabel}</div>
           <div className="stat-sub">{selectedPeriod?.status === 'open' ? 'Open period' : 'Closed period'}</div>
         </div>
       </div>
 
       {noPar > 0 && (
-        <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
-          <strong style={{ color: 'var(--theme-accent)' }}>Tip:</strong> {noPar} item{noPar !== 1 ? 's have' : ' has'} no par level set. Click the par field in any row to set it inline — press Enter to save.
+        <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
+          <strong style={{ color: 'var(--theme-accent-ink)' }}>Tip:</strong> {noPar} item{noPar !== 1 ? 's have' : ' has'} no par level set. Click the par field in any row to set it inline — press Enter to save.
         </div>
       )}
 
       <div className="no-print" style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
+        <input style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
           placeholder="Search items…" value={search} onChange={e => setSearch(e.target.value)} />
         <select className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
           <option value="all">All Categories</option>
@@ -387,7 +389,7 @@ export default function ReorderReport() {
         <button
           className="btn btn-ghost"
           onClick={resetAllPar}
-          style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)', marginLeft: 'auto' }}
+          style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)', marginLeft: 'auto' }}
         >
           ✕ Clear All Par
         </button>
@@ -396,7 +398,7 @@ export default function ReorderReport() {
             <button
               className="btn btn-ghost"
               onClick={clearBookStock}
-              style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
+              style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
             >
               ✕ Clear Book Stock
             </button>
@@ -463,7 +465,7 @@ export default function ReorderReport() {
                               onBlur={() => savePar(row.item.id)}
                               onKeyDown={e => handleParKey(e, row.item.id)}
                               autoFocus
-                              style={{ width: 80, textAlign: 'right', background: 'var(--theme-bg)', border: '1px solid var(--theme-accent)', borderRadius: 4, padding: '4px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
+                              style={{ width: 80, textAlign: 'right', background: 'var(--theme-bg)', border: '1px solid var(--theme-accent)', borderRadius: 'var(--radius-xs)', padding: '4px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
                             />
                           ) : (
                             <Tip text="Click to set the par level — minimum stock quantity before reorder is triggered." width={230}>
@@ -474,7 +476,7 @@ export default function ReorderReport() {
                             </Tip>
                           )}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: row.needsReorder ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: row.needsReorder ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                           {row.currentStock.toFixed(2)}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
@@ -498,10 +500,10 @@ export default function ReorderReport() {
                             </span>
                           </Tip>
                         </td>
-                        <td style={{ textAlign: 'right', color: row.shortfall > 0 ? 'var(--theme-red)' : 'var(--theme-text2)', fontWeight: row.shortfall > 0 ? 700 : 400 }}>
+                        <td style={{ textAlign: 'right', color: row.shortfall > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)', fontWeight: row.shortfall > 0 ? 700 : 400 }}>
                           {row.shortfall > 0 ? row.shortfall.toFixed(2) : '—'}
                         </td>
-                        <td style={{ textAlign: 'right', color: row.shortfallValue > 0 ? 'var(--theme-red)' : 'var(--theme-text2)', fontWeight: row.shortfallValue > 0 ? 600 : 400 }}>
+                        <td style={{ textAlign: 'right', color: row.shortfallValue > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)', fontWeight: row.shortfallValue > 0 ? 600 : 400 }}>
                           {row.shortfallValue > 0 ? row.shortfallValue.toLocaleString('en-NP', { maximumFractionDigits: 0 }) : '—'}
                         </td>
                         <td>
@@ -519,7 +521,7 @@ export default function ReorderReport() {
                 <tfoot>
                   <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                     <td colSpan={9} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total estimated purchase needed</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', fontSize: 15, paddingTop: 12 }}>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', fontSize: 14, paddingTop: 12 }}>
                       NPR {totalShortfallValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
                     </td>
                     <td></td>

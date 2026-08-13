@@ -64,26 +64,26 @@ export default function NewGatePassModal({ vendors, onClose, onSaved }) {
           )}
         </div>
         <div className="form-field">
-          <label>Driver Name *</label>
-          <input value={driverName} onChange={e => setDriverName(e.target.value)} placeholder="Driver's name" />
+          <label htmlFor="newgat-f1">Driver Name *</label>
+          <input id="newgat-f1" value={driverName} onChange={e => setDriverName(e.target.value)} placeholder="Driver's name" />
         </div>
         <div className="form-field">
-          <label>Vehicle Number *</label>
-          <input value={vehicleNumber} onChange={e => setVehicleNumber(e.target.value)} placeholder="e.g. BA 5 KHA 5678" />
+          <label htmlFor="newgat-f2">Vehicle Number *</label>
+          <input id="newgat-f2" value={vehicleNumber} onChange={e => setVehicleNumber(e.target.value)} placeholder="e.g. BA 5 KHA 5678" />
         </div>
         <div className="form-field">
-          <label><Tip text="Reason for this vehicle's visit — printed on the gate pass." width={240}>Purpose</Tip></label>
-          <select className="form-select" value={purpose} onChange={e => setPurpose(e.target.value)}>
+          <label htmlFor="newgat-f3"><Tip text="Reason for this vehicle's visit — printed on the gate pass." width={240}>Purpose</Tip></label>
+          <select id="newgat-f3" className="form-select" value={purpose} onChange={e => setPurpose(e.target.value)}>
             {PURPOSES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
           </select>
         </div>
         <div className="form-field">
-          <label>Notes</label>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" rows={2}
-            style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }} />
+          <label htmlFor="newgat-f4">Notes</label>
+          <textarea id="newgat-f4" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" rows={2}
+            style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }} />
         </div>
       </div>
-      {error && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
+      {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
       <div className="form-actions" style={{ justifyContent: 'flex-end' }}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>

@@ -244,22 +244,22 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
       </label>
       {isAdmin && (
         <Tip text="Crest Admin only. Downloads every current recipe and sub-recipe with its full ingredient breakdown and cost by default — a backup, an editable spreadsheet, or a file to hand to another location. Check specific rows in the list below first to export just those instead (works across tabs). Same format as ↓ Template, so it can be edited and re-imported (here, or into a different client)." width={330}>
-          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={downloadRecipeExport} disabled={(exportRecipes || recipes).length === 0}>↓ Export</button>
+          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={downloadRecipeExport} disabled={(exportRecipes || recipes).length === 0}>Export Excel</button>
         </Tip>
       )}
-      {importError && <span style={{ fontSize: 11, color: 'var(--theme-red)' }}>{importError}</span>}
+      {importError && <span style={{ fontSize: 11, color: 'var(--theme-red-text)' }}>{importError}</span>}
 
       {importPreview && (
         <Modal onClose={() => { if (!importBusy) { setImportPreview(null); setImportError('') } }} title="Import Recipes — Preview" maxWidth={760}>
           <div style={{ marginBottom: 12, fontSize: 13, color: 'var(--theme-text2)' }}>
             <strong style={{ color: 'var(--theme-text1)' }}>{importPreview.summary.willImport}</strong> of {importPreview.summary.totalRecipes} recipes ready ·{' '}
-            <strong style={{ color: 'var(--theme-green)' }}>{importPreview.summary.matchedLines}</strong> ingredients matched
-            {importPreview.summary.badLines > 0 && <> · <strong style={{ color: 'var(--theme-red)' }}>{importPreview.summary.badLines}</strong> unmatched (skipped)</>}
+            <strong style={{ color: 'var(--theme-green-text)' }}>{importPreview.summary.matchedLines}</strong> ingredients matched
+            {importPreview.summary.badLines > 0 && <> · <strong style={{ color: 'var(--theme-red-text)' }}>{importPreview.summary.badLines}</strong> unmatched (skipped)</>}
             {importPreview.summary.duplicates > 0 && <> · {importPreview.summary.duplicates} already exist (skipped)</>}
             {importPreview.summary.subs > 0 && <> · {importPreview.summary.subs} sub-recipes (create in app)</>}
           </div>
 
-          <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid var(--theme-border)', borderRadius: 8 }}>
+          <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)' }}>
             {importPreview.recipes.map((r, idx) => {
               const status = r.willImport ? { t: 'Will import', c: 'var(--theme-green)' }
                 : r.duplicate ? { t: 'Already exists — skipped', c: 'var(--theme-amber)' }
@@ -274,12 +274,12 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
                     <span style={{ fontSize: 11, fontWeight: 600, color: status.c, whiteSpace: 'nowrap' }}>{status.t}</span>
                   </div>
                   {r.badLines.length > 0 && (
-                    <div style={{ marginTop: 6, fontSize: 11, color: 'var(--theme-red)' }}>
+                    <div style={{ marginTop: 6, fontSize: 11, color: 'var(--theme-red-text)' }}>
                       {r.badLines.map((l, i) => <div key={i}>✗ {l.ingName || '(blank)'} — {l.reason}</div>)}
                     </div>
                   )}
                   {r.matchedLines.some(l => l.warning) && (
-                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--theme-amber)' }}>
+                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--theme-amber-text)' }}>
                       {r.matchedLines.filter(l => l.warning).map((l, i) => <div key={i}>⚠ {l.ingName}: {l.warning}</div>)}
                     </div>
                   )}
@@ -288,7 +288,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
             })}
           </div>
 
-          {importError && <p style={{ color: 'var(--theme-red)', fontSize: 12, marginTop: 10 }}>{importError}</p>}
+          {importError && <p style={{ color: 'var(--theme-red-text)', fontSize: 12, marginTop: 10 }}>{importError}</p>}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
             <button className="btn btn-ghost" onClick={() => { setImportPreview(null); setImportError('') }} disabled={importBusy}>Cancel</button>
             <button className="btn btn-primary" onClick={runImport} disabled={importBusy || importPreview.summary.willImport === 0}>

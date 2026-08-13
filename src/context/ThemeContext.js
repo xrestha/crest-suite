@@ -23,7 +23,20 @@ import { createContext, useContext, useState, useEffect, useMemo } from 'react'
 // Note `accentInk` is NOT `accentText`, and the two are easy to confuse: `accentText` is the
 // foreground that sits ON an accent-coloured fill; `accentInk` is the accent itself used AS text.
 //
-// Dark presets declare none of these — applyTheme falls back to the base colour for each.
+// `accentText` was plain `#ffffff` on all five light presets, and on three of them that failed:
+// measured live (S551) at 2.84:1 on Rosé Dawn, 3.61:1 on Light and 3.68:1 on Solarized — i.e.
+// every `.btn-primary` in the product, on those themes. Fixed by giving those three a dark,
+// hue-matched ink instead of darkening the accent itself, since the accent is a brand value and
+// also serves as a tint/border/dot colour where it is already correct. Latte (5.41:1) and Bright
+// (4.54:1) keep white.
+//
+// Dark presets declare none of the *Text variants — applyTheme falls back to the base colour for
+// each, which is correct there. Three of them (Tokyo Night, Dracula, Nord) DO now declare an
+// `accentInk`, for a different reason: `.tab-btn--active` sets accent-as-text on a tint of that
+// same accent, and measured against that composited surface the base accent fell to 4.19 / 3.49 /
+// 3.50:1 — a light accent on a dark card is not automatically safe once the card is tinted with
+// the accent itself. Their inks are LIGHTER than the accent; the light presets' are darker. All
+// ten now clear 4.5:1 on both card and page background (S551).
 export const PRESETS = {
   dark: {
     name: 'Dark', description: 'Classic charcoal & gold',
@@ -40,6 +53,7 @@ export const PRESETS = {
     text1: '#c0caf5', text2: '#787c99', text3: '#9aa0c0',
     accent: '#7aa2f7', accentHover: '#9bb8fa', accentText: '#16161e',
     inputBg: '#1a1b26', tableHover: 'rgba(122,162,247,0.07)', focusRing: 'rgba(122,162,247,0.18)',
+    accentInk: '#93b4f9',
     green: '#9ece6a', red: '#f7768e', amber: '#e0af68', purple: '#bb9af7',
     cardShadow: 'inset 0 1px 0 0 rgba(192,202,245,0.06), 0 10px 24px -8px rgba(26,27,38,0.55), 0 3px 8px -3px rgba(26,27,38,0.4)',
   },
@@ -49,6 +63,7 @@ export const PRESETS = {
     text1: '#f8f8f2', text2: '#8a8ea8', text3: '#a8abc8',
     accent: '#bd93f9', accentHover: '#d0b3fb', accentText: '#21222c',
     inputBg: '#282a36', tableHover: 'rgba(189,147,249,0.08)', focusRing: 'rgba(189,147,249,0.2)',
+    accentInk: '#d3b6fc',
     green: '#50fa7b', red: '#ff5555', amber: '#ffb86c', purple: '#bd93f9',
     cardShadow: 'inset 0 1px 0 0 rgba(248,248,242,0.06), 0 10px 24px -8px rgba(40,42,54,0.55), 0 3px 8px -3px rgba(40,42,54,0.4)',
   },
@@ -58,6 +73,7 @@ export const PRESETS = {
     text1: '#eceff4', text2: '#8a93a5', text3: '#aeb6c5',
     accent: '#88c0d0', accentHover: '#9fd0dd', accentText: '#2e3440',
     inputBg: '#2e3440', tableHover: 'rgba(136,192,208,0.08)', focusRing: 'rgba(136,192,208,0.2)',
+    accentInk: '#b3d8e2',
     green: '#a3be8c', red: '#bf616a', amber: '#ebcb8b', purple: '#b48ead',
     cardShadow: 'inset 0 1px 0 0 rgba(236,239,244,0.06), 0 10px 24px -8px rgba(46,52,64,0.55), 0 3px 8px -3px rgba(46,52,64,0.4)',
   },
@@ -89,30 +105,30 @@ export const PRESETS = {
     name: 'Rosé Dawn', description: 'Warm rose light',
     bg: '#faf4ed', card: '#fffaf3', border: '#dfd9d3', borderLt: '#f2e9e1', sidebar: '#f2e9e1',
     text1: '#524d72', text2: '#5c5971', text3: '#6c657a',
-    accent: '#d7827e', accentHover: '#c66e6a', accentText: '#ffffff',
+    accent: '#d7827e', accentHover: '#c66e6a', accentText: '#2e1c1b',
     inputBg: '#fffaf3', tableHover: '#f4ece4', focusRing: 'rgba(215,130,126,0.16)',
     green: '#56949f', red: '#b4637a', amber: '#ea9d34', purple: '#907aa9',
-    greenText: '#417179', redText: '#965266', amberText: '#906020', purpleText: '#746389', accentInk: '#955a57',
+    greenText: '#417179', redText: '#965266', amberText: '#906020', purpleText: '#746389', accentInk: '#8a5350',
     cardShadow: '0 1px 2px rgba(87,82,121,0.06), 0 10px 24px -8px rgba(87,82,121,0.1)',
   },
   solarized: {
     name: 'Solarized', description: 'Cream & ocean blue',
     bg: '#fdf6e3', card: '#fffbf0', border: '#e2dac0', borderLt: '#f0e9d6', sidebar: '#eee8d5',
     text1: '#435359', text2: '#525c5c', text3: '#5c6a6a',
-    accent: '#268bd2', accentHover: '#1f6fa8', accentText: '#ffffff',
+    accent: '#268bd2', accentHover: '#1f6fa8', accentText: '#00131c',
     inputBg: '#fffbf0', tableHover: '#f3edda', focusRing: 'rgba(38,139,210,0.12)',
     green: '#859900', red: '#dc322f', amber: '#b58900', purple: '#6c71c4',
-    greenText: '#5f6d00', redText: '#c32c2a', amberText: '#816200', purpleText: '#5d61a8', accentInk: '#1e6da5',
+    greenText: '#5f6d00', redText: '#c32c2a', amberText: '#816200', purpleText: '#5d61a8', accentInk: '#1b6193',
     cardShadow: '0 1px 2px rgba(88,110,117,0.06), 0 10px 24px -8px rgba(88,110,117,0.1)',
   },
   light: {
     name: 'Light', description: 'Clean warm white',
     bg: '#f6f3ef', card: '#ffffff', border: '#ddd6cf', borderLt: '#ece6df', sidebar: '#ece6dd',
     text1: '#1c1917', text2: '#5c554e', text3: '#6b655e',
-    accent: '#b07d2b', accentHover: '#946720', accentText: '#ffffff',
+    accent: '#b07d2b', accentHover: '#946720', accentText: '#241a08',
     inputBg: '#fbf9f6', tableHover: '#f3ede6', focusRing: 'rgba(176,125,43,0.14)',
     green: '#15803d', red: '#dc2626', amber: '#b45309', purple: '#7c3aed',
-    greenText: '#137538', redText: '#c92323', amberText: '#a44c08', purpleText: '#7c3aed', accentInk: '#865f21',
+    greenText: '#137538', redText: '#c92323', amberText: '#a44c08', purpleText: '#7c3aed', accentInk: '#7a561e',
     cardShadow: '0 1px 2px rgba(28,25,23,0.06), 0 10px 24px -8px rgba(28,25,23,0.1)',
   },
   bright: {
@@ -122,7 +138,7 @@ export const PRESETS = {
     accent: '#3a6df0', accentHover: '#2f5cdb', accentText: '#ffffff',
     inputBg: '#f8faff', tableHover: '#eaf0fc', focusRing: 'rgba(58,109,240,0.14)',
     green: '#16a34a', red: '#dc2626', amber: '#d97706', purple: '#7c3aed',
-    greenText: '#117c38', redText: '#cf2424', amberText: '#a55a05', purpleText: '#7c3aed', accentInk: '#3563db',
+    greenText: '#117c38', redText: '#cf2424', amberText: '#a55a05', purpleText: '#7c3aed', accentInk: '#2f58c4',
     cardShadow: '0 1px 2px rgba(15,23,42,0.05), 0 10px 26px -8px rgba(58,109,240,0.16), 0 3px 8px -3px rgba(15,23,42,0.06)',
   },
 }

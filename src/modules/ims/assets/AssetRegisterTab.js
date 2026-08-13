@@ -125,7 +125,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
                   <td style={{ textAlign: 'right' }}>{fmt(a.unit_cost)}</td>
                   <td style={{ textAlign: 'right' }}>{fmt(a.total_cost)}</td>
                   <td>{fmtDate(a.acquisition_date)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{fmt(nbvOf(a))}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(nbvOf(a))}</td>
                   <td style={{ textAlign: 'right' }}>{pctDepreciatedOf(a).toFixed(1)}%</td>
                   <td>
                     <span className={`badge ${a.status === 'active' ? 'badge-green' : 'badge-red'}`}>{a.status}</span>
@@ -134,7 +134,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
                     <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setEditingAsset(a)}>Edit</button>
                     {isAdmin && (
                       <Tip text="Admin only — permanently deletes the asset and its posted depreciation history. Never available to a client login." width={260}>
-                        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }} onClick={() => handleDelete(a)} disabled={deletingId === a.id}>
+                        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={() => handleDelete(a)} disabled={deletingId === a.id}>
                           {deletingId === a.id ? 'Deleting…' : 'Delete'}
                         </button>
                       </Tip>

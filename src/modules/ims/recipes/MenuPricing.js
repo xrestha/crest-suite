@@ -4,12 +4,9 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { useSettings } from '../../../context/SettingsContext'
+import { fcBand, fcThresholds } from '../../../shared/imsFormulas'
 
-function fcColor(pct) {
-  if (pct <= 30) return 'var(--theme-green)'
-  if (pct <= 38) return 'var(--theme-amber)'
-  return 'var(--theme-red)'
-}
 
 function vatOf(r) {
   return (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : parseFloat(r.vat_rate)
@@ -19,6 +16,11 @@ const EMPTY_FORM = { name: '', category: '', price: '', vatRate: 0.13, costPrice
 
 export default function MenuPricing() {
   const { clientId, profile, clientModules, hasImsAccess } = useAuth()
+  const { settings } = useSettings()
+  // Was a hardcoded 30/38 scale in every one of these files, which disagreed with the client's
+  // own configured fc_warning_pct/fc_critical_pct that Recipe Costing's filter pills use.
+  const fcColor = pct => fcBand(pct, settings).color
+
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const [recipes, setRecipes]   = useState([])
@@ -244,7 +246,7 @@ export default function MenuPricing() {
 
       {!loading && recipes.length > 0 && (
         <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-          <span style={{ fontSize: 12, color: 'var(--theme-green)' }}>● {posOnCount} item{posOnCount !== 1 ? 's' : ''} on POS</span>
+          <span style={{ fontSize: 12, color: 'var(--theme-green-text)' }}>● {posOnCount} item{posOnCount !== 1 ? 's' : ''} on POS</span>
           {posOffCount > 0 && <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>● {posOffCount} hidden from POS</span>}
         </div>
       )}
@@ -304,7 +306,7 @@ export default function MenuPricing() {
                       </button>
                       {' · '}
                       <Tip text="Set which items appear as 'Pair with' suggestions when staff tap this item on the POS order screen." width={260}>
-                        <button onClick={() => openSuggestModal(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: (suggMap[r.id]?.length || 0) > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)', textDecoration: 'underline' }}>
+                        <button onClick={() => openSuggestModal(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: (suggMap[r.id]?.length || 0) > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', textDecoration: 'underline' }}>
                           {(suggMap[r.id]?.length || 0) > 0 ? `${suggMap[r.id].length} pairing${suggMap[r.id].length !== 1 ? 's' : ''}` : 'Pair'}
                         </button>
                       </Tip>
@@ -327,7 +329,7 @@ export default function MenuPricing() {
       {suggestModal && (
         <div onClick={e => { if (e.target === e.currentTarget) setSuggestModal(null) }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12, width: 'min(480px, 96vw)', padding: '24px 28px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
+          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', width: 'min(480px, 96vw)', padding: '24px 28px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
             <h3 style={{ margin: '0 0 4px', fontSize: 16, color: 'var(--theme-text1)' }}>Pair with — {suggestModal.name}</h3>
             <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
               Checked items appear as "Pair with" chips when staff tap this item on the POS order screen.
@@ -337,13 +339,13 @@ export default function MenuPricing() {
               placeholder="Search items…"
               value={pairingSearch}
               onChange={e => setPairingSearch(e.target.value)}
-              style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)', marginBottom: 10, flexShrink: 0 }}
+              style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)', marginBottom: 10, flexShrink: 0 }}
             />
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
               {recipes
                 .filter(r => r.id !== suggestModal.id && r.name.toLowerCase().includes(pairingSearch.toLowerCase()))
                 .map(r => (
-                  <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 6, cursor: 'pointer', background: pairingDraft.has(r.id) ? 'color-mix(in srgb, var(--theme-accent) 10%, var(--theme-card))' : 'transparent' }}>
+                  <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: pairingDraft.has(r.id) ? 'color-mix(in srgb, var(--theme-accent) 10%, var(--theme-card))' : 'transparent' }}>
                     <input type="checkbox" checked={pairingDraft.has(r.id)}
                       onChange={() => setPairingDraft(s => { const n = new Set(s); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n })}
                       style={{ accentColor: 'var(--theme-accent)', cursor: 'pointer', width: 15, height: 15, flexShrink: 0 }}
@@ -368,20 +370,20 @@ export default function MenuPricing() {
       {addModal && (
         <div onClick={e => { if (e.target === e.currentTarget) { setAddModal(false); setEditingId(null) } }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12, width: 'min(440px, 96vw)', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
+          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', width: 'min(440px, 96vw)', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
             <h3 style={{ margin: '0 0 20px', fontSize: 16, color: 'var(--theme-text1)' }}>{editingId ? 'Edit Menu Item' : 'Add Menu Item'}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
-                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>Item Name *</label>
-                <input autoFocus value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f1">Item Name *</label>
+                <input id="menupr-f1" autoFocus value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
                   onKeyDown={e => e.key === 'Enter' && saveNewItem()} placeholder="e.g. Cappuccino"
-                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>Category</label>
-                <input list="menu-cats-pos" value={addForm.category} onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))}
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f2">Category</label>
+                <input id="menupr-f2" list="menu-cats-pos" value={addForm.category} onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))}
                   placeholder="Beverage / Food / Dessert / Other"
-                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
                 <datalist id="menu-cats-pos">
                   {['Beverage', 'Food', 'Dessert', 'Snack', 'Other', ...Array.from(new Set(recipes.map(r => r.category))).sort()]
                     .filter((v, i, a) => a.indexOf(v) === i).map(c => <option key={c} value={c} />)}
@@ -392,7 +394,7 @@ export default function MenuPricing() {
                 <div style={{ display: 'flex', gap: 8 }}>
                   {[{ label: 'VAT 13%', val: 0.13 }, { label: 'No VAT', val: 0 }].map(opt => (
                     <button key={opt.val} onClick={() => setAddForm(f => ({ ...f, vatRate: opt.val }))} style={{
-                      flex: 1, padding: '7px 0', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+                      flex: 1, padding: '7px 0', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: 'pointer',
                       background: addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                       color: addForm.vatRate === opt.val ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
                       border: `1px solid ${addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
@@ -402,13 +404,13 @@ export default function MenuPricing() {
                 </div>
               </div>
               <div>
-                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f3">
                   {addForm.vatRate > 0 ? 'Menu Price (incl. VAT) *' : 'Menu Price *'}
                 </label>
-                <input type="number" min="0" step="any" value={addForm.price}
+                <input id="menupr-f3" type="number" min="0" step="any" value={addForm.price}
                   onChange={e => setAddForm(f => ({ ...f, price: e.target.value }))}
                   onKeyDown={e => e.key === 'Enter' && saveNewItem()} placeholder="e.g. 290"
-                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
                 {addForm.price && parseFloat(addForm.price) > 0 && addForm.vatRate > 0 && (
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
                     Ex-VAT: NPR {(parseFloat(addForm.price) / (1 + addForm.vatRate)).toFixed(2)}
@@ -416,17 +418,17 @@ export default function MenuPricing() {
                 )}
               </div>
               <div>
-                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f4">
                   <Tip text="What this item costs you to buy/produce, e.g. what you pay your supplier for a bottle of Coke. Used to value this item on the Complimentary Slip and comp reporting instead of showing NPR 0 — there's no Item Master to link an ingredient to on a POS-only plan." width={280}>
                     Cost Price (optional)
                   </Tip>
                 </label>
-                <input type="number" min="0" step="any" value={addForm.costPrice}
+                <input id="menupr-f4" type="number" min="0" step="any" value={addForm.costPrice}
                   onChange={e => setAddForm(f => ({ ...f, costPrice: e.target.value }))}
                   onKeyDown={e => e.key === 'Enter' && saveNewItem()} placeholder="e.g. 25"
-                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
               </div>
-              {addError && <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-red)' }}>{addError}</p>}
+              {addError && <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-red-text)' }}>{addError}</p>}
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
               <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { setAddModal(false); setEditingId(null) }}>Cancel</button>
@@ -495,7 +497,7 @@ export default function MenuPricing() {
       {/* POS summary strip */}
       {!loading && recipes.length > 0 && (
         <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-          <span style={{ fontSize: 12, color: 'var(--theme-green)' }}>
+          <span style={{ fontSize: 12, color: 'var(--theme-green-text)' }}>
             ● {posOnCount} item{posOnCount !== 1 ? 's' : ''} on POS
           </span>
           {posOffCount > 0 && (
@@ -532,7 +534,7 @@ export default function MenuPricing() {
                 {th('left',  'Recipe name, category, and VAT status. VAT 13% items: selling price includes 13% VAT. No VAT items are sold at the price as entered.', 'Item')}
                 {th('right', 'Total ingredient cost per portion at current item rates from the Item Master.', 'Food Cost', 100)}
                 {th('right', 'Current VAT-inclusive menu price saved in Recipe Costing. Calculated as selling price × (1 + VAT rate).', 'Current Price', 120)}
-                {th('right', 'Food cost ÷ ex-VAT selling price. Green ≤30%, amber 31–38%, red >38%. Nepal F&B target: 28–35%.', 'FC %', 80)}
+                {th('right', `Food cost ÷ ex-VAT selling price. Green up to ${fcThresholds(settings).warn}%, amber up to ${fcThresholds(settings).critical}%, red above that — the thresholds set in Settings → Thresholds. A plate of momo costing NPR 105 sold at NPR 300 is 35%.`, 'FC %', 80)}
                 {th('right', 'Enter a new VAT-inclusive menu price. The ex-VAT price and FC% are back-calculated automatically. Press Enter to save.', 'New Price (incl VAT)', 150)}
                 {th('right', 'Projected FC% at the new price. Updates live as you type.', 'New FC %', 90)}
                 {th('right', 'Difference between new and current VAT-inclusive price. Green = price increase, red = price decrease.', 'Change', 90)}
@@ -591,17 +593,17 @@ export default function MenuPricing() {
                         style={{
                           background: 'var(--theme-input-bg)',
                           border: `1px solid ${changed ? 'var(--theme-amber)' : 'var(--theme-border)'}`,
-                          borderRadius: 5, padding: '5px 8px', fontSize: 13,
+                          borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13,
                           color: 'var(--theme-text1)', outline: 'none',
                           width: 110, textAlign: 'right',
                         }}
                       />
-                      {errors[r.id] && <div style={{ fontSize: 10, color: 'var(--theme-red)', marginTop: 2 }}>{errors[r.id]}</div>}
+                      {errors[r.id] && <div style={{ fontSize: 10, color: 'var(--theme-red-text)', marginTop: 2 }}>{errors[r.id]}</div>}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: newFcPct !== null ? 700 : 400, color: newFcPct !== null ? fcColor(newFcPct) : 'var(--theme-text3)' }}>
                       {newFcPct !== null ? `${newFcPct.toFixed(1)}%` : '—'}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: diff !== null ? 600 : 400, color: diff === null ? 'var(--theme-text3)' : diff > 0 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                    <td style={{ textAlign: 'right', fontWeight: diff !== null ? 600 : 400, color: diff === null ? 'var(--theme-text3)' : diff > 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                       {diff !== null ? `${diff > 0 ? '+' : ''}NPR ${Math.round(diff)}` : '—'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
@@ -628,7 +630,7 @@ export default function MenuPricing() {
       {suggestModal && (
         <div onClick={e => { if (e.target === e.currentTarget) setSuggestModal(null) }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12, width: 'min(480px, 96vw)', padding: '24px 28px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
+          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', width: 'min(480px, 96vw)', padding: '24px 28px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
             <h3 style={{ margin: '0 0 4px', fontSize: 16, color: 'var(--theme-text1)' }}>Pair with — {suggestModal.name}</h3>
             <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
               Checked items appear as "Pair with" chips when staff tap this item on the POS order screen.
@@ -638,13 +640,13 @@ export default function MenuPricing() {
               placeholder="Search items…"
               value={pairingSearch}
               onChange={e => setPairingSearch(e.target.value)}
-              style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)', marginBottom: 10, flexShrink: 0 }}
+              style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)', marginBottom: 10, flexShrink: 0 }}
             />
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
               {recipes
                 .filter(r => r.id !== suggestModal.id && r.name.toLowerCase().includes(pairingSearch.toLowerCase()))
                 .map(r => (
-                  <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 6, cursor: 'pointer', background: pairingDraft.has(r.id) ? 'color-mix(in srgb, var(--theme-accent) 10%, var(--theme-card))' : 'transparent' }}>
+                  <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: pairingDraft.has(r.id) ? 'color-mix(in srgb, var(--theme-accent) 10%, var(--theme-card))' : 'transparent' }}>
                     <input type="checkbox" checked={pairingDraft.has(r.id)}
                       onChange={() => setPairingDraft(s => { const n = new Set(s); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n })}
                       style={{ accentColor: 'var(--theme-accent)', cursor: 'pointer', width: 15, height: 15, flexShrink: 0 }}
@@ -670,30 +672,30 @@ export default function MenuPricing() {
       {addModal && (
         <div onClick={e => { if (e.target === e.currentTarget) { setAddModal(false); setEditingId(null) } }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12, width: 'min(440px, 96vw)', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
+          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', width: 'min(440px, 96vw)', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
             <h3 style={{ margin: '0 0 20px', fontSize: 16, color: 'var(--theme-text1)' }}>Add Menu Item</h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
-                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>Item Name *</label>
-                <input
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f5">Item Name *</label>
+                <input id="menupr-f5"
                   autoFocus
                   value={addForm.name}
                   onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
                   onKeyDown={e => e.key === 'Enter' && saveNewItem()}
                   placeholder="e.g. Cappuccino"
-                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }}
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }}
                 />
               </div>
 
               <div>
-                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>Category</label>
-                <input
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f6">Category</label>
+                <input id="menupr-f6"
                   list="menu-cats"
                   value={addForm.category}
                   onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))}
                   placeholder="Beverage / Food / Dessert / Other"
-                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }}
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }}
                 />
                 <datalist id="menu-cats">
                   {['Beverage', 'Food', 'Dessert', 'Snack', 'Other',
@@ -708,7 +710,7 @@ export default function MenuPricing() {
                   {[{ label: 'VAT 13%', val: 0.13 }, { label: 'No VAT', val: 0 }].map(opt => (
                     <button key={opt.val} onClick={() => setAddForm(f => ({ ...f, vatRate: opt.val }))}
                       style={{
-                        flex: 1, padding: '7px 0', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+                        flex: 1, padding: '7px 0', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: 'pointer',
                         background: addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                         color: addForm.vatRate === opt.val ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
                         border: `1px solid ${addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
@@ -719,16 +721,16 @@ export default function MenuPricing() {
               </div>
 
               <div>
-                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>
+                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f7">
                   {addForm.vatRate > 0 ? 'Menu Price (incl. VAT) *' : 'Menu Price *'}
                 </label>
-                <input
+                <input id="menupr-f7"
                   type="number" min="0" step="any"
                   value={addForm.price}
                   onChange={e => setAddForm(f => ({ ...f, price: e.target.value }))}
                   onKeyDown={e => e.key === 'Enter' && saveNewItem()}
                   placeholder="e.g. 290"
-                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }}
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }}
                 />
                 {addForm.price && parseFloat(addForm.price) > 0 && (
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
@@ -737,7 +739,7 @@ export default function MenuPricing() {
                 )}
               </div>
 
-              {addError && <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-red)' }}>{addError}</p>}
+              {addError && <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-red-text)' }}>{addError}</p>}
             </div>
 
             <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>

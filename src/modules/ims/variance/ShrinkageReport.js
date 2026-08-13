@@ -7,12 +7,16 @@ import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import Tip from '../../../components/Tip'
 import { Navigate } from 'react-router-dom'
 
+// `badge` rather than a hand-rolled chip: the previous inline version built its border as
+// `1px solid ${color}40` by string-concatenating an alpha onto a value that is a var() — an
+// invalid declaration CSS discards in silence, so the border never painted on any preset. The
+// shared classes carry the tint, radius, padding and type, and cannot drift.
 function shrinkageStatus(count, covered) {
   const ratio = covered > 0 ? count / covered : 0
-  if (ratio >= 0.67 && count >= 2) return { label: 'Consistent', color: 'var(--theme-red)', bg: 'rgba(248,113,113,0.1)' }
-  if (count >= 2)                  return { label: 'Occasional', color: 'var(--theme-amber)', bg: 'rgba(251,191,36,0.1)'  }
-  if (count === 1)                 return { label: 'Once',       color: 'var(--theme-accent)', bg: 'rgba(201,168,76,0.1)'  }
-  return                                  { label: 'Clear',      color: 'var(--theme-green)', bg: 'rgba(52,211,153,0.1)'  }
+  if (ratio >= 0.67 && count >= 2) return { label: 'Consistent', badge: 'badge-red',    color: 'var(--theme-red-text)' }
+  if (count >= 2)                  return { label: 'Occasional', badge: 'badge-amber',  color: 'var(--theme-amber-text)' }
+  if (count === 1)                 return { label: 'Once',       badge: 'badge-yellow', color: 'var(--theme-accent-ink)' }
+  return                                  { label: 'Clear',      badge: 'badge-green',  color: 'var(--theme-green-text)' }
 }
 
 export default function ShrinkageReport() {
@@ -215,9 +219,9 @@ export default function ShrinkageReport() {
         </select>
       </div>
 
-      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-        <strong style={{ color: 'var(--theme-accent)' }}>What this shows:</strong> Items where actual usage consistently exceeded theoretical (recipe-based) usage across multiple closed periods.
-        Unlike wastage — which is <em style={{ color: 'var(--theme-text1)' }}>logged</em> — shrinkage is <em style={{ color: 'var(--theme-red)' }}>unexplained</em>. Possible causes: theft, over-portioning, unlogged spillage, or data entry errors.
+      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+        <strong style={{ color: 'var(--theme-accent-ink)' }}>What this shows:</strong> Items where actual usage consistently exceeded theoretical (recipe-based) usage across multiple closed periods.
+        Unlike wastage — which is <em style={{ color: 'var(--theme-text1)' }}>logged</em> — shrinkage is <em style={{ color: 'var(--theme-red-text)' }}>unexplained</em>. Possible causes: theft, over-portioning, unlogged spillage, or data entry errors.
         Only items linked to recipes (with sales data) are analysed.
       </div>
 
@@ -232,21 +236,21 @@ export default function ShrinkageReport() {
             <div className="stat-label">
               <Tip text="Items over-used in 67%+ of monitored periods — your highest-risk items." width={240}>Consistent Shrinkage</Tip>
             </div>
-            <div className="stat-value" style={{ color: summary.consistent > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>{summary.consistent}</div>
+            <div className="stat-value" style={{ color: summary.consistent > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{summary.consistent}</div>
             <div className="stat-sub">items</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">
               <Tip text="Items with at least one period of unexplained over-use vs theoretical usage." width={220}>Any Shrinkage</Tip>
             </div>
-            <div className="stat-value" style={{ color: summary.anyFlagged > 0 ? 'var(--theme-amber)' : 'var(--theme-green)' }}>{summary.anyFlagged}</div>
+            <div className="stat-value" style={{ color: summary.anyFlagged > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{summary.anyFlagged}</div>
             <div className="stat-sub">of {summary.totalTracked} recipe-covered items</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">
               <Tip text="Total NPR value of unexplained loss across all periods analysed (qty × item rate)." width={240}>Total Loss Value</Tip>
             </div>
-            <div className="stat-value" style={{ fontSize: 16, color: summary.totalLossVal > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>
+            <div className="stat-value" style={{ fontSize: 16, color: summary.totalLossVal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
               {summary.totalLossVal > 0 ? fmt(summary.totalLossVal) : '—'}
             </div>
             <div className="stat-sub">across all analysed periods</div>
@@ -314,20 +318,14 @@ export default function ShrinkageReport() {
                       {row.shrinkCount > 0 ? row.shrinkCount : '—'}
                     </td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.coveredPeriods}</td>
-                    <td style={{ textAlign: 'right', color: row.shrinkCount > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>
+                    <td style={{ textAlign: 'right', color: row.shrinkCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
                       {row.avgShrinkQty > 0 ? Number(row.avgShrinkQty.toFixed(3)).toLocaleString() : '—'}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: row.totalShrinkValue > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: row.totalShrinkValue > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
                       {row.totalShrinkValue > 0 ? fmt(row.totalShrinkValue) : '—'}
                     </td>
                     <td>
-                      <span style={{
-                        fontSize: 11, fontWeight: 700, color: row.status.color,
-                        background: row.status.bg, border: `1px solid ${row.status.color}40`,
-                        borderRadius: 4, padding: '2px 8px'
-                      }}>
-                        {row.status.label}
-                      </span>
+                      <span className={`badge ${row.status.badge}`}>{row.status.label}</span>
                     </td>
                   </tr>
                 ))}

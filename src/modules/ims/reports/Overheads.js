@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -16,6 +17,7 @@ const BUCKET_CONFIG = {
   overhead: {
     label: 'Fixed Overheads',
     color: 'var(--theme-accent)',
+    textColor: 'var(--theme-accent-ink)',
     target: 25,
     presets: ['Rent', 'Utilities', 'Tech & Software', 'Marketing', 'Insurance', 'Miscellaneous'],
     placeholders: {
@@ -30,6 +32,7 @@ const BUCKET_CONFIG = {
   labor: {
     label: 'Labor Costs',
     color: 'var(--theme-text1)',
+    textColor: 'var(--theme-text1)',
     target: 30,
     presets: ['Manager / Head Chef', 'Kitchen Staff', 'Service Staff', 'Part-time / Hourly', 'Benefits & Bonuses'],
     placeholders: {
@@ -43,6 +46,7 @@ const BUCKET_CONFIG = {
   tax_fees: {
     label: 'Tax & Fees',
     color: 'var(--theme-purple)',
+    textColor: 'var(--theme-purple-text)',
     target: 5,
     presets: ['VAT Compliance', 'Card Processing', 'Bank Charges', 'License & Permits', 'Accountant Fees'],
     placeholders: {
@@ -248,12 +252,21 @@ export default function Overheads() {
     return p != null ? `${p.toFixed(1)}%` : null
   }
 
-  function trafficLight(actual, target) {
+  // Fill variant of trafficLight below — same bands, base tokens, for bars and dots.
+  function trafficLightFill(actual, target) {
     if (actual == null) return 'var(--theme-text2)'
     const diff = actual - target
     if (diff <= 2)  return 'var(--theme-green)'
     if (diff <= 8)  return 'var(--theme-amber)'
     return 'var(--theme-red)'
+  }
+
+  function trafficLight(actual, target) {
+    if (actual == null) return 'var(--theme-text2)'
+    const diff = actual - target
+    if (diff <= 2)  return 'var(--theme-green-text)'
+    if (diff <= 8)  return 'var(--theme-amber-text)'
+    return 'var(--theme-red-text)'
   }
 
   function fmt(val) {
@@ -262,12 +275,13 @@ export default function Overheads() {
 
   // P&L rows
   const pnlRows = hasSales ? [
-    { key: 'food',   label: 'Food Cost',  amount: foodCost,        target: 30, color: 'var(--theme-accent)' },
-    { key: 'labor',  label: 'Labor',      amount: totals.labor,    target: 30, color: 'var(--theme-text1)' },
-    { key: 'oh',     label: 'Overhead',   amount: totals.overhead, target: 25, color: 'var(--theme-green)' },
-    { key: 'tax',    label: 'Tax & Fees', amount: totals.tax_fees, target: 5,  color: 'var(--theme-purple)' },
+    { key: 'food',   label: 'Food Cost',  amount: foodCost,        target: 30, color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
+    { key: 'labor',  label: 'Labor',      amount: totals.labor,    target: 30, color: 'var(--theme-text1)', textColor: 'var(--theme-text1)' },
+    { key: 'oh',     label: 'Overhead',   amount: totals.overhead, target: 25, color: 'var(--theme-green)', textColor: 'var(--theme-green-text)' },
+    { key: 'tax',    label: 'Tax & Fees', amount: totals.tax_fees, target: 5,  color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)' },
     { key: 'profit', label: 'Net Profit', amount: netProfit,       target: 10,
-      color: netProfit != null && netProfit >= 0 ? 'var(--theme-green)' : 'var(--theme-red)' },
+      color:     netProfit != null && netProfit >= 0 ? 'var(--theme-green)'      : 'var(--theme-red)',
+      textColor: netProfit != null && netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' },
   ] : null
 
   // Cross-bucket ranked pivot — all line items with amount > 0, sorted by spend
@@ -301,6 +315,7 @@ export default function Overheads() {
   const bucketTotal = totals[activeBucket]
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="fixed cost tracking" />
 
   return (
     <div>
@@ -314,7 +329,7 @@ export default function Overheads() {
           <select
             value={periodId}
             onChange={e => setPeriodId(e.target.value)}
-            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
+            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
           >
             {periods.map(p => <option key={p.id} value={p.id}>{p.label}{p.status === 'open' ? ' (open)' : ''}</option>)}
           </select>
@@ -325,7 +340,7 @@ export default function Overheads() {
       </div>
 
       {isLocked && (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red)' }}>
+        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
         </div>
       )}
@@ -336,7 +351,7 @@ export default function Overheads() {
           {
             label: 'Fixed Overheads', value: fmt(totals.overhead),
             sub: fmtPct(totals.overhead, revenue) ? `${fmtPct(totals.overhead, revenue)} of revenue` : 'No sales data',
-            color: 'var(--theme-accent)',
+            color: 'var(--theme-accent-ink)',
             tip: 'Rent, utilities, tech, marketing — costs that exist regardless of how many customers you serve.'
           },
           {
@@ -348,7 +363,7 @@ export default function Overheads() {
           {
             label: 'Tax & Fees', value: fmt(totals.tax_fees),
             sub: fmtPct(totals.tax_fees, revenue) ? `${fmtPct(totals.tax_fees, revenue)} of revenue` : 'No sales data',
-            color: 'var(--theme-purple)',
+            color: 'var(--theme-purple-text)',
             tip: 'VAT compliance, card processing fees, bank charges, licenses. Often forgotten but real.'
           },
           {
@@ -368,7 +383,7 @@ export default function Overheads() {
             <div className="stat-label">
               <Tip text={s.tip} width={220}>{s.label}</Tip>
             </div>
-            <div className="stat-value" style={{ fontSize: 16, color: s.color }}>{s.value}</div>
+            <div className="stat-value" style={{ fontSize: 16, color: s.textColor || s.color }}>{s.value}</div>
             <div className="stat-sub">{s.sub}</div>
           </div>
         ))}
@@ -377,22 +392,26 @@ export default function Overheads() {
       {/* Entry card — tabs + table */}
       <div className="card" style={{ marginBottom: 20 }}>
         {/* Bucket tabs */}
-        <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--theme-border)', marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', borderBottom: '1px solid var(--theme-border)', marginBottom: 20 }}
+             role="tablist" aria-label="Fixed cost buckets">
           {Object.entries(BUCKET_CONFIG).map(([key, c]) => (
             <button
               key={key}
+              type="button"
+              role="tab"
+              aria-selected={activeBucket === key}
               onClick={() => setActiveBucket(key)}
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
                 padding: '10px 20px', fontSize: 13, fontWeight: 500,
-                color: activeBucket === key ? c.color : 'var(--theme-text2)',
+                color: activeBucket === key ? (c.textColor || c.color) : 'var(--theme-text2)',
                 borderBottom: activeBucket === key ? `2px solid ${c.color}` : '2px solid transparent',
                 marginBottom: -1, transition: 'color 0.12s', whiteSpace: 'nowrap'
               }}
             >
               {c.label}
               {totals[key] > 0 && (
-                <span style={{ marginLeft: 8, fontSize: 11, background: 'color-mix(in srgb, var(--theme-text1) 8%, transparent)', borderRadius: 10, padding: '2px 7px', color: c.color }}>
+                <span style={{ marginLeft: 8, fontSize: 11, background: 'color-mix(in srgb, var(--theme-text1) 8%, transparent)', borderRadius: 'var(--radius-md)', padding: '2px 7px', color: c.textColor || c.color }}>
                   {fmt(totals[key])}
                 </span>
               )}
@@ -434,7 +453,7 @@ export default function Overheads() {
                         else updateRow(activeBucket, idx, 'category', e.target.value)
                       }}
                       disabled={isLocked}
-                      style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
+                      style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
                     >
                       {cfg.presets.map(c => <option key={c} value={c}>{c}</option>)}
                       <option value="__custom__">Custom…</option>
@@ -445,7 +464,7 @@ export default function Overheads() {
                         onChange={e => updateRow(activeBucket, idx, 'category', e.target.value)}
                         placeholder="Category name"
                         disabled={isLocked}
-                        style={{ marginTop: 4, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '5px 8px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
+                        style={{ marginTop: 4, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
                       />
                     )}
                   </td>
@@ -455,7 +474,7 @@ export default function Overheads() {
                       onChange={e => updateRow(activeBucket, idx, 'description', e.target.value)}
                       disabled={isLocked}
                       placeholder={cfg.placeholders[row.category] || 'Description…'}
-                      style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
+                      style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
                     />
                   </td>
                   <td style={{ textAlign: 'right' }}>
@@ -465,10 +484,10 @@ export default function Overheads() {
                       onChange={e => updateRow(activeBucket, idx, 'amount', e.target.value)}
                       disabled={isLocked}
                       placeholder="0"
-                      style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 130, textAlign: 'right' }}
+                      style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 130, textAlign: 'right' }}
                     />
                   </td>
-                  <td style={{ textAlign: 'right', fontSize: 13, color: bucketTotal > 0 && parseFloat(row.amount) > 0 ? cfg.color : 'var(--theme-text3)', fontWeight: 600 }}>
+                  <td style={{ textAlign: 'right', fontSize: 13, color: bucketTotal > 0 && parseFloat(row.amount) > 0 ? (cfg.textColor || cfg.color) : 'var(--theme-text3)', fontWeight: 600 }}>
                     {bucketTotal > 0 && parseFloat(row.amount) > 0
                       ? `${((parseFloat(row.amount) / bucketTotal) * 100).toFixed(1)}%`
                       : '—'}
@@ -476,14 +495,14 @@ export default function Overheads() {
                   <td style={{ textAlign: 'center' }}>
                     {!isLocked && (
                       <button onClick={() => removeRow(activeBucket, idx)}
-                        style={{ background: 'none', border: 'none', color: 'var(--theme-red)', cursor: 'pointer', fontSize: 16, padding: '4px 8px' }}>×</button>
+                        style={{ background: 'none', border: 'none', color: 'var(--theme-red-text)', cursor: 'pointer', fontSize: 16, padding: '4px 8px' }}>×</button>
                     )}
                   </td>
                 </tr>
               ))}
               <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                 <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12, fontSize: 13 }}>TOTAL</td>
-                <td style={{ textAlign: 'right', fontWeight: 700, color: cfg.color, fontSize: 16, paddingTop: 12 }}>{fmt(bucketTotal)}</td>
+                <td style={{ textAlign: 'right', fontWeight: 700, color: cfg.textColor || cfg.color, fontSize: 16, paddingTop: 12 }}>{fmt(bucketTotal)}</td>
                 <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', fontSize: 13, paddingTop: 12 }}>100%</td>
                 <td></td>
               </tr>
@@ -513,8 +532,13 @@ export default function Overheads() {
               const actualPct  = pct(row.amount, revenue)
               const numPct     = actualPct || 0
               const isProfit   = row.key === 'profit'
+              // Two values again: barColor fills the progress bar, barText labels the percentage
+              // beside it. The single value was the base token, which is a fill colour.
               const barColor   = isProfit
                 ? (row.amount != null && row.amount >= 0 ? 'var(--theme-green)' : 'var(--theme-red)')
+                : trafficLightFill(numPct, row.target)
+              const barText    = isProfit
+                ? (row.amount != null && row.amount >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)')
                 : trafficLight(numPct, row.target)
               const barWidth   = Math.min(Math.abs(numPct), 100)
 
@@ -528,15 +552,15 @@ export default function Overheads() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
                       <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{fmt(row.amount)}</span>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: barColor, minWidth: 54, textAlign: 'right' }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: barText, minWidth: 54, textAlign: 'right' }}>
                         {actualPct != null
                           ? `${isProfit && row.amount >= 0 ? '+' : ''}${actualPct.toFixed(1)}%`
                           : '—'}
                       </span>
                     </div>
                   </div>
-                  <div style={{ height: 7, background: 'var(--theme-border)', borderRadius: 4, overflow: 'hidden' }}>
-                    <div style={{ width: '100%', height: '100%', background: barColor, borderRadius: 4, transform: `scaleX(${barWidth / 100})`, transformOrigin: 'left', transition: 'transform 0.4s ease' }} />
+                  <div style={{ height: 7, background: 'var(--theme-border)', borderRadius: 'var(--radius-xs)', overflow: 'hidden' }}>
+                    <div style={{ width: '100%', height: '100%', background: barColor, borderRadius: 'var(--radius-xs)', transform: `scaleX(${barWidth / 100})`, transformOrigin: 'left', transition: 'transform 0.4s ease' }} />
                   </div>
                 </div>
               )
@@ -546,7 +570,7 @@ export default function Overheads() {
           {/* Net profit callout */}
           {netProfit != null && (
             <div style={{
-              marginTop: 20, padding: '12px 16px', borderRadius: 8,
+              marginTop: 20, padding: '12px 16px', borderRadius: 'var(--radius-sm)',
               background: netProfit >= 0 ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
               border: `1px solid ${netProfit >= 0 ? 'rgba(52,211,153,0.25)' : 'rgba(248,113,113,0.25)'}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center'
@@ -554,7 +578,7 @@ export default function Overheads() {
               <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
                 {netProfit >= 0 ? '✓ Profitable this period' : '✗ Operating at a loss this period'}
               </span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: netProfit >= 0 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+              <span style={{ fontSize: 18, fontWeight: 800, color: netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                 {netProfit >= 0 ? '+' : ''}{fmt(netProfit)}
               </span>
             </div>
@@ -563,7 +587,7 @@ export default function Overheads() {
       ) : (
         <div className="card" style={{ marginBottom: 16, background: 'rgba(201,168,76,0.04)', borderColor: 'rgba(201,168,76,0.15)' }}>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
-            💡 Add sales entries for this period to unlock the <strong style={{ color: 'var(--theme-accent)' }}>P&L Summary</strong>, <strong style={{ color: 'var(--theme-accent)' }}>Break-Even</strong>, and <strong style={{ color: 'var(--theme-accent)' }}>Overhead per Cover</strong> panels.
+            💡 Add sales entries for this period to unlock the <strong style={{ color: 'var(--theme-accent-ink)' }}>P&L Summary</strong>, <strong style={{ color: 'var(--theme-accent-ink)' }}>Break-Even</strong>, and <strong style={{ color: 'var(--theme-accent-ink)' }}>Overhead per Cover</strong> panels.
           </p>
         </div>
       )}
@@ -575,33 +599,32 @@ export default function Overheads() {
 
           {/* Revenue cost stack — only when sales data available */}
           {hasSales && (() => {
-            const fc  = { key: 'food',     label: 'Food Cost', color: 'var(--theme-accent)', amount: foodCost,        pct: pct(foodCost,        revenue) || 0 }
-            const lb  = { key: 'labor',    label: 'Labor',     color: 'var(--theme-text1)', amount: totals.labor,    pct: pct(totals.labor,    revenue) || 0 }
-            const oh  = { key: 'overhead', label: 'Overhead',  color: 'var(--theme-green)', amount: totals.overhead, pct: pct(totals.overhead, revenue) || 0 }
-            const tx  = { key: 'tax',      label: 'Tax & Fees',color: 'var(--theme-purple)', amount: totals.tax_fees, pct: pct(totals.tax_fees, revenue) || 0 }
+            const fc  = { key: 'food',     label: 'Food Cost', color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)', amount: foodCost,        pct: pct(foodCost,        revenue) || 0 }
+            const lb  = { key: 'labor',    label: 'Labor',     color: 'var(--theme-text1)', textColor: 'var(--theme-text1)', amount: totals.labor,    pct: pct(totals.labor,    revenue) || 0 }
+            const oh  = { key: 'overhead', label: 'Overhead',  color: 'var(--theme-green)', textColor: 'var(--theme-green-text)', amount: totals.overhead, pct: pct(totals.overhead, revenue) || 0 }
+            const tx  = { key: 'tax',      label: 'Tax & Fees',color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)', amount: totals.tax_fees, pct: pct(totals.tax_fees, revenue) || 0 }
             const prPct = netProfit != null ? pct(netProfit, revenue) : null
             const pr  = { key: 'profit',   label: prPct != null && prPct < 0 ? 'Loss' : 'Net Profit',
-                          color: prPct != null && prPct < 0 ? 'var(--theme-red)' : 'var(--theme-green)',
+                          color:     prPct != null && prPct < 0 ? 'var(--theme-red)'      : 'var(--theme-green)',
+                          textColor: prPct != null && prPct < 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
                           amount: netProfit, pct: prPct || 0 }
             const segments = [fc, lb, oh, tx, pr].filter(s => s.amount != null && s.pct > 0.2)
             return (
               <div style={{ marginBottom: 24 }}>
                 <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 10 }}>
-                  Where each rupee of revenue goes &nbsp;·&nbsp; <span style={{ color: 'var(--theme-accent)', fontWeight: 600 }}>Revenue {fmt(revenue)}</span>
+                  Where each rupee of revenue goes &nbsp;·&nbsp; <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>Revenue {fmt(revenue)}</span>
                 </div>
                 {/* Stacked bar */}
-                <div style={{ display: 'flex', height: 36, borderRadius: 8, overflow: 'hidden', gap: 2, marginBottom: 10 }}>
+                <div style={{ display: 'flex', height: 36, borderRadius: 'var(--radius-sm)', overflow: 'hidden', gap: 2, marginBottom: 10 }}>
                   {segments.map(s => (
                     <div key={s.key} title={`${s.label}: ${fmt(s.amount)} (${s.pct.toFixed(1)}%)`} style={{
                       width: `${Math.min(s.pct, 100)}%`, minWidth: s.pct > 4 ? 2 : 0,
                       background: s.color, display: 'flex', alignItems: 'center',
                       justifyContent: 'center', overflow: 'hidden', cursor: 'default',
                     }}>
-                      {s.pct > 7 && (
-                        <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--theme-bg)', whiteSpace: 'nowrap' }}>
-                          {s.pct.toFixed(0)}%
-                        </span>
-                      )}
+                      {/* No label inside the segment: it sat on a signal-colour fill in
+                          --theme-bg and measured 2.60:1 on Rosé Dawn, and the legend directly
+                          below already carries the same percentage to one more decimal. */}
                     </div>
                   ))}
                 </div>
@@ -609,9 +632,9 @@ export default function Overheads() {
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                   {segments.map(s => (
                     <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 2, background: s.color, display: 'inline-block', flexShrink: 0 }} />
+                      <span style={{ width: 10, height: 10, borderRadius: 'var(--radius-xs)', background: s.color, display: 'inline-block', flexShrink: 0 }} />
                       <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{s.label}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: s.color }}>{s.pct.toFixed(1)}%</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: s.textColor || s.color }}>{s.pct.toFixed(1)}%</span>
                     </div>
                   ))}
                 </div>
@@ -625,9 +648,9 @@ export default function Overheads() {
               const bucketRows = rows[key].filter(r => parseFloat(r.amount) > 0)
               const total = totals[key]
               return (
-                <div key={key} style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 8, padding: '14px', border: '1px solid var(--theme-border)' }}>
+                <div key={key} style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 'var(--radius-sm)', padding: '14px', border: '1px solid var(--theme-border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: cfg.color }}>{cfg.label}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: cfg.textColor || cfg.color }}>{cfg.label}</span>
                     <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{fmt(total)}</span>
                   </div>
                   {total === 0 ? (
@@ -642,10 +665,10 @@ export default function Overheads() {
                           <div key={i}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
                               <span style={{ fontSize: 11, color: 'var(--theme-text1)', fontWeight: 500 }}>{row.category}</span>
-                              <span style={{ fontSize: 11, color: cfg.color, fontWeight: 700 }}>{rowPct.toFixed(0)}%</span>
+                              <span style={{ fontSize: 11, color: cfg.textColor || cfg.color, fontWeight: 700 }}>{rowPct.toFixed(0)}%</span>
                             </div>
-                            <div style={{ height: 5, background: 'var(--theme-border)', borderRadius: 3, overflow: 'hidden' }}>
-                              <div style={{ width: `${rowPct}%`, height: '100%', background: cfg.color, opacity: 0.75, borderRadius: 3 }} />
+                            <div style={{ height: 5, background: 'var(--theme-border)', borderRadius: 'var(--radius-xs)', overflow: 'hidden' }}>
+                              <div style={{ width: `${rowPct}%`, height: '100%', background: cfg.color, opacity: 0.75, borderRadius: 'var(--radius-xs)' }} />
                             </div>
                           </div>
                         )
@@ -690,14 +713,14 @@ export default function Overheads() {
                       return (
                         <tr key={i}>
                           <td>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: cfg?.color, background: 'rgba(255,255,255,0.05)', borderRadius: 4, padding: '2px 7px', whiteSpace: 'nowrap' }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: cfg?.textColor || cfg?.color, background: 'rgba(255,255,255,0.05)', borderRadius: 'var(--radius-xs)', padding: '2px 7px', whiteSpace: 'nowrap' }}>
                               {cfg?.label || item.bucket}
                             </span>
                           </td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.category}</td>
                           <td style={{ color: 'var(--theme-text2)', maxWidth: 220 }}>{item.description || '—'}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600 }}>{item.amount.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{item.pctOfTotal.toFixed(1)}%</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{item.pctOfTotal.toFixed(1)}%</td>
                           {revenue > 0 && (
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {item.pctOfRev != null ? `${item.pctOfRev.toFixed(1)}%` : '—'}
@@ -705,8 +728,8 @@ export default function Overheads() {
                           )}
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <div style={{ flex: 1, height: 6, background: 'var(--theme-border)', borderRadius: 3, overflow: 'hidden', minWidth: 60 }}>
-                                <div style={{ width: `${item.pctOfTotal}%`, height: '100%', background: cfg?.color || 'var(--theme-accent)', borderRadius: 3 }} />
+                              <div style={{ flex: 1, height: 6, background: 'var(--theme-border)', borderRadius: 'var(--radius-xs)', overflow: 'hidden', minWidth: 60 }}>
+                                <div style={{ width: `${item.pctOfTotal}%`, height: '100%', background: cfg?.color || 'var(--theme-accent)', borderRadius: 'var(--radius-xs)' }} />
                               </div>
                             </div>
                           </td>
@@ -718,7 +741,7 @@ export default function Overheads() {
                     <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                       <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 10, fontSize: 12 }}>TOTAL FIXED COSTS</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 10 }}>{totalFixed.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 10 }}>100%</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 10 }}>100%</td>
                       {revenue > 0 && (
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 10 }}>
                           {fmtPct(totalFixed, revenue)}
@@ -757,16 +780,16 @@ export default function Overheads() {
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Revenue</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green)' : 'var(--theme-red)' }}>{fmt(revenue)}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{fmt(revenue)}</div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Covers</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green)' : 'var(--theme-red)' }}>{Math.round(covers).toLocaleString()}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{Math.round(covers).toLocaleString()}</div>
               </div>
             </div>
-            <div style={{ padding: '10px 14px', borderRadius: 6, fontSize: 13, fontWeight: 700,
+            <div style={{ padding: '10px 14px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700,
               background: isAboveBreakEven ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)',
-              color: isAboveBreakEven ? 'var(--theme-green)' : 'var(--theme-red)'
+              color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
             }}>
               {isAboveBreakEven && breakEvenRev
                 ? `✓ Above break-even by ${fmt(revenue - breakEvenRev)}`
@@ -793,7 +816,7 @@ export default function Overheads() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Fixed OH / Cover</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent)' }}>
+                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                   {covers > 0 && totals.overhead > 0 ? fmt(totals.overhead / covers) : '—'}
                 </div>
               </div>
@@ -805,7 +828,7 @@ export default function Overheads() {
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Tax & Fees / Cover</div>
-                <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--theme-purple)' }}>
+                <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--theme-purple-text)' }}>
                   {covers > 0 && totals.tax_fees > 0 ? fmt(totals.tax_fees / covers) : '—'}
                 </div>
               </div>
@@ -826,7 +849,7 @@ export default function Overheads() {
       {/* Footer note */}
       <div className="card" style={{ background: 'rgba(201,168,76,0.04)', borderColor: 'rgba(201,168,76,0.15)' }}>
         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.7 }}>
-          💡 <strong style={{ color: 'var(--theme-accent)' }}>How overhead is allocated to recipes:</strong> Only <strong style={{ color: 'var(--theme-text1)' }}>Fixed Overheads</strong> (not labor or tax) are distributed across menu items proportionally by each item's share of period revenue. This gives you the true overhead-per-portion in Recipe Costing. Labor and Tax & Fees are period-level costs tracked separately.
+          💡 <strong style={{ color: 'var(--theme-accent-ink)' }}>How overhead is allocated to recipes:</strong> Only <strong style={{ color: 'var(--theme-text1)' }}>Fixed Overheads</strong> (not labor or tax) are distributed across menu items proportionally by each item's share of period revenue. This gives you the true overhead-per-portion in Recipe Costing. Labor and Tax & Fees are period-level costs tracked separately.
         </p>
       </div>
     </div>

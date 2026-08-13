@@ -109,12 +109,12 @@ export default function DemandForecast() {
       <div className="print-only" style={{ marginBottom: 16 }}>
         <div style={{ fontWeight: 700, fontSize: 16 }}>{bizInfo.name}</div>
         {bizInfo.address && <div style={{ fontSize: 12 }}>{bizInfo.address}</div>}
-        <div style={{ fontWeight: 700, fontSize: 15, marginTop: 8 }}>Demand Forecast — {horizonLabel}</div>
+        <div style={{ fontWeight: 700, fontSize: 14, marginTop: 8 }}>Demand Forecast — {horizonLabel}</div>
         <div style={{ fontSize: 11 }}>Generated: {new Date().toLocaleString()}</div>
       </div>
 
       <div className="no-print" style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
+        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 18 }}>
           Demand Forecast <Tip text="Predicts covers, revenue, and per-dish quantity for upcoming days using a day-of-week moving average over your last ~12 weeks of POS sales (or manual Sales entries if POS history is thin). A simple, auditable model — not a trained AI — so you can see exactly why a number was predicted." width={320}>ⓘ</Tip>
         </h2>
         <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
@@ -138,12 +138,12 @@ export default function DemandForecast() {
         {lastRun && (
           <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 'auto' }}>
             Last run: {new Date(lastRun.run_at).toLocaleString()}
-            {lastRun.error ? <span style={{ color: 'var(--theme-red)' }}> — failed: {lastRun.error}</span> : ` (${lastRun.rows_written} rows)`}
+            {lastRun.error ? <span style={{ color: 'var(--theme-red-text)' }}> — failed: {lastRun.error}</span> : ` (${lastRun.rows_written} rows)`}
           </span>
         )}
       </div>
 
-      {msg && <p className="no-print" style={{ color: msg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)', fontSize: 13, marginBottom: 12 }}>{msg.replace(/^(error|ok):/, '')}</p>}
+      {msg && <p className="no-print" style={{ color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)', fontSize: 13, marginBottom: 12 }}>{msg.replace(/^(error|ok):/, '')}</p>}
 
       {loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
@@ -186,8 +186,8 @@ export default function DemandForecast() {
                       </td>
                       <td>{f.holiday && (
                         f.holiday.multiplier != null
-                          ? <Tip text={`Adjusted ×${f.holiday.multiplier} for ${f.holiday.name} — set in Holiday Calendar. Covers, revenue, and item quantities above already reflect this.`}><span className="badge-amber" style={{ fontSize: 10 }}>{f.holiday.name} ×{f.holiday.multiplier}</span></Tip>
-                          : <Tip text={`No demand multiplier set for ${f.holiday.name} in Holiday Calendar — this forecast is NOT adjusted for it. Treat it as a floor, not a ceiling, on a festival day.`}><span className="badge-amber" style={{ fontSize: 10 }}>{f.holiday.name}</span></Tip>
+                          ? <Tip text={`Adjusted ×${f.holiday.multiplier} for ${f.holiday.name} — set in Holiday Calendar. Covers, revenue, and item quantities above already reflect this.`}><span className="badge badge-amber">{f.holiday.name} ×{f.holiday.multiplier}</span></Tip>
+                          : <Tip text={`No demand multiplier set for ${f.holiday.name} in Holiday Calendar — this forecast is NOT adjusted for it. Treat it as a floor, not a ceiling, on a festival day.`}><span className="badge badge-amber">{f.holiday.name}</span></Tip>
                       )}</td>
                     </tr>
                     {allItems.length > 0 && (
@@ -198,10 +198,10 @@ export default function DemandForecast() {
                               <span key={recipeId}>{recipeNames[recipeId] || recipeId}: <strong style={{ color: 'var(--theme-text2)' }}>{qty.toFixed(1)}</strong></span>
                             ))}
                             {hiddenCount > 0 && (
-                              <span style={{ cursor: 'pointer', color: 'var(--theme-accent)' }} onClick={() => setExpandedItemsIdx(idx)}>+{hiddenCount} more</span>
+                              <span style={{ cursor: 'pointer', color: 'var(--theme-accent-ink)' }} onClick={() => setExpandedItemsIdx(idx)}>+{hiddenCount} more</span>
                             )}
                             {showingAll && allItems.length > PREVIEW_COUNT && (
-                              <span style={{ cursor: 'pointer', color: 'var(--theme-accent)' }} onClick={() => setExpandedItemsIdx(null)}>show less</span>
+                              <span style={{ cursor: 'pointer', color: 'var(--theme-accent-ink)' }} onClick={() => setExpandedItemsIdx(null)}>show less</span>
                             )}
                           </div>
                           {/* Print always shows the complete item list regardless of on-screen

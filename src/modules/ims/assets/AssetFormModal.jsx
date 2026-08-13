@@ -94,47 +94,47 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
     <Modal onClose={onClose} title={asset ? `Edit ${asset.asset_code || 'Asset'}` : 'Add Asset'} maxWidth={720}>
       <div className="form-grid form-grid-3">
         <div className="form-field">
-          <label>Category</label>
-          <SearchableSelect value={form.category_id} onChange={v => set('category_id', v)} options={categoryOptions} placeholder="— No category —" />
+          <label htmlFor="assetf-f1">Category</label>
+          <SearchableSelect id="assetf-f1" value={form.category_id} onChange={v => set('category_id', v)} options={categoryOptions} placeholder="— No category —" />
         </div>
         <div className="form-field">
-          <label>Name</label>
-          <input className="form-select" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Commercial Refrigerator" />
+          <label htmlFor="assetf-f2">Name</label>
+          <input id="assetf-f2" className="form-select" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Commercial Refrigerator" />
         </div>
         <div className="form-field">
-          <label><Tip text="Which physical station or area this asset lives — e.g. Kitchen, Front of House, Storage." width={230}>Location</Tip></label>
-          <input className="form-select" value={form.location} onChange={e => set('location', e.target.value)} placeholder="e.g. Kitchen" />
-        </div>
-
-        <div className="form-field">
-          <label>Quantity</label>
-          <QtyInput value={form.quantity} onChange={v => set('quantity', v)} className="form-select" style={{ width: '100%' }} />
-        </div>
-        <div className="form-field">
-          <label>Unit Cost (NPR)</label>
-          <QtyInput value={form.unit_cost} onChange={v => set('unit_cost', v)} className="form-select" style={{ width: '100%' }} />
-        </div>
-        <div className="form-field">
-          <label>Total Cost (NPR)</label>
-          <input className="form-select" value={totalCost.toLocaleString('en-NP')} disabled style={{ color: 'var(--theme-text2)' }} />
+          <label htmlFor="assetf-f3"><Tip text="Which physical station or area this asset lives — e.g. Kitchen, Front of House, Storage." width={230}>Location</Tip></label>
+          <input id="assetf-f3" className="form-select" value={form.location} onChange={e => set('location', e.target.value)} placeholder="e.g. Kitchen" />
         </div>
 
         <div className="form-field">
-          <label>Acquisition Date</label>
-          <input type="date" className="form-select" value={form.acquisition_date} onChange={e => set('acquisition_date', e.target.value)} />
+          <label htmlFor="assetf-f4">Quantity</label>
+          <QtyInput id="assetf-f4" value={form.quantity} onChange={v => set('quantity', v)} className="form-select" style={{ width: '100%' }} />
         </div>
         <div className="form-field">
-          <label><Tip text="Auto-fills from the category's default when you pick one — still editable per asset." width={250}>Useful Life (years)</Tip></label>
-          <QtyInput value={form.useful_life_years} onChange={v => set('useful_life_years', v)} className="form-select" style={{ width: '100%' }} />
+          <label htmlFor="assetf-f5">Unit Cost (NPR)</label>
+          <QtyInput id="assetf-f5" value={form.unit_cost} onChange={v => set('unit_cost', v)} className="form-select" style={{ width: '100%' }} />
         </div>
         <div className="form-field">
-          <label><Tip text="Estimated value at the end of its useful life — depreciation never brings NBV below this." width={250}>Salvage Value (NPR)</Tip></label>
-          <QtyInput value={form.salvage_value} onChange={v => set('salvage_value', v)} className="form-select" style={{ width: '100%' }} />
+          <label htmlFor="assetf-f6">Total Cost (NPR)</label>
+          <input id="assetf-f6" className="form-select" value={totalCost.toLocaleString('en-NP')} disabled style={{ color: 'var(--theme-text2)' }} />
         </div>
 
         <div className="form-field">
-          <label><Tip text="For the annual tax filing on the Tax Depreciation (IRD) tab — not used for the Depreciation Runs tab. Nepal groups assets into 5 pools by type rather than depreciating each item separately. Auto-fills from the category, still editable per asset. Not sure which one? Pick '— Not tracked —' and ask your accountant later; nothing else on this page is affected." width={320}>Tax Pool</Tip></label>
-          <select className="form-select" value={form.tax_pool} onChange={e => set('tax_pool', e.target.value)}>
+          <label htmlFor="assetf-f7">Acquisition Date</label>
+          <input id="assetf-f7" type="date" className="form-select" value={form.acquisition_date} onChange={e => set('acquisition_date', e.target.value)} />
+        </div>
+        <div className="form-field">
+          <label htmlFor="assetf-f8"><Tip text="Auto-fills from the category's default when you pick one — still editable per asset." width={250}>Useful Life (years)</Tip></label>
+          <QtyInput id="assetf-f8" value={form.useful_life_years} onChange={v => set('useful_life_years', v)} className="form-select" style={{ width: '100%' }} />
+        </div>
+        <div className="form-field">
+          <label htmlFor="assetf-f9"><Tip text="Estimated value at the end of its useful life — depreciation never brings NBV below this." width={250}>Salvage Value (NPR)</Tip></label>
+          <QtyInput id="assetf-f9" value={form.salvage_value} onChange={v => set('salvage_value', v)} className="form-select" style={{ width: '100%' }} />
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="assetf-f10"><Tip text="For the annual tax filing on the Tax Depreciation (IRD) tab — not used for the Depreciation Runs tab. Nepal groups assets into 5 pools by type rather than depreciating each item separately. Auto-fills from the category, still editable per asset. Not sure which one? Pick '— Not tracked —' and ask your accountant later; nothing else on this page is affected." width={320}>Tax Pool</Tip></label>
+          <select id="assetf-f10" className="form-select" value={form.tax_pool} onChange={e => set('tax_pool', e.target.value)}>
             <option value="">— Not tracked —</option>
             {['A', 'B', 'C', 'D', 'E'].map(p => <option key={p} value={p}>{POOL_LABELS[p]}</option>)}
           </select>
@@ -145,26 +145,26 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
           )}
         </div>
         <div className="form-field">
-          <label><Tip text="Percentage of this asset's use that's personal rather than business. Reports default to filtering this to 0% — apportioned depreciation for a non-zero value isn't calculated in v1." width={300}>Personal Use %</Tip></label>
-          <QtyInput value={form.personal_use_percent} onChange={v => set('personal_use_percent', v)} className="form-select" style={{ width: '100%' }} />
+          <label htmlFor="assetf-f11"><Tip text="Percentage of this asset's use that's personal rather than business. Reports default to filtering this to 0% — apportioned depreciation for a non-zero value isn't calculated in v1." width={300}>Personal Use %</Tip></label>
+          <QtyInput id="assetf-f11" value={form.personal_use_percent} onChange={v => set('personal_use_percent', v)} className="form-select" style={{ width: '100%' }} />
         </div>
         <div className="form-field">
-          <label>Department / Cost Center</label>
-          <input className="form-select" value={form.department} onChange={e => set('department', e.target.value)} placeholder="e.g. Kitchen" />
+          <label htmlFor="assetf-f12">Department / Cost Center</label>
+          <input id="assetf-f12" className="form-select" value={form.department} onChange={e => set('department', e.target.value)} placeholder="e.g. Kitchen" />
         </div>
 
         <div className="form-field" style={{ gridColumn: '1 / -1' }}>
-          <label>Description</label>
-          <input className="form-select" value={form.description} onChange={e => set('description', e.target.value)} style={{ width: '100%' }} />
+          <label htmlFor="assetf-f13">Description</label>
+          <input id="assetf-f13" className="form-select" value={form.description} onChange={e => set('description', e.target.value)} style={{ width: '100%' }} />
         </div>
         <div className="form-field" style={{ gridColumn: '1 / -1' }}>
-          <label>Notes</label>
-          <textarea className="form-select" value={form.notes} onChange={e => set('notes', e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} />
+          <label htmlFor="assetf-f14">Notes</label>
+          <textarea id="assetf-f14" className="form-select" value={form.notes} onChange={e => set('notes', e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} />
         </div>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
-        {error && <span style={{ color: 'var(--theme-red)', fontSize: 12 }}>{error}</span>}
+        {error && <span style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>{error}</span>}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>

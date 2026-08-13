@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { useTheme } from '../../../context/ThemeContext'
-import { contrastRatio } from '../../../utils/avatarColor'
 import Modal from '../../../components/Modal'
+import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import { getCf } from './purchasesHelpers'
 
@@ -11,10 +10,8 @@ const EMPTY_RETURN = { purchase_entry_id: '', qty: '', notes: '' }
 // Vendor Returns tab — record + list returns against an existing purchase entry. Rate, vendor,
 // and payment method are always inherited from the linked purchase (a return can't have its own).
 export default function ReturnsTab({ period, purchases, returns, isLocked, effectiveClientId, onChanged }) {
-  const { colors } = useTheme()
   // .btn-primary's CSS pairs its background with --theme-accent-text, calibrated for --theme-accent
   // — overriding just the background to red here left the text color mismatched to accent, not red.
-  const redText = contrastRatio(colors.red, '#ffffff') >= contrastRatio(colors.red, '#000000') ? '#ffffff' : '#000000'
   const { scopedUpdate, scopedInsert, scopedDelete } = useScopedDb()
   const [showReturnForm, setShowReturnForm] = useState(false)
   const [returnForm, setReturnForm]         = useState(EMPTY_RETURN)
@@ -110,7 +107,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
   return (
     <>
       {purchases.length === 0 && (
-        <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent)' }}>
+        <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
           No purchases exist for this period yet. Add purchases first before recording returns.
         </div>
       )}
@@ -120,8 +117,8 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
         <Modal onClose={() => { setShowReturnForm(false); setEditingReturnId(null) }} title={editingReturnId ? 'Edit Return' : 'Record Return to Vendor'}>
           <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 2fr', gap: 16 }}>
             <div className="form-field">
-              <label>Purchase Entry to Return *</label>
-              <select
+              <label htmlFor="return-f1">Purchase Entry to Return *</label>
+              <select id="return-f1"
                 value={returnForm.purchase_entry_id}
                 onChange={e => setReturnForm(f => ({ ...f, purchase_entry_id: e.target.value, qty: '' }))}
               >
@@ -148,8 +145,8 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                 const maxInInputUnits = linked ? (cf > 1 ? linked.qty / cf : linked.qty) : ''
                 return (
                   <>
-                    <label>Return Qty {inputUnit ? `(${inputUnit})` : ''} *</label>
-                    <input
+                    <label htmlFor="return-f2">Return Qty {inputUnit ? `(${inputUnit})` : ''} *</label>
+                    <input id="return-f2"
                       type="number" min="0.001" step="any"
                       value={returnForm.qty}
                       onChange={e => setReturnForm(f => ({ ...f, qty: e.target.value }))}
@@ -173,8 +170,8 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
             </div>
 
             <div className="form-field">
-              <label>Notes (optional)</label>
-              <input
+              <label htmlFor="return-f3">Notes (optional)</label>
+              <input id="return-f3"
                 value={returnForm.notes}
                 onChange={e => setReturnForm(f => ({ ...f, notes: e.target.value }))}
                 placeholder="Reason for return, damaged batch, etc."
@@ -192,20 +189,23 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
             const baseRetQty = returnForm.qty ? parseFloat(returnForm.qty) * cf : 0
             const retValue = baseRetQty * linked.rate
             return (
-              <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.15)', borderRadius: 6, fontSize: 13, color: 'var(--theme-text2)', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+              <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.15)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--theme-text2)', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
                 <span>Rate: <strong style={{ color: 'var(--theme-text1)' }}>NPR {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}/{displayRateUnit}</strong></span>
                 <span>Vendor: <strong style={{ color: 'var(--theme-text1)' }}>{linked.vendors?.name || '—'}</strong></span>
                 <span>Payment: <strong style={{ color: 'var(--theme-text1)' }}>{linked.payment_method || 'Cash'}</strong></span>
-                {retValue > 0 && <span>Return Value: <strong style={{ color: 'var(--theme-red)' }}>−NPR {retValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</strong></span>}
+                {retValue > 0 && <span>Return Value: <strong style={{ color: 'var(--theme-red-text)' }}>−NPR {retValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</strong></span>}
                 <span style={{ color: 'var(--theme-text3)', fontSize: 11 }}>Rate, vendor & payment inherited from original purchase</span>
               </div>
             )
           })()}
 
-          {returnError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '10px 0 0' }}>{returnError}</p>}
+          {returnError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '10px 0 0' }}>{returnError}</p>}
           <div className="form-actions">
             <button className="btn btn-ghost" onClick={() => { setShowReturnForm(false); setEditingReturnId(null) }}>Cancel</button>
-            <button className="btn btn-primary" style={{ background: 'var(--theme-red)', borderColor: 'var(--theme-red)', color: redText }} onClick={saveReturn} disabled={returnSaving}>
+            {/* .btn-danger, not a solid --theme-red fill: red has no paired foreground token (it ranges
+                from #f87171 on Dark to #dc2626 on Bright), which is why this had to compute a
+                black/white foreground at runtime. The variant is the documented tint pattern. */}
+            <button className="btn btn-danger" onClick={saveReturn} disabled={returnSaving}>
               {returnSaving ? 'Saving…' : editingReturnId ? 'Update Return' : 'Record Return'}
             </button>
           </div>
@@ -224,17 +224,20 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Day</th><th>Item</th><th>Vendor</th>
-                  <th style={{ textAlign: 'right' }}>Returned Qty</th><th>UOM</th>
-                  <th style={{ textAlign: 'right' }}>Rate</th>
-                  <th style={{ textAlign: 'right' }}>Return Value</th>
-                  <th>Payment</th><th>Notes</th><th></th>
+                  <th><Tip text="Day of the Nepali month the goods went back to the vendor — not the day the bill was raised." width={250}>Day</Tip></th>
+                  <th>Item</th><th>Vendor</th>
+                  <th style={{ textAlign: 'right' }}><Tip text="How much went back, in the item's base unit. e.g. a 12-bottle crate returned on an item tracked in bottles shows 12." width={260}>Returned Qty</Tip></th>
+                  <th>UOM</th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Rate per base unit, inherited from the original purchase — a return is credited at what you paid, not at today's price." width={260}>Rate</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Returned Qty × Rate. This is subtracted from the vendor's purchases everywhere in IMS, so net purchases and COGS both drop by it." width={270}>Return Value</Tip></th>
+                  <th><Tip text="Whether the original bill was Cash or Credit. A Cash return is money back; a Credit return reduces what you still owe that vendor." width={260}>Payment</Tip></th>
+                  <th>Notes</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {returns.map(ret => (
                   <tr key={ret.id}>
-                    <td style={{ fontWeight: 700, color: 'var(--theme-accent)' }}>{ret.bs_day || '—'}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{ret.bs_day || '—'}</td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{ret.items?.name}</td>
                     <td style={{ color: 'var(--theme-text2)' }}>{ret.vendors?.name || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                     {(() => {
@@ -244,7 +247,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                       const displayRate = cf > 1 ? ret.rate * cf : ret.rate
                       return (
                         <>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontWeight: 600 }}>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>
                             −{Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
                             {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{Number(ret.qty).toLocaleString()} {ret.items?.uom}</div>}
                           </td>
@@ -253,7 +256,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                         </>
                       )
                     })()}
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontWeight: 700 }}>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 700 }}>
                       −NPR {(ret.qty * ret.rate).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td>
@@ -274,7 +277,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                 ))}
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td colSpan={6} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total Returns</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', fontSize: 15, paddingTop: 12 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', fontSize: 14, paddingTop: 12 }}>
                     −NPR {returnTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td colSpan={3}></td>

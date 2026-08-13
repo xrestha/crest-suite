@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -237,6 +238,7 @@ export default function StockMovements() {
   const maxDay = selectedPeriod ? daysInBsMonth(selectedPeriod.bs_year, selectedPeriod.bs_month) : 32
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="the stock movement log" />
 
   return (
     <div>
@@ -253,7 +255,7 @@ export default function StockMovements() {
           <Tip text="Prints exactly what's on screen — the active tab, with the current search, source and sort filters applied, including the totals row." width={280}>
             <button className="btn btn-ghost" onClick={printCurrentTab} style={{ fontSize: 12 }}>🖨 Print</button>
           </Tip>
-          <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>↓ Export Excel</button>
+          <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>Export Excel</button>
           <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>)}
           </select>
@@ -269,7 +271,7 @@ export default function StockMovements() {
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Total batches across every sub-recipe below — a rough measure of how much prep work this period's sales required." width={260}>Batches Used</Tip></div>
-            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple)' }}>{subBatchTotal.toLocaleString('en-NP', { maximumFractionDigits: 1 })}</div>
+            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple-text)' }}>{subBatchTotal.toLocaleString('en-NP', { maximumFractionDigits: 1 })}</div>
             <div className="stat-sub">summed across all sub-recipes</div>
           </div>
           <div className="stat-card">
@@ -292,7 +294,7 @@ export default function StockMovements() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Same calc, restricted to POS Comp rows — the food-cost value of dishes given away complimentary, with zero revenue collected." width={260}>Comp Value</Tip></div>
-          <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple)' }}>NPR {compValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple-text)' }}>NPR {compValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
           <div className="stat-sub">value given away</div>
         </div>
         <div className="stat-card">
@@ -313,7 +315,7 @@ export default function StockMovements() {
       </div>
 
       {noBomRecipes.length > 0 && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber-text)' }}>
           <span>⚠</span>
           <span>
             {noBomRecipes.length} item{noBomRecipes.length !== 1 ? 's' : ''} sold this period {noBomRecipes.length !== 1 ? 'have' : 'has'} no ingredients linked, so no stock was depleted for {noBomRecipes.length !== 1 ? 'them' : 'it'}: <strong>{noBomRecipes.join(', ')}</strong>. Add ingredients under Recipes to fix this going forward.
@@ -322,7 +324,7 @@ export default function StockMovements() {
       )}
 
       <div className="no-print" style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
+        <input style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
           placeholder={tab === 'subs' ? 'Search sub-recipes…' : 'Search items…'} value={search} onChange={e => setSearch(e.target.value)} />
         <select className="form-select" value={filterSource} onChange={e => setFilterSource(e.target.value)}>
           <option value="all">All Sources</option>
@@ -389,12 +391,12 @@ export default function StockMovements() {
           </Tip>
           <div style={{ position: 'relative' }}>
             <input
-              style={{ background: 'var(--theme-card)', border: `1px solid ${ingQ ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 6, padding: '8px 12px 8px 30px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
+              style={{ background: 'var(--theme-card)', border: `1px solid ${ingQ ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '8px 12px 8px 30px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Find ingredient in sub-recipes…" value={ingSearch} onChange={e => setIngSearch(e.target.value)} />
             <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
             {ingSearch && (
               <button onClick={() => setIngSearch('')} title="Clear"
-                style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 4px' }}>×</button>
+                style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 4px' }}>×</button>
             )}
           </div>
         </div>
@@ -432,13 +434,13 @@ export default function StockMovements() {
         )}
 
         {usage.miscategorised.length > 0 && (
-          <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--theme-amber)' }}>
+          <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--theme-amber-text)' }}>
             {usage.miscategorised.length} recipe{usage.miscategorised.length !== 1 ? 's are' : ' is'} used as an ingredient by another recipe but {usage.miscategorised.length !== 1 ? 'are' : 'is'} not categorised as a Sub-Recipe: <strong>{usage.miscategorised.join(', ')}</strong>. {usage.miscategorised.length !== 1 ? 'They' : 'It'} still count{usage.miscategorised.length !== 1 ? '' : 's'} here, but not in Recipe Costing's sub-recipe total — set the category on the recipe to make the two agree.
           </div>
         )}
 
         {showRecon && (
-          <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--theme-amber)' }}>
+          <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--theme-amber-text)' }}>
             These figures imply NPR {usage.derivedItemValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })} of raw ingredients, but the ledger recorded NPR {ledgerTotalValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
             {' '}({reconGap > 0 ? '+' : '−'}NPR {Math.abs(reconGap).toLocaleString('en-NP', { maximumFractionDigits: 0 })} difference).
             {' '}Usual causes: a recipe edited after a sale — the ledger froze each depletion at the ingredients in force when it was sold, while this view re-walks the recipe as it stands today, so the two part ways permanently for anything sold before the edit; manual Sales Entry only started depleting stock on 2026-07-30 and earlier saves were never backfilled; POS credit notes reverse revenue but never restore stock; and recipes with no ingredients linked deplete nothing (see the banner above when that applies).
@@ -473,7 +475,7 @@ export default function StockMovements() {
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {r.qty.toLocaleString('en-NP', { maximumFractionDigits: 3 })} <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>{r.yieldUom}</span>
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-purple)' }}>{r.batches.toLocaleString('en-NP', { maximumFractionDigits: 2 })}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-purple-text)' }}>{r.batches.toLocaleString('en-NP', { maximumFractionDigits: 2 })}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.batchCost.toLocaleString('en-NP', { maximumFractionDigits: 2 })}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.value.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
                   </tr>
@@ -492,11 +494,11 @@ export default function StockMovements() {
                       ? `${subRows.reduce((s, r) => s + r.qty, 0).toLocaleString('en-NP', { maximumFractionDigits: 2 })} ${subRows[0].yieldUom}`
                       : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-purple)', paddingTop: 12, fontSize: 13 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-purple-text)', paddingTop: 12, fontSize: 13 }}>
                     {subBatchTotal.toLocaleString('en-NP', { maximumFractionDigits: 2 })}
                   </td>
                   <td style={{ paddingTop: 12 }} />
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 12, fontSize: 15 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12, fontSize: 14 }}>
                     {subValueTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
                   </td>
                 </tr>
@@ -549,7 +551,7 @@ export default function StockMovements() {
                           onClick={() => viewPosBill(effectiveClientId, { id: r.ref_id, close_type: r.order.close_type })}
                           role="button" tabIndex={0} className="interactive-card"
                           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); viewPosBill(effectiveClientId, { id: r.ref_id, close_type: r.order.close_type }) } }}
-                          style={{ cursor: 'pointer', color: 'var(--theme-accent)', borderBottom: '1px dashed var(--theme-accent)', paddingBottom: 1 }}
+                          style={{ cursor: 'pointer', color: 'var(--theme-accent-ink)', borderBottom: '1px dashed var(--theme-accent)', paddingBottom: 1 }}
                         >
                           #{r.order.order_no}
                         </span>
@@ -572,7 +574,7 @@ export default function StockMovements() {
                       pcs), so one summed quantity would mean nothing. Value is the comparable one. */}
                   <td style={{ textAlign: 'right', color: 'var(--theme-text3)', paddingTop: 12 }}>—</td>
                   <td colSpan={3} style={{ paddingTop: 12 }} />
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 12, fontSize: 15 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12, fontSize: 14 }}>
                     {totalValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
                   </td>
                 </tr>

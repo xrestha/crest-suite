@@ -3,20 +3,22 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { useSettings } from '../../../context/SettingsContext'
+import { fcBand } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
-function fcColor(pct) {
-  if (pct <= 30) return 'var(--theme-green)'
-  if (pct <= 38) return 'var(--theme-amber)'
-  return 'var(--theme-red)'
-}
 
 export default function RecipeMargin() {
   const { clientId, profile, hasImsAccess } = useAuth()
+  const { settings } = useSettings()
+  // Was a hardcoded 30/38 scale in every one of these files, which disagreed with the client's
+  // own configured fc_warning_pct/fc_critical_pct that Recipe Costing's filter pills use.
+  const fcColor = pct => fcBand(pct, settings).color
+
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods]         = useState([])
@@ -161,7 +163,7 @@ export default function RecipeMargin() {
           <div className="stat-label">
             <Tip text="Sum of (Selling Price − Food Cost) × Qty Sold across all recipes with sales this period." width={280}>Total Contribution</Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-green)' }}>{fmtNPR(totalContrib)}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{fmtNPR(totalContrib)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">
@@ -173,7 +175,7 @@ export default function RecipeMargin() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Top Contributor</div>
-          <div className="stat-value" style={{ fontSize: 15 }}>{topRecipe ? topRecipe.name : '—'}</div>
+          <div className="stat-value" style={{ fontSize: 14 }}>{topRecipe ? topRecipe.name : '—'}</div>
           {topRecipe && <div className="stat-label" style={{ marginTop: 4 }}>{fmtNPR(topRecipe.totalContribution)}</div>}
         </div>
       </div>
@@ -240,11 +242,11 @@ export default function RecipeMargin() {
                   <td>{r.category}</td>
                   <td style={{ textAlign: 'right' }}>NPR {r.price.toFixed(0)}</td>
                   <td style={{ textAlign: 'right' }}>NPR {r.cost.toFixed(2)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600, color: r.margin >= 0 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                  <td style={{ textAlign: 'right', fontWeight: 600, color: r.margin >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     NPR {r.margin.toFixed(2)}
                   </td>
                   <td style={{ textAlign: 'right' }}>{r.qty ? Number(r.qty).toLocaleString() : '—'}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent)' }}>
+                  <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)' }}>
                     {r.totalContribution ? fmtNPR(r.totalContribution) : '—'}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(r.fcPct) }}>
@@ -257,7 +259,7 @@ export default function RecipeMargin() {
               <tr style={{ fontWeight: 700 }}>
                 <td colSpan={6}>Total ({withSales.length} recipes sold)</td>
                 <td style={{ textAlign: 'right' }}>{withSales.reduce((s, r) => s + r.qty, 0).toLocaleString()}</td>
-                <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{fmtNPR(totalContrib)}</td>
+                <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(totalContrib)}</td>
                 <td style={{ textAlign: 'right', color: fcColor(avgFcPct) }}>{avgFcPct.toFixed(1)}%</td>
               </tr>
             </tfoot>

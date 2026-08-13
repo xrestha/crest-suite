@@ -4,7 +4,11 @@ import { useState, useRef, useEffect, useMemo, useId } from 'react'
 // Drop-in replacement for a <select>: pass value, onChange(value), and
 // options=[{ value, label }]. The dropdown is position:fixed so it is never
 // clipped by a modal/table overflow.
-export default function SearchableSelect({ value, onChange, options, placeholder = '— Select —', style }) {
+// `id` exists so a real <label htmlFor> can name this control the way it names a native <select>
+// — without it the trigger reads to a screen reader as an unnamed button, which is what every
+// call site had before S551. It lands on the trigger button (the element that is focused when
+// the control is closed) and is mirrored onto the filter input's aria-labelledby when open.
+export default function SearchableSelect({ value, onChange, options, placeholder = '— Select —', style, id }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
@@ -80,6 +84,7 @@ export default function SearchableSelect({ value, onChange, options, placeholder
     <div ref={rootRef} style={{ position: 'relative', ...style }}>
       <button
         type="button"
+        id={id}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => (open ? close() : openIt())}
@@ -111,6 +116,7 @@ export default function SearchableSelect({ value, onChange, options, placeholder
             placeholder="Type to search…"
             autoComplete="off"
             role="combobox"
+            aria-labelledby={id}
             aria-expanded="true"
             aria-controls={listboxId}
             aria-autocomplete="list"

@@ -4,16 +4,13 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { getSuggestedPrice, computeRecipeCosts } from '../../../utils/recipeCost'
 import Tip from '../../../components/Tip'
+import { useSettings } from '../../../context/SettingsContext'
+import { fcBand } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
-function fcColor(pct) {
-  if (pct <= 30) return 'var(--theme-green)'
-  if (pct <= 38) return 'var(--theme-amber)'
-  return 'var(--theme-red)'
-}
 
 // vat_rate may be 0 (No VAT); null/undefined falls back to 13%.
 function vatOf(r) {
@@ -22,6 +19,11 @@ function vatOf(r) {
 
 export default function MenuRepricing() {
   const { clientId, profile, hasImsAccess } = useAuth()
+  const { settings } = useSettings()
+  // Was a hardcoded 30/38 scale in every one of these files, which disagreed with the client's
+  // own configured fc_warning_pct/fc_critical_pct that Recipe Costing's filter pills use.
+  const fcColor = pct => fcBand(pct, settings).color
+
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods]         = useState([])
@@ -173,7 +175,7 @@ export default function MenuRepricing() {
           <div className="stat-label">
             <Tip text="Number of priced dishes whose current food-cost % is above their target — i.e. priced too low to hit the margin you set." width={300}>Underpriced Dishes</Tip>
           </div>
-          <div className="stat-value" style={{ color: underpricedRows.length ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+          <div className="stat-value" style={{ color: underpricedRows.length ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
             {underpricedRows.length}
           </div>
         </div>
@@ -181,11 +183,11 @@ export default function MenuRepricing() {
           <div className="stat-label">
             <Tip text="Sum of (Price Gap × Qty Sold) across all underpriced dishes this period. Extra margin you'd capture by repricing to target — ingredient cost is unchanged, so it drops straight to the bottom line." width={320}>Monthly Opportunity</Tip>
           </div>
-          <div className="stat-value" style={{ color: totalOpportunity ? 'var(--theme-accent)' : 'var(--theme-green)' }}>{fmtNPR(totalOpportunity)}</div>
+          <div className="stat-value" style={{ color: totalOpportunity ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)' }}>{fmtNPR(totalOpportunity)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Biggest Leak</div>
-          <div className="stat-value" style={{ fontSize: 15 }}>{biggestLeak ? biggestLeak.name : '—'}</div>
+          <div className="stat-value" style={{ fontSize: 14 }}>{biggestLeak ? biggestLeak.name : '—'}</div>
           {biggestLeak && <div className="stat-label" style={{ marginTop: 4 }}>{fmtNPR(biggestLeak.monthlyOpportunity || biggestLeak.priceGap)}{biggestLeak.monthlyOpportunity ? '/mo' : '/portion'}</div>}
         </div>
       </div>
@@ -267,11 +269,11 @@ export default function MenuRepricing() {
                   <td style={{ textAlign: 'right' }}>NPR {r.price.toFixed(0)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(r.currentFcPct) }}>{r.currentFcPct.toFixed(1)}%</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.targetPct.toFixed(0)}%</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-green)' }}>NPR {r.suggestedMenuPrice.toFixed(0)}</td>
-                  <td style={{ textAlign: 'right', color: r.priceGap > 0 ? 'var(--theme-amber)' : 'var(--theme-text2)' }}>
+                  <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-green-text)' }}>NPR {r.suggestedMenuPrice.toFixed(0)}</td>
+                  <td style={{ textAlign: 'right', color: r.priceGap > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>
                     {r.priceGap > 0 ? `NPR ${r.priceGap.toFixed(2)}` : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: r.monthlyOpportunity > 0 ? 'var(--theme-accent)' : 'var(--theme-text2)' }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: r.monthlyOpportunity > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
                     {r.monthlyOpportunity > 0 ? fmtNPR(r.monthlyOpportunity) : '—'}
                   </td>
                 </tr>
@@ -280,7 +282,7 @@ export default function MenuRepricing() {
             <tfoot>
               <tr style={{ fontWeight: 700 }}>
                 <td colSpan={10}>Total ({display.filter(r => r.underpriced).length} underpriced)</td>
-                <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>
+                <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
                   {fmtNPR(display.reduce((s, r) => s + r.monthlyOpportunity, 0))}
                 </td>
               </tr>

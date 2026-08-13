@@ -23,7 +23,7 @@ const AuthContext = createContext({})
 // Included on all plans (Starter and above)
 const STARTER_KEYS = new Set([
   'monthly_summary', 'annual_summary', 'vat_report', 'non_vat_report', 'wastage_report', 'settings',
-  'sales_entry', 'payment_summary', 'stock_report', 'menu_pricing', 'staff_meals',
+  'sales_entry', 'payment_summary', 'menu_pricing', 'staff_meals',
   'outstanding_payables', 'vendor_balance_confirmation',
 ])
 // Requires Growth plan or above
@@ -34,6 +34,11 @@ const GROWTH_KEYS = new Set([
   'requisitions',
   'nutrition_facts', 'menu_repricing', 'combo_builder',
   'reorder_report', 'stock_movement_log',
+  // stock_report is the third instance of the same defect (S551): its On-hand figure subtracts a
+  // recipe-explosion usage term, so on Starter — where recipes don't exist — stock only ever
+  // grows, and the Low/Out status column can never fire. Moved to Growth with a grandfather
+  // sweep (supabase/migrations/20260813120000).
+  'stock_report',
   // overheads is the data-entry page behind Fixed Costs %/Est. Net Margin on ClientDashboard and
   // Recipes' True Cost allocation. A data-entry page must not sit above the tier of any figure
   // that consumes it, or the consumer renders blank with no explanation.

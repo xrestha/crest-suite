@@ -65,11 +65,11 @@ export default function AssetCard({ asset, onClose, onChanged }) {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Book value as of the latest posted depreciation run, or total cost if never posted." width={250}>Current NBV</Tip></div>
-          <div className="stat-value" style={{ color: 'var(--theme-accent)' }}>NPR {fmt(currentNbv)}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>NPR {fmt(currentNbv)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Accumulated Depreciation</div>
-          <div className="stat-value" style={{ color: 'var(--theme-red)' }}>NPR {fmt(accumulatedDepreciation)}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>NPR {fmt(accumulatedDepreciation)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">% Depreciated</div>
@@ -81,7 +81,7 @@ export default function AssetCard({ asset, onClose, onChanged }) {
         <span>Category: <strong style={{ color: 'var(--theme-text1)' }}>{asset.assets_categories?.name || '—'}</strong></span>
         <span>Acquired: <strong style={{ color: 'var(--theme-text1)' }}>{fmtDate(asset.acquisition_date)}</strong></span>
         <span>Location: <strong style={{ color: 'var(--theme-text1)' }}>{asset.location || '—'}</strong></span>
-        <span>Status: <strong style={{ color: asset.status === 'active' ? 'var(--theme-green)' : 'var(--theme-red)' }}>{asset.status}</strong></span>
+        <span>Status: <strong style={{ color: asset.status === 'active' ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{asset.status}</strong></span>
       </div>
 
       <h3 style={{ fontSize: 13, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Depreciation History (Book)</h3>
@@ -119,8 +119,8 @@ export default function AssetCard({ asset, onClose, onChanged }) {
       )}
 
       {asset.status !== 'active' ? (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 8, padding: '12px 16px', fontSize: 13 }}>
-          <strong style={{ color: 'var(--theme-red)' }}>{asset.status === 'disposed' ? 'Disposed' : 'Written Off'}</strong> on {fmtDate(asset.disposal_date)} —
+        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', fontSize: 13 }}>
+          <strong style={{ color: 'var(--theme-red-text)' }}>{asset.status === 'disposed' ? 'Disposed' : 'Written Off'}</strong> on {fmtDate(asset.disposal_date)} —
           {' '}Proceeds NPR {fmt(asset.disposal_proceeds)}, {asset.disposal_gain_loss >= 0 ? 'Gain' : 'Loss'} of NPR {fmt(Math.abs(asset.disposal_gain_loss))}.
           {asset.disposal_reason && <div style={{ marginTop: 4, color: 'var(--theme-text2)' }}>{asset.disposal_reason}</div>}
         </div>
@@ -132,27 +132,27 @@ export default function AssetCard({ asset, onClose, onChanged }) {
         <div className="card" style={{ background: 'var(--theme-bg)' }}>
           <div className="form-grid form-grid-3">
             <div className="form-field">
-              <label>Outcome</label>
-              <select className="form-select" value={disposalForm.status} onChange={e => setDisposalForm(f => ({ ...f, status: e.target.value }))}>
+              <label htmlFor="assetc-f1">Outcome</label>
+              <select id="assetc-f1" className="form-select" value={disposalForm.status} onChange={e => setDisposalForm(f => ({ ...f, status: e.target.value }))}>
                 <option value="disposed">Disposed (sold/scrapped for proceeds)</option>
                 <option value="written_off">Written Off (no proceeds)</option>
               </select>
             </div>
             <div className="form-field">
-              <label>Disposal Date</label>
-              <input type="date" className="form-select" value={disposalForm.disposal_date} onChange={e => setDisposalForm(f => ({ ...f, disposal_date: e.target.value }))} />
+              <label htmlFor="assetc-f2">Disposal Date</label>
+              <input id="assetc-f2" type="date" className="form-select" value={disposalForm.disposal_date} onChange={e => setDisposalForm(f => ({ ...f, disposal_date: e.target.value }))} />
             </div>
             <div className="form-field">
-              <label>Proceeds (NPR)</label>
-              <input type="number" className="form-select" value={disposalForm.disposal_proceeds} onChange={e => setDisposalForm(f => ({ ...f, disposal_proceeds: e.target.value }))} />
+              <label htmlFor="assetc-f3">Proceeds (NPR)</label>
+              <input id="assetc-f3" type="number" className="form-select" value={disposalForm.disposal_proceeds} onChange={e => setDisposalForm(f => ({ ...f, disposal_proceeds: e.target.value }))} />
             </div>
             <div className="form-field" style={{ gridColumn: '1 / -1' }}>
-              <label>Reason</label>
-              <input className="form-select" value={disposalForm.disposal_reason} onChange={e => setDisposalForm(f => ({ ...f, disposal_reason: e.target.value }))} style={{ width: '100%' }} />
+              <label htmlFor="assetc-f4">Reason</label>
+              <input id="assetc-f4" className="form-select" value={disposalForm.disposal_reason} onChange={e => setDisposalForm(f => ({ ...f, disposal_reason: e.target.value }))} style={{ width: '100%' }} />
             </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-            {error && <span style={{ color: 'var(--theme-red)', fontSize: 12 }}>{error}</span>}
+            {error && <span style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>{error}</span>}
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
               <button className="btn btn-ghost" onClick={() => setDisposing(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={submitDisposal} disabled={saving}>{saving ? 'Saving…' : 'Confirm Disposal'}</button>

@@ -4,7 +4,9 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -27,6 +29,7 @@ export default function TheoreticalVariance() {
   const [filterCat,       setFilterCat]       = useState('all')
   const [filterType,      setFilterType]      = useState('all') // all | over | under
   const [sortBy,          setSortBy]          = useState('variance_val')
+  const [hasClosing,      setHasClosing]      = useState(true)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
 
@@ -70,10 +73,13 @@ export default function TheoreticalVariance() {
     })
     setRecipes(allRecipes)
 
-    const open = (p || []).find(x => x.status === 'open')
-    if (open) {
-      setSelectedPeriod(open)
-      await computeVariance(open.id, i || [], allRecipes)
+    // Most recent CLOSED period by default — the "Actual" side of this comparison subtracts a
+    // closing stock count that does not exist until month-end, so opening on the live month made
+    // every item read as massively over-consumed. Same fix as Variance.js.
+    const chosen = (p || []).find(x => x.status === 'closed') || (p || []).find(x => x.status === 'open')
+    if (chosen) {
+      setSelectedPeriod(chosen)
+      await computeVariance(chosen.id, i || [], allRecipes)
     }
     setLoading(false)
   }
@@ -146,6 +152,7 @@ export default function TheoreticalVariance() {
     const openMap = {}, closeMap = {}, purchMap = {}, retMap = {}, wastMap = {}, staffMap = {}
     ;(opening || []).forEach(r => { openMap[r.item_id]  = parseFloat(r.qty || 0) })
     ;(closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty || 0) })
+    setHasClosing((closing || []).length > 0)
     ;(purch   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + parseFloat(r.qty || 0) })
     ;(rets    || []).forEach(r => { retMap[r.item_id]   = (retMap[r.item_id]   || 0) + parseFloat(r.qty || 0) })
     ;(wast    || []).forEach(r => { wastMap[r.item_id]  = (wastMap[r.item_id]  || 0) + parseFloat(r.qty || 0) })
@@ -218,12 +225,16 @@ export default function TheoreticalVariance() {
   const fmtPct  = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
 
   function varianceColor(pct) {
-    if (pct >  5) return 'var(--theme-red)'  // red — over-consumed
-    if (pct < -5) return 'var(--theme-amber)'  // amber — under-consumed (possible under-portioning)
-    return 'var(--theme-green)'                // green — within tolerance
+    // Neutral while the closing count is missing — every figure is an artefact of the gap, not a
+    // finding, and the banner above says so.
+    if (!hasClosing) return 'var(--theme-text2)'
+    if (pct >  5) return 'var(--theme-red-text)'    // over-consumed
+    if (pct < -5) return 'var(--theme-amber-text)'  // under-consumed (possible under-portioning)
+    return 'var(--theme-green-text)'                // within tolerance
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="this comparison" />
 
   return (
     <div>
@@ -235,7 +246,7 @@ export default function TheoreticalVariance() {
           </p>
         </div>
         <select
-          style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
+          style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
           value={selectedPeriod?.id || ''}
           onChange={e => handlePeriodChange(e.target.value)}
         >
@@ -247,10 +258,19 @@ export default function TheoreticalVariance() {
         </select>
       </div>
 
+      {!loading && !computing && selectedPeriod && !hasClosing && (
+        <div style={{ background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.30)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>Closing stock hasn’t been counted for {periodLabel} yet.</strong>{' '}
+          The “Actual” column subtracts the closing count, so until it exists everything still on
+          your shelves is counted as consumed and every item looks over-used. Finish the Stock
+          Count for this month, or pick a closed month above.
+        </div>
+      )}
+
       {/* Explanation banner */}
-      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent)' }}>
-        <strong>How to read this:</strong> Theoretical = what your recipes say you should have used based on sales.
-        Actual = opening + purchased − returned − wastage − closing. The gap reveals over-portioning, theft, or data entry errors.
+      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
+        <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> Theoretical = what your recipes say you should have used based on sales.
+        Actual = {COGS_FORMULA}. The gap reveals over-portioning, theft, or data entry errors.
         Red rows need investigation. Green = within ±5% tolerance.
       </div>
 
@@ -260,8 +280,8 @@ export default function TheoreticalVariance() {
           {[
             { label: 'Theoretical Cost',  value: fmtNPR(totalTheorVal),    sub: 'Based on recipes × sales',      color: 'var(--theme-text3)' },
             { label: 'Actual Cost',        value: fmtNPR(totalActualVal),   sub: 'From stock movements',          color: 'var(--theme-text1)' },
-            { label: 'Total Variance',     value: fmtNPR(totalVarianceVal), sub: totalVarianceVal >= 0 ? 'Over-consumed' : 'Under-consumed', color: totalVarianceVal > 0 ? 'var(--theme-red)' : 'var(--theme-green)' },
-            { label: 'Items Over-used',    value: overCount,                sub: `${underCount} under-consumed`,  color: overCount > 0 ? 'var(--theme-red)' : 'var(--theme-green)' },
+            { label: 'Total Variance',     value: hasClosing ? fmtNPR(totalVarianceVal) : 'Not measurable yet', sub: !hasClosing ? 'Closing count not entered' : totalVarianceVal >= 0 ? 'Over-consumed' : 'Under-consumed', color: !hasClosing ? 'var(--theme-text2)' : totalVarianceVal > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' },
+            { label: 'Items Over-used',    value: hasClosing ? overCount : '—',           sub: hasClosing ? `${underCount} under-consumed` : 'Needs closing count',  color: !hasClosing ? 'var(--theme-text2)' : overCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' },
           ].map(card => (
             <div key={card.label} className="card" style={{ padding: '16px 20px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{card.label}</div>
@@ -276,26 +296,26 @@ export default function TheoreticalVariance() {
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <select
-            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '7px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
+            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
             value={filterCat} onChange={e => setFilterCat(e.target.value)}
           >
             <option value="all">All Categories</option>
             {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
 
-          <div style={{ display: 'flex', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
             {[['all', 'All'], ['over', '🔴 Over-consumed'], ['under', '🟡 Under-consumed']].map(([val, lbl]) => (
               <button key={val} onClick={() => setFilterType(val)} style={{
                 background: filterType === val ? 'rgba(201,168,76,0.12)' : 'none',
                 border: 'none', borderRight: '1px solid var(--theme-border)', cursor: 'pointer',
                 padding: '7px 14px', fontSize: 12, fontWeight: 600,
-                color: filterType === val ? 'var(--theme-accent)' : 'var(--theme-text2)',
+                color: filterType === val ? 'var(--theme-accent-ink)' : 'var(--theme-text2)',
               }}>{lbl}</button>
             ))}
           </div>
 
           <select
-            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '7px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
+            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
             value={sortBy} onChange={e => setSortBy(e.target.value)}
           >
             <option value="variance_val">Sort: Variance Value ↓</option>
@@ -334,7 +354,7 @@ export default function TheoreticalVariance() {
                     <Tip text="What your recipes say should have been consumed based on qty sold × ingredient qty per portion." width={240}>Theoretical</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="Opening + Purchased − Returned − Wastage − Closing. The actual stock consumed this period." width={240}>Actual</Tip>
+                    <Tip text={`${COGS_FORMULA}. The actual stock consumed this period.`} width={250}>Actual</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Actual − Theoretical. Positive = over-consumed (waste/theft/over-portioning). Negative = under-consumed (under-portioning or missing sales data)." width={280}>Variance</Tip>
@@ -378,7 +398,7 @@ export default function TheoreticalVariance() {
               {visible.length > 1 && (
                 <tfoot>
                   <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                    <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-accent)' }}>
+                    <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                       {visible.length} items shown
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text3)' }}>
@@ -388,7 +408,7 @@ export default function TheoreticalVariance() {
                       {fmtNPR(visible.reduce((s, r) => s + r.actual * r.rate, 0))}
                     </td>
                     <td colSpan={2} />
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: visible.reduce((s, r) => s + r.varianceVal, 0) > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: visible.reduce((s, r) => s + r.varianceVal, 0) > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                       {fmtNPR(visible.reduce((s, r) => s + r.varianceVal, 0))}
                     </td>
                   </tr>

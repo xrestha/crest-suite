@@ -23,7 +23,7 @@ export default function SupersedeConfirmModal({ mode, superseded, recipeNames, o
     <Modal onClose={onCancel} title={`Delete ${superseded.total} ${what}?`} maxWidth={620}>
       <div style={{
         background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)',
-        borderRadius: 8, padding: '12px 14px', marginBottom: 16, fontSize: 13, color: 'var(--theme-red)',
+        borderRadius: 'var(--radius-sm)', padding: '12px 14px', marginBottom: 16, fontSize: 13, color: 'var(--theme-red-text)',
       }}>
         This cannot be undone. Deleted sales entries are not recoverable.
       </div>
@@ -44,7 +44,7 @@ export default function SupersedeConfirmModal({ mode, superseded, recipeNames, o
             {superseded.byRecipe.map(e => (
               <tr key={e.recipeId}>
                 <td style={{ fontWeight: 600 }}>{recipeNames[e.recipeId] || 'Unknown item'}</td>
-                <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontWeight: 600 }}>{e.count}</td>
+                <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>{e.count}</td>
                 <td style={{ textAlign: 'right' }}>{e.qty.toLocaleString()}</td>
                 {isBulk && (
                   <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--theme-text3)' }}>
@@ -58,10 +58,10 @@ export default function SupersedeConfirmModal({ mode, superseded, recipeNames, o
       </div>
 
       <div className="form-field" style={{ marginBottom: 16 }}>
-        <label>
+        <label htmlFor="supers-f1">
           Type <strong style={{ color: 'var(--theme-text1)', letterSpacing: 0.5 }}>{CONFIRM_WORD}</strong> to confirm
         </label>
-        <input
+        <input id="supers-f1"
           type="text"
           value={typed}
           onChange={e => setTyped(e.target.value)}
@@ -81,7 +81,7 @@ export default function SupersedeConfirmModal({ mode, superseded, recipeNames, o
           onClick={onConfirm}
           disabled={!armed}
           style={{
-            color: armed ? 'var(--theme-red)' : 'var(--theme-text3)',
+            color: armed ? 'var(--theme-red-text)' : 'var(--theme-text3)',
             borderColor: armed ? 'rgba(248,113,113,0.5)' : 'var(--theme-border)',
             background: armed ? 'rgba(248,113,113,0.10)' : 'transparent',
           }}

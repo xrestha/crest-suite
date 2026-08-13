@@ -214,8 +214,13 @@
   --motion-slow:   260ms;
 
   /* Shape scale — theme-invariant (radius does not vary per preset, unlike color/shadow above).
-     sm: badges/small controls, md: buttons/inputs/tabs, lg: cards/panels, xl: hero surfaces
-     (login card, chart expand-modal). */
+     xs: micro-elements, sm: badges/small controls, md: buttons/inputs/tabs, lg: cards/panels,
+     xl: hero surfaces (login card, chart expand-modal). */
+  /* xs was added 2026-08-13 (S551) rather than rounding 38 real sites up to sm: at 10×10 a legend
+     swatch or a 4px-tall progress bar reads as a circle at 8px radius, which is why every one of
+     those sites had independently reached for a 2–4px literal. A step the system was missing, not
+     drift — added to DESIGN.md at the same time, per the closed-scale rule. */
+  --radius-xs: 4px;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 18px;
@@ -1015,6 +1020,25 @@ tr.interactive-row:focus-visible {
   cursor: not-allowed;
 }
 
+/* `.btn` and `.tab-btn` are the two classes nearly every page in the product is built from, and
+   until S551 neither had a focus ring — 11 of 16 focusable elements on a measured IMS page fell
+   back to the browser's own default outline, which on a dark card is close to invisible. Same
+   ring the inputs already use, so a keyboard user sees one consistent indicator everywhere. */
+/* Tip's trigger is tabIndex={0} (keyboard-reachable since S465) but had no visible focus state,
+   so a keyboard user tabbing a report page hit six invisible stops per screen. */
+.tip-trigger:focus-visible {
+  outline: none;
+  border-radius: var(--radius-xs);
+  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+}
+
+.btn:focus-visible,
+.tab-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+  border-color: var(--theme-accent);
+}
+
 .btn-primary {
   background: var(--theme-accent);
   color: var(--theme-accent-text);
@@ -1114,6 +1138,19 @@ tr.interactive-row:focus-visible {
   }
   /* Chart controls were in neither coarse block, so the expand affordance stayed 24px on a
      tablet — the device most likely to be propped on a pass counter. */
+  /* A bare <input type="checkbox"> renders at the UA default 13×13 — measured on /recipes,
+     /payables and /menu-repricing, where they are the row-select and select-all controls, i.e.
+     the entry point to every bulk action on those pages. Below the 24px minimum on any pointer,
+     and unusable with a thumb. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 20px;
+    height: 20px;
+  }
+  /* .tab-btn measured 23px tall — just under the floor, and it is the day-picker on Purchases. */
+  .tab-btn {
+    min-height: 32px;
+  }
   .chart-icon-btn,
   .chart-close-btn {
     min-height: 44px;
@@ -1176,13 +1213,31 @@ tr.interactive-row:focus-visible {
 }
 
 .panel-tab--active {
-  color: var(--theme-accent);
+  /* accent-ink for the label (accent as text), base accent for the underline (accent as fill). */
+  color: var(--theme-accent-ink);
   border-bottom-color: var(--theme-accent);
   font-weight: 600;
 }
 
 .panel-tab--danger {
-  color: var(--theme-red);
+  color: var(--theme-red-text);
+}
+
+.panel-tab:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--theme-focus-ring);
+  color: var(--theme-text1);
+}
+
+/* The row a set of .panel-tabs sits in. flexWrap is not cosmetic: a bare `display:flex` row with
+   no wrap silently pushes its LAST tab off the container as tabs are added — which is how the
+   Danger tab disappeared from ClientDrawer, and Stock Count's 7-tab row is the same shape. */
+.panel-tab-bar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--theme-border);
+  margin-bottom: 20px;
 }
 
 .panel-tab--danger:hover {
@@ -1494,8 +1549,11 @@ textarea:focus-visible {
   border-color: rgba(201,168,76,0.25);
 }
 
+/* accent-ink, not accent: this is the accent used AS text, on a tinted fill. Measured live (S551)
+   the base token failed AA on 7 of the 10 presets here — worst 2.27:1 on Rosé Dawn — and this one
+   rule renders on 19 IMS routes alone. */
 .tab-btn--active {
-  color: var(--theme-accent);
+  color: var(--theme-accent-ink);
   border-color: rgba(201,168,76,0.5);
   background: var(--theme-focus-ring);
   font-weight: 600;
@@ -1661,7 +1719,7 @@ textarea:focus-visible {
 }
 
 .stat-value.gold {
-  color: var(--theme-accent);
+  color: var(--theme-accent-ink);
 }
 
 .stat-sub {

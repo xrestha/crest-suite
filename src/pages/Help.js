@@ -108,7 +108,7 @@ const IMS_FEATURE_TIERS = [
       {
         icon: '▤', name: 'Stock Report',
         guide: 'Your current inventory valuation: on-hand quantity and value (qty × rate) per item and category, with a total stock-value headline. On-hand uses your closing physical count if entered, otherwise a theoretical estimate (Opening + Net Purchases − Usage − Wastage − Staff Meals − Requisitioned). Flags Low (at/below par) and Out-of-stock items. Export to Excel or print.',
-        tips: ['For an accurate valuation, enter a closing stock count — items then show a "Physical" badge instead of "Theor."', 'A negative-stock warning means usage/wastage exceeds recorded purchases — usually a missing purchase entry', 'Total Stock Value matches the Closing value in Stock Count → Summary for a counted period']
+        tips: ['For an accurate valuation, enter a closing stock count — items then show a "Physical" badge instead of "Theor."', 'A negative-stock warning means usage/wastage exceeds recorded purchases — usually a missing purchase entry', 'Total Stock Value matches the Closing value in Stock Count → Summary for a counted period', 'Needs Growth: the theoretical on-hand figure subtracts what your recipes say you consumed, so without Recipe Costing (Growth) stock would only ever go up. Existing Starter clients keep their access']
       },
       {
         icon: '⚑', name: 'Reorder Report',
@@ -162,8 +162,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '△', name: 'Variance Report',
-        guide: 'Compares theoretical usage (sales × recipe qty) against actual usage (opening + purchases − closing − wastage). Positive variance means more was used than sold — indicating waste, theft, or over-portioning. Items with >10% variance are flagged.',
-        tips: ['Sort by NPR value to prioritise the biggest leaks', 'Items with no recipe show actual usage only — no theoretical comparison', 'Review this every month before closing the period']
+        guide: 'Compares theoretical usage (sales × recipe qty) against actual usage (Opening + Net Purchases − Wastage − Staff Meals − Closing). Positive variance means more was used than sold — indicating waste, theft, or over-portioning. The flag threshold is yours: Settings → Thresholds → Variance Flag (default 10%). The report opens on the most recent CLOSED month, because the closing stock count is what makes the comparison possible at all.',
+        tips: ['Sort by NPR value to prioritise the biggest leaks', 'Items with no recipe show actual usage only — no theoretical comparison', 'Review this every month before closing the period', 'If you pick a month whose stock count is not done yet, the report says so and greys the figures out rather than showing them: without a closing count everything still on your shelves counts as "used", and every item would look over-consumed. Finish the Stock Count first — the Data Coverage card tells you whether both halves (sales + stock count) are in']
       },
       {
         icon: '₿', name: 'Outstanding Payables',
@@ -734,6 +734,9 @@ const FAQ = [
   { q: 'What if I forgot to enter a purchase?', a: 'Go to Purchases, select the correct period, and add the entry with the correct day. The system recalculates everything automatically.' },
   { q: 'How do I correct a wrong entry?', a: 'Every entry has an Edit button. Click it, correct the values, and save. No need to delete and re-enter.' },
   { q: 'Why does my Variance Report show no theoretical usage?', a: 'Either you have not entered Sales Entries for the period, or the items have no Recipe built. Both are needed for theoretical usage to calculate.' },
+  { q: 'Why did the Variance Report open on last month instead of this one?', a: 'Because variance can only be measured once the month\'s closing stock has been counted, which happens at month end. Mid-month there is no closing count, so everything still sitting on your shelves would be counted as "used" and every item would look over-consumed. The report therefore opens on the most recent closed month. You can still select the open month from the dropdown — it will tell you the count is missing and show the figures greyed out rather than flagging false losses.' },
+  { q: 'Two reports show a different COGS for the same month — which is right?', a: 'They agree now. COGS is Opening + Net Purchases (after returns) − Wastage − Staff Meals − Closing, everywhere in Crest. Annual Summary used to leave staff meals out, so its COGS and food-cost % sat slightly below Monthly Summary\'s for the same month; that was fixed on 2026-08-13 and Annual Summary\'s figures for past months will have moved up a little as a result. Staff meals count as cost of goods because the food came out of the same stock.' },
+  { q: 'On Purchases, the Total under the table does not match the Bill Total column. Why?', a: 'They are two different, both-correct figures, and both are now labelled. "Total goods value (ex-VAT)" is qty × rate before any bill discount and before VAT — that is what Stock Count and COGS use. "Total payable (incl. VAT)" is what actually leaves the bank, and that is what the Bill Total column adds up to. The difference is VAT minus discount.' },
   { q: 'Can two staff members enter data at the same time?', a: 'Yes. The system is cloud-based and supports multiple users simultaneously.' },
   { q: 'What happens to data when I close a period?', a: 'Closing a period locks it from further editing. All data is preserved permanently. You can view closed period reports at any time.' },
   { q: 'How do I add a new menu item to recipe costing?', a: 'Go to Recipe Costing → New Recipe. Add ingredients from your Item Master with qty per portion. The system calculates food cost instantly.' },

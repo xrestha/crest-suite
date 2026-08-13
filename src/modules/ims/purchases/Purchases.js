@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -7,8 +8,9 @@ import { supabase } from '../../../supabaseClient'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
+import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
-import { getCf } from './purchasesHelpers'
+import { getCf, calcBillTotals } from './purchasesHelpers'
 import PurchaseBillModal from './PurchaseBillModal'
 import PurchaseBillPrint from './PurchaseBillPrint'
 import ReturnsTab from './ReturnsTab'
@@ -295,12 +297,22 @@ export default function Purchases() {
     return acc
   }, {})
 
+  // The Total column on each bill row shows what was actually PAYABLE (incl. VAT, after the
+  // bill's discount) while the footer and the Gross Purchases KPI are the ex-VAT, pre-discount
+  // base. Both are legitimate figures, neither was labelled, and they differ by exactly
+  // (VAT − discount) — so the column visibly did not add up to the total printed beneath it.
+  // Footer now carries both, each named. Grouped the same way the table groups.
+  const filteredPayable = Object.values(byDay).reduce((sum, dayGroups) =>
+    sum + Object.values(dayGroups).reduce((s, lines) =>
+      s + calcBillTotals(lines, lines[0]?.discount_amount).grandTotal, 0), 0)
+
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
 
   // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
   // the route was reachable by any account at an ims_enabled client regardless of ims_role.
   if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="purchase entry" />
 
   return (
     <>
@@ -309,8 +321,8 @@ export default function Purchases() {
       {/* Rate update modal */}
       {rateUpdateItems.length > 0 && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid rgba(201,168,76,0.3)', borderRadius: 12, padding: '24px 28px', maxWidth: 520, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 4 }}>📦 Rate changes detected</div>
+          <div style={{ background: 'var(--theme-card)', border: '1px solid rgba(201,168,76,0.3)', borderRadius: 'var(--radius-md)', padding: '24px 28px', maxWidth: 520, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 4 }}>📦 Rate changes detected</div>
             <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 16 }}>Select items to update in the Item Master. This affects recipe costing going forward.</div>
 
             {/* Select all */}
@@ -324,7 +336,7 @@ export default function Purchases() {
             {/* Item rows */}
             <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
               {rateUpdateItems.map(item => (
-                <label key={item.itemId} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--theme-bg)', borderRadius: 7, padding: '10px 12px', cursor: 'pointer', userSelect: 'none' }}>
+                <label key={item.itemId} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--theme-bg)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', cursor: 'pointer', userSelect: 'none' }}>
                   <input type="checkbox"
                     checked={rateUpdateSelected.has(item.itemId)}
                     onChange={e => {
@@ -337,9 +349,9 @@ export default function Purchases() {
                     <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>per-unit → NPR {(item.newRate / item.purchaseQty).toFixed(4)}</div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, fontSize: 13 }}>
-                    <span style={{ color: 'var(--theme-red)', fontWeight: 600 }}>NPR {item.oldRate.toLocaleString()}</span>
+                    <span style={{ color: 'var(--theme-red-text)', fontWeight: 600 }}>NPR {item.oldRate.toLocaleString()}</span>
                     <span style={{ color: 'var(--theme-text2)' }}> → </span>
-                    <span style={{ color: 'var(--theme-green)', fontWeight: 600 }}>NPR {item.newRate.toLocaleString()}</span>
+                    <span style={{ color: 'var(--theme-green-text)', fontWeight: 600 }}>NPR {item.newRate.toLocaleString()}</span>
                   </div>
                 </label>
               ))}
@@ -368,7 +380,7 @@ export default function Purchases() {
         return (
           <Modal title={`⚠ Delete all ${noun} entries?`} maxWidth={440} onClose={() => { setDeleteAllTarget(null); setDeleteAllTyped('') }}>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', marginTop: 0 }}>
-              This permanently deletes <strong style={{ color: 'var(--theme-red)' }}>all {count} {noun} entr{count !== 1 ? 'ies' : 'y'}</strong> for <strong>{periodLabel}</strong>. This cannot be undone.
+              This permanently deletes <strong style={{ color: 'var(--theme-red-text)' }}>all {count} {noun} entr{count !== 1 ? 'ies' : 'y'}</strong> for <strong>{periodLabel}</strong>. This cannot be undone.
             </p>
             <p style={{ fontSize: 12, color: 'var(--theme-text3)', marginBottom: 6 }}>
               Type <strong style={{ color: 'var(--theme-text1)' }}>{periodLabel}</strong> to confirm.
@@ -396,7 +408,7 @@ export default function Purchases() {
 
       {/* Locked banner */}
       {isLocked && (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red)' }}>
+        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
         </div>
       )}
@@ -434,12 +446,12 @@ export default function Purchases() {
           <div className="stat-value">{purchases.length}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Gross Purchases</div>
+          <div className="stat-label"><Tip text="Goods value at qty × rate, before bill discounts and excluding VAT. Matches what Stock Count and COGS consume; the payable figure including VAT is in the table footer." width={270}>Gross Purchases (ex-VAT)</Tip></div>
           <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {grossTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Returns</div>
-          <div className="stat-value" style={{ fontSize: 16, color: returnTotal > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>
+          <div className="stat-value" style={{ fontSize: 16, color: returnTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
             {returnTotal > 0 ? `−NPR ${returnTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
           </div>
           <div className="stat-sub">{returns.length} entr{returns.length !== 1 ? 'ies' : 'y'}</div>
@@ -458,27 +470,24 @@ export default function Purchases() {
 
       {/* Tabs */}
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--theme-border)', marginBottom: 24 }}>
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 4 }} role="tablist" aria-label="Purchases views">
           {[
             { id: 'purchases', label: `Purchases (${purchases.length})` },
             { id: 'returns',   label: `Returns (${returns.length})` },
             { id: 'register',  label: 'Daily Register' },
           ].map(tab => (
-            <button key={tab.id} onClick={() => {
-              // Switching tabs unmounts ReturnsTab, which resets its own form state naturally.
-              setActiveTab(tab.id); setShowForm(false)
-            }} style={{
-              background: 'none', border: 'none', cursor: 'pointer', padding: '10px 20px', fontSize: 13, fontWeight: 500,
-              color: activeTab === tab.id ? 'var(--theme-accent)' : 'var(--theme-text2)',
-              borderBottom: activeTab === tab.id ? '2px solid var(--theme-accent)' : '2px solid transparent',
-              marginBottom: -1
-            }}>{tab.label}</button>
+            <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id}
+              className={`panel-tab${activeTab === tab.id ? ' panel-tab--active' : ''}`}
+              onClick={() => {
+                // Switching tabs unmounts ReturnsTab, which resets its own form state naturally.
+                setActiveTab(tab.id); setShowForm(false)
+              }}>{tab.label}</button>
           ))}
         </div>
         {!isLocked && activeTab !== 'register' && (
           <button
             className="btn btn-ghost"
-            style={{ fontSize: 12, padding: '5px 12px', marginBottom: 4, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}
+            style={{ fontSize: 12, padding: '5px 12px', marginBottom: 4, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}
             onClick={() => setDeleteAllTarget(activeTab === 'purchases' ? 'purchases' : 'returns')}
             disabled={activeTab === 'purchases' ? purchases.length === 0 : returns.length === 0}
           >
@@ -546,7 +555,7 @@ export default function Purchases() {
                 style={{ minWidth: 220 }}
               />
               {filterVendor !== 'all' && (
-                <span style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600 }}>
+                <span style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
                   Vendor Total: NPR {vendorTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               )}
@@ -573,10 +582,12 @@ export default function Purchases() {
                 <table className="data-table purchases-print-plain">
                   <thead>
                     <tr>
-                      <th>Day</th><th>Item</th><th>Vendor</th>
-                      <th style={{ textAlign: 'right' }}>Qty</th><th>UOM</th>
-                      <th style={{ textAlign: 'right' }}>Rate</th>
-                      <th style={{ textAlign: 'right' }}>Total</th>
+                      <th><Tip text="Day of the Nepali month the goods were received." width={220}>Day</Tip></th>
+                      <th>Item</th><th>Vendor</th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Quantity in your purchase unit, with the base-unit figure in brackets where the two differ — e.g. 2 Crate (24 Bottle). Stock and costing always use the base unit." width={280}>Qty</Tip></th>
+                      <th>UOM</th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Cost per base unit, not per purchase unit. A NPR 1,200 crate of 24 bottles stores as NPR 50 per bottle — which is what Recipe Costing and Stock value use." width={280}>Rate</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="What the bill came to in total — after any discount and including 13% VAT on the VAT-marked lines. This is the amount payable to the vendor." width={260}>Bill Total (incl. VAT)</Tip></th>
                       <th>Expiry</th><th></th>
                     </tr>
                   </thead>
@@ -595,7 +606,7 @@ export default function Purchases() {
                         const groupGrand    = (groupTotal - discountAmt) + vatAmount
 
                         const dayCell = (
-                          <td style={{ fontWeight: 700, color: 'var(--theme-accent)', fontSize: 14, borderRight: '1px solid var(--theme-border)', verticalAlign: 'middle', paddingTop: 10, paddingBottom: 10 }}>
+                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, borderRight: '1px solid var(--theme-border)', verticalAlign: 'middle', paddingTop: 10, paddingBottom: 10 }}>
                             {gIdx === 0 ? (
                               <>
                                 {day}
@@ -611,7 +622,10 @@ export default function Purchases() {
                         const actionsCell = (
                           <td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
-                              <span className={`badge ${first.payment_method === 'Cash' ? 'badge-green' : first.payment_method === 'Credit' ? 'badge-red' : 'badge-purple'}`}>
+                              {/* Credit is a normal commercial arrangement, not a fault — it was badge-red beside a green
+                                  Cash, which reads as a warning on every credit bill a restaurant enters.
+                                  badge-yellow is the categorical tag; overdue-ness is Outstanding Payables' job. */}
+                              <span className={`badge ${first.payment_method === 'Cash' ? 'badge-green' : first.payment_method === 'Credit' ? 'badge-yellow' : 'badge-purple'}`}>
                                 {first.payment_method || 'Cash'}
                               </span>
                               {!isLocked && <>
@@ -654,13 +668,13 @@ export default function Purchases() {
                                 {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                 {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
                               </td>
-                              <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 13, verticalAlign: 'middle' }}>
+                              <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
                                 {groupGrand.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                {vatAmount > 0 && <div style={{ fontSize: 10, color: 'var(--theme-amber)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
-                                {discountAmt > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                                {vatAmount > 0 && <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                                {discountAmt > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                               </td>
                               <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
-                                {entry.expiry_date ? <span style={{ color: 'var(--theme-accent)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
+                                {entry.expiry_date ? <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
                               </td>
                               {actionsCell}
                             </tr>
@@ -678,10 +692,10 @@ export default function Purchases() {
                               <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 10 }}>{groupEntries.length} items</span>
                             </td>
                             <td colSpan={3}></td>
-                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 13, verticalAlign: 'middle' }}>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
                               {groupGrand.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              {vatAmount > 0 && <div style={{ fontSize: 10, color: 'var(--theme-amber)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
-                              {discountAmt > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              {vatAmount > 0 && <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              {discountAmt > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                             </td>
                             <td></td>
                             {actionsCell}
@@ -716,11 +730,11 @@ export default function Purchases() {
                                   </>
                                 )
                               })()}
-                              <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>
+                              <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
                                 {(entry.qty * entry.rate).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>
                               <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
-                                {entry.expiry_date ? <span style={{ color: 'var(--theme-accent)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
+                                {entry.expiry_date ? <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
                               </td>
                               <td></td>
                             </tr>
@@ -729,14 +743,25 @@ export default function Purchases() {
                       })
                     })}
                     <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                      <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
+                      <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>
+                        <Tip text="Sum of qty × rate for the lines shown — before any bill discount and excluding VAT. This is the goods value, which is what Stock Count and COGS use." width={270}>Total goods value (ex-VAT)</Tip>
+                      </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>
                         {filteredQty !== null ? filteredQty.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
                       </td>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12, paddingTop: 12 }}>{filteredQtyUnit}</td>
                       <td></td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 15, paddingTop: 12 }}>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
                         NPR {filteredValue.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td colSpan={2}></td>
+                    </tr>
+                    <tr>
+                      <td colSpan={6} style={{ fontWeight: 700, color: 'var(--theme-text2)' }}>
+                        <Tip text="The same bills after their discounts and with VAT added — what actually leaves the bank. This is the figure the Bill Total column adds up to." width={270}>Total payable (incl. VAT)</Tip>
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14 }}>
+                        NPR {filteredPayable.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td colSpan={2}></td>
                     </tr>
@@ -850,7 +875,7 @@ export default function Purchases() {
                       {days.map(d => (
                         <th key={d} style={{ ...thStyle, width: 52, color: d % 2 === 0 ? 'var(--theme-text2)' : 'var(--theme-text3)' }}>{d}</th>
                       ))}
-                      <th style={{ ...thStyle, width: 68, color: 'var(--theme-accent)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 3 }}>Total</th>
+                      <th style={{ ...thStyle, width: 68, color: 'var(--theme-accent-ink)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 3 }}><Tip text="Row total across every day of the month, at goods value (ex-VAT, before bill discounts)." width={260}>Total</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -861,7 +886,7 @@ export default function Purchases() {
                         {/* Category header — click to collapse/expand, so a long item list can be
                             narrowed down without scrolling past categories you don't need right now */}
                         <tr key={`cat-${cat}`} style={{ background: 'rgba(201,168,76,0.06)', cursor: 'pointer' }} onClick={() => toggleRegisterCat(cat)}>
-                          <td colSpan={3 + numDays + 1} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 11, color: 'var(--theme-accent)', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid var(--theme-border)' }}>
+                          <td colSpan={3 + numDays + 1} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 11, color: 'var(--theme-accent-ink)', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid var(--theme-border)' }}>
                             <span style={{ display: 'inline-block', width: 14 }}>{collapsed ? '▸' : '▾'}</span>{cat}
                             <span style={{ fontWeight: 400, color: 'var(--theme-text3)', textTransform: 'none', letterSpacing: 0, marginLeft: 8 }}>({byCategory[cat].length})</span>
                           </td>
@@ -885,7 +910,7 @@ export default function Purchases() {
                                   </td>
                                 )
                               })}
-                              <td style={{ ...tdStyle, color: 'var(--theme-accent)', fontWeight: 700, borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, background: rowBg }}>
+                              <td style={{ ...tdStyle, color: 'var(--theme-accent-ink)', fontWeight: 700, borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, background: rowBg }}>
                                 {total.toLocaleString('en-NP', { maximumFractionDigits: 2 })}
                               </td>
                             </tr>

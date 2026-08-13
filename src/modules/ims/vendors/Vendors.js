@@ -154,8 +154,8 @@ export default function Vendors() {
         <Modal onClose={() => setShowForm(false)} title={editing ? 'Edit Vendor' : 'Add Vendor'}>
           <div className="form-grid form-grid-3">
             <div className="form-field">
-              <label>Vendor Name *</label>
-              <input
+              <label htmlFor="vendor-f1">Vendor Name *</label>
+              <input id="vendor-f1"
                 value={form.name}
                 onChange={e => setForm({ ...form, name: e.target.value })}
                 placeholder="e.g. Big Mart, Arawat Suppliers"
@@ -163,16 +163,16 @@ export default function Vendors() {
               />
             </div>
             <div className="form-field">
-              <label><Tip text="Name of the sales rep or account manager at this supplier. Useful for direct contact on order issues.">Contact Person</Tip></label>
-              <input
+              <label htmlFor="vendor-f2"><Tip text="Name of the sales rep or account manager at this supplier. Useful for direct contact on order issues.">Contact Person</Tip></label>
+              <input id="vendor-f2"
                 value={form.contact_person}
                 onChange={e => setForm({ ...form, contact_person: e.target.value })}
                 placeholder="Name"
               />
             </div>
             <div className="form-field">
-              <label>Phone</label>
-              <input
+              <label htmlFor="vendor-f3">Phone</label>
+              <input id="vendor-f3"
                 value={form.phone}
                 onChange={e => setForm({ ...form, phone: e.target.value })}
                 placeholder="98XXXXXXXX"
@@ -181,16 +181,16 @@ export default function Vendors() {
           </div>
           <div className="form-grid form-grid-3" style={{ marginTop: 18 }}>
             <div className="form-field" style={{ gridColumn: 'span 2' }}>
-              <label>Address</label>
-              <input
+              <label htmlFor="vendor-f4">Address</label>
+              <input id="vendor-f4"
                 value={form.address}
                 onChange={e => setForm({ ...form, address: e.target.value })}
                 placeholder="e.g. Balaju, Kathmandu"
               />
             </div>
             <div className="form-field">
-              <label><Tip text="Supplier's PAN (Permanent Account Number) or VAT registration number. Required for VAT invoice reconciliation and IRD compliance." width={280}>PAN / VAT No.</Tip></label>
-              <input
+              <label htmlFor="vendor-f5"><Tip text="Supplier's PAN (Permanent Account Number) or VAT registration number. Required for VAT invoice reconciliation and IRD compliance." width={280}>PAN / VAT No.</Tip></label>
+              <input id="vendor-f5"
                 value={form.pan_vat_no}
                 onChange={e => setForm({ ...form, pan_vat_no: e.target.value })}
                 placeholder="e.g. 123456789"
@@ -199,15 +199,15 @@ export default function Vendors() {
           </div>
           <div className="form-grid form-grid-3" style={{ marginTop: 18 }}>
             <div className="form-field">
-              <label><Tip text="Standard credit period or payment arrangement agreed with this supplier, e.g. 'Net 30', 'COD', '50% Advance'. Shown on Outstanding Payables for reference.">Payment Terms</Tip></label>
-              <input
+              <label htmlFor="vendor-f6"><Tip text="Standard credit period or payment arrangement agreed with this supplier, e.g. 'Net 30', 'COD', '50% Advance'. Shown on Outstanding Payables for reference.">Payment Terms</Tip></label>
+              <input id="vendor-f6"
                 value={form.payment_terms}
                 onChange={e => setForm({ ...form, payment_terms: e.target.value })}
                 placeholder="e.g. Net 30, COD"
               />
             </div>
           </div>
-          {error && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
+          {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
           <div className="form-actions" style={{ justifyContent: 'space-between' }}>
             {editing ? (() => {
               const idx = filtered.findIndex(v => v.id === editing)
@@ -239,7 +239,7 @@ export default function Vendors() {
           onChange={e => setSearch(e.target.value)}
           placeholder="Search vendor name or code…"
           style={{
-            background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6,
+            background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
             padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 280
           }}
         />
@@ -277,7 +277,7 @@ export default function Vendors() {
               <tbody>
                 {filtered.map(v => (
                   <tr key={v.id}>
-                    <td style={{ color: 'var(--theme-accent)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
+                    <td style={{ color: 'var(--theme-accent-ink)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
                       {v.vendor_code || '—'}
                     </td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{v.name}</td>
@@ -289,7 +289,9 @@ export default function Vendors() {
                       {v.address || <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                     </td>
                     <td>
-                      <span className={`badge ${v.is_active ? 'badge-green' : 'badge-red'}`}>
+                      {/* gray, not red: deactivating a vendor is routine housekeeping, not an error state, and red
+                          is this module's overdue/loss colour everywhere else. Matches Items. */}
+                      <span className={`badge ${v.is_active ? 'badge-green' : 'badge-gray'}`}>
                         {v.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>

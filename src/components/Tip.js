@@ -23,6 +23,7 @@ export default function Tip({ text, children, width = 220, style }) {
   return (
     <span
       ref={ref}
+      className="tip-trigger"
       tabIndex={0}
       aria-describedby={pos ? tooltipId : undefined}
       style={{ position: 'relative', cursor: 'help', borderBottom: '1px dashed var(--theme-border)', display: 'inline', ...style }}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -487,6 +488,7 @@ export default function Sales() {
   // and read, then overwrite, the client's whole manual sales ledger. Nav already hid it
   // (Layout.js's imsVisible requires an imsRole); the route did not.
   if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="sales entry" />
 
   return (
     <div>
@@ -499,7 +501,7 @@ export default function Sales() {
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <select
-            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
+            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
             value={selectedPeriod?.id || ''}
             onChange={e => handlePeriodChange(e.target.value)}
           >
@@ -516,23 +518,27 @@ export default function Sales() {
 
       {/* Period locked banner */}
       {isLocked && (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red)' }}>
+        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
         </div>
       )}
       {/* POS-supersedes-manual banner. Accent rather than red — this is how the product is meant
           to work for a two-module client, not an error or a lockout they need to resolve. */}
       {posOwnsSales && (
-        <div style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.35)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-text1)' }}>
+        <div style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.35)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-text1)' }}>
           🛈 <span><strong>Sales come from Crest POS.</strong> Every bill closed at the till posts its own sales automatically, so Bulk Entry and Daily Entry are disabled — manual figures would duplicate or contradict the till. These views stay live and read-only.</span>
         </div>
       )}
       {/* Stat cards */}
       <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 20 }}>
         <div className="stat-card">
-          <div className="stat-label">Total Covers</div>
+          {/* Was labelled "Total Covers" — this is Σ qty_sold across recipes, i.e. dishes, not
+              guests. A cover is a guest served (what CoversReport and Demand Forecast both mean by
+              it), and it is the denominator of average spend per head — so an owner dividing
+              revenue by this got roughly revenue-per-dish and called it their average check. */}
+          <div className="stat-label"><Tip text="Total number of menu items sold this period — dishes, not guests. Guest counts (covers) come from POS bills, not from sales entry." width={260}>Items Sold</Tip></div>
           <div className="stat-value">{totalQty.toLocaleString()}</div>
-          <div className="stat-sub">Items sold this period</div>
+          <div className="stat-sub">across all menu items</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Items with Sales</div>
@@ -550,20 +556,18 @@ export default function Sales() {
 
       {/* Tabs */}
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--theme-border)', marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 4 }} role="tablist" aria-label="Sales entry views">
           {Object.entries(TAB_LABELS).map(([key, label]) => {
             const tabDisabled = posOwnsSales && ENTRY_TABS.includes(key)
             // aria-disabled, NOT the disabled attribute: a disabled <button> swallows mouse events
             // and never bubbles them, so Tip (which binds onMouseEnter on its wrapper span) would
             // never fire and the user would get a greyed-out tab with no way to find out why.
             const btn = (
-              <button key={key} onClick={() => { if (!tabDisabled) setViewMode(key) }} aria-disabled={tabDisabled} style={{
-                background: 'none', border: 'none', cursor: tabDisabled ? 'not-allowed' : 'pointer',
-                padding: '10px 20px', fontSize: 13, fontWeight: 500,
-                color: tabDisabled ? 'var(--theme-text3)' : viewMode === key ? 'var(--theme-accent)' : 'var(--theme-text2)',
-                borderBottom: viewMode === key ? '2px solid var(--theme-accent)' : '2px solid transparent',
-                marginBottom: -1, transition: 'color 0.12s'
-              }}>{tabDisabled ? `🔒 ${label}` : label}</button>
+              <button key={key} type="button" role="tab" aria-selected={viewMode === key}
+                onClick={() => { if (!tabDisabled) setViewMode(key) }} aria-disabled={tabDisabled}
+                className={`panel-tab${viewMode === key ? ' panel-tab--active' : ''}`}
+                style={tabDisabled ? { cursor: 'not-allowed', color: 'var(--theme-text3)' } : undefined}
+              >{tabDisabled ? `🔒 ${label}` : label}</button>
             )
             return tabDisabled
               ? <Tip key={key} style={{ borderBottom: 'none', cursor: 'not-allowed' }} width={300}
@@ -585,7 +589,7 @@ export default function Sales() {
                   value={menuSearch}
                   onChange={e => setMenuSearch(e.target.value)}
                   placeholder="Search menu item…"
-                  style={{ background: 'var(--theme-card)', border: `1px solid ${menuSearch ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 6, padding: '6px 10px 6px 28px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: 170, display: 'block' }}
+                  style={{ background: 'var(--theme-card)', border: `1px solid ${menuSearch ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '6px 10px 6px 28px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: 170, display: 'block' }}
                 />
                 <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
                 {menuSearch && (
@@ -598,7 +602,7 @@ export default function Sales() {
               <select
                 value={categoryFilter}
                 onChange={e => setCategoryFilter(e.target.value)}
-                style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', marginBottom: 6 }}
+                style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', marginBottom: 6 }}
               >
                 <option value="all">All Categories</option>
                 {categories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -608,7 +612,7 @@ export default function Sales() {
               <select
                 value={sortBy}
                 onChange={e => setSortBy(e.target.value)}
-                style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', marginBottom: 6 }}
+                style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', marginBottom: 6 }}
               >
                 <option value="rev_desc">Highest Revenue</option>
                 <option value="rev_asc">Lowest Revenue</option>
@@ -629,13 +633,13 @@ export default function Sales() {
           {/* BULK ENTRY */}
           {viewMode === 'bulk' && (
             <>
-              <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent)' }}>
+              <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
                 Enter total qty sold for the entire period per menu item. Sub-recipes are excluded.
               </div>
               <div className="card">
                 <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
-                    Period total — <strong style={{ color: 'var(--theme-accent)' }}>{periodLabel}</strong>
+                    Period total — <strong style={{ color: 'var(--theme-accent-ink)' }}>{periodLabel}</strong>
                   </span>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button
@@ -647,7 +651,7 @@ export default function Sales() {
                         recipes.forEach(r => { cleared[r.id] = '' })
                         setBulkForm(cleared)
                       }}
-                      style={{ fontSize: 13, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
+                      style={{ fontSize: 13, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
                     >
                       Clear All
                     </button>
@@ -661,7 +665,7 @@ export default function Sales() {
                   </div>
                 </div>
                 {bulkSaveError && (
-                  <div className="no-print" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 6, padding: '8px 12px', marginBottom: 16, fontSize: 12.5, color: 'var(--theme-red)' }}>
+                  <div className="no-print" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', marginBottom: 16, fontSize: 12, color: 'var(--theme-red-text)' }}>
                     ⚠ {bulkSaveError}
                   </div>
                 )}
@@ -704,13 +708,13 @@ export default function Sales() {
                                 disabled={isLocked}
                                 style={{
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
-                                  borderRadius: 5, padding: '6px 10px', fontSize: 13,
+                                  borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 110, textAlign: 'right',
                                   borderColor: parseFloat(qty) > 0 ? 'rgba(201,168,76,0.4)' : 'var(--theme-border)'
                                 }}
                               />
                             </td>
-                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
+                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
                               {rev > 0 ? `NPR ${rev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
                             </td>
                           </tr>
@@ -727,7 +731,7 @@ export default function Sales() {
           {/* DAILY ENTRY */}
           {viewMode === 'daily' && (
             <>
-              <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent)' }}>
+              <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
                 Enter qty sold per menu item for a single day. Use Bulk Entry for period totals instead.
               </div>
               <div className="card">
@@ -769,7 +773,7 @@ export default function Sales() {
                             <button
                               className="btn btn-ghost"
                               onClick={() => setSelectedDay(today.day)}
-                              style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.3)' }}
+                              style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent-ink)', borderColor: 'rgba(201,168,76,0.3)' }}
                             >Today (day {today.day})</button>
                           )}
                         </>
@@ -787,7 +791,7 @@ export default function Sales() {
                         setDailyForm(cleared)
                         setDiscountForm(cleared)
                       }}
-                      style={{ fontSize: 13, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
+                      style={{ fontSize: 13, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
                     >Clear</button>
                     <button
                       className="btn btn-primary"
@@ -797,7 +801,7 @@ export default function Sales() {
                   </div>
                 </div>
                 {dailySaveError && (
-                  <div className="no-print" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 6, padding: '8px 12px', marginBottom: 16, fontSize: 12.5, color: 'var(--theme-red)' }}>
+                  <div className="no-print" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', marginBottom: 16, fontSize: 12, color: 'var(--theme-red-text)' }}>
                     ⚠ {dailySaveError}
                   </div>
                 )}
@@ -820,9 +824,9 @@ export default function Sales() {
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, marginBottom: 12, fontSize: 13, flexWrap: 'wrap' }}>
                         <span style={{ color: 'var(--theme-text2)' }}>Total qty sold (Day {selectedDay}): <strong style={{ color: 'var(--theme-text1)' }}>{totQty.toLocaleString()}</strong></span>
                         {totDiscount > 0 && (
-                          <span style={{ color: 'var(--theme-text2)' }}>Total discount: <strong style={{ color: 'var(--theme-red)' }}>NPR {totDiscount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                          <span style={{ color: 'var(--theme-text2)' }}>Total discount: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {totDiscount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
                         )}
-                        <span style={{ color: 'var(--theme-text2)' }}>Day revenue: <strong style={{ color: 'var(--theme-accent)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
+                        <span style={{ color: 'var(--theme-text2)' }}>Day revenue: <strong style={{ color: 'var(--theme-accent-ink)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
                       </div>
                     )
                   })()}
@@ -864,7 +868,7 @@ export default function Sales() {
                                 disabled={isLocked}
                                 style={{
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
-                                  borderRadius: 5, padding: '6px 10px', fontSize: 13,
+                                  borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 110, textAlign: 'right',
                                   borderColor: qty > 0 ? 'rgba(201,168,76,0.4)' : 'var(--theme-border)'
                                 }}
@@ -879,13 +883,13 @@ export default function Sales() {
                                 disabled={isLocked}
                                 style={{
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
-                                  borderRadius: 5, padding: '6px 10px', fontSize: 13,
+                                  borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 100, textAlign: 'right',
                                   borderColor: disc > 0 ? 'rgba(248,113,113,0.4)' : 'var(--theme-border)'
                                 }}
                               />
                             </td>
-                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
+                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
                               {qty > 0 || disc > 0 ? `NPR ${rev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
                           </tr>
@@ -904,7 +908,7 @@ export default function Sales() {
                         setDailyForm(cleared)
                         setDiscountForm(cleared)
                       }}
-                      style={{ fontSize: 13, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
+                      style={{ fontSize: 13, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
                     >Clear</button>
                     <button
                       className="btn btn-primary"
@@ -965,7 +969,7 @@ export default function Sales() {
                         <th style={{ position: 'sticky', left: 0, background: 'var(--theme-bg)', zIndex: 1, minWidth: 160 }}>Menu Item</th>
                         <th style={{ position: 'sticky', left: 160, background: 'var(--theme-bg)', zIndex: 1, minWidth: 90 }}>Category</th>
                         {activeDays.map(d => (
-                          <th key={d} style={{ textAlign: 'right', minWidth: 56, color: isCurrentMonth && d === today.day ? 'var(--theme-accent)' : undefined }}>
+                          <th key={d} style={{ textAlign: 'right', minWidth: 56, color: isCurrentMonth && d === today.day ? 'var(--theme-accent-ink)' : undefined }}>
                             {isCurrentMonth && d === today.day ? <span title="Today">⬤ {d}</span> : d}
                           </th>
                         ))}
@@ -998,7 +1002,7 @@ export default function Sales() {
                                 {fmtQty(pivot[recipe.id]?.[0] || 0)}
                               </td>
                             )}
-                            <td style={{ textAlign: 'right', fontWeight: 700, color: total > 0 ? 'var(--theme-accent)' : 'var(--theme-text2)' }}>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: total > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
                               {total > 0 ? total.toLocaleString() : '—'}
                             </td>
                           </tr>
@@ -1016,7 +1020,7 @@ export default function Sales() {
                             {(() => { const t = activeRecipes.reduce((s, r) => s + (pivot[r.id]?.[0] || 0), 0); return t > 0 ? t.toLocaleString() : '—' })()}
                           </td>
                         )}
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontSize: 15 }}>{grandTotal.toLocaleString()}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 14 }}>{grandTotal.toLocaleString()}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1078,17 +1082,17 @@ export default function Sales() {
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString()}` : '—'}
                             </td>
-                            <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-red)' : 'var(--theme-text3)' }}>
+                            <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>
                               {disc > 0 ? `NPR ${disc.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
-                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)', fontWeight: 600 }}>
+                            <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: 600 }}>
                               {rev > 0 ? `NPR ${rev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
                               {revPct > 0 ? (
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-                                  <div style={{ width: 60, height: 4, background: 'var(--theme-border)', borderRadius: 2 }}>
-                                    <div style={{ width: `${Math.min(revPct, 100)}%`, height: '100%', background: 'var(--theme-accent)', borderRadius: 2 }} />
+                                  <div style={{ width: 60, height: 4, background: 'var(--theme-border)', borderRadius: 'var(--radius-xs)' }}>
+                                    <div style={{ width: `${Math.min(revPct, 100)}%`, height: '100%', background: 'var(--theme-accent)', borderRadius: 'var(--radius-xs)' }} />
                                   </div>
                                   <span style={{ fontSize: 12, color: 'var(--theme-text2)', minWidth: 36 }}>{revPct.toFixed(1)}%</span>
                                 </div>
@@ -1101,10 +1105,10 @@ export default function Sales() {
                         <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{sumTotalQty.toLocaleString()}</td>
                         <td></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', paddingTop: 12 }}>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>
                           {sumTotalDiscount > 0 ? `NPR ${sumTotalDiscount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 15, paddingTop: 12 }}>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
                           NPR {sumTotalRev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td></td>

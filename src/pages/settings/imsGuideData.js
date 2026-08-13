@@ -527,7 +527,7 @@ export const IMS_GUIDE_GROUPS = [
         ],
         fields: [],
         formulas: [
-          'Per month: COGS = Opening + Net Purchases − Wastage − Closing (note: unlike Monthly Summary, this version does NOT subtract Staff Meals — a subtle inconsistency between the two reports worth flagging if numbers are compared side by side).',
+          'Per month: COGS = Opening + Net Purchases (after returns) − Wastage − Staff Meals − Closing. Identical to Monthly Summary, Stock Count and Period Comparison — this page used to leave Staff Meals out, which put its COGS and FC% below the other reports for the same month (fixed 2026-08-13).',
           'Annual FC% = totalCOGS ÷ totalRevenue × 100 — summed then divided, explicitly NOT an average of each month\'s FC% (more accurate, since it weights by each month\'s actual size).',
         ],
         gotchas: [
@@ -1152,7 +1152,7 @@ export const IMS_GUIDE_GROUPS = [
           { label: 'Vendor Codes', desc: 'Same pattern for vendor_code_prefix (default VND). Shown as a badge in Vendor Report and used as a secondary search field there.' },
           { label: 'Sub-Recipe Codes', desc: 'Same pattern for sub_recipe_code_prefix (default SRC), scoped to recipes where category = "Sub-Recipe." Gated behind the recipe_costing feature flag.' },
           { label: 'Recipe Categories', desc: 'Free-form list feeding the recipe-form category dropdown and the category filter tabs on Best Sellers, Recipe Margin, and Menu Repricing. "Sub-Recipe / Prep Item" is a protected, system-managed category that can\'t be added/removed here — it\'s the sentinel value every cost report explicitly excludes. Removing a category from this list does NOT retag existing recipes; they keep showing under their now-orphaned category name.' },
-          { label: 'Thresholds', desc: 'fc_warning_pct (35) / fc_critical_pct (45) color the Dashboard\'s Food Cost % card and Recipe Costing\'s FC filter pills. expiry_warning_days (7) sets FIFO/Expiry Report\'s "expiring soon" window. variance_flag_pct (10) is the intended Variance Report flag threshold. None of these four feed the Finance/Menu/Vendor reports — they\'re specifically Dashboard/Recipe Costing/FIFO/Variance-facing.' },
+          { label: 'Thresholds', desc: 'fc_warning_pct (35) / fc_critical_pct (45) now colour EVERY food-cost figure in the product: the Dashboard card, Recipe Costing\'s filter pills AND its FC% column, Menu Pricing, Menu Repricing, Recipe Margin, Annual Summary and Period Comparison. Those pages each carried their own hardcoded 30/38 scale until 2026-08-13, so a dish could be returned by the pill labelled "⚠ 35–45%" and painted red at the same time. expiry_warning_days (7) sets FIFO/Expiry Report\'s "expiring soon" window. variance_flag_pct (10) is the Variance Report\'s Over/Under flag threshold — wired 2026-08-13, before which the report ignored the setting and always used 10.' },
         ],
         formulas: [],
         gotchas: [

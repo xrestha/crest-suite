@@ -4,6 +4,8 @@ import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { useSettings } from '../../../context/SettingsContext'
+import { fcBand } from '../../../shared/imsFormulas'
 import ChartCard from '../../../components/ChartCard'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import {
@@ -13,12 +15,13 @@ import {
 } from 'recharts'
 import { chartMotion } from '../../../shared/chartMotion'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 
 const QUADRANTS = {
-  Star:      { color: 'var(--theme-green)', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.30)', icon: '★', desc: 'High profit · High popularity' },
-  Plowhorse: { color: 'var(--theme-purple)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)', icon: '🐴', desc: 'High profit · Low popularity' },
-  Puzzle:    { color: 'var(--theme-amber)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)',  icon: '?', desc: 'Low profit · High popularity' },
-  Dog:       { color: 'var(--theme-red)', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.30)', icon: '✕', desc: 'Low profit · Low popularity' },
+  Star:      { color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.30)', icon: '★', desc: 'High profit · High popularity' },
+  Plowhorse: { color: 'var(--theme-purple-text)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)', icon: '🐴', desc: 'High profit · Low popularity' },
+  Puzzle:    { color: 'var(--theme-amber-text)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)',  icon: '?', desc: 'Low profit · High popularity' },
+  Dog:       { color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.30)', icon: '✕', desc: 'Low profit · Low popularity' },
 }
 
 const FC_CUTOFF = 35 // %
@@ -39,10 +42,10 @@ function ScatterTooltipContent({ active, payload }) {
   return (
     <div style={{
       background: 'var(--theme-card)', border: `1px solid ${q.border}`,
-      borderRadius: 8, padding: '10px 14px', fontSize: 12, minWidth: 160
+      borderRadius: 'var(--radius-sm)', padding: '10px 14px', fontSize: 12, minWidth: 160
     }}>
       <div style={{ fontWeight: 700, color: q.color, marginBottom: 6 }}>{q.icon} {d.name}</div>
-      <div style={{ color: 'var(--theme-text2)' }}>FC%: <span style={{ fontWeight: 600, color: d.fcPct > FC_CUTOFF ? 'var(--theme-red)' : 'var(--theme-green)' }}>{d.sellingPrice > 0 ? d.fcPct.toFixed(1) + '%' : '—'}</span></div>
+      <div style={{ color: 'var(--theme-text2)' }}>FC%: <span style={{ fontWeight: 600, color: d.fcPct > FC_CUTOFF ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{d.sellingPrice > 0 ? d.fcPct.toFixed(1) + '%' : '—'}</span></div>
       <div style={{ color: 'var(--theme-text2)' }}>Qty Sold: <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{d.qtySold}</span></div>
       <div style={{ color: 'var(--theme-text2)' }}>Revenue: <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>NPR {d.revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
     </div>
@@ -52,9 +55,9 @@ function ScatterTooltipContent({ active, payload }) {
 function BarTooltipContent({ active, payload, label }) {
   if (!active || !payload?.length) return null
   return (
-    <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+    <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 12 }}>
       <div style={{ fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 4 }}>{label}</div>
-      <div style={{ color: 'var(--theme-text2)' }}>Revenue: <span style={{ fontWeight: 600, color: 'var(--theme-accent)' }}>NPR {(payload[0]?.value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+      <div style={{ color: 'var(--theme-text2)' }}>Revenue: <span style={{ fontWeight: 600, color: 'var(--theme-accent-ink)' }}>NPR {(payload[0]?.value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
     </div>
   )
 }
@@ -77,6 +80,10 @@ function median(arr) {
 
 export default function MenuEngineering() {
   const { profile, clientId: authClientId, loading: authLoading, hasImsAccess } = useAuth()
+  // Colours come from the client's configured thresholds; the Star/Puzzle/Dog CLASSIFICATION
+  // deliberately stays on FC_CUTOFF, because computeMenuEngineeringSection.js mirrors classify()
+  // verbatim for the frozen Monthly Owner Report and the two must not diverge.
+  const { settings } = useSettings()
   const clientId = authClientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const { colors } = useTheme()
@@ -85,6 +92,9 @@ export default function MenuEngineering() {
   const [periodId, setPeriodId]   = useState('')
   const [items, setItems]         = useState([])   // enriched recipe rows
   const [loading, setLoading]     = useState(false)
+  // This page's `loading` starts false (it only covers loadData), so the no-period state needs
+  // its own "have we fetched periods yet" flag or it flashes on every first paint.
+  const [periodsLoaded, setPeriodsLoaded] = useState(false)
   const [filterQ, setFilterQ]     = useState('All')
   const [search, setSearch]       = useState('')
   const [viewMode, setViewMode]   = useState('table') // 'table' | 'matrix'
@@ -103,6 +113,7 @@ export default function MenuEngineering() {
       label: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}`
     }))
     setPeriods(withLabel)
+    setPeriodsLoaded(true)
     const active = withLabel.find(p => p.status === 'open') || withLabel[0]
     if (active) setPeriodId(active.id)
   }
@@ -229,6 +240,7 @@ export default function MenuEngineering() {
   }, [items])
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
+  if (periodsLoaded && periods.length === 0) return <NoPeriodState what="menu engineering" />
 
   return (
     <div>
@@ -262,7 +274,7 @@ export default function MenuEngineering() {
             style={{
               background: filterQ === name ? q.bg : 'var(--theme-card)',
               border: `1px solid ${filterQ === name ? q.border : 'var(--theme-border)'}`,
-              borderRadius: 8, padding: '14px 16px', cursor: 'pointer',
+              borderRadius: 'var(--radius-sm)', padding: '14px 16px', cursor: 'pointer',
               transition: 'all 0.15s'
             }}
           >
@@ -284,7 +296,7 @@ export default function MenuEngineering() {
           placeholder="Search menu items…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 220 }}
+          style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 220 }}
         />
         <select className="form-select" value={filterQ} onChange={e => setFilterQ(e.target.value)}>
           <option value="All">All Quadrants</option>
@@ -332,7 +344,7 @@ export default function MenuEngineering() {
                   { q: 'Puzzle',    pos: 'right + bottom (high qty, high FC%)', hint: 'Popular — review recipe cost' },
                   { q: 'Dog',       pos: 'left + bottom (low qty, high FC%)',   hint: 'Consider redesign or removal' },
                 ].map(({ q, pos, hint }) => (
-                  <div key={q} style={{ background: 'var(--theme-table-hover)', borderRadius: 6, padding: '8px 10px' }}>
+                  <div key={q} style={{ background: 'var(--theme-table-hover)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: Q_HEX[q], display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                         <span style={{ width: 8, height: 8, borderRadius: '50%', background: Q_HEX[q], display: 'inline-block', flexShrink: 0 }} />
@@ -374,7 +386,7 @@ export default function MenuEngineering() {
               footer={topItems.length > 0 && (
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 8 }}>
                   Top {topItems.length} = <strong style={{ color: 'var(--theme-text1)' }}>NPR {topItemsRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
-                  {allItemsRevenue > 0 && <> · <span style={{ color: 'var(--theme-accent)', fontWeight: 600 }}>{((topItemsRevenue / allItemsRevenue) * 100).toFixed(0)}%</span> of total menu revenue</>}
+                  {allItemsRevenue > 0 && <> · <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{((topItemsRevenue / allItemsRevenue) * 100).toFixed(0)}%</span> of total menu revenue</>}
                 </div>
               )}
               renderChart={h => topItems.length === 0 ? (
@@ -473,7 +485,7 @@ export default function MenuEngineering() {
                       <td style={{ textAlign: 'right' }}>{r.ingredientCost.toFixed(2)}</td>
                       <td style={{ textAlign: 'right' }}>
                         <span style={{
-                          color: r.fcPct <= 30 ? 'var(--theme-green)' : r.fcPct <= 38 ? 'var(--theme-amber)' : 'var(--theme-red)',
+                          color: fcBand(r.fcPct, settings).color,
                           fontWeight: 600
                         }}>
                           {r.sellingPrice > 0 ? r.fcPct.toFixed(1) + '%' : '—'}
@@ -486,7 +498,7 @@ export default function MenuEngineering() {
                           fontSize: 12, fontWeight: 700,
                           background: q.bg, color: q.color,
                           border: `1px solid ${q.border}`,
-                          borderRadius: 4, padding: '3px 8px',
+                          borderRadius: 'var(--radius-xs)', padding: '3px 8px',
                           whiteSpace: 'nowrap'
                         }}>
                           {q.icon} {r.quadrant}
@@ -512,7 +524,7 @@ export default function MenuEngineering() {
             <div key={name} style={{
               background: 'var(--theme-card)',
               border: `1px solid ${q.border}`,
-              borderRadius: 10, overflow: 'hidden'
+              borderRadius: 'var(--radius-md)', overflow: 'hidden'
             }}>
               {/* Quadrant header */}
               <div style={{
@@ -521,10 +533,10 @@ export default function MenuEngineering() {
                 borderBottom: `1px solid ${q.border}`
               }}>
                 <div>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: q.color }}>{q.icon} {name}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: q.color }}>{q.icon} {name}</span>
                   <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginLeft: 10 }}>{q.desc}</span>
                 </div>
-                <span style={{ fontSize: 20, fontWeight: 700, color: q.color }}>{byQuadrant[name].length}</span>
+                <span style={{ fontSize: 18, fontWeight: 700, color: q.color }}>{byQuadrant[name].length}</span>
               </div>
               {/* Items */}
               <div style={{ padding: '8px 0', minHeight: 60 }}>
@@ -542,7 +554,7 @@ export default function MenuEngineering() {
                     <div style={{ textAlign: 'right' }}>
                       <div style={{
                         fontSize: 12, fontWeight: 700,
-                        color: r.fcPct <= 30 ? 'var(--theme-green)' : r.fcPct <= 38 ? 'var(--theme-amber)' : 'var(--theme-red)'
+                        color: fcBand(r.fcPct, settings).color
                       }}>
                         {r.sellingPrice > 0 ? r.fcPct.toFixed(1) + '%' : '—'} FC
                       </div>
@@ -561,13 +573,13 @@ export default function MenuEngineering() {
         <div className="card" style={{ marginTop: 16, display: 'flex', gap: 24, flexWrap: 'wrap', padding: '12px 20px' }}>
           <span style={{ fontSize: 11, color: 'var(--theme-text2)', alignSelf: 'center' }}>Thresholds:</span>
           <Tip text="Items with food cost ≤ 35% of selling price are 'high profit'. Above 35% = low profit.">
-            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>FC% cutoff <span style={{ color: 'var(--theme-accent)' }}>35%</span></span>
+            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>FC% cutoff <span style={{ color: 'var(--theme-accent-ink)' }}>35%</span></span>
           </Tip>
           <Tip text={`Median portions sold this period. Items at or above ${medianQty.toFixed(0)} are 'high popularity'; below = low popularity.`}>
-            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Volume cutoff <span style={{ color: 'var(--theme-accent)' }}>median = {medianQty.toFixed(1)} portions</span></span>
+            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Volume cutoff <span style={{ color: 'var(--theme-accent-ink)' }}>median = {medianQty.toFixed(1)} portions</span></span>
           </Tip>
           <Tip text="The Bikram Sambat period being analysed. Change the period in the dropdown above to compare months.">
-            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Period <span style={{ color: 'var(--theme-accent)' }}>{periods.find(p => p.id === periodId)?.label || ''}</span></span>
+            <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Period <span style={{ color: 'var(--theme-accent-ink)' }}>{periods.find(p => p.id === periodId)?.label || ''}</span></span>
           </Tip>
         </div>
       )}

@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
+import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { COGS_FORMULA, computeUsed, varianceFlagPct } from '../../../shared/imsFormulas'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -20,6 +23,8 @@ function dispPurch(baseQty, item) {
 
 export default function Variance() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
+  const { settings } = useSettings()
+  const flagPct = varianceFlagPct(settings)
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods] = useState([])
@@ -30,6 +35,9 @@ export default function Variance() {
   const [filterFlag, setFilterFlag] = useState('all')
   const [categories, setCategories] = useState([])
   const [summary, setSummary] = useState(null)
+  // Variance is only meaningful once the period's closing stock has been counted — see the
+  // comment on the period default below.
+  const [hasClosing, setHasClosing] = useState(true)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -41,8 +49,13 @@ export default function Variance() {
     ])
     setPeriods(p || [])
     setCategories(c || [])
-    const open = (p || []).find(x => x.status === 'open')
-    if (open) { setSelectedPeriod(open); await buildReport(open.id) }
+    // Default to the most recent CLOSED period, not the open one. Closing stock is counted at
+    // month-end, so mid-month `closeQty` is 0 for every item — actual usage then reads as
+    // "everything on the shelf plus everything bought", every row flags Over, and the page paints
+    // a red "potential loss" figure on a month that structurally cannot have one yet.
+    // ShrinkageReport.js already restricts itself this way; this page never did.
+    const chosen = (p || []).find(x => x.status === 'closed') || (p || []).find(x => x.status === 'open')
+    if (chosen) { setSelectedPeriod(chosen); await buildReport(chosen.id) }
     setLoading(false)
   }
 
@@ -86,6 +99,7 @@ export default function Variance() {
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
+    setHasClosing((closing || []).length > 0)
 
     // PATCHED: build purchMap net of returns
     const purchMap = {}
@@ -118,7 +132,9 @@ export default function Variance() {
       const closeQty     = closeMap[item.id] || 0
       const wasteQty     = wasteMap[item.id]     || 0
       const staffMealQty = staffMealMap[item.id] || 0
-      const actualUsed   = openQty + netPurchQty - closeQty - wasteQty - staffMealQty
+      const actualUsed   = computeUsed({
+        opening: openQty, purchases: netPurchQty, wastage: wasteQty, staffMeals: staffMealQty, closing: closeQty
+      })
       const theoreticalUsed = theoreticalMap[item.id] || 0
       const variance     = actualUsed - theoreticalUsed
       const variancePct  = theoreticalUsed > 0 ? (variance / theoreticalUsed) * 100 : null
@@ -126,8 +142,8 @@ export default function Variance() {
 
       let flag = 'ok'
       if (variancePct !== null) {
-        if (variancePct > 10) flag = 'over'
-        else if (variancePct < -10) flag = 'under'
+        if (variancePct > flagPct) flag = 'over'
+        else if (variancePct < -flagPct) flag = 'under'
       }
       if (theoreticalUsed === 0 && actualUsed > 0) flag = 'over'
 
@@ -166,6 +182,7 @@ export default function Variance() {
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="the variance report" />
 
   return (
     <div>
@@ -187,6 +204,15 @@ export default function Variance() {
         </select>
       </div>
 
+      {!loading && selectedPeriod && !hasClosing && (
+        <div style={{ background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.30)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>Closing stock hasn’t been counted for {periodLabel} yet.</strong>{' '}
+          Variance can’t be measured until it is — until then the figures below count everything
+          still sitting on your shelves as “used”, which makes every item look over-consumed.
+          Finish the Stock Count for this month, or pick a closed month above.
+        </div>
+      )}
+
       {summary && (
         <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
           <div className="stat-card">
@@ -195,36 +221,43 @@ export default function Variance() {
           </div>
           <div className="stat-card">
             <div className="stat-label">
-              <Tip text="Items where actual usage differs from theoretical by more than 10%. These need investigation." width={230}>Flagged Items</Tip>
+              <Tip text={`Items where actual usage differs from theoretical by more than ${flagPct}%. These need investigation. Change the threshold in Settings → Thresholds.`} width={240}>Flagged Items</Tip>
             </div>
-            <div className="stat-value" style={{ color: summary.flaggedCount > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>{summary.flaggedCount}</div>
-            <div className="stat-sub">&gt;10% variance</div>
+            <div className="stat-value" style={{ color: !hasClosing ? 'var(--theme-text2)' : summary.flaggedCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
+              {hasClosing ? summary.flaggedCount : '—'}
+            </div>
+            <div className="stat-sub">{hasClosing ? `>${flagPct}% variance` : 'Needs closing count'}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">
               <Tip text="Sum of (over-used qty × item rate) across all items. This is the NPR value of stock you can't account for." width={240}>Total Variance Value</Tip>
             </div>
-            <div className="stat-value gold" style={{ fontSize: 18, color: summary.totalVarianceValue > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>
-              NPR {Math.abs(summary.totalVarianceValue).toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+            <div className="stat-value gold" style={{ fontSize: 18, color: !hasClosing ? 'var(--theme-text2)' : summary.totalVarianceValue > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
+              {hasClosing
+                ? `NPR ${Math.abs(summary.totalVarianceValue).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`
+                : 'Not measurable yet'}
             </div>
-            <div className="stat-sub">{summary.totalVarianceValue > 0 ? 'Over-used (potential loss)' : 'Under-used'}</div>
+            <div className="stat-sub">{!hasClosing ? 'Closing count not entered' : summary.totalVarianceValue > 0 ? 'Over-used (potential loss)' : 'Under-used'}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">
-              <Tip text="Whether sales data is linked. Without sales, theoretical usage can't be calculated and variance won't be meaningful." width={240}>Data Coverage</Tip>
+              <Tip text="Variance needs two things: sales entries (to work out what should have been used) and a closing stock count (to work out what actually was). Both must be present for the figures to mean anything." width={260}>Data Coverage</Tip>
             </div>
-            <div className="stat-value" style={{ fontSize: 16 }}>
+            <div className="stat-value" style={{ fontSize: 16, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {summary.totalTheoretical > 0 ? <span className="badge badge-green">Sales linked</span> : <span className="badge badge-amber">No sales data</span>}
+              {hasClosing ? <span className="badge badge-green">Stock counted</span> : <span className="badge badge-amber">No closing count</span>}
             </div>
-            <div className="stat-sub">{summary.totalTheoretical > 0 ? 'Theoretical usage calculated' : 'Add sales entries to compare'}</div>
+            <div className="stat-sub">
+              {summary.totalTheoretical > 0 && hasClosing ? 'Variance is measurable' : 'Both are needed to compare'}
+            </div>
           </div>
         </div>
       )}
 
-      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-        <strong style={{ color: 'var(--theme-accent)' }}>How to read this:</strong> Theoretical = what should have been used based on sales × recipe qty. Actual = Opening + Net Purchases (after returns) − Closing − Wastage.
-        <span style={{ color: 'var(--theme-red)' }}> Over variance</span> = more used than sold (waste, theft, over-portioning).
-        <span style={{ color: 'var(--theme-amber)' }}> Under variance</span> = less used than expected (under-portioning or data gap).
+      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+        <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> Theoretical = what should have been used based on sales × recipe qty. Actual = {COGS_FORMULA}.
+        <span style={{ color: 'var(--theme-red-text)' }}> Over variance</span> = more used than sold (waste, theft, over-portioning).
+        <span style={{ color: 'var(--theme-amber-text)' }}> Under variance</span> = less used than expected (under-portioning or data gap).
       </div>
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -265,7 +298,7 @@ export default function Variance() {
                   <th style={{ textAlign: 'right' }}>Net Purchased</th>
                   <th style={{ textAlign: 'right' }}>Wastage</th>
                   <th style={{ textAlign: 'right' }}>Closing</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Opening + Net Purchases − Closing − Wastage. What was actually consumed based on stock movement." width={230}>Actual Used</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text={`${COGS_FORMULA}. What was actually consumed, based on stock movement.`} width={240}>Actual Used</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="What should have been used based on recipes sold × ingredient qty per portion." width={220}>Theoretical</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Actual − Theoretical. Positive (red) = over-used = loss. Negative (yellow) = under-used = possible data gap." width={240}>Variance</Tip></th>
                   <th style={{ textAlign: 'right' }}>Var %</th>
@@ -275,16 +308,20 @@ export default function Variance() {
               </thead>
               <tbody>
                 {filtered.sort((a, b) => Math.abs(b.value) - Math.abs(a.value)).map(row => {
-                  const varColor = row.variance > 0 ? 'var(--theme-red)' : row.variance < 0 ? 'var(--theme-amber)' : 'var(--theme-text2)'
+                  // Without a closing count every variance figure is an artefact of the missing
+                  // count, so it is shown in neutral type and left unflagged rather than painted
+                  // red — the banner above says why.
+                  const varColor = !hasClosing ? 'var(--theme-text2)'
+                    : row.variance > 0 ? 'var(--theme-red-text)' : row.variance < 0 ? 'var(--theme-amber-text)' : 'var(--theme-text2)'
                   return (
-                    <tr key={row.item.id} style={{ background: row.flag === 'over' ? 'rgba(248,113,113,0.03)' : 'transparent' }}>
+                    <tr key={row.item.id} style={{ background: hasClosing && row.flag === 'over' ? 'rgba(248,113,113,0.03)' : 'transparent' }}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.item.name}</td>
                       <td><span className="badge badge-yellow">{row.category}</span></td>
                       <td style={{ color: 'var(--theme-text2)' }}>{row.item.uom}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.openQty > 0 ? row.openQty.toLocaleString() : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{row.purchQty !== 0 ? dispPurch(row.purchQty, row.item) : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{row.wasteQty > 0 ? row.wasteQty.toLocaleString() : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-green)' }}>{row.closeQty > 0 ? row.closeQty.toLocaleString() : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{row.purchQty !== 0 ? dispPurch(row.purchQty, row.item) : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{row.wasteQty > 0 ? row.wasteQty.toLocaleString() : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{row.closeQty > 0 ? row.closeQty.toLocaleString() : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{row.actualUsed !== 0 ? Number(row.actualUsed.toFixed(3)).toLocaleString() : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.theoreticalUsed > 0 ? Number(row.theoreticalUsed.toFixed(3)).toLocaleString() : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: varColor }}>
@@ -296,7 +333,7 @@ export default function Variance() {
                       <td style={{ textAlign: 'right', fontWeight: 600, color: varColor }}>
                         {row.value !== 0 ? `${row.value > 0 ? '+' : ''}${Number(row.value.toFixed(0)).toLocaleString()}` : '—'}
                       </td>
-                      <td>{flagBadge(row.flag)}</td>
+                      <td>{hasClosing ? flagBadge(row.flag) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                     </tr>
                   )
                 })}

@@ -7,6 +7,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -171,12 +172,13 @@ export default function FifoReport() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
 
   function flagStyle(flag) {
-    if (flag === 'expired') return { color: 'var(--theme-red)', badge: 'badge-red', label: 'Expired' }
-    if (flag === 'warning') return { color: 'var(--theme-amber)', badge: 'badge-amber', label: `Expiring in ${warningDays}d` }
-    return { color: 'var(--theme-green)', badge: 'badge-green', label: 'OK' }
+    if (flag === 'expired') return { color: 'var(--theme-red-text)', badge: 'badge-red', label: 'Expired' }
+    if (flag === 'warning') return { color: 'var(--theme-amber-text)', badge: 'badge-amber', label: `Expiring in ${warningDays}d` }
+    return { color: 'var(--theme-green-text)', badge: 'badge-green', label: 'OK' }
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="the FIFO / expiry report" />
 
   return (
     <div>
@@ -189,7 +191,7 @@ export default function FifoReport() {
           <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
-          <button className="btn btn-ghost" onClick={exportExcel}>⬇ Export Excel</button>
+          <button className="btn btn-ghost" onClick={exportExcel}>Export Excel</button>
         </div>
       </div>
 
@@ -201,20 +203,20 @@ export default function FifoReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Expired</div>
-          <div className="stat-value" style={{ color: expiredCount > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>{expiredCount}</div>
+          <div className="stat-value" style={{ color: expiredCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{expiredCount}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">
             <Tip text={`Items whose expiry date is within ${warningDays} days from today. Configurable in Settings → Thresholds.`} width={240}>Expiring Soon</Tip>
           </div>
-          <div className="stat-value" style={{ color: warningCount > 0 ? 'var(--theme-accent)' : 'var(--theme-green)' }}>{warningCount}</div>
+          <div className="stat-value" style={{ color: warningCount > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)' }}>{warningCount}</div>
           <div className="stat-sub">Within {warningDays} days</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Total NPR value of stock that is expired or expiring soon. This is the potential loss if not used or returned in time." width={240}>Value at Risk</Tip>
           </div>
-          <div className="stat-value" style={{ fontSize: 18, color: totalAtRisk > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+          <div className="stat-value" style={{ fontSize: 18, color: totalAtRisk > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
             NPR {totalAtRisk.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
           </div>
         </div>
@@ -249,7 +251,7 @@ export default function FifoReport() {
                     <th>Item</th>
                     <th>Category</th>
                     <th style={{ textAlign: 'right' }}><Tip text="Original purchased quantity minus returns and this period's consumption (sales usage, wastage, staff meals), allocated against this item's batches oldest-first. This is the estimated stock still on hand from this batch — not batch-precise, since consumption isn't tracked per-batch." width={280}>Net Qty</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}>Returned</th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returned</th>
                     <th>UOM</th>
                     <th style={{ textAlign: 'right' }}>Rate</th>
                     <th style={{ textAlign: 'right' }}>Value</th>
@@ -266,12 +268,12 @@ export default function FifoReport() {
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.itemName}</td>
                         <td><span className="badge badge-yellow">{row.category}</span></td>
                         <td style={{ textAlign: 'right' }}>{Number(row.qty).toLocaleString()}</td>
-                        <td style={{ textAlign: 'right', color: row.returnedQty > 0 ? 'var(--theme-red)' : 'var(--theme-text3)' }}>
+                        <td style={{ textAlign: 'right', color: row.returnedQty > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>
                           {row.returnedQty > 0 ? `−${Number(row.returnedQty).toLocaleString()}` : '—'}
                         </td>
                         <td style={{ color: 'var(--theme-text2)' }}>{row.uom}</td>
                         <td style={{ textAlign: 'right' }}>{Number(row.rate).toLocaleString()}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>NPR {Number(row.value.toFixed(0)).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>NPR {Number(row.value.toFixed(0)).toLocaleString()}</td>
                         <td style={{ color: fs.color }}>{row.expiryDate}</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: fs.color }}>
                           {row.daysUntilExpiry < 0 ? `${Math.abs(row.daysUntilExpiry)}d ago` : `${row.daysUntilExpiry}d`}

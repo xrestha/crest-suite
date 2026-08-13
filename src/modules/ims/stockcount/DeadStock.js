@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 
@@ -45,6 +46,7 @@ export default function DeadStock() {
       { data: purchases },
       { data: rets },
       { data: wastes },
+      { data: staffMealRows },
       { data: closings },
     ] = await Promise.all([
       scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
@@ -52,6 +54,9 @@ export default function DeadStock() {
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      // Staff meals count as consumption (src/shared/imsFormulas.js). Without them an item only
+      // ever eaten by staff read as "Dead — no movement", which is the opposite of true.
+      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
     ])
 
@@ -65,9 +70,10 @@ export default function DeadStock() {
       const purchased = sumField(purchases, 'qty',          item.id)
       const returned  = sumField(rets,      'qty',          item.id)
       const wasted    = sumField(wastes,    'qty',          item.id)
+      const staffUsed = sumField(staffMealRows, 'qty',      item.id)
       const closing   = sumField(closings,  'physical_qty', item.id)
       const available = opening + purchased - returned
-      const used      = Math.max(available - wasted - closing, 0)
+      const used      = Math.max(available - wasted - staffUsed - closing, 0)
 
       // Skip items with no stock presence at all
       if (available <= 0 && closing <= 0) continue
@@ -180,19 +186,19 @@ export default function DeadStock() {
       <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">Dead Stock Items</div>
-          <div className="stat-value" style={{ color: 'var(--theme-red)' }}>{deadCount}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{deadCount}</div>
           <div className="stat-label" style={{ marginTop: 4 }}>Zero consumption</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Slow Movers</div>
-          <div className="stat-value" style={{ color: 'var(--theme-amber)' }}>{slowCount}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-amber-text)' }}>{slowCount}</div>
           <div className="stat-label" style={{ marginTop: 4 }}>Used &lt;20% of available</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Total closing stock value of all dead and slow-moving items — capital currently tied up in idle inventory." width={260}>Value at Risk</Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-red)' }}>{fmt(totalValueAtRisk)}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{fmt(totalValueAtRisk)}</div>
         </div>
       </div>
 
@@ -243,7 +249,7 @@ export default function DeadStock() {
                   <Tip text="Quantity recorded as wastage this period." width={200}>Wasted</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Opening + Net Purchased − Wasted − Closing. The quantity actually consumed this period." width={260}>Used</Tip>
+                  <Tip text={`${COGS_FORMULA}. The quantity actually consumed this period.`} width={260}>Used</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Physical stock counted at the end of this period." width={200}>Closing</Tip>
@@ -267,11 +273,11 @@ export default function DeadStock() {
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.wasted)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.used)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.closing)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontWeight: 600 }}>{fmt(r.valueAtRisk)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>{fmt(r.valueAtRisk)}</td>
                   <td>
                     <span style={{
-                      fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
-                      color:      r.status === 'Dead' ? 'var(--theme-red)' : 'var(--theme-amber)',
+                      fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-xs)',
+                      color:      r.status === 'Dead' ? 'var(--theme-red-text)' : 'var(--theme-amber-text)',
                       background: r.status === 'Dead' ? 'rgba(248,113,113,0.1)' : 'rgba(251,191,36,0.1)',
                       border:     `1px solid ${r.status === 'Dead' ? 'rgba(248,113,113,0.25)' : 'rgba(251,191,36,0.25)'}`,
                     }}>

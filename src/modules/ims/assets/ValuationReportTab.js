@@ -54,8 +54,8 @@ export default function ValuationReportTab({ assets }) {
     <div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }} className="no-print">
         <div className="form-field">
-          <label><Tip text="Any period a depreciation run has been posted for — the report reflects each asset's NBV as of this date." width={260}>As Of</Tip></label>
-          <select className="form-select" value={asOf} onChange={e => setAsOf(e.target.value)} disabled={periodOptions.length === 0}>
+          <label htmlFor="valuat-f1"><Tip text="Any period a depreciation run has been posted for — the report reflects each asset's NBV as of this date." width={260}>As Of</Tip></label>
+          <select id="valuat-f1" className="form-select" value={asOf} onChange={e => setAsOf(e.target.value)} disabled={periodOptions.length === 0}>
             {periodOptions.length === 0 && <option value="">No posted periods yet</option>}
             {periodOptions.map(d => <option key={d} value={d}>{fmtDate(d)}</option>)}
           </select>
@@ -78,11 +78,11 @@ export default function ValuationReportTab({ assets }) {
             </div>
             <div className="stat-card">
               <div className="stat-label">Accumulated Depreciation</div>
-              <div className="stat-value" style={{ color: 'var(--theme-red)' }}>NPR {fmt(valuation.accumulatedDepreciation)}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>NPR {fmt(valuation.accumulatedDepreciation)}</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">Net Book Value</div>
-              <div className="stat-value" style={{ color: 'var(--theme-accent)' }}>NPR {fmt(valuation.nbv)}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>NPR {fmt(valuation.nbv)}</div>
             </div>
           </div>
 
@@ -122,7 +122,7 @@ export default function ValuationReportTab({ assets }) {
                   <tr key={c.categoryName}>
                     <td>{c.categoryName}</td>
                     <td style={{ textAlign: 'right' }}>{fmt(c.totalCost)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{fmt(c.accumulatedDepreciation)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(c.accumulatedDepreciation)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(c.nbv)}</td>
                   </tr>
                 ))}
@@ -131,8 +131,8 @@ export default function ValuationReportTab({ assets }) {
                 <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
                   <td>Total</td>
                   <td style={{ textAlign: 'right' }}>{fmt(valuation.totalCost)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{fmt(valuation.accumulatedDepreciation)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{fmt(valuation.nbv)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(valuation.accumulatedDepreciation)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(valuation.nbv)}</td>
                 </tr>
               </tfoot>
             </table>

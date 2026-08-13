@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { Calculator as CalculatorIcon } from 'lucide-react'
 import { supabase } from '../../../supabaseClient'
-import { useTheme } from '../../../context/ThemeContext'
-import { contrastRatio } from '../../../utils/avatarColor'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import Tip from '../../../components/Tip'
@@ -51,11 +49,6 @@ function initFromEditingEntries(entries, items) {
 // (period, items, vendors) and gets a single onSaved(validLines) callback so it can reload the
 // purchases list and run its own "did any item's rate change" check.
 export default function PurchaseBillModal({ period, items, itemOptions, vendors, editingGroupId, editingEntries, onClose, onSaved }) {
-  const { colors } = useTheme()
-  // --theme-amber has no paired foreground token the way --theme-accent does (--theme-accent-text)
-  // — a hardcoded black/white would fail on whichever presets land on the opposite end, so pick
-  // whichever of black/white actually contrasts best against this preset's real amber hex.
-  const amberText = contrastRatio(colors.amber, '#ffffff') >= contrastRatio(colors.amber, '#000000') ? '#ffffff' : '#000000'
   const initial = editingEntries?.length ? initFromEditingEntries(editingEntries, items) : { header: { ...EMPTY_HEADER }, lines: [newLine()] }
   const [billHeader, setBillHeader] = useState(initial.header)
   const [billLines, setBillLines]   = useState(initial.lines)
@@ -181,8 +174,8 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
       {/* Header row */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.4fr auto 90px 1fr', gap: 14, marginBottom: 20, alignItems: 'end' }}>
         <div className="form-field">
-          <label>Vendor</label>
-          <select className="form-select" style={{ fontSize: 13 }} value={billHeader.vendor_id} onChange={e => setBillHeader(h => ({ ...h, vendor_id: e.target.value }))}>
+          <label htmlFor="purcha-f1">Vendor</label>
+          <select id="purcha-f1" className="form-select" style={{ fontSize: 13 }} value={billHeader.vendor_id} onChange={e => setBillHeader(h => ({ ...h, vendor_id: e.target.value }))}>
             <option value="">— None —</option>
             {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
           </select>
@@ -192,9 +185,9 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
           <BsCalendarPicker lockYear={period?.bs_year} lockMonth={period?.bs_month} value={billHeader.bs_day} onChange={handleHeaderDayChange} placeholder="Pick day" />
         </div>
         <div className="form-field">
-          <label><Tip text="Vendor's invoice or bill number. Shared across all items on this bill." width={240}>Invoice Ref</Tip></label>
-          <input value={billHeader.invoice_ref} onChange={e => setBillHeader(h => ({ ...h, invoice_ref: e.target.value }))} placeholder="Optional"
-            style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', boxSizing: 'border-box' }} />
+          <label htmlFor="purcha-f2"><Tip text="Vendor's invoice or bill number. Shared across all items on this bill." width={240}>Invoice Ref</Tip></label>
+          <input id="purcha-f2" value={billHeader.invoice_ref} onChange={e => setBillHeader(h => ({ ...h, invoice_ref: e.target.value }))} placeholder="Optional"
+            style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', boxSizing: 'border-box' }} />
         </div>
         <div className="form-field">
           <label><Tip text="Apply 13% VAT to all line items at once. You can also toggle VAT on each individual line row." width={270}>VAT</Tip></label>
@@ -209,7 +202,7 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
                 onClick={() => setBillLines(ls => ls.map(l => ({ ...l, vat_inclusive: !allVat })))}
                 style={{ cursor: 'pointer', background: 'none', border: 'none', padding: '8px 4px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
               >
-                <div style={{ width: 34, height: 18, borderRadius: 9, background: knobBg, opacity: knobOpacity, position: 'relative', transition: 'background 0.2s, opacity 0.2s', flexShrink: 0 }}>
+                <div style={{ width: 34, height: 18, borderRadius: 'var(--radius-md)', background: knobBg, opacity: knobOpacity, position: 'relative', transition: 'background 0.2s, opacity 0.2s', flexShrink: 0 }}>
                   <div style={{ position: 'absolute', top: 3, left: allVat ? 17 : someVat ? 11 : 3, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
                 </div>
                 <span style={{ fontSize: 13, fontWeight: someVat ? 700 : 400, color: knobBg, opacity: knobOpacity, letterSpacing: '0.04em' }}>
@@ -220,16 +213,16 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
           })()}
         </div>
         <div className="form-field">
-          <label><Tip text="Promo or trade discount on the total bill. Applied before VAT — VAT is levied only on the net taxable amount." width={260}>Discount (NPR)</Tip></label>
-          <input type="number" min="0" step="any"
+          <label htmlFor="purcha-f3"><Tip text="Promo or trade discount on the total bill. Applied before VAT — VAT is levied only on the net taxable amount." width={260}>Discount (NPR)</Tip></label>
+          <input id="purcha-f3" type="number" min="0" step="any"
             value={billHeader.discount}
             onChange={e => setBillHeader(h => ({ ...h, discount: e.target.value }))}
             placeholder="0"
-            style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-red)', outline: 'none', width: '90px', textAlign: 'right' }} />
+            style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-red-text)', outline: 'none', width: '90px', textAlign: 'right' }} />
         </div>
         <div className="form-field">
-          <label><Tip text="Cash: paid on delivery. Credit: pay later. FonePay: digital payment. Applied to all items on this bill.">Payment</Tip></label>
-          <select className="form-select" style={{ fontSize: 13 }} value={billHeader.payment_method} onChange={e => setBillHeader(h => ({ ...h, payment_method: e.target.value }))}>
+          <label htmlFor="purcha-f4"><Tip text="Cash: paid on delivery. Credit: pay later. FonePay: digital payment. Applied to all items on this bill.">Payment</Tip></label>
+          <select id="purcha-f4" className="form-select" style={{ fontSize: 13 }} value={billHeader.payment_method} onChange={e => setBillHeader(h => ({ ...h, payment_method: e.target.value }))}>
             {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
@@ -274,7 +267,7 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
               const inputUnit = cf > 1 ? selItem.purchase_unit : (selItem?.uom || '')
               const lineBase = (parseFloat(line.qty) || 0) * (parseFloat(line.rate) || 0)
               const lineAmount = line.vat_inclusive ? lineBase * 1.13 : lineBase
-              const cellInput = { background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }
+              const cellInput = { background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }
               return (
                   <tr key={line._key} style={{ borderBottom: '1px solid var(--theme-card)' }}>
                     <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'middle' }}>
@@ -312,7 +305,7 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
                         onChange={() => updateBillLine(line._key, 'vat_inclusive', !line.vat_inclusive)}
                         style={{ cursor: 'pointer', width: 15, height: 15, accentColor: 'var(--theme-amber)' }}
                       />
-                      {line.vat_inclusive && <div style={{ fontSize: 9, color: 'var(--theme-amber)', marginTop: 2, fontWeight: 700 }}>13%</div>}
+                      {line.vat_inclusive && <div style={{ fontSize: 9, color: 'var(--theme-amber-text)', marginTop: 2, fontWeight: 700 }}>13%</div>}
                     </td>
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
                       <input
@@ -326,11 +319,11 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle', textAlign: 'right' }}>
                       {lineAmount > 0 && (
                         <>
-                          <div style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600, paddingTop: 7 }}>
+                          <div style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 600, paddingTop: 7 }}>
                             {lineAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                           {line.vat_inclusive && parseFloat(line.rate) > 0 && (
-                            <div style={{ fontSize: 10, color: 'var(--theme-amber)', marginTop: 2 }}>
+                            <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2 }}>
                               +VAT {(parseFloat(line.rate) * 0.13 * (parseFloat(line.qty) || 1)).toFixed(2)}
                             </div>
                           )}
@@ -340,13 +333,13 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
                     <td style={{ padding: '6px 8px 6px', verticalAlign: 'middle' }}>
                       <input type="date" value={line.expiry_date}
                         onChange={e => updateBillLine(line._key, 'expiry_date', e.target.value)}
-                        style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 8px', fontSize: 12, color: 'var(--theme-text2)', outline: 'none', width: '100%' }} />
+                        style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 8px', fontSize: 12, color: 'var(--theme-text2)', outline: 'none', width: '100%' }} />
                     </td>
                     <td style={{ padding: '6px 8px 6px', verticalAlign: 'middle' }}>
                       <input type="number" min="0" value={line.shelf_life} placeholder="Days"
                         onChange={e => updateBillLine(line._key, 'shelf_life', e.target.value)}
                         title="Enter days to auto-fill expiry date"
-                        style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 8px', fontSize: 12, color: 'var(--theme-text2)', outline: 'none', width: '100%', textAlign: 'right' }} />
+                        style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 8px', fontSize: 12, color: 'var(--theme-text2)', outline: 'none', width: '100%', textAlign: 'right' }} />
                     </td>
                     <td style={{ padding: '6px 0 6px', verticalAlign: 'middle', textAlign: 'right' }}>
                       <button onClick={() => removeBillLine(line._key)} aria-label="Remove line"
@@ -358,6 +351,10 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
           </tbody>
         </table>
       </div>
+
+      {/* Acts on the table above, so it lives under the table — not in the form's action row,
+          where it was previously a solid --theme-amber fill competing with Save for the eye. */}
+      <button className="btn btn-ghost" onClick={addBillLine} style={{ marginTop: 10 }}>+ Add Item</button>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end', marginTop: 14, gap: 16 }}>
         {(() => {
@@ -382,15 +379,15 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
               )}
               {discount > 0 && (
                 <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
-                  Discount: <span style={{ color: 'var(--theme-red)', fontWeight: 600, marginLeft: 8 }}>− NPR {fmt(discount)}</span>
+                  Discount: <span style={{ color: 'var(--theme-red-text)', fontWeight: 600, marginLeft: 8 }}>− NPR {fmt(discount)}</span>
                 </div>
               )}
               {vatTotal > 0 && (
                 <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
-                  VAT (13%): <span style={{ color: 'var(--theme-amber)', fontWeight: 600, marginLeft: 8 }}>NPR {fmt(vatTotal)}</span>
+                  VAT (13%): <span style={{ color: 'var(--theme-amber-text)', fontWeight: 600, marginLeft: 8 }}>NPR {fmt(vatTotal)}</span>
                 </div>
               )}
-              <div style={{ color: 'var(--theme-accent)', fontWeight: 700, fontSize: 14, borderTop: '1px solid var(--theme-border)', paddingTop: 6 }}>
+              <div style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, fontSize: 14, borderTop: '1px solid var(--theme-border)', paddingTop: 6 }}>
                 Grand Total: NPR {fmt(grandTotal)}
               </div>
             </div>
@@ -398,15 +395,14 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
         })()}
       </div>
 
-      {error && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
-      <div className="form-actions" style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center' }}>
-        <button className="btn btn-ghost" onClick={onClose}
-          style={{ justifySelf: 'start', fontSize: 13, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}>Cancel</button>
-        <button className="btn" onClick={addBillLine}
-          style={{ fontSize: 13, background: 'var(--theme-amber)', color: amberText, borderColor: 'var(--theme-amber)' }}>
-          + Add Item
-        </button>
-        <button className="btn btn-primary" onClick={saveBill} disabled={saving} style={{ justifySelf: 'end', fontSize: 13 }}>
+      {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
+      {/* Cancel is plain ghost: it carried the red tint + red border DESIGN.md reserves for
+          destructive actions, on a fully reversible action on an unsaved form — the same treatment
+          Purchases' real "Delete All" uses. And the row is one group at the right edge rather than
+          `1fr auto 1fr`, which pushed Cancel and Save to opposite ends of a 1160px modal. */}
+      <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+        <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={saveBill} disabled={saving}>
           {saving ? 'Saving…' : editingGroupId ? 'Update Bill' : `Save ${billLines.filter(l => l.item_id && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0).length || ''} Entr${billLines.filter(l => l.item_id && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0).length === 1 ? 'y' : 'ies'}`}
         </button>
       </div>

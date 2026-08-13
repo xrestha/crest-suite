@@ -84,12 +84,12 @@ export default function DepreciationRunTab({ assets, onReload }) {
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div className="form-field">
-            <label>Period Start</label>
-            <input type="date" className="form-select" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
+            <label htmlFor="deprec-f1">Period Start</label>
+            <input id="deprec-f1" type="date" className="form-select" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
           </div>
           <div className="form-field">
-            <label>Period End</label>
-            <input type="date" className="form-select" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
+            <label htmlFor="deprec-f2">Period End</label>
+            <input id="deprec-f2" type="date" className="form-select" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
           </div>
           <button className="btn btn-primary" onClick={preview} disabled={loading}>{loading ? 'Computing…' : 'Preview'}</button>
           {lines && (
@@ -99,7 +99,7 @@ export default function DepreciationRunTab({ assets, onReload }) {
               </button>
             </Tip>
           )}
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{msg.split(':').slice(1).join(':')}</span>}
+          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
       </div>
 

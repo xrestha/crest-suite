@@ -5,6 +5,8 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
+import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared/imsFormulas'
+import { useSettings } from '../../../context/SettingsContext'
 import { Navigate } from 'react-router-dom'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
@@ -17,6 +19,7 @@ function getFiscalYear(bs_year, bs_month) {
 
 export default function AnnualSummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
+  const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
 
@@ -72,7 +75,7 @@ export default function AnnualSummary() {
     const [
       { data: items }, { data: opening }, { data: closing },
       { data: purchases }, { data: returns }, { data: wastages },
-      { data: sales }, { data: recipes }
+      { data: staffMeals }, { data: sales }, { data: recipes }
     ] = await Promise.all([
       scopedFrom('items', 'id, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
       supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', periodIds),
@@ -80,6 +83,10 @@ export default function AnnualSummary() {
       fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty, rate').in('period_id', periodIds).order('id')),
       scopedFrom('vendor_returns', 'period_id, item_id, qty, rate').in('period_id', periodIds),
       supabase.from('wastages').select('period_id, item_id, qty').in('period_id', periodIds),
+      // Staff meals were missing here entirely, so this page's COGS (and therefore its Food Cost %
+      // and every trend arrow off it) sat systematically below MonthlySummary's figure for the
+      // exact same month, with nothing on either page saying so. See src/shared/imsFormulas.js.
+      supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', periodIds),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
       supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount').in('period_id', periodIds).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, selling_price'),
@@ -99,7 +106,8 @@ export default function AnnualSummary() {
       const retVal    = (returns   || []).filter(r => r.period_id === pid).reduce((s, r) => s + parseFloat(r.qty) * parseFloat(r.rate), 0)
       const netPurch  = grossPurch - retVal
       const wasteVal  = (wastages  || []).filter(r => r.period_id === pid).reduce((s, r) => s + parseFloat(r.qty) * (rateMap[r.item_id] || 0), 0)
-      const cogs      = openVal + netPurch - wasteVal - closeVal
+      const staffVal  = (staffMeals|| []).filter(r => r.period_id === pid).reduce((s, r) => s + parseFloat(r.qty) * (rateMap[r.item_id] || 0), 0)
+      const cogs      = computeUsed({ opening: openVal, purchases: netPurch, wastage: wasteVal, staffMeals: staffVal, closing: closeVal })
       // Uses the price captured on the row (unit_price) — the price actually charged that period
       // — falling back to the recipe's current price only for rows recorded before that column
       // existed. Previously always used the current price, so an earlier period's revenue and
@@ -129,12 +137,8 @@ export default function AnnualSummary() {
 
   function fmt(v) { return `NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })}` }
 
-  function fcColor(pct) {
-    if (pct == null) return 'var(--theme-text2)'
-    if (pct <= 35) return 'var(--theme-green)'
-    if (pct <= 45) return 'var(--theme-accent)'
-    return 'var(--theme-red)'
-  }
+  // Client-configured thresholds, same as every other FC% surface (src/shared/imsFormulas.js).
+  const fcColor = pct => fcBand(pct, settings).color
 
   async function exportExcel() {
     if (!report) return
@@ -178,12 +182,12 @@ export default function AnnualSummary() {
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
               {[false, true].map(fm => (
                 <button key={String(fm)} onClick={() => setFiscalMode(fm)}
                   style={{ padding: '7px 14px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
                     background: fiscalMode === fm ? 'rgba(201,168,76,0.15)' : 'transparent',
-                    color: fiscalMode === fm ? 'var(--theme-accent)' : 'var(--theme-text2)' }}>
+                    color: fiscalMode === fm ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
                   {fm ? 'Fiscal Year' : 'Calendar Year'}
                 </button>
               ))}
@@ -195,7 +199,7 @@ export default function AnnualSummary() {
           {report && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => printWithTitle(`Annual Summary - ${selectedLabel}`)}>⎙ Print</button>
-              <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={exportExcel}>↓ Excel</button>
+              <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={exportExcel}>Export Excel</button>
             </div>
           )}
         </div>
@@ -204,14 +208,14 @@ export default function AnnualSummary() {
       {report && (
         <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
           {[
-            { label: 'Annual Revenue',  value: fmt(report.totRevenue), color: 'var(--theme-green)',
+            { label: 'Annual Revenue',  value: fmt(report.totRevenue), color: 'var(--theme-green-text)',
               tip: 'Total net sales revenue across all months in this period.' },
-            { label: 'Annual COGS',     value: fmt(report.totCogs),    color: 'var(--theme-accent)',
-              tip: 'Total Cost of Goods Sold: Opening + Net Purchases − Wastage − Closing, summed across all months.' },
+            { label: 'Annual COGS',     value: fmt(report.totCogs),    color: 'var(--theme-accent-ink)',
+              tip: `Total Cost of Goods Sold: ${COGS_FORMULA}, summed across all months.` },
             { label: 'Annual FC%',      value: report.totFcPct != null ? `${report.totFcPct.toFixed(1)}%` : '—',
               color: fcColor(report.totFcPct),
               tip: 'Annual COGS ÷ Annual Revenue. More accurate than averaging monthly FC% figures.' },
-            { label: 'Annual Wastage',  value: fmt(report.totWaste),   color: 'var(--theme-red)',
+            { label: 'Annual Wastage',  value: fmt(report.totWaste),   color: 'var(--theme-red-text)',
               tip: 'Total value of stock logged as wastage across all months in this period.' },
           ].map(s => (
             <div key={s.label} className="stat-card">
@@ -238,14 +242,14 @@ export default function AnnualSummary() {
                   <th>Month</th>
                   <th style={{ textAlign: 'right' }}>Revenue</th>
                   <th style={{ textAlign: 'right' }}>Gross Purchases</th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}>Returns</th>
+                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
                   <th style={{ textAlign: 'right' }}>Net Purchases</th>
                   <th style={{ textAlign: 'right' }}>Wastage</th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="Opening + Net Purchases − Wastage − Closing. Ingredient cost consumed this month." width={240}>COGS</Tip>
+                    <Tip text={`${COGS_FORMULA}. Ingredient cost consumed this month.`} width={250}>COGS</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="COGS ÷ Revenue. Green ≤35%, amber 36–45%, red >45%." width={200}>FC%</Tip>
+                    <Tip text={`COGS ÷ Revenue. Green up to ${fcThresholds(settings).warn}%, amber up to ${fcThresholds(settings).critical}%, red above that — set in Settings → Thresholds.`} width={250}>FC%</Tip>
                   </th>
                   <th>Trend</th>
                 </tr>
@@ -259,21 +263,21 @@ export default function AnnualSummary() {
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                         {row.label}
                         {row.period.status === 'open' && (
-                          <span style={{ fontSize: 10, marginLeft: 6, color: 'var(--theme-green)', fontWeight: 700 }}>OPEN</span>
+                          <span style={{ fontSize: 10, marginLeft: 6, color: 'var(--theme-green-text)', fontWeight: 700 }}>OPEN</span>
                         )}
                       </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-green)' }}>{row.revenue > 0 ? fmt(row.revenue) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{row.grossPurch > 0 ? fmt(row.grossPurch) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{row.retVal > 0 ? `−${fmt(row.retVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{row.netPurch !== 0 ? fmt(row.netPurch) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{row.wasteVal > 0 ? fmt(row.wasteVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{row.revenue > 0 ? fmt(row.revenue) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{row.grossPurch > 0 ? fmt(row.grossPurch) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{row.retVal > 0 ? `−${fmt(row.retVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{row.netPurch !== 0 ? fmt(row.netPurch) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{row.wasteVal > 0 ? fmt(row.wasteVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{row.cogs !== 0 ? fmt(row.cogs) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(row.fcPct) }}>
                         {row.fcPct != null ? `${row.fcPct.toFixed(1)}%` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                       </td>
                       <td>
                         {trend != null && (
-                          <span style={{ fontSize: 11, fontWeight: 700, color: trend > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: trend > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                             {trend > 0 ? '↑' : '↓'} {Math.abs(trend).toFixed(1)}pp
                           </span>
                         )}
@@ -285,15 +289,15 @@ export default function AnnualSummary() {
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td style={{ fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 14 }}>ANNUAL TOTAL</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)', paddingTop: 14 }}>{fmt(report.totRevenue)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 14 }}>{fmt(report.totPurch)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', paddingTop: 14 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 14 }}>{fmt(report.totRevenue)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 14 }}>{fmt(report.totPurch)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>
                     {report.totRet > 0 ? `−${fmt(report.totRet)}` : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 14 }}>{fmt(report.totPurch - report.totRet)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', paddingTop: 14 }}>{fmt(report.totWaste)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent)', paddingTop: 14, fontSize: 15 }}>{fmt(report.totCogs)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 800, paddingTop: 14, fontSize: 15, color: fcColor(report.totFcPct) }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 14 }}>{fmt(report.totPurch - report.totRet)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>{fmt(report.totWaste)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', paddingTop: 14, fontSize: 14 }}>{fmt(report.totCogs)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 800, paddingTop: 14, fontSize: 14, color: fcColor(report.totFcPct) }}>
                     {report.totFcPct != null ? `${report.totFcPct.toFixed(1)}%` : '—'}
                   </td>
                   <td style={{ paddingTop: 14 }} />
@@ -303,7 +307,7 @@ export default function AnnualSummary() {
           </div>
         )}
         <div style={{ marginTop: 16, fontSize: 12, color: 'var(--theme-text3)' }}>
-          COGS = Opening + (Purchases − Returns) − Wastage − Closing · Revenue from sales entries · Annual FC% = Total COGS ÷ Total Revenue
+          COGS = {COGS_FORMULA} · Revenue from sales entries · Annual FC% = Total COGS ÷ Total Revenue
         </div>
       </div>
     </div>

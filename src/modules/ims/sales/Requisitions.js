@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -335,6 +336,7 @@ export default function Requisitions() {
   // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
   // the route was reachable by any account at an ims_enabled client regardless of ims_role.
   if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="requisitions" />
 
   return (
     <div>
@@ -345,7 +347,7 @@ export default function Requisitions() {
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <select
-            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
+            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
             value={selectedPeriod?.id || ''}
             onChange={e => handlePeriodChange(e.target.value)}
           >
@@ -375,10 +377,10 @@ export default function Requisitions() {
                 />
               </div>
               <div className="form-field">
-                <label>
+                <label htmlFor="requis-f1">
                   <Tip text="The department receiving items from the main store (e.g. Kitchen, Bar, Pastry)." width={230}>Department</Tip>
                 </label>
-                <select
+                <select id="requis-f1"
                   value={formDept}
                   onChange={e => setFormDept(e.target.value)}
                   style={{ width: '100%' }}
@@ -387,8 +389,8 @@ export default function Requisitions() {
                 </select>
               </div>
               <div className="form-field">
-                <label>Notes (optional)</label>
-                <input
+                <label htmlFor="requis-f2">Notes (optional)</label>
+                <input id="requis-f2"
                   value={formNotes}
                   onChange={e => setFormNotes(e.target.value)}
                   placeholder="e.g. Dinner service, lunch prep…"
@@ -413,7 +415,7 @@ export default function Requisitions() {
                       <Tip text="Quantity actually issued from the store. Leave blank to issue the full requested quantity when you confirm." width={260}>Qty Issued</Tip>
                     </th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item." width={240}>Rate / UOM</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}><Tip text="Estimated store issue cost = Qty Issued (or Requested) × Rate / UOM." width={240}>Est. Value</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Estimated store issue cost = Qty Issued (or Requested) × Rate / UOM." width={240}>Est. Value</Tip></th>
                     <th style={{ width: 36 }}></th>
                   </tr>
                 </thead>
@@ -455,14 +457,14 @@ export default function Requisitions() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
                           {rate > 0 ? `NPR ${rate.toLocaleString('en-NP', { maximumFractionDigits: 2 })}` : '—'}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent)' : 'var(--theme-text2)', fontSize: 12 }}>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', fontSize: 12 }}>
                           {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-NP')}` : '—'}
                         </td>
                         <td>
                           <button
                             onClick={() => removeFormLine(line._key)}
                             aria-label="Remove line"
-                            style={{ background: 'none', border: 'none', color: 'var(--theme-red)', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '10px' }}
+                            style={{ background: 'none', border: 'none', color: 'var(--theme-red-text)', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '10px' }}
                           >×</button>
                         </td>
                       </tr>
@@ -474,7 +476,7 @@ export default function Requisitions() {
             <button className="btn btn-ghost" style={{ marginTop: 10, fontSize: 12 }} onClick={addFormLine}>+ Add Item</button>
           </div>
 
-          {error && <div style={{ color: 'var(--theme-red)', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+          {error && <div style={{ color: 'var(--theme-red-text)', fontSize: 13, marginBottom: 12 }}>{error}</div>}
 
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="btn btn-ghost" onClick={backToList} disabled={saving}>Cancel</button>
@@ -524,12 +526,12 @@ export default function Requisitions() {
               <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 3 }}>Day</div>
-                  <div style={{ fontWeight: 700, color: 'var(--theme-accent)', fontSize: 18 }}>{selectedReq.bs_day}</div>
+                  <div style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 18 }}>{selectedReq.bs_day}</div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{periodLabel}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 3 }}>Department</div>
-                  <div style={{ fontWeight: 700, color: 'var(--theme-text1)', fontSize: 15 }}>{selectedReq.department}</div>
+                  <div style={{ fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14 }}>{selectedReq.department}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 3 }}>Status</div>
@@ -554,12 +556,12 @@ export default function Requisitions() {
                     <button
                       className="btn btn-ghost"
                       onClick={() => deleteReq(selectedReq.id)}
-                      style={{ color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
+                      style={{ color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
                     >Delete</button>
                     <button className="btn btn-primary" onClick={startIssuing}>Issue</button>
                   </>
                 )}
-                <button className="btn btn-ghost" onClick={() => exportExcel(selectedReq, selectedLines)}>⬇ Export</button>
+                <button className="btn btn-ghost" onClick={() => exportExcel(selectedReq, selectedLines)}>Export Excel</button>
                 <button className="btn btn-ghost" onClick={() => printWithTitle(`Requisition - Day ${selectedReq.bs_day} - ${selectedReq.department} - ${periodLabel}`)}>Print</button>
               </div>
             </div>
@@ -582,7 +584,7 @@ export default function Requisitions() {
                         <Tip text="Set the actual quantity you are issuing from the store. Can be less than requested." width={230}>Qty Issued</Tip>
                       </th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item." width={240}>Rate / UOM</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods leaving the store." width={240}>Value Issued</Tip></th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods leaving the store." width={240}>Value Issued</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -605,7 +607,7 @@ export default function Requisitions() {
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
                             {rate > 0 ? `NPR ${rate.toLocaleString('en-NP', { maximumFractionDigits: 2 })}` : '—'}
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent)' }}>
+                          <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)' }}>
                             {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-NP')}` : '—'}
                           </td>
                         </tr>
@@ -636,7 +638,7 @@ export default function Requisitions() {
                         <Tip text="Qty actually issued from the store. Green = full qty issued, red = partial." width={220}>Qty Issued</Tip>
                       </th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><Tip text="Per-base-unit cost from the most recent purchase entry for this item." width={240}>Rate / UOM</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods that left the store." width={240}>Value</Tip></th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Qty Issued × Rate / UOM — the NPR cost of goods that left the store." width={240}>Value</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -657,14 +659,14 @@ export default function Requisitions() {
                           </td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{line.items?.uom}</td>
                           <td style={{ textAlign: 'right' }}>{Number(reqQty).toLocaleString()}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: selectedReq.status === 'issued' ? (partial ? 'var(--theme-red)' : 'var(--theme-green)') : 'var(--theme-text2)' }}>
+                          <td style={{ textAlign: 'right', fontWeight: 600, color: selectedReq.status === 'issued' ? (partial ? 'var(--theme-red-text)' : 'var(--theme-green-text)') : 'var(--theme-text2)' }}>
                             {selectedReq.status === 'issued' ? Number(issdQty).toLocaleString() : '—'}
                             {partial && <span style={{ fontSize: 10, marginLeft: 4 }}>partial</span>}
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
                             {rate > 0 ? `NPR ${rate.toLocaleString('en-NP', { maximumFractionDigits: 2 })}` : '—'}
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent)' : 'var(--theme-text2)' }}>
+                          <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
                             {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-NP')}` : '—'}
                           </td>
                         </tr>
@@ -681,7 +683,7 @@ export default function Requisitions() {
                           <td colSpan={6} style={{ fontWeight: 700, paddingTop: 12 }}>
                             {selectedReq.status === 'issued' ? 'Total Issued Value' : 'Total Requested Value'}
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 12 }}>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>
                             NPR {Math.round(total).toLocaleString('en-NP')}
                           </td>
                         </tr>
@@ -705,11 +707,11 @@ export default function Requisitions() {
             </div>
             <div className="stat-card">
               <div className="stat-label">Issued</div>
-              <div className="stat-value" style={{ color: 'var(--theme-green)' }}>{issuedReqs.length}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{issuedReqs.length}</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">Draft / Pending</div>
-              <div className="stat-value" style={{ color: draftReqs.length > 0 ? 'var(--theme-accent)' : 'var(--theme-text2)' }}>{draftReqs.length}</div>
+              <div className="stat-value" style={{ color: draftReqs.length > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>{draftReqs.length}</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">Total Issued Value</div>
@@ -769,7 +771,7 @@ export default function Requisitions() {
                       const lineCount = (req.requisition_lines || []).length
                       return (
                         <tr key={req.id} style={{ cursor: 'pointer' }} onClick={() => viewReq(req)}>
-                          <td style={{ fontWeight: 700, color: 'var(--theme-accent)' }}>Day {req.bs_day}</td>
+                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>Day {req.bs_day}</td>
                           <td style={{ fontWeight: 600 }}>{req.department}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{lineCount}</td>
                           <td>
@@ -778,7 +780,7 @@ export default function Requisitions() {
                             </span>
                           </td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{req.notes || '—'}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent)' : 'var(--theme-text2)' }}>
+                          <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
                             {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-NP')}` : '—'}
                           </td>
                           <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
@@ -786,7 +788,7 @@ export default function Requisitions() {
                             {req.status === 'draft' && !periodClosed && (
                               <button
                                 className="btn btn-ghost"
-                                style={{ fontSize: 12, padding: '4px 10px', marginLeft: 4, color: 'var(--theme-red)' }}
+                                style={{ fontSize: 12, padding: '4px 10px', marginLeft: 4, color: 'var(--theme-red-text)' }}
                                 onClick={() => deleteReq(req.id)}
                               >Del</button>
                             )}

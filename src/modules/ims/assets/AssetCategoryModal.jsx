@@ -112,7 +112,7 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={addRow}>+ Add Category</button>
-        {error && <span style={{ color: 'var(--theme-red)', fontSize: 12 }}>{error}</span>}
+        {error && <span style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>{error}</span>}
         <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
     </Modal>

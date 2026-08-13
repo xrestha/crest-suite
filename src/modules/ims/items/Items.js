@@ -350,16 +350,14 @@ export default function Items() {
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
-  const tabStyle = (tab) => ({
-    padding: '8px 18px',
-    fontSize: 13,
-    fontWeight: activeTab === tab ? 600 : 400,
-    color: activeTab === tab ? 'var(--theme-accent)' : 'var(--theme-text2)',
-    background: 'none',
-    border: 'none',
-    borderBottom: activeTab === tab ? '2px solid var(--theme-accent)' : '2px solid transparent',
-    cursor: 'pointer',
-    transition: 'all 0.15s'
+  // .panel-tab is the shared class for exactly this row (it carries the underline, the type, the
+  // 40px height, the coarse-pointer target and a focus ring); this file had hand-rolled it.
+  const tabProps = (tab) => ({
+    type: 'button',
+    role: 'tab',
+    'aria-selected': activeTab === tab,
+    className: `panel-tab${activeTab === tab ? ' panel-tab--active' : ''}`,
+    onClick: () => setActiveTab(tab),
   })
 
   return (
@@ -383,7 +381,7 @@ export default function Items() {
           {isAdmin && items.some(i => i.purchase_unit) && (
             <button
               className="btn btn-ghost"
-              style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
+              style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
               onClick={clearAllConversions}
             >
               ✕ Clear All Conversions
@@ -395,7 +393,7 @@ export default function Items() {
 
       {categories.length === 0 && !loading && (
         <div className="card" style={{ marginBottom: 20, borderColor: 'rgba(201,168,76,0.3)' }}>
-          <p style={{ color: 'var(--theme-accent)', fontSize: 13, margin: 0 }}>
+          <p style={{ color: 'var(--theme-accent-ink)', fontSize: 13, margin: 0 }}>
             No categories found. Click <strong>⚡ Load Default Categories</strong> to set up your 7 standard categories matching your Excel structure.
           </p>
         </div>
@@ -404,14 +402,14 @@ export default function Items() {
       {showForm && (
         <Modal onClose={() => setShowForm(false)} title={editing ? 'Edit Item' : 'Add Item'}>
           {/* Tab bar */}
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--theme-border)', marginBottom: 20, gap: 0 }}>
-            <button style={tabStyle('details')} onClick={() => setActiveTab('details')}>
+          <div className="panel-tab-bar" role="tablist" aria-label="Item form sections">
+            <button {...tabProps('details')}>
               Details
             </button>
-            <button style={tabStyle('conversion')} onClick={() => setActiveTab('conversion')}>
+            <button {...tabProps('conversion')}>
               Conversion
               {form.purchase_unit && form.base_unit && form.conversion_factor
-                ? <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-green)' }}>●</span>
+                ? <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-green-text)' }}>●</span>
                 : null}
             </button>
           </div>
@@ -421,8 +419,8 @@ export default function Items() {
             <>
               <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
                 <div className="form-field" style={{ gridColumn: 'span 2' }}>
-                  <label>Item Name *</label>
-                  <input
+                  <label htmlFor="items-f1">Item Name *</label>
+                  <input id="items-f1"
                     value={form.name}
                     onChange={e => setForm(f({ name: e.target.value }))}
                     placeholder="e.g. CHICKEN BREAST"
@@ -430,19 +428,19 @@ export default function Items() {
                   />
                 </div>
                 <div className="form-field">
-                  <label>Category</label>
-                  <select value={form.category_id} onChange={e => setForm(f({ category_id: e.target.value }))}>
+                  <label htmlFor="items-f2">Category</label>
+                  <select id="items-f2" value={form.category_id} onChange={e => setForm(f({ category_id: e.target.value }))}>
                     <option value="">— None —</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
                 <div className="form-field">
-                  <label>
+                  <label htmlFor="items-f3">
                     <Tip width={260} text="The usable percentage of an ingredient after trimming, cleaning, or cooking. e.g. Whole chicken = 70% (bones & skin removed), Spinach = 60% (wilts down), Onion = 85% (skin & root removed). Leave at 100 if you buy and use in the same form.">
                       Yield %
                     </Tip>
                   </label>
-                  <input
+                  <input id="items-f3"
                     type="number"
                     min="1" max="100"
                     value={form.yield_pct}
@@ -452,18 +450,18 @@ export default function Items() {
                   <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Usable % after trim/prep. 100 = no loss</span>
                 </div>
                 <div className="form-field">
-                  <label>UOM (base unit)</label>
-                  <select value={form.uom} onChange={e => setForm(f({ uom: e.target.value }))}>
+                  <label htmlFor="items-f4">UOM (base unit)</label>
+                  <select id="items-f4" value={form.uom} onChange={e => setForm(f({ uom: e.target.value }))}>
                     {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
                 <div className="form-field">
-                  <label>
+                  <label htmlFor="items-f5">
                     <Tip text={form.conversion_factor ? `Locked — derived from conversion factor (${form.conversion_factor}). Set on the Conversion tab.` : 'How many base units you typically buy at once. e.g. 1000 if you buy 1 KG bag = 1000 GM.'} width={240}>
                       Purchase Qty
                     </Tip>
                   </label>
-                  <input
+                  <input id="items-f5"
                     type="number"
                     value={form.conversion_factor ? form.conversion_factor : form.purchase_qty}
                     onChange={e => { if (!form.conversion_factor) { setAmtDraft(''); setForm(f({ purchase_qty: e.target.value })) } }}
@@ -478,8 +476,8 @@ export default function Items() {
                   )}
                 </div>
                 <div className="form-field">
-                  <label>Rate (NPR)</label>
-                  <input
+                  <label htmlFor="items-f6">Rate (NPR)</label>
+                  <input id="items-f6"
                     type="number"
                     value={form.rate}
                     onChange={e => { setAmtDraft(''); setForm(f({ rate: e.target.value })) }}
@@ -487,10 +485,10 @@ export default function Items() {
                   />
                 </div>
                 <div className="form-field">
-                  <label>
+                  <label htmlFor="items-f7">
                     <Tip text="Enter the total amount paid. Rate will be back-calculated as Total ÷ Purchase Qty." width={220}>Total (NPR)</Tip>
                   </label>
-                  <input
+                  <input id="items-f7"
                     type="number" min="0" step="any"
                     value={amtDraft}
                     placeholder={
@@ -503,7 +501,7 @@ export default function Items() {
                 </div>
               </div>
               {form.purchase_qty && form.rate && (
-                <p style={{ fontSize: 12, color: 'var(--theme-accent)', margin: '10px 0 0' }}>
+                <p style={{ fontSize: 12, color: 'var(--theme-accent-ink)', margin: '10px 0 0' }}>
                   Per {form.uom} rate: NPR {amtDraft ? form.rate : perUom(form.purchase_qty, form.rate)}
                 </p>
               )}
@@ -520,8 +518,8 @@ export default function Items() {
               </p>
               <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 16, maxWidth: 560 }}>
                 <div className="form-field">
-                  <label>Purchase Unit</label>
-                  <select
+                  <label htmlFor="items-f8">Purchase Unit</label>
+                  <select id="items-f8"
                     value={form.purchase_unit}
                     onChange={e => setForm(f({ purchase_unit: e.target.value }))}
                   >
@@ -531,8 +529,8 @@ export default function Items() {
                   <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Unit you buy in</span>
                 </div>
                 <div className="form-field">
-                  <label>Base Unit</label>
-                  <select
+                  <label htmlFor="items-f9">Base Unit</label>
+                  <select id="items-f9"
                     value={form.base_unit}
                     onChange={e => setForm(f({ base_unit: e.target.value }))}
                   >
@@ -542,8 +540,8 @@ export default function Items() {
                   <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Unit used in kitchen</span>
                 </div>
                 <div className="form-field">
-                  <label>Conversion Factor</label>
-                  <input
+                  <label htmlFor="items-f10">Conversion Factor</label>
+                  <input id="items-f10"
                     type="number"
                     min="0"
                     step="any"
@@ -560,11 +558,11 @@ export default function Items() {
                 <div style={{
                   marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 10,
                   background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.25)',
-                  borderRadius: 8, padding: '10px 18px'
+                  borderRadius: 'var(--radius-sm)', padding: '10px 18px'
                 }}>
                   <span style={{ fontSize: 18 }}>🔄</span>
                   <div>
-                    <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--theme-green)' }}>
+                    <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--theme-green-text)' }}>
                       {conversionPreview(form.purchase_unit, form.base_unit, form.conversion_factor)}
                     </p>
                     {form.rate && form.conversion_factor && (
@@ -581,7 +579,7 @@ export default function Items() {
                 <div style={{ marginTop: 12 }}>
                   <button
                     className="btn btn-ghost"
-                    style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
+                    style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
                     onClick={() => setForm(f({ purchase_unit: '', base_unit: '', conversion_factor: '' }))}
                   >
                     ✕ Clear Conversion
@@ -591,7 +589,7 @@ export default function Items() {
             </>
           )}
 
-          {error && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '10px 0 0' }}>{error}</p>}
+          {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '10px 0 0' }}>{error}</p>}
           <div className="form-actions" style={{ justifyContent: 'space-between' }}>
             {editing ? (() => {
               const idx = filtered.findIndex(i => i.id === editing)
@@ -622,7 +620,7 @@ export default function Items() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             style={{
-              background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6,
+              background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
               padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260
             }}
             placeholder="Search by name or code…"
@@ -649,10 +647,10 @@ export default function Items() {
         <button
           onClick={() => setSortConvFirst(v => !v)}
           style={{
-            fontSize: 12, padding: '7px 14px', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+            fontSize: 12, padding: '7px 14px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', whiteSpace: 'nowrap',
             border: sortConvFirst ? '1px solid var(--theme-accent)' : '1px solid var(--theme-border)',
             background: sortConvFirst ? 'var(--theme-table-hover)' : 'transparent',
-            color: sortConvFirst ? 'var(--theme-accent)' : 'var(--theme-text2)',
+            color: sortConvFirst ? 'var(--theme-accent-ink)' : 'var(--theme-text2)',
             fontWeight: sortConvFirst ? 600 : 400
           }}
         >
@@ -680,7 +678,7 @@ export default function Items() {
             <button key={tab.id} onClick={() => setFilterCat(tab.id)} style={{
               background: 'none', border: 'none', cursor: 'pointer',
               padding: '10px 16px', fontSize: 13, fontWeight: 500,
-              color: active ? 'var(--theme-accent)' : 'var(--theme-text2)',
+              color: active ? 'var(--theme-accent-ink)' : 'var(--theme-text2)',
               borderBottom: active ? '2px solid var(--theme-accent)' : '2px solid transparent',
               marginBottom: -1, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap'
             }}>
@@ -688,9 +686,9 @@ export default function Items() {
                 ? tab.name.split(' ').slice(0,2).map((w,i) => i===0 ? w : w.slice(0,4)+'.').join(' ')
                 : tab.name}
               <span style={{
-                fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+                fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--radius-sm)',
                 background: active ? 'rgba(201,168,76,0.12)' : 'color-mix(in srgb, var(--theme-text2) 12%, transparent)',
-                color: active ? 'var(--theme-accent)' : 'var(--theme-text2)'
+                color: active ? 'var(--theme-accent-ink)' : 'var(--theme-text2)'
               }}>{count}</span>
             </button>
           )
@@ -734,7 +732,7 @@ export default function Items() {
                   </th>
                   <th><Tip text="Purchase unit → base unit mapping (e.g. 1 carton = 12 bottles). Set this when your vendor sells in bulk but you track stock in individual units." width={280}>Conversion</Tip></th>
                   <th>Status</th>
-                  <th><Tip text="Number of recipes that use this item as an ingredient. Helps identify items that are safe to archive." width={250}>Used In</Tip></th>
+                  <th><Tip text="Where this item already has records. An item with any of these can't be deleted — deactivate it instead, which hides it everywhere but keeps its history. R = Recipes, P = Purchases, OS/CS = Stock counts, W = Wastage, SM = Staff Meals, RQ = Requisitions, VR = Vendor Returns." width={300}>Used In</Tip></th>
                   <th></th>
                 </tr>
               </thead>
@@ -743,7 +741,7 @@ export default function Items() {
                   const hasConversion = item.purchase_unit && item.base_unit && item.conversion_factor && item.conversion_factor !== 1
                   return (
                     <tr key={item.id}>
-                      <td style={{ color: 'var(--theme-accent)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
+                      <td style={{ color: 'var(--theme-accent-ink)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
                         {item.item_code || '—'}
                       </td>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.name}</td>
@@ -757,18 +755,18 @@ export default function Items() {
                       <td>{item.uom}</td>
                       <td style={{ textAlign: 'right' }}>{Number(item.purchase_qty).toLocaleString()}</td>
                       <td style={{ textAlign: 'right' }}>{Number(item.rate).toLocaleString()}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
                         {Number(item.per_uom_rate).toFixed(2)}
                       </td>
-                      <td style={{ textAlign: 'right', color: parseFloat(item.yield_pct) < 100 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>
+                      <td style={{ textAlign: 'right', color: parseFloat(item.yield_pct) < 100 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
                         {parseFloat(item.yield_pct || 100).toFixed(0)}%
                       </td>
                       <td>
                         {hasConversion ? (
                           <span style={{
                             fontSize: 11, background: 'rgba(52,211,153,0.08)',
-                            color: 'var(--theme-green)', border: '1px solid rgba(52,211,153,0.25)',
-                            borderRadius: 4, padding: '2px 7px', whiteSpace: 'nowrap'
+                            color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.25)',
+                            borderRadius: 'var(--radius-xs)', padding: '2px 7px', whiteSpace: 'nowrap'
                           }}>
                             🔄 1 {item.purchase_unit} = {item.conversion_factor} {item.base_unit}
                           </span>
@@ -783,13 +781,13 @@ export default function Items() {
                       </td>
                       <td>
                         {usageMap[item.id]?.length > 0 ? (
-                          <span title={`Used in: ${usageMap[item.id].map(code => USAGE_LABELS[code] || code).join(', ')}`} style={{
+                          <Tip text={`Has records in: ${usageMap[item.id].map(code => USAGE_LABELS[code] || code).join(', ')}`} width={260}><span style={{
                             fontSize: 11, background: 'rgba(201,168,76,0.12)',
-                            color: 'var(--theme-accent)', border: '1px solid rgba(201,168,76,0.3)',
-                            borderRadius: 4, padding: '2px 7px', cursor: 'default', whiteSpace: 'nowrap'
+                            color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.3)',
+                            borderRadius: 'var(--radius-xs)', padding: '2px 7px', cursor: 'default', whiteSpace: 'nowrap'
                           }}>
                             🔗 {usageMap[item.id].join(', ')}
-                          </span>
+                          </span></Tip>
                         ) : (
                           <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>—</span>
                         )}
@@ -801,7 +799,7 @@ export default function Items() {
                           onClick={() => toggleActive(item)}>
                           {item.is_active ? 'Hide' : 'Show'}
                         </button>
-                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
                           onClick={() => deleteItem(item)}>Del</button>
                       </td>
                     </tr>

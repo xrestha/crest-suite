@@ -5,10 +5,16 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const METHODS = ['Cash', 'Credit', 'FonePay']
+// Two roles, two values: the base token is the FILL (split bar, legend swatch), the -text variant
+// is the TEXT (the KPI figure). One value cannot do both — the base tokens fail AA as text on all
+// five light presets. Note these are semantic here, not a series palette: Cash/Credit/FonePay
+// genuinely mean paid / owed / digital.
 const METHOD_COLORS = { Cash: 'var(--theme-green)', Credit: 'var(--theme-red)', FonePay: 'var(--theme-purple)' }
+const METHOD_TEXT   = { Cash: 'var(--theme-green-text)', Credit: 'var(--theme-red-text)', FonePay: 'var(--theme-purple-text)' }
 
 export default function PaymentReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -116,6 +122,7 @@ export default function PaymentReport() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="the payment report" />
 
   return (
     <div>
@@ -128,7 +135,7 @@ export default function PaymentReport() {
           <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
-          <button className="btn btn-ghost" onClick={exportExcel}>⬇ Export Excel</button>
+          <button className="btn btn-ghost" onClick={exportExcel}>Export Excel</button>
         </div>
       </div>
 
@@ -144,7 +151,7 @@ export default function PaymentReport() {
           <div className="stat-label">
             <Tip text="Value of goods returned to suppliers, subtracted from gross to get net spend." width={250}>Total Returns</Tip>
           </div>
-          <div className="stat-value" style={{ fontSize: 17, color: 'var(--theme-red)' }}>
+          <div className="stat-value" style={{ fontSize: 17, color: 'var(--theme-red-text)' }}>
             {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
           </div>
         </div>
@@ -153,7 +160,7 @@ export default function PaymentReport() {
             <div className="stat-label">
               <Tip text={`Net purchase spend paid via ${s.method} (gross − returns) for this period.`} width={240}>{s.method} (Net)</Tip>
             </div>
-            <div className="stat-value" style={{ fontSize: 17, color: METHOD_COLORS[s.method] }}>
+            <div className="stat-value" style={{ fontSize: 17, color: METHOD_TEXT[s.method] || METHOD_COLORS[s.method] }}>
               NPR {s.net.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
             </div>
             <div className="stat-sub">
@@ -168,23 +175,27 @@ export default function PaymentReport() {
       {grandNet > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 10 }}>Payment Method Split (Net)</div>
-          <div style={{ display: 'flex', height: 20, borderRadius: 6, overflow: 'hidden', gap: 2 }}>
+          <div style={{ display: 'flex', height: 20, borderRadius: 'var(--radius-sm)', overflow: 'hidden', gap: 2 }}>
             {summary.filter(s => s.net > 0).map(s => (
               <div key={s.method} style={{
                 width: `${(s.net / grandNet) * 100}%`,
                 background: METHOD_COLORS[s.method],
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, fontWeight: 700, color: 'var(--theme-bg)'
-              }}>
-                {((s.net / grandNet) * 100) > 10 ? `${((s.net / grandNet) * 100).toFixed(0)}%` : ''}
+              }} title={`${s.method}: ${((s.net / grandNet) * 100).toFixed(1)}%`}>
+                {/* The percentage moved to the legend below: on the fill it was --theme-bg on a
+                    signal colour, 3.14:1 on Rosé Dawn, and there is no one foreground that works
+                    on green, red and purple across ten presets. */}
               </div>
             ))}
           </div>
           <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
             {summary.map(s => (
               <div key={s.method} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: 2, background: METHOD_COLORS[s.method] }} />
+                <div style={{ width: 10, height: 10, borderRadius: 'var(--radius-xs)', background: METHOD_COLORS[s.method] }} />
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.method}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>
+                  {grandNet > 0 ? `${((s.net / grandNet) * 100).toFixed(1)}%` : '—'}
+                </span>
               </div>
             ))}
           </div>
@@ -192,14 +203,11 @@ export default function PaymentReport() {
       )}
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--theme-border)' }}>
+      <div className="panel-tab-bar" role="tablist" aria-label="Payment report views">
         {['summary', 'daily'].map(m => (
-          <button key={m} onClick={() => setViewMode(m)} style={{
-            background: 'none', border: 'none', cursor: 'pointer', padding: '10px 20px',
-            fontSize: 13, fontWeight: 500,
-            color: viewMode === m ? 'var(--theme-accent)' : 'var(--theme-text2)',
-            borderBottom: viewMode === m ? '2px solid var(--theme-accent)' : '2px solid transparent', marginBottom: -1
-          }}>{m === 'summary' ? 'Method Summary' : 'Daily Breakdown'}</button>
+          <button key={m} type="button" role="tab" aria-selected={viewMode === m}
+            className={`panel-tab${viewMode === m ? ' panel-tab--active' : ''}`}
+            onClick={() => setViewMode(m)}>{m === 'summary' ? 'Method Summary' : 'Daily Breakdown'}</button>
         ))}
       </div>
 
@@ -212,7 +220,7 @@ export default function PaymentReport() {
                 <tr>
                   <th>Payment Method</th>
                   <th style={{ textAlign: 'right' }}>Gross Purchases</th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}>Returns</th>
+                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Gross purchases − returns for this method." width={220}>Net Amount</Tip>
                   </th>
@@ -225,9 +233,9 @@ export default function PaymentReport() {
               <tbody>
                 {summary.map(s => (
                   <tr key={s.method}>
-                    <td style={{ fontWeight: 600, color: METHOD_COLORS[s.method] }}>{s.method}</td>
+                    <td style={{ fontWeight: 600, color: METHOD_TEXT[s.method] || METHOD_COLORS[s.method] }}>{s.method}</td>
                     <td style={{ textAlign: 'right' }}>NPR {s.gross.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
                       {s.returnAmt > 0 ? `−NPR ${s.returnAmt.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>NPR {s.net.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
@@ -240,10 +248,10 @@ export default function PaymentReport() {
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td style={{ fontWeight: 700, paddingTop: 12 }}>Total</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>NPR {grandGross.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', paddingTop: 12 }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>
                     {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 12 }}>NPR {grandNet.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>NPR {grandNet.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
                   <td style={{ textAlign: 'right', paddingTop: 12 }}>100%</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{purchases.length}</td>
                 </tr>
@@ -256,14 +264,14 @@ export default function PaymentReport() {
               <thead>
                 <tr>
                   <th>Day</th>
-                  {METHODS.map(m => <th key={m} style={{ textAlign: 'right', color: METHOD_COLORS[m] }}>{m} (Net)</th>)}
+                  {METHODS.map(m => <th key={m} style={{ textAlign: 'right', color: METHOD_TEXT[m] || METHOD_COLORS[m] }}>{m} (Net)</th>)}
                   <th style={{ textAlign: 'right' }}>Day Total</th>
                 </tr>
               </thead>
               <tbody>
                 {dailyByMethod.map(d => (
                   <tr key={d.day}>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-accent)' }}>{d.day}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-accent-ink)' }}>{d.day}</td>
                     {METHODS.map(m => (
                       <td key={m} style={{ textAlign: 'right', color: d.byMethod[m] !== 0 ? METHOD_COLORS[m] : 'var(--theme-text3)' }}>
                         {d.byMethod[m] !== 0 ? `NPR ${d.byMethod[m].toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}

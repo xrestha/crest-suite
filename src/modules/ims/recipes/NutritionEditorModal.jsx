@@ -152,13 +152,13 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
 
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
         <div className="form-field" style={{ width: 110 }}>
-          <label><Tip width={240} text="Reference amount these values describe. Food tables use 100 (per 100 GM/ML). For counted items use 1 (per piece).">Per (qty)</Tip></label>
-          <input type="number" min="0" step="any" value={nutriForm.basis_qty}
+          <label htmlFor="nutrit-f1"><Tip width={240} text="Reference amount these values describe. Food tables use 100 (per 100 GM/ML). For counted items use 1 (per piece).">Per (qty)</Tip></label>
+          <input id="nutrit-f1" type="number" min="0" step="any" value={nutriForm.basis_qty}
             onChange={e => setNF({ basis_qty: e.target.value })} placeholder="100" />
         </div>
         <div className="form-field" style={{ width: 120 }}>
-          <label>Per (unit)</label>
-          <select value={nutriForm.basis_unit} onChange={e => setNF({ basis_unit: e.target.value })}>
+          <label htmlFor="nutrit-f2">Per (unit)</label>
+          <select id="nutrit-f2" value={nutriForm.basis_unit} onChange={e => setNF({ basis_unit: e.target.value })}>
             {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
@@ -169,7 +169,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
               className="btn btn-ghost"
               style={{
                 fontSize: 12,
-                color: nutriMatchSource === lib ? (lib === 'DFTQC Nepal' ? 'var(--theme-green)' : lib === 'IFCT 2017' ? 'var(--theme-accent)' : 'var(--theme-text1)') : undefined,
+                color: nutriMatchSource === lib ? (lib === 'DFTQC Nepal' ? 'var(--theme-green-text)' : lib === 'IFCT 2017' ? 'var(--theme-accent-ink)' : 'var(--theme-text1)') : undefined,
                 borderColor: nutriMatchSource === lib ? 'currentColor' : undefined,
               }}
               onClick={() => findNutriSeedsFor(lib)}
@@ -179,13 +179,13 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
           ))}
         </div>
         {nutriForm.source && (
-          <span style={{ fontSize: 11, color: 'var(--theme-green)', marginBottom: 8 }}>Source: {nutriForm.source}</span>
+          <span style={{ fontSize: 11, color: 'var(--theme-green-text)', marginBottom: 8 }}>Source: {nutriForm.source}</span>
         )}
       </div>
 
       {nutriMatches.length > 0 && (
-        <div style={{ marginBottom: 16, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-purple) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 20%, transparent)', borderRadius: 8 }}>
-          <div style={{ fontSize: 11, color: 'var(--theme-purple)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+        <div style={{ marginBottom: 16, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-purple) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 20%, transparent)', borderRadius: 'var(--radius-sm)' }}>
+          <div style={{ fontSize: 11, color: 'var(--theme-purple-text)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
             {nutriMatches.length} match{nutriMatches.length > 1 ? 'es' : ''} from {nutriMatchSource}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -202,8 +202,8 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
       )}
 
       {/* Open Food Facts — branded / packaged products */}
-      <div style={{ marginBottom: 16, padding: '12px 14px', background: 'rgba(52,211,153,0.05)', border: '1px solid rgba(52,211,153,0.18)', borderRadius: 8 }}>
-        <div style={{ fontSize: 11, color: 'var(--theme-green)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+      <div style={{ marginBottom: 16, padding: '12px 14px', background: 'rgba(52,211,153,0.05)', border: '1px solid rgba(52,211,153,0.18)', borderRadius: 'var(--radius-sm)' }}>
+        <div style={{ fontSize: 11, color: 'var(--theme-green-text)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
           <Tip width={280} text="For branded / packaged goods (sauces, drinks, snacks). Search by product name or paste a barcode. Pulls nutrition per 100 g from the Open Food Facts database.">Fetch from Open Food Facts</Tip>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -212,13 +212,13 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
             onChange={e => setOffQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); fetchFromOFF() } }}
             placeholder="Product name or barcode…"
-            style={{ flex: 1, minWidth: 180, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
+            style={{ flex: 1, minWidth: 180, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
           />
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={fetchFromOFF} disabled={offBusy || !offQuery.trim()}>
             {offBusy ? 'Searching…' : '🔍 Fetch'}
           </button>
         </div>
-        {offError && <p style={{ color: 'var(--theme-accent)', fontSize: 12, margin: '8px 0 0' }}>{offError}</p>}
+        {offError && <p style={{ color: 'var(--theme-accent-ink)', fontSize: 12, margin: '8px 0 0' }}>{offError}</p>}
         {offResults.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
             {offResults.map((r, i) => (
@@ -238,25 +238,25 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
       <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14 }}>
         {NUTRIENTS.map(def => (
           <div className="form-field" key={def.key}>
-            <label>
+            <label htmlFor="nutrit-f3">
               {def.key === 'sodium_mg'
                 ? <Tip width={220} text="Sodium is in milligrams (mg), not grams. 1 g salt ≈ 388 mg sodium.">{def.label} ({def.unit})</Tip>
                 : `${def.label} (${def.unit})`}
             </label>
-            <input type="number" min="0" step="any" value={nutriForm[def.key]}
+            <input id="nutrit-f3" type="number" min="0" step="any" value={nutriForm[def.key]}
               onChange={e => setNF({ [def.key]: e.target.value })} placeholder="0" />
           </div>
         ))}
         <div className="form-field" style={{ gridColumn: 'span 2' }}>
-          <label><Tip width={240} text="Comma-separated allergen tags (e.g. dairy, gluten, nuts). Aggregated across the recipe's ingredients.">Allergens</Tip></label>
-          <input value={nutriForm.allergens} onChange={e => setNF({ allergens: e.target.value })} placeholder="e.g. dairy, gluten" />
+          <label htmlFor="nutrit-f4"><Tip width={240} text="Comma-separated allergen tags (e.g. dairy, gluten, nuts). Aggregated across the recipe's ingredients.">Allergens</Tip></label>
+          <input id="nutrit-f4" value={nutriForm.allergens} onChange={e => setNF({ allergens: e.target.value })} placeholder="e.g. dairy, gluten" />
         </div>
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '12px 0 0' }}>
         Library values are reference estimates — verify for branded or prepared items.
       </p>
-      {nutriError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '10px 0 0' }}>{nutriError}</p>}
+      {nutriError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '10px 0 0' }}>{nutriError}</p>}
       <div className="form-actions" style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={saveNutri} disabled={nutriSaving}>

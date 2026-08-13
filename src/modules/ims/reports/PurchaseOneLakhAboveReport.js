@@ -105,7 +105,7 @@ export default function PurchaseOneLakhAboveReport() {
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
       <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
+        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 18 }}>
           Purchase One Lakh Above Report <Tip text="Nepal VAT return Annexure 13 (अनुसूची १३): any single vendor whose cumulative purchases exceed NPR 1,00,000 in a fiscal year must be disclosed by name+PAN. This aggregates purchases by vendor across the selected fiscal year and flags who crosses that threshold." width={320}>ⓘ</Tip>
         </h2>
         <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
@@ -115,12 +115,12 @@ export default function PurchaseOneLakhAboveReport() {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Fiscal Year (BS)</label>
-          <select className="form-select" value={selectedFy} onChange={e => setSelectedFy(e.target.value)}>
+          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="purcha-f1">Fiscal Year (BS)</label>
+          <select id="purcha-f1" className="form-select" value={selectedFy} onChange={e => setSelectedFy(e.target.value)}>
             {fyOptions.map(fy => <option key={fy} value={fy}>{fy}</option>)}
           </select>
         </div>
-        <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={rows.length === 0}>⬇ Excel</button>
+        <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={rows.length === 0}>Export Excel</button>
       </div>
 
       {loading ? (
@@ -172,8 +172,8 @@ export default function PurchaseOneLakhAboveReport() {
                     <td style={{ textAlign: 'right' }}>{fmtNpr(v.returned)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(v.net)}</td>
                     <td>
-                      {over && !v.pan && <span className="badge-red" style={{ fontSize: 11 }}>⚠ Missing PAN</span>}
-                      {over && v.pan && <span className="badge-amber" style={{ fontSize: 11 }}>Annexure 13</span>}
+                      {over && !v.pan && <span className="badge badge-red">⚠ Missing PAN</span>}
+                      {over && v.pan && <span className="badge badge-amber">Annexure 13</span>}
                     </td>
                   </tr>
                 )

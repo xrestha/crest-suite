@@ -129,13 +129,13 @@ export default function SalesImportButton({ recipes, onMatched, disabled }) {
           <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImportFile} disabled={disabled} />
         </label>
       </Tip>
-      {importError && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 6 }}>{importError}</div>}
+      {importError && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 6 }}>{importError}</div>}
       {importSummary && (
         <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 6 }}>
-          <strong style={{ color: 'var(--theme-accent)' }}>{importSummary.matched}</strong> of {importSummary.total} rows matched.
+          <strong style={{ color: 'var(--theme-accent-ink)' }}>{importSummary.matched}</strong> of {importSummary.total} rows matched.
           {importSummary.unmatchedNames.length > 0 && (
             <details style={{ marginTop: 4 }}>
-              <summary style={{ cursor: 'pointer', color: 'var(--theme-red)' }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--theme-red-text)' }}>
                 {importSummary.unmatchedNames.length} unmatched name{importSummary.unmatchedNames.length !== 1 ? 's' : ''} — click to view
               </summary>
               <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>

@@ -17,9 +17,12 @@ const GOLD_HEX  = '#c9a84c'
 const GREEN_HEX = '#34d399'
 const MUTED_HEX = '#6b7280'
 
-const GOLD  = 'var(--theme-accent)'
-const GREEN = 'var(--theme-green)'
-const RED   = 'var(--theme-red)'
+// Every one of these constants is only ever used as TEXT on this page (rank numbers, margin
+// figures, the "% of total revenue" callout, KPI values), so they take the -text/-ink variants.
+// The base tokens above stay on the chart, where they are fills.
+const GOLD  = 'var(--theme-accent-ink)'
+const GREEN = 'var(--theme-green-text)'
+const RED   = 'var(--theme-red-text)'
 const MUTED = 'var(--theme-text2)'
 
 export default function BestSellers() {
@@ -198,7 +201,7 @@ export default function BestSellers() {
                   <XAxis dataKey="name" tick={{ fill: MUTED_HEX, fontSize: 11 }} angle={-30} textAnchor="end" interval={0} />
                   <YAxis tick={{ fill: MUTED_HEX, fontSize: 11 }} tickFormatter={v => sortBy === 'revenue' ? `${Math.round(v/1000)}k` : v} />
                   <Tooltip
-                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 8, fontSize: 12, color: 'var(--theme-text1)' }}
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 12, color: 'var(--theme-text1)' }}
                     labelStyle={{ color: 'var(--theme-text1)' }}
                     itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={(v) => [sortBy === 'revenue' ? fmt(v) : sortBy === 'margin' ? `${v}%` : v, sortBy === 'revenue' ? 'Revenue' : sortBy === 'qty' ? 'Qty Sold' : 'Margin']}
@@ -292,7 +295,7 @@ export default function BestSellers() {
             ].map(s => (
               <div key={s.label}>
                 <div style={{ fontSize: 11, color: MUTED, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{s.label}</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: s.color }}>{s.val}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.val}</div>
               </div>
             ))}
           </div>

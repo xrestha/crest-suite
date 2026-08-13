@@ -66,7 +66,7 @@ const REPORTS = [
   { to: '/period-comparison',    label: 'Period Comparison',    icon: GitCompare, featureKey: 'period_comparison', cat: 'summary', minPlan: 'pro', minImsRole: 'supervisor' },
   { to: '/budget',               label: 'Budget vs Actual',     icon: Target, featureKey: 'budget_vs_actual',  cat: 'summary', minPlan: 'growth', minImsRole: 'supervisor' },
   // Stock & variance
-  { to: '/stock-report',         label: 'Stock Report',         icon: Boxes, featureKey: 'stock_report',         cat: 'stock', minImsRole: 'supervisor' },
+  { to: '/stock-report',         label: 'Stock Report',         icon: Boxes, featureKey: 'stock_report',         cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/reorder',              label: 'Reorder Report',       icon: RefreshCw, featureKey: 'reorder_report',       cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/stock-movements',      label: 'Stock Movements',      icon: History, featureKey: 'stock_movement_log',  cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   // Crest Suite Pro — see the Fixed Assets note above; gated in-page, not here.

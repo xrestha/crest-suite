@@ -72,7 +72,7 @@ export default function ComboBuilder() {
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1000 }}>
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
+        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 18 }}>
           Combo Builder{' '}
           <Tip text="Shows which items are actually ordered together most often at this table (from real POS bills, last N days) and suggests a discounted combo price. Insight-only — pick a pairing you like, then create the priced bundle yourself in Menu Pricing." width={320}>ⓘ</Tip>
         </h2>
@@ -83,10 +83,10 @@ export default function ComboBuilder() {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         <div style={{ minWidth: 260 }}>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
+          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="combob-f1">
             <Tip text="The item to find pairings for — results show what's most often ordered alongside it." width={240}>Anchor Item</Tip>
           </label>
-          <SearchableSelect value={anchorId} onChange={setAnchorId} options={menuOptions} placeholder="Select an item…" />
+          <SearchableSelect id="combob-f1" value={anchorId} onChange={setAnchorId} options={menuOptions} placeholder="Select an item…" />
         </div>
         <div>
           <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Window</label>
@@ -97,10 +97,10 @@ export default function ComboBuilder() {
           </div>
         </div>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
+          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="combob-f2">
             <Tip text="Discount applied to the combined price when you bundle two items — used to compute the suggested combo price below. Saved per client." width={260}>Combo Discount %</Tip>
           </label>
-          <input
+          <input id="combob-f2"
             type="number" min="0" max="100" step="1" value={discountPct}
             onChange={e => setDiscountPct(e.target.value)}
             onBlur={e => saveDiscountPct(e.target.value)}
@@ -153,15 +153,15 @@ export default function ComboBuilder() {
                     </td>
                     <td style={{ textAlign: 'right' }}>{p.coCount}</td>
                     <td style={{ minWidth: 100 }}>
-                      <div style={{ background: 'var(--theme-input-bg)', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+                      <div style={{ background: 'var(--theme-input-bg)', borderRadius: 'var(--radius-xs)', height: 8, overflow: 'hidden' }}>
                         <div style={{ width: `${pct}%`, height: '100%', background: 'var(--theme-accent)' }} />
                       </div>
                     </td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(combined)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)' }}>{fmtNpr(combo)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-green)' }}>−{fmtNpr(savings)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{fmtNpr(combo)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>−{fmtNpr(savings)}</td>
                     <td>
-                      <a href="/menu-pricing" style={{ fontSize: 12, color: 'var(--theme-accent)', whiteSpace: 'nowrap' }}>Create as Menu Item →</a>
+                      <a href="/menu-pricing" style={{ fontSize: 12, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>Create as Menu Item →</a>
                     </td>
                   </tr>
                 )

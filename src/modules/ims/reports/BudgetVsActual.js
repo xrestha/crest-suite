@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -104,6 +105,7 @@ export default function BudgetVsActual() {
   const fmtPct = v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%'
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="this budget report" />
 
   return (
     <div>
@@ -113,7 +115,7 @@ export default function BudgetVsActual() {
           <p className="page-subtitle">Compare planned spend against actual net purchases — {periodLabel}</p>
         </div>
         <select
-          style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
+          style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
           value={selectedPeriod?.id || ''}
           onChange={e => handlePeriodChange(e.target.value)}
         >
@@ -125,7 +127,7 @@ export default function BudgetVsActual() {
         </select>
       </div>
 
-      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent)' }}>
+      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
         Enter a budget for each category — the app compares it against net purchases (purchases − returns) for the selected period. Budgets are saved automatically.
       </div>
 
@@ -170,7 +172,7 @@ export default function BudgetVsActual() {
                             style={{
                               background: 'var(--theme-bg)', border: '1px solid',
                               borderColor: budget > 0 ? 'rgba(201,168,76,0.4)' : 'var(--theme-border)',
-                              borderRadius: 5, padding: '5px 10px', fontSize: 13,
+                              borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13,
                               color: 'var(--theme-text1)', outline: 'none', width: 130, textAlign: 'right',
                             }}
                           />
@@ -180,18 +182,18 @@ export default function BudgetVsActual() {
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
                         {actual > 0 ? fmt(actual) : '—'}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: noBudget ? 'var(--theme-text2)' : isOver ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: noBudget ? 'var(--theme-text2)' : isOver ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                         {noBudget ? '—' : (variance >= 0 ? '+' : '') + fmt(variance)}
                       </td>
-                      <td style={{ textAlign: 'right', color: noBudget ? 'var(--theme-text2)' : isOver ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                      <td style={{ textAlign: 'right', color: noBudget ? 'var(--theme-text2)' : isOver ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                         {pct !== null ? fmtPct(pct) : '—'}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         {noBudget
-                          ? <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 15%, transparent)', padding: '2px 10px', borderRadius: 10 }}>No Budget</span>
+                          ? <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 15%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>No Budget</span>
                           : isOver
-                          ? <span style={{ fontSize: 11, color: 'var(--theme-red)', background: 'rgba(248,113,113,0.12)', padding: '2px 10px', borderRadius: 10 }}>Over Budget</span>
-                          : <span style={{ fontSize: 11, color: 'var(--theme-green)', background: 'rgba(52,211,153,0.12)', padding: '2px 10px', borderRadius: 10 }}>Under Budget</span>
+                          ? <span style={{ fontSize: 11, color: 'var(--theme-red-text)', background: 'rgba(248,113,113,0.12)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>Over Budget</span>
+                          : <span style={{ fontSize: 11, color: 'var(--theme-green-text)', background: 'rgba(52,211,153,0.12)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>Under Budget</span>
                         }
                       </td>
                     </tr>
@@ -201,17 +203,17 @@ export default function BudgetVsActual() {
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td></td>
-                  <td style={{ fontWeight: 700, color: 'var(--theme-accent)' }}>Totals</td>
+                  <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>Totals</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
                     {totalBudget > 0 ? fmt(totalBudget) : '—'}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text3)' }}>
                     {totalActual > 0 ? fmt(totalActual) : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: totalBudget === 0 ? 'var(--theme-text2)' : totalVariance >= 0 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: totalBudget === 0 ? 'var(--theme-text2)' : totalVariance >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     {totalBudget > 0 ? (totalVariance >= 0 ? '+' : '') + fmt(totalVariance) : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: totalBudget === 0 ? 'var(--theme-text2)' : totalVariance >= 0 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: totalBudget === 0 ? 'var(--theme-text2)' : totalVariance >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     {totalBudget > 0 ? fmtPct((totalVariance / totalBudget) * 100) : '—'}
                   </td>
                   <td></td>

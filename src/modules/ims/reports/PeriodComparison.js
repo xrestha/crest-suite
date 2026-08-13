@@ -14,6 +14,8 @@ import {
   XAxis, YAxis, CartesianGrid, ReferenceLine, Tooltip as RTooltip, ResponsiveContainer,
 } from 'recharts'
 import { chartMotion } from '../../../shared/chartMotion'
+import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared/imsFormulas'
+import { useSettings } from '../../../context/SettingsContext'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -21,13 +23,6 @@ const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kart
 // semantic colors) — mirrors FoodBeverageSplit.jsx's own convention so a category reads the same
 // color everywhere in the app, duplicated locally since that constant lives in a dashboard file.
 const FALLBACK_HEX = ['#c9a84c', '#60a5fa', '#f87171', '#fb923c', '#22d3ee', '#f472b6', '#facc15', '#818cf8']
-
-function fcColor(pct) {
-  if (pct == null) return 'var(--theme-text2)'
-  if (pct <= 30) return 'var(--theme-green)'
-  if (pct <= 38) return 'var(--theme-amber)'
-  return 'var(--theme-red)'
-}
 
 function periodLabel(p, short) {
   const m = BS_MONTHS[p.bs_month - 1]
@@ -48,10 +43,10 @@ function DeltaRow({ pct, suffix, judge = 'neutral' }) {
   if (pct == null) return null
   const up = pct >= 0
   let color = 'var(--theme-text2)'
-  if (judge === 'good-up')   color = up ? 'var(--theme-green)' : 'var(--theme-red)'
-  if (judge === 'good-down') color = up ? 'var(--theme-red)'   : 'var(--theme-green)'
+  if (judge === 'good-up')   color = up ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
+  if (judge === 'good-down') color = up ? 'var(--theme-red-text)'   : 'var(--theme-green-text)'
   return (
-    <div style={{ fontSize: 10.5, color, marginTop: 1, fontStyle: suffix === 'vs LY' ? 'italic' : 'normal' }}>
+    <div style={{ fontSize: 10, color, marginTop: 1, fontStyle: suffix === 'vs LY' ? 'italic' : 'normal' }}>
       {up ? '↑' : '↓'} {Math.abs(pct).toFixed(1)}% {suffix}
     </div>
   )
@@ -62,9 +57,9 @@ function DeltaRow({ pct, suffix, judge = 'neutral' }) {
 function PpDeltaRow({ curr, prev, suffix }) {
   if (curr == null || prev == null) return null
   const diff = curr - prev
-  const color = diff < 0 ? 'var(--theme-green)' : diff > 0 ? 'var(--theme-red)' : 'var(--theme-text2)'
+  const color = diff < 0 ? 'var(--theme-green-text)' : diff > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)'
   return (
-    <div style={{ fontSize: 10.5, color, marginTop: 1, fontStyle: suffix === 'vs LY' ? 'italic' : 'normal' }}>
+    <div style={{ fontSize: 10, color, marginTop: 1, fontStyle: suffix === 'vs LY' ? 'italic' : 'normal' }}>
       {diff < 0 ? '↓' : diff > 0 ? '↑' : '→'} {Math.abs(diff).toFixed(1)}pp {suffix}
     </div>
   )
@@ -73,6 +68,10 @@ function PpDeltaRow({ curr, prev, suffix }) {
 export default function PeriodComparison() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const { colors } = useTheme()
+  const { settings } = useSettings()
+  // Was a module-level hardcoded 30/38 scale; now the client's own thresholds, like every other
+  // FC% surface (src/shared/imsFormulas.js).
+  const fcColor = pct => fcBand(pct, settings).color
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods] = useState([])
@@ -110,6 +109,7 @@ export default function PeriodComparison() {
       { data: purchases },
       { data: returns },
       { data: wastes },
+      { data: staffMeals },
       { data: openings },
       { data: closings },
       { data: sales },
@@ -117,6 +117,9 @@ export default function PeriodComparison() {
       fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', ids).order('id')),
       scopedFrom('vendor_returns', 'period_id, qty, rate').in('period_id', ids),
       supabase.from('wastages').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
+      // Staff meals belong in COGS (src/shared/imsFormulas.js) — omitted here until 2026-08-13,
+      // which put this page's COGS and FC% below MonthlySummary's for the identical month.
+      supabase.from('staff_meals').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
       supabase.from('opening_stock').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
       supabase.from('closing_stock').select('period_id, physical_qty, items(per_uom_rate)').in('period_id', ids),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
@@ -128,6 +131,7 @@ export default function PeriodComparison() {
       const purchV   = (purchases||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.rate||0),0)
       const retV     = (returns||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.rate||0),0)
       const wasteV   = (wastes||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
+      const staffV   = (staffMeals||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
       const openV    = (openings||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
       const closeV   = (closings||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.physical_qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
       // Uses unit_price captured on the row (the price actually charged that period) when
@@ -151,7 +155,7 @@ export default function PeriodComparison() {
         catRev[cat] = (catRev[cat] || 0) + amt
       })
       const netPurch = purchV - retV
-      const cogs     = openV + netPurch - wasteV - closeV
+      const cogs     = computeUsed({ opening: openV, purchases: netPurch, wastage: wasteV, staffMeals: staffV, closing: closeV })
       const fcPct    = revenue > 0 ? (cogs / revenue) * 100 : null
       result[pid]    = { purchV, retV, netPurch, wasteV, openV, closeV, revenue, cogs, fcPct, catRev }
     }
@@ -198,8 +202,8 @@ export default function PeriodComparison() {
     if (Math.abs(diff) < 0.3) return <span style={{ color: 'var(--theme-text2)' }}>→</span>
     // For FC%: down is better (lower cost)
     return diff < 0
-      ? <span style={{ color: 'var(--theme-green)' }}>↓ {Math.abs(diff).toFixed(1)}pp</span>
-      : <span style={{ color: 'var(--theme-red)' }}>↑ {Math.abs(diff).toFixed(1)}pp</span>
+      ? <span style={{ color: 'var(--theme-green-text)' }}>↓ {Math.abs(diff).toFixed(1)}pp</span>
+      : <span style={{ color: 'var(--theme-red-text)' }}>↑ {Math.abs(diff).toFixed(1)}pp</span>
   }
 
   // Chart data, oldest → newest (the table itself stays newest-first, but a trend chart reads
@@ -294,13 +298,13 @@ export default function PeriodComparison() {
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--theme-text2)', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--theme-text2)', cursor: 'pointer' }} htmlFor="period-f1">
               <input type="checkbox" checked={showYoy} onChange={e => setShowYoy(e.target.checked)} />
               <Tip text="Adds an italic 'vs LY' line under each figure, comparing this period to the same BS month one year earlier — useful for spotting festival/seasonal swings a plain month-to-month view can't tell apart from real drift." width={280}>
                 Compare vs last year
               </Tip>
             </label>
-            <select className="form-select" value={limit} onChange={e => setLimit(Number(e.target.value))}>
+            <select id="period-f1" className="form-select" value={limit} onChange={e => setLimit(Number(e.target.value))}>
               <option value={6}>Last 6 periods</option>
               <option value={12}>Last 12 periods</option>
               <option value={24}>Last 24 periods</option>
@@ -322,7 +326,7 @@ export default function PeriodComparison() {
             {latestStats?.fcPct != null ? latestStats.fcPct.toFixed(1) + '%' : '—'}
           </div>
           {fcTrend != null && (
-            <div className="stat-label" style={{ marginTop: 4, color: fcTrend < 0 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+            <div className="stat-label" style={{ marginTop: 4, color: fcTrend < 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
               {fcTrend < 0 ? '↓' : '↑'} {Math.abs(fcTrend).toFixed(1)}pp vs prev period
             </div>
           )}
@@ -331,11 +335,11 @@ export default function PeriodComparison() {
           <div className="stat-label">
             <Tip text="Period with the lowest food cost % in the selected range." width={220}>Best FC% Period</Tip>
           </div>
-          <div className="stat-value" style={{ fontSize: 15 }}>
+          <div className="stat-value" style={{ fontSize: 14 }}>
             {bestFcPeriod ? periodLabel(bestFcPeriod) : '—'}
           </div>
           {bestFcPeriod && stats[bestFcPeriod.id]?.fcPct != null && (
-            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-green)' }}>
+            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-green-text)' }}>
               {stats[bestFcPeriod.id].fcPct.toFixed(1)}%
             </div>
           )}
@@ -349,11 +353,11 @@ export default function PeriodComparison() {
           <div className="stat-label">
             <Tip text="Period with the highest revenue in the selected range." width={220}>Highest Revenue Period</Tip>
           </div>
-          <div className="stat-value" style={{ fontSize: 15 }}>
+          <div className="stat-value" style={{ fontSize: 14 }}>
             {highestRevenuePeriod ? periodLabel(highestRevenuePeriod) : '—'}
           </div>
           {highestRevenuePeriod && (
-            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-green)' }}>
+            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-green-text)' }}>
               {fmt(stats[highestRevenuePeriod.id]?.revenue)}
             </div>
           )}
@@ -362,11 +366,11 @@ export default function PeriodComparison() {
           <div className="stat-label">
             <Tip text="Period with the highest net purchases in the selected range." width={220}>Highest Purchases Period</Tip>
           </div>
-          <div className="stat-value" style={{ fontSize: 15 }}>
+          <div className="stat-value" style={{ fontSize: 14 }}>
             {highestPurchasePeriod ? periodLabel(highestPurchasePeriod) : '—'}
           </div>
           {highestPurchasePeriod && (
-            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-accent)' }}>
+            <div className="stat-label" style={{ marginTop: 4, color: 'var(--theme-accent-ink)' }}>
               {fmt(stats[highestPurchasePeriod.id]?.netPurch)}
             </div>
           )}
@@ -379,8 +383,10 @@ export default function PeriodComparison() {
           <ChartCard
             title="Revenue vs Net Purchases — Period Trend"
             legend={<>
-              <span style={{ color: colors.accent }}>● Purchases</span>
-              <span style={{ color: colors.green }}>● Revenue</span>
+              {/* Swatch keeps the series colour, label carries the contrast — the whole string
+                  coloured measured 2.74:1 on Rosé Dawn. Same split as StatPill's color/textColor. */}
+              <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: colors.accent }}>●</span> Purchases</span>
+              <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: colors.green }}>●</span> Revenue</span>
             </>}
             renderChart={h => {
               const big = h > 200
@@ -405,7 +411,7 @@ export default function PeriodComparison() {
                     <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} interval={0} />
                     <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 44 : 32} />
                     <RTooltip
-                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: big ? 12 : 11 }}
+                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: big ? 12 : 11 }}
                       labelStyle={{ color: colors.text1 }}
                       formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
                     />
@@ -442,9 +448,9 @@ export default function PeriodComparison() {
             title="Food Cost % — Period Trend"
             footer={
               <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10, flexWrap: 'wrap' }}>
-                <span style={{ color: 'var(--theme-green)' }}>● ≤30% Good</span>
-                <span style={{ color: 'var(--theme-amber)' }}>● 31–38% Watch</span>
-                <span style={{ color: 'var(--theme-red)' }}>● &gt;38% High</span>
+                <span style={{ color: 'var(--theme-green-text)' }}>● ≤{fcThresholds(settings).warn}% Good</span>
+                <span style={{ color: 'var(--theme-amber-text)' }}>● {fcThresholds(settings).warn}–{fcThresholds(settings).critical}% Watch</span>
+                <span style={{ color: 'var(--theme-red-text)' }}>● &gt;{fcThresholds(settings).critical}% High</span>
                 <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period</span>
               </div>
             }
@@ -457,7 +463,7 @@ export default function PeriodComparison() {
                   <ReferenceLine y={30} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '30%', fill: colors.green, fontSize: 9, position: 'right' }} />
                   <ReferenceLine y={38} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '38%', fill: colors.red, fontSize: 9, position: 'right' }} />
                   <RTooltip
-                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--theme-text1)' }}
                     labelStyle={{ color: 'var(--theme-text1)' }}
                     itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={(v, _n, props) => {
@@ -488,7 +494,7 @@ export default function PeriodComparison() {
           <ChartCard
             title="Revenue by Category — Period Trend"
             legend={<div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              {categories.map(c => <span key={c} style={{ color: colorOf(c) }}>● {c}</span>)}
+              {categories.map(c => <span key={c} style={{ color: 'var(--theme-text2)' }}><span style={{ color: colorOf(c) }}>●</span> {c}</span>)}
             </div>}
             smallHeight={200}
             renderChart={h => (
@@ -498,7 +504,7 @@ export default function PeriodComparison() {
                   <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
                   <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={36} />
                   <RTooltip
-                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
                     formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
                   />
                   {categories.map(c => (
@@ -528,7 +534,7 @@ export default function PeriodComparison() {
                   <Tip text="Total value of wastage logged in Stock Count (qty × per-unit rate)." width={240}>Wastage</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Opening Value + Net Purchases − Wastage − Closing Value." width={260}>COGS</Tip>
+                  <Tip text={`${COGS_FORMULA}, in value.`} width={260}>COGS</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Qty Sold × Selling Price ex-VAT from Sales Entry. Shows — if no sales data entered for this period. The line beneath shows the % change vs the previous period, and vs the same month last year when that toggle is on." width={300}>Revenue (ex-VAT)</Tip>
@@ -552,12 +558,12 @@ export default function PeriodComparison() {
                     <td>
                       <strong>{periodLabel(p)}</strong>
                       {p.status === 'open' && (
-                        <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: 'var(--theme-green)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 3, padding: '1px 5px' }}>
+                        <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: 'var(--theme-green-text)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 'var(--radius-xs)', padding: '1px 5px' }}>
                           OPEN
                         </span>
                       )}
                       {showYoy && (
-                        <div style={{ fontSize: 10.5, color: 'var(--theme-text3)', fontStyle: 'italic', marginTop: 2 }}>
+                        <div style={{ fontSize: 10, color: 'var(--theme-text3)', fontStyle: 'italic', marginTop: 2 }}>
                           {ly ? `LY: ${periodLabel(ly)}` : 'LY: no matching period'}
                         </div>
                       )}
@@ -567,7 +573,7 @@ export default function PeriodComparison() {
                       <DeltaRow pct={pctDelta(s.netPurch, prev?.netPurch)} suffix="vs prev" judge="neutral" />
                       {showYoy && <DeltaRow pct={pctDelta(s.netPurch, lyS?.netPurch)} suffix="vs LY" judge="neutral" />}
                     </td>
-                    <td style={{ textAlign: 'right', color: s.wasteV ? 'var(--theme-amber)' : 'var(--theme-text2)' }}>{fmt(s.wasteV)}</td>
+                    <td style={{ textAlign: 'right', color: s.wasteV ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>{fmt(s.wasteV)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(s.cogs)}</td>
                     <td style={{ textAlign: 'right' }}>
                       {fmt(s.revenue)}

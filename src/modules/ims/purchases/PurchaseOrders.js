@@ -8,22 +8,23 @@ import Fab from '../../../components/Fab'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
+import NoPeriodState from '../../../components/NoPeriodState'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
 
 const STATUS_META = {
   draft:     { label: 'Draft',     color: 'var(--theme-text2)', bg: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-text2) 30%, transparent)' },
-  sent:      { label: 'Sent',      color: 'var(--theme-purple)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)' },
-  partial:   { label: 'Partial',   color: 'var(--theme-accent)', bg: 'rgba(201,168,76,0.1)',  border: 'rgba(201,168,76,0.3)' },
-  received:  { label: 'Received',  color: 'var(--theme-green)', bg: 'rgba(52,211,153,0.1)',  border: 'rgba(52,211,153,0.3)' },
-  cancelled: { label: 'Cancelled', color: 'var(--theme-red)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.3)' },
+  sent:      { label: 'Sent',      color: 'var(--theme-purple-text)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)' },
+  partial:   { label: 'Partial',   color: 'var(--theme-accent-ink)', bg: 'rgba(201,168,76,0.1)',  border: 'rgba(201,168,76,0.3)' },
+  received:  { label: 'Received',  color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.1)',  border: 'rgba(52,211,153,0.3)' },
+  cancelled: { label: 'Cancelled', color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.3)' },
 }
 
 function StatusBadge({ status }) {
   const m = STATUS_META[status] || STATUS_META.draft
   return (
-    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-xs)',
       color: m.color, background: m.bg, border: `1px solid ${m.border}`, letterSpacing: '0.04em' }}>
       {m.label}
     </span>
@@ -342,6 +343,7 @@ export default function PurchaseOrders() {
     : '—'
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  if (!loading && periods.length === 0) return <NoPeriodState what="purchase orders" />
 
   const thStyle = { textAlign: 'left', fontSize: 11, color: 'var(--theme-text2)', padding: '0 12px 10px', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }
   const tdStyle = { padding: '12px', fontSize: 13, verticalAlign: 'middle' }
@@ -365,24 +367,24 @@ export default function PurchaseOrders() {
         <div className="card" style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
             <div className="form-field" style={{ minWidth: 120 }}>
-              <label>BS Day *</label>
-              <input type="number" min="1" max="32" value={receiveBsDay}
+              <label htmlFor="purcha-f1">BS Day *</label>
+              <input id="purcha-f1" type="number" min="1" max="32" value={receiveBsDay}
                 onChange={e => setReceiveBsDay(e.target.value)} placeholder="e.g. 15" />
             </div>
             <div className="form-field" style={{ minWidth: 140 }}>
-              <label>
+              <label htmlFor="purcha-f2">
                 <Tip width={260} text="Defaults to Credit — most PO deliveries are on credit terms. Change to Cash or FonePay if the vendor requires payment on delivery.">
                   Payment Method
                 </Tip>
               </label>
-              <select className="form-select" value={receivePayment} onChange={e => setReceivePayment(e.target.value)}>
+              <select id="purcha-f2" className="form-select" value={receivePayment} onChange={e => setReceivePayment(e.target.value)}>
                 {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
             <div className="form-field" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
               <label style={{ visibility: 'hidden' }}>VAT</label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13,
-                color: receiveVatInclusive ? 'var(--theme-accent)' : 'var(--theme-text3)', userSelect: 'none', paddingBottom: 6 }}>
+                color: receiveVatInclusive ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', userSelect: 'none', paddingBottom: 6 }}>
                 <input type="checkbox" checked={receiveVatInclusive} onChange={e => setReceiveVatInclusive(e.target.checked)}
                   style={{ width: 15, height: 15, accentColor: 'var(--theme-accent)', cursor: 'pointer' }} />
                 <Tip text="Tick if the vendor's invoice rates include 13% VAT. The system strips VAT and stores the ex-VAT rate in the purchase entry." width={260}>
@@ -426,21 +428,21 @@ export default function PurchaseOrders() {
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-text2)' }}>{l.qty_ordered}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-text2)' }}>{l.qty_received || 0}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', color: rem > 0 ? 'var(--theme-accent)' : 'var(--theme-green)' }}>{rem}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', color: rem > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)' }}>{rem}</td>
                       <td style={{ ...tdStyle, textAlign: 'right' }}>
                         {isFullyReceived ? (
-                          <span style={{ color: 'var(--theme-green)', fontSize: 12 }}>✓ Done</span>
+                          <span style={{ color: 'var(--theme-green-text)', fontSize: 12 }}>✓ Done</span>
                         ) : (
                           <input type="number" min="0" max={rem} value={l.receiving}
                             onChange={e => setReceiveLines(prev => prev.map((x, i) => i === idx ? { ...x, receiving: e.target.value } : x))}
-                            style={{ background: 'var(--theme-bg)', border: '1px solid rgba(201,168,76,0.4)', borderRadius: 5,
+                            style={{ background: 'var(--theme-bg)', border: '1px solid rgba(201,168,76,0.4)', borderRadius: 'var(--radius-sm)',
                               padding: '6px 10px', fontSize: 13, color: 'var(--theme-text1)', width: 90, textAlign: 'right', outline: 'none' }} />
                         )}
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-text2)' }}>
                         NPR {l.unit_price.toFixed(2)}
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>
+                      <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
                         {val > 0 ? `NPR ${val.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
                       </td>
                     </tr>
@@ -450,7 +452,7 @@ export default function PurchaseOrders() {
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td colSpan={6} style={{ ...tdStyle, fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 16 }}>Total Receiving Value</td>
-                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', fontSize: 15, paddingTop: 16 }}>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 16 }}>
                     NPR {receiveLines.reduce((s, l) => s + parseFloat(l.receiving || 0) * l.unit_price, 0)
                       .toLocaleString('en-NP', { maximumFractionDigits: 0 })}
                   </td>
@@ -459,7 +461,7 @@ export default function PurchaseOrders() {
             </table>
           </div>
 
-          {receiveError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '16px 0 0' }}>{receiveError}</p>}
+          {receiveError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '16px 0 0' }}>{receiveError}</p>}
 
           <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
             <button className="btn btn-ghost" onClick={() => setView('list')}>Cancel</button>
@@ -489,15 +491,15 @@ export default function PurchaseOrders() {
         <div className="card" style={{ marginBottom: 20 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 20 }}>
             <div className="form-field">
-              <label>Vendor *</label>
-              <select className="form-select" value={poForm.vendor_id} onChange={e => setPoForm(f => ({ ...f, vendor_id: e.target.value }))}>
+              <label htmlFor="purcha-f3">Vendor *</label>
+              <select id="purcha-f3" className="form-select" value={poForm.vendor_id} onChange={e => setPoForm(f => ({ ...f, vendor_id: e.target.value }))}>
                 <option value="">— Select vendor —</option>
                 {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
             </div>
             <div className="form-field">
-              <label>Period *</label>
-              <select className="form-select" value={poForm.period_id} onChange={e => setPoForm(f => ({ ...f, period_id: e.target.value }))}>
+              <label htmlFor="purcha-f4">Period *</label>
+              <select id="purcha-f4" className="form-select" value={poForm.period_id} onChange={e => setPoForm(f => ({ ...f, period_id: e.target.value }))}>
                 <option value="">— Select period —</option>
                 {periods.map(p => (
                   <option key={p.id} value={p.id}>
@@ -519,8 +521,8 @@ export default function PurchaseOrders() {
                 clearable />
             </div>
             <div className="form-field" style={{ gridColumn: 'span 2' }}>
-              <label>Notes</label>
-              <input value={poForm.notes} onChange={e => setPoForm(f => ({ ...f, notes: e.target.value }))}
+              <label htmlFor="purcha-f5">Notes</label>
+              <input id="purcha-f5" value={poForm.notes} onChange={e => setPoForm(f => ({ ...f, notes: e.target.value }))}
                 placeholder="e.g. Deliver before 10am, use back entrance…" />
             </div>
           </div>
@@ -563,7 +565,7 @@ export default function PurchaseOrders() {
                       <input type="number" min="0" value={row.qty_ordered}
                         onChange={e => updatePoItem(row._key, 'qty_ordered', e.target.value)}
                         placeholder="0"
-                        style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5,
+                        style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
                           padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }} />
                     </td>
                     <td style={{ padding: '5px 8px', fontSize: 12, color: 'var(--theme-text2)' }}>{item?.uom || '—'}</td>
@@ -571,10 +573,10 @@ export default function PurchaseOrders() {
                       <input type="number" min="0" value={row.unit_price}
                         onChange={e => updatePoItem(row._key, 'unit_price', e.target.value)}
                         placeholder="0.00"
-                        style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 5,
+                        style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
                           padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }} />
                     </td>
-                    <td style={{ padding: '5px 8px', textAlign: 'right', fontSize: 13, color: subtotal > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)', fontWeight: 600 }}>
+                    <td style={{ padding: '5px 8px', textAlign: 'right', fontSize: 13, color: subtotal > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: 600 }}>
                       {subtotal > 0 ? `NPR ${subtotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
                     </td>
                     <td style={{ padding: '5px 0', textAlign: 'right' }}>
@@ -589,7 +591,7 @@ export default function PurchaseOrders() {
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td colSpan={4} style={{ paddingTop: 12, fontWeight: 700, color: 'var(--theme-text2)', fontSize: 13 }}>PO Total</td>
-                  <td style={{ paddingTop: 12, textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent)', fontSize: 15 }}>
+                  <td style={{ paddingTop: 12, textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 14 }}>
                     NPR {liveTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
                   </td>
                   <td></td>
@@ -599,7 +601,7 @@ export default function PurchaseOrders() {
           </table>
           </div>
 
-          {formError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '16px 0 0' }}>{formError}</p>}
+          {formError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '16px 0 0' }}>{formError}</p>}
 
           <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
             <button className="btn btn-ghost" onClick={() => setView('list')}>Cancel</button>
@@ -634,7 +636,7 @@ export default function PurchaseOrders() {
                 <div style={{ fontSize: 13, color: '#555', marginTop: 4 }}>Crest Suite</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 20, fontWeight: 700, color: '#111', fontFamily: 'monospace' }}>{po.po_number}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: '#111', fontFamily: 'monospace' }}>{po.po_number}</div>
                 <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>
                   Period: {periodLabel}
                 </div>
@@ -645,7 +647,7 @@ export default function PurchaseOrders() {
                 )}
                 <div style={{ marginTop: 6 }}>
                   <span style={{
-                    fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 3,
+                    fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 'var(--radius-xs)',
                     border: `1px solid #999`, color: '#333', letterSpacing: '0.06em', textTransform: 'uppercase'
                   }}>{po.status}</span>
                 </div>
@@ -655,12 +657,12 @@ export default function PurchaseOrders() {
             {/* Vendor */}
             <div style={{ marginBottom: 24 }}>
               <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#888', marginBottom: 4 }}>Vendor</div>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>{po.vendors?.name || '—'}</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{po.vendors?.name || '—'}</div>
             </div>
 
             {/* Notes */}
             {po.notes && (
-              <div style={{ marginBottom: 20, padding: '10px 14px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, color: '#444' }}>
+              <div style={{ marginBottom: 20, padding: '10px 14px', border: '1px solid #ddd', borderRadius: 'var(--radius-xs)', fontSize: 13, color: '#444' }}>
                 <strong>Notes:</strong> {po.notes}
               </div>
             )}
@@ -788,14 +790,14 @@ export default function PurchaseOrders() {
                 return (
                   <tr key={po.id} style={{ opacity: po.status === 'cancelled' ? 0.45 : 1 }}>
                     <td>
-                      <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent)' }}>{po.po_number}</span>
+                      <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{po.po_number}</span>
                     </td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{po.vendors?.name || '—'}</td>
                     <td><StatusBadge status={po.status} /></td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
                       {receivedCount}/{itemCount} items
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)' }}>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                       {total > 0 ? `NPR ${total.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
                     </td>
                     <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{po.expected_date || '—'}</td>
@@ -829,7 +831,7 @@ export default function PurchaseOrders() {
                           </button>
                         )}
                         {isAdmin && (
-                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red)' }}
+                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red-text)' }}
                             onClick={() => deletePo(po)}>
                             <Tip width={220} text="Admin only — permanently delete this PO and its line items. Purchase entries already created are not affected.">
                               Delete
@@ -837,7 +839,7 @@ export default function PurchaseOrders() {
                           </button>
                         )}
                         {canReceive && (
-                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red)' }}
+                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red-text)' }}
                             onClick={() => cancelPo(po)}>
                             <Tip width={220} text="Cancel this PO. No purchase entries will be created. Cannot be undone.">
                               Cancel

@@ -157,11 +157,11 @@ export default function TaxPoolTab({ assets }) {
 
   return (
     <div>
-      <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 8, padding: '12px 16px', marginBottom: 12, fontSize: 12.5, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+      <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 12, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         ⚠ {DISCLAIMER_TEXT}
       </div>
 
-      <p className="no-print" style={{ fontSize: 12.5, color: 'var(--theme-text2)', lineHeight: 1.6, marginBottom: 20, maxWidth: 760 }}>
+      <p className="no-print" style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6, marginBottom: 20, maxWidth: 760 }}>
         This tab is for your <strong style={{ color: 'var(--theme-text1)' }}>annual tax filing</strong> — hand it to your
         accountant, or use it yourself if you file directly. It's separate from the <strong style={{ color: 'var(--theme-text1)' }}>Depreciation Runs</strong> tab,
         which is for your own internal books and will show a different number — that's expected. Nepal's tax rules don't
@@ -172,8 +172,8 @@ export default function TaxPoolTab({ assets }) {
       <div className="card no-print" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div className="form-field">
-            <label><Tip text="Nepal's tax year runs mid-July to mid-July (Shrawan to Ashadh) — it doesn't line up with the Jan-Dec calendar year most people think in." width={280}>Fiscal Year</Tip></label>
-            <select className="form-select" value={fyStart} onChange={e => { setFyStart(parseInt(e.target.value)); setLines(null) }}>
+            <label htmlFor="taxpoo-f1"><Tip text="Nepal's tax year runs mid-July to mid-July (Shrawan to Ashadh) — it doesn't line up with the Jan-Dec calendar year most people think in." width={280}>Fiscal Year</Tip></label>
+            <select id="taxpoo-f1" className="form-select" value={fyStart} onChange={e => { setFyStart(parseInt(e.target.value)); setLines(null) }}>
               {fyOptionsAround(currentFyStart).map(y => <option key={y} value={y}>FY {getBsFiscalYear(y, 4)}</option>)}
             </select>
           </div>
@@ -186,7 +186,7 @@ export default function TaxPoolTab({ assets }) {
           {lines && (
             <button className="btn btn-ghost" onClick={() => printWithTitle(`Tax Depreciation Schedule - FY ${fyLabel}`)}>Print</button>
           )}
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{msg.split(':').slice(1).join(':')}</span>}
+          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
       </div>
 
@@ -195,14 +195,14 @@ export default function TaxPoolTab({ assets }) {
         <h3 style={{ fontSize: 13, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
           <Tip text="Fixing or maintaining something you already own — e.g. servicing an oven, repainting, fixing a fridge compressor. Buying a brand new item is NOT a repair expense; that's a new asset in the Register tab instead." width={300}>Repair &amp; Maintenance Expenses</Tip> — FY {fyLabel}
         </h3>
-        <p style={{ fontSize: 11.5, color: 'var(--theme-text3)', margin: '0 0 12px', lineHeight: 1.5 }}>
+        <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 12px', lineHeight: 1.5 }}>
           Nepal tax law only lets you deduct repair costs up to 5% of what a pool is worth — spend more than that on
           repairs for one pool in a year, and the extra rolls into next year instead of counting this year.
         </p>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 4 }}>
           <div className="form-field" style={{ gap: 4 }}>
-            <label style={{ fontSize: 11 }}>Which pool was this equipment in?</label>
-            <select className="form-select" value={newExpense.pool} onChange={e => setNewExpense(f => ({ ...f, pool: e.target.value }))}>
+            <label style={{ fontSize: 11 }} htmlFor="taxpoo-f2">Which pool was this equipment in?</label>
+            <select id="taxpoo-f2" className="form-select" value={newExpense.pool} onChange={e => setNewExpense(f => ({ ...f, pool: e.target.value }))}>
               {POOLS_AD.map(p => <option key={p} value={p}>{POOL_LABELS[p]}</option>)}
             </select>
           </div>

@@ -265,7 +265,7 @@ export default function SupplierPriceTracker() {
         <div className="card no-print" style={{ marginBottom: 16, borderColor: 'rgba(201,168,76,0.4)', background: 'rgba(201,168,76,0.05)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
             <div>
-              <p style={{ fontSize: 13, color: 'var(--theme-accent)', margin: '0 0 6px', fontWeight: 600 }}>
+              <p style={{ fontSize: 13, color: 'var(--theme-accent-ink)', margin: '0 0 6px', fontWeight: 600 }}>
                 ⚠ Rate updated — {affectedRecipes.recipes.length} recipe{affectedRecipes.recipes.length !== 1 ? 's' : ''} affected for {affectedRecipes.itemName}
               </p>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -308,7 +308,7 @@ export default function SupplierPriceTracker() {
 
         <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 'auto' }}>
           {filteredKeys.length} item{filteredKeys.length !== 1 ? 's' : ''}
-          {risingCount > 0 && <span style={{ color: 'var(--theme-red)', marginLeft: 8 }}>· {risingCount} ↑ rising</span>}
+          {risingCount > 0 && <span style={{ color: 'var(--theme-red-text)', marginLeft: 8 }}>· {risingCount} ↑ rising</span>}
         </span>
       </div>
 
@@ -397,11 +397,11 @@ export default function SupplierPriceTracker() {
                       <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{item.categories?.name || '—'}</td>
                       <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
                       <td style={{ textAlign: 'right' }}>
-                        <span style={{ color: rateMismatch ? 'var(--theme-accent)' : 'var(--theme-text1)', fontWeight: 600 }}
+                        <span style={{ color: rateMismatch ? 'var(--theme-accent-ink)' : 'var(--theme-text1)', fontWeight: 600 }}
                           title={rateMismatch ? 'Master rate differs from last purchase by >5%' : ''}>
                           {masterRate > 0 ? masterRate.toFixed(4) : '—'}
                         </span>
-                        {rateMismatch && <span style={{ fontSize: 10, color: 'var(--theme-accent)', marginLeft: 4 }}>⚠</span>}
+                        {rateMismatch && <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)', marginLeft: 4 }}>⚠</span>}
                       </td>
                       <td className="no-print" style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                         {isEditing ? (
@@ -415,7 +415,7 @@ export default function SupplierPriceTracker() {
                               style={{
                                 width: 90, textAlign: 'right',
                                 background: 'var(--theme-bg)', border: '1px solid var(--theme-accent)',
-                                borderRadius: 4, padding: '4px 8px', fontSize: 13,
+                                borderRadius: 'var(--radius-xs)', padding: '4px 8px', fontSize: 13,
                                 color: 'var(--theme-text1)', outline: 'none'
                               }}
                             />
@@ -436,12 +436,12 @@ export default function SupplierPriceTracker() {
                           </button>
                         )}
                       </td>
-                      <td style={{ textAlign: 'right', color: trend === 'up' ? 'var(--theme-red)' : trend === 'down' ? 'var(--theme-green)' : 'var(--theme-text3)' }}>
+                      <td style={{ textAlign: 'right', color: trend === 'up' ? 'var(--theme-red-text)' : trend === 'down' ? 'var(--theme-green-text)' : 'var(--theme-text3)' }}>
                         {lastEntry ? lastEntry.perUomRate.toFixed(4) : '—'}
                       </td>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{lastEntry?.period_label || '—'}</td>
                       <td>{trendBadge(trend)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: pct == null ? 'var(--theme-text2)' : pct > 0 ? 'var(--theme-red)' : pct < 0 ? 'var(--theme-green)' : 'var(--theme-text2)' }}>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: pct == null ? 'var(--theme-text2)' : pct > 0 ? 'var(--theme-red-text)' : pct < 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>
                         {pct != null ? `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%` : '—'}
                       </td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{history.length}</td>
@@ -467,7 +467,7 @@ export default function SupplierPriceTracker() {
                           </td>
                           <td style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Qty: {entry.qty}</td>
                           <td></td>
-                          <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 600, color: entryPct == null ? 'var(--theme-text3)' : entryPct > 0 ? 'var(--theme-red)' : entryPct < 0 ? 'var(--theme-green)' : 'var(--theme-text3)' }}>
+                          <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 600, color: entryPct == null ? 'var(--theme-text3)' : entryPct > 0 ? 'var(--theme-red-text)' : entryPct < 0 ? 'var(--theme-green-text)' : 'var(--theme-text3)' }}>
                             {entryPct != null ? `${entryPct > 0 ? '+' : ''}${entryPct.toFixed(1)}%` : <span style={{ color: 'var(--theme-text3)' }}>first</span>}
                           </td>
                           <td></td>

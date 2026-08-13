@@ -32,7 +32,7 @@ const PAYMENT_MODES = ['Cash', 'FonePay', 'Bank Transfer', 'Cheque']
 const INPUT = {
   background: 'var(--theme-input-bg, var(--theme-card))',
   border: '1px solid var(--theme-border, var(--theme-border))',
-  borderRadius: 6, padding: '7px 10px', fontSize: 13,
+  borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13,
   color: 'var(--theme-text, var(--theme-text1))', outline: 'none',
 }
 
@@ -546,10 +546,10 @@ export default function OutstandingPayables() {
       </div>
 
       {setupNeeded && (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 8, padding: '16px 20px', marginBottom: 24, fontSize: 13 }}>
-          <div style={{ fontWeight: 700, color: 'var(--theme-red)', marginBottom: 8 }}>⚠ One-time setup required</div>
+        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 24, fontSize: 13 }}>
+          <div style={{ fontWeight: 700, color: 'var(--theme-red-text)', marginBottom: 8 }}>⚠ One-time setup required</div>
           <div style={{ color: 'var(--theme-text3)', marginBottom: 10 }}>Run this SQL in Supabase → SQL Editor, then refresh:</div>
-          <code style={{ display: 'block', background: 'var(--theme-bg)', padding: '10px 14px', borderRadius: 6, color: 'var(--theme-accent)', fontSize: 12, userSelect: 'all' }}>
+          <code style={{ display: 'block', background: 'var(--theme-bg)', padding: '10px 14px', borderRadius: 'var(--radius-sm)', color: 'var(--theme-accent-ink)', fontSize: 12, userSelect: 'all' }}>
             ALTER TABLE purchase_entries ADD COLUMN IF NOT EXISTS paid_at date;
           </code>
         </div>
@@ -559,23 +559,23 @@ export default function OutstandingPayables() {
         {activeTab === 'outstanding' ? (<>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills, less any payments already recorded. Bill amounts match the vendor's invoice: net of goods returned and any bill discount, plus 13% VAT on VAT-inclusive lines." width={280}>Total Remaining</Tip></div>
-            <div className="stat-value" style={{ fontSize: 18, color: totalRemaining > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>{fmt(totalRemaining)}</div>
+            <div className="stat-value" style={{ fontSize: 18, color: totalRemaining > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{fmt(totalRemaining)}</div>
             <div className="stat-sub">{filteredBills.length} bill{filteredBills.length !== 1 ? 's' : ''} · {Object.keys(byVendor).length} vendor{Object.keys(byVendor).length !== 1 ? 's' : ''}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Bills with a remaining balance older than 60 days." width={230}>Overdue Bills</Tip></div>
-            <div className="stat-value" style={{ color: overdueBills > 0 ? 'var(--theme-amber)' : 'var(--theme-text2)' }}>{overdueBills}</div>
+            <div className="stat-value" style={{ color: overdueBills > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>{overdueBills}</div>
             <div className="stat-sub">&gt;60 days outstanding</div>
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Remaining value on bills over 90 days old. Urgent settlement needed." width={240}>90+ Day Value</Tip></div>
-            <div className="stat-value" style={{ fontSize: 16, color: urgentValue > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>{urgentValue > 0 ? fmt(urgentValue) : '—'}</div>
+            <div className="stat-value" style={{ fontSize: 16, color: urgentValue > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{urgentValue > 0 ? fmt(urgentValue) : '—'}</div>
             <div className="stat-sub">Urgent settlement</div>
           </div>
         </>) : (<>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Total invoiced value of all fully settled credit bills — net of returns and discount, including VAT where applicable." width={260}>Total Paid</Tip></div>
-            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-green)' }}>{fmt(totalRemaining)}</div>
+            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-green-text)' }}>{fmt(totalRemaining)}</div>
             <div className="stat-sub">{filteredBills.length} settled bill{filteredBills.length !== 1 ? 's' : ''}</div>
           </div>
           <div className="stat-card">
@@ -629,7 +629,7 @@ export default function OutstandingPayables() {
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>
               {selectedBillObjs.length} bill{selectedBillObjs.length !== 1 ? 's' : ''} selected
             </div>
-            <div style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 700 }}>{fmt(selectedTotal)} total</div>
+            <div style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{fmt(selectedTotal)} total</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Payment Date</div>
@@ -653,7 +653,7 @@ export default function OutstandingPayables() {
             onClick={() => paySelectedBills(selectedBillObjs)}>
             {bulkSaving ? '…' : `Pay ${selectedBillObjs.length} Bill${selectedBillObjs.length !== 1 ? 's' : ''} in Full`}
           </button>
-          {bulkError && <div style={{ width: '100%', fontSize: 12, color: 'var(--theme-red)' }}>⚠ {bulkError}</div>}
+          {bulkError && <div style={{ width: '100%', fontSize: 12, color: 'var(--theme-red-text)' }}>⚠ {bulkError}</div>}
         </div>
       )}
 
@@ -684,7 +684,7 @@ export default function OutstandingPayables() {
               <div key={vName} className="card" style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--theme-border)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{vName}</span>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--theme-text1)' }}>{vName}</span>
                     {vendorByName[vName] && (<>
                       {!termsSetupNeeded && (
                         <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
@@ -697,7 +697,7 @@ export default function OutstandingPayables() {
                       </button>
                     </>)}
                   </div>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: activeTab === 'outstanding' ? 'var(--theme-red)' : 'var(--theme-green)' }}>{fmt(vendorTotal)}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: activeTab === 'outstanding' ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{fmt(vendorTotal)}</span>
                 </div>
                 <div className="table-wrap">
                   <table className="data-table">
@@ -755,20 +755,20 @@ export default function OutstandingPayables() {
                               <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{b.invoice_ref || '—'}</td>
                               <td style={{ color: 'var(--theme-text2)' }}>{BS_MONTHS[(b.period.bs_month || 1) - 1]} {b.period.bs_year}</td>
                               <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.entries.length}</td>
-                              <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent)' }}>{fmt(b.total)}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)' }}>{fmt(b.total)}</td>
                               {activeTab === 'outstanding' ? (<>
-                                <td style={{ textAlign: 'right', color: b.paid > 0 ? 'var(--theme-green)' : 'var(--theme-text2)' }}>{b.paid > 0 ? fmt(b.paid) : '—'}</td>
-                                <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)' }}>{fmt(b.remaining)}</td>
+                                <td style={{ textAlign: 'right', color: b.paid > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{b.paid > 0 ? fmt(b.paid) : '—'}</td>
+                                <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)' }}>{fmt(b.remaining)}</td>
                                 <td style={{ textAlign: 'right', fontWeight: 700, color: b.aging.color }}>{b.daysOld}</td>
                                 <td>
                                   {b.isPartial
-                                    ? <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-purple)', background: 'color-mix(in srgb, var(--theme-purple) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 40%, transparent)', borderRadius: 4, padding: '2px 8px', whiteSpace: 'nowrap' }}>Partial</span>
-                                    : <span style={{ fontSize: 11, fontWeight: 700, color: b.aging.color, background: `color-mix(in srgb, ${b.aging.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${b.aging.color} 40%, transparent)`, borderRadius: 4, padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.aging.label}</span>
+                                    ? <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-purple-text)', background: 'color-mix(in srgb, var(--theme-purple) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 40%, transparent)', borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>Partial</span>
+                                    : <span style={{ fontSize: 11, fontWeight: 700, color: b.aging.color, background: `color-mix(in srgb, ${b.aging.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${b.aging.color} 40%, transparent)`, borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.aging.label}</span>
                                   }
                                 </td>
-                                <td style={{ color: 'var(--theme-accent)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Close' : '＋ Pay Bill'}</td>
+                                <td style={{ color: 'var(--theme-accent-ink)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Close' : '＋ Pay Bill'}</td>
                               </>) : (<>
-                                <td style={{ color: 'var(--theme-green)', fontWeight: 600, fontSize: 13 }}>{fmtBsDate(b.settledOn) || '—'}</td>
+                                <td style={{ color: 'var(--theme-green-text)', fontWeight: 600, fontSize: 13 }}>{fmtBsDate(b.settledOn) || '—'}</td>
                                 <td style={{ color: 'var(--theme-text3)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : '▼ Details'}</td>
                               </>)}
                             </tr>
@@ -795,7 +795,7 @@ export default function OutstandingPayables() {
                                             <td style={{ padding: '4px 16px 4px 0', color: 'var(--theme-text1)' }}>{e.items?.name}</td>
                                             <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.qty).toLocaleString()} {e.items?.uom}</td>
                                             <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.rate).toLocaleString()}</td>
-                                            <td style={{ padding: '4px 0 4px 16px', textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{fmt(e.value)}</td>
+                                            <td style={{ padding: '4px 0 4px 16px', textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmt(e.value)}</td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -843,7 +843,7 @@ export default function OutstandingPayables() {
                                                     onChange={ev => { ev.stopPropagation(); toggleSelectPayment(p.id) }}
                                                     onClick={ev => ev.stopPropagation()} />
                                                 </td>
-                                                <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green)' }}>{fmtBsDate(p.paid_at)}</td>
+                                                <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green-text)' }}>{fmtBsDate(p.paid_at)}</td>
                                                 <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(p.amount)}</td>
                                                 <td style={{ padding: '5px 16px', color: 'var(--theme-text3)' }}>{p.payment_mode || '—'}</td>
                                                 <td style={{ padding: '5px 0 5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
@@ -852,7 +852,7 @@ export default function OutstandingPayables() {
                                             <tr style={{ borderTop: '1px solid var(--theme-border)' }}>
                                               <td />
                                               <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
-                                              <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)' }}>{fmt(b.paid)}</td>
+                                              <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)' }}>{fmt(b.paid)}</td>
                                               <td />
                                               <td />
                                             </tr>
@@ -912,8 +912,8 @@ export default function OutstandingPayables() {
                                             {savingPayment ? '…' : 'Save'}
                                           </button>
                                         </div>
-                                        {payError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--theme-red)' }}>⚠ {payError}</div>}
-                                        {willSettle && !payError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--theme-green)' }}>✓ This will fully settle the bill</div>}
+                                        {payError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--theme-red-text)' }}>⚠ {payError}</div>}
+                                        {willSettle && !payError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--theme-green-text)' }}>✓ This will fully settle the bill</div>}
                                       </div>
                                     )}
 
@@ -927,13 +927,13 @@ export default function OutstandingPayables() {
                       <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                         {activeTab === 'outstanding' ? (<>
                           <td colSpan={4} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)', paddingTop: 12 }}>{vPaidTotal > 0 ? fmt(vPaidTotal) : '—'}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)', paddingTop: 12 }}>{fmt(vRemainingTotal)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 12 }}>{vPaidTotal > 0 ? fmt(vPaidTotal) : '—'}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>{fmt(vRemainingTotal)}</td>
                           <td colSpan={3} style={{ paddingTop: 12 }}></td>
                         </>) : (<>
                           <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
                           <td colSpan={2} style={{ paddingTop: 12 }}></td>
                         </>)}
                       </tr>
@@ -948,8 +948,8 @@ export default function OutstandingPayables() {
       {editingTermsVendor && (
         <Modal onClose={() => setEditingTermsVendor(null)} title={`Payment Terms — ${editingTermsVendor.name}`}>
           <div className="form-field">
-            <label>Payment Terms</label>
-            <input
+            <label htmlFor="outsta-f1">Payment Terms</label>
+            <input id="outsta-f1"
               value={termsForm}
               onChange={e => setTermsForm(e.target.value)}
               placeholder="e.g. Net 30, COD, 50% Advance"
@@ -957,7 +957,7 @@ export default function OutstandingPayables() {
               style={{ ...INPUT, width: '100%' }}
             />
           </div>
-          {termsError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{termsError}</p>}
+          {termsError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{termsError}</p>}
           <div className="form-actions">
             <button className="btn btn-ghost" onClick={() => setEditingTermsVendor(null)}>Cancel</button>
             <button className="btn btn-primary" onClick={saveTerms} disabled={termsSaving}>
@@ -970,8 +970,8 @@ export default function OutstandingPayables() {
       {editingNotePayments && (
         <Modal onClose={() => setEditingNotePayments(null)} title={`Edit Note — ${editingNotePayments.count} payment${editingNotePayments.count === 1 ? '' : 's'}`}>
           <div className="form-field">
-            <label>Note</label>
-            <input
+            <label htmlFor="outsta-f2">Note</label>
+            <input id="outsta-f2"
               value={noteForm}
               onChange={e => setNoteForm(e.target.value)}
               placeholder="e.g. Cheque #1234, Siddhartha Bank"
@@ -982,7 +982,7 @@ export default function OutstandingPayables() {
           <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '10px 0 0' }}>
             Replaces the note on all {editingNotePayments.count} selected row{editingNotePayments.count === 1 ? '' : 's'} — rows sharing the same note merge into one line on the Vendor Balance Confirmation letter.
           </p>
-          {noteError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{noteError}</p>}
+          {noteError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{noteError}</p>}
           <div className="form-actions">
             <button className="btn btn-ghost" onClick={() => setEditingNotePayments(null)}>Cancel</button>
             <button className="btn btn-primary" onClick={saveNoteForSelected} disabled={noteSaving}>
@@ -995,8 +995,8 @@ export default function OutstandingPayables() {
       {editingModePayments && (
         <Modal onClose={() => setEditingModePayments(null)} title={`Edit Payment Mode — ${editingModePayments.count} payment${editingModePayments.count === 1 ? '' : 's'}`}>
           <div className="form-field">
-            <label>Payment Mode</label>
-            <select className="form-select" style={{ ...INPUT, width: '100%' }}
+            <label htmlFor="outsta-f3">Payment Mode</label>
+            <select id="outsta-f3" className="form-select" style={{ ...INPUT, width: '100%' }}
               value={modeForm} onChange={e => setModeForm(e.target.value)}>
               {PAYMENT_MODES.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
@@ -1004,7 +1004,7 @@ export default function OutstandingPayables() {
           <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '10px 0 0' }}>
             Sets the Payment Mode on all {editingModePayments.count} selected row{editingModePayments.count === 1 ? '' : 's'} — useful for tagging historical settlements recorded before this column existed, so they show a real value on the Vendor Balance Confirmation letter.
           </p>
-          {modeError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{modeError}</p>}
+          {modeError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{modeError}</p>}
           <div className="form-actions">
             <button className="btn btn-ghost" onClick={() => setEditingModePayments(null)}>Cancel</button>
             <button className="btn btn-primary" onClick={saveModeForSelected} disabled={modeSaving}>

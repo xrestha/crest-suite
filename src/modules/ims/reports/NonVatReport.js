@@ -190,7 +190,7 @@ export default function NonVatReport() {
           <div className="stat-label">
             <Tip text="These purchases carry no input VAT credit — the full amount is a direct cost with no tax recovery.">Input VAT Credit</Tip>
           </div>
-          <div className="stat-value" style={{ fontSize: 22, color: 'var(--theme-red)' }}>NIL</div>
+          <div className="stat-value" style={{ fontSize: 22, color: 'var(--theme-red-text)' }}>NIL</div>
           <div className="stat-sub">no tax credit claimable</div>
         </div>
       </div>
@@ -240,7 +240,7 @@ export default function NonVatReport() {
                     const rowTotal = e.qty * e.rate
                     return (
                       <tr key={e.id}>
-                        <td style={{ color: 'var(--theme-accent)', fontWeight: 700 }}>{e.bs_day}</td>
+                        <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{e.bs_day}</td>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{e.items?.name}</td>
                         <td>
                           {e.items?.categories?.name
@@ -251,14 +251,14 @@ export default function NonVatReport() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{Number(e.qty).toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                         <td style={{ color: 'var(--theme-text2)' }}>{e.items?.uom}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtNPR(e.rate)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{fmtNPR(rowTotal)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmtNPR(rowTotal)}</td>
                         <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{e.invoice_ref || '—'}</td>
                       </tr>
                     )
                   })}
                   <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
                     <td colSpan={7} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>TOTAL</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{fmtNPR(total)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(total)}</td>
                     <td></td>
                   </tr>
                 </tbody>
@@ -278,7 +278,7 @@ export default function NonVatReport() {
                 Grouped by supplier — share with your CA for expense reconciliation
               </p>
             </div>
-            <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--theme-border)', borderRadius: 4, padding: '3px 8px' }}>
+            <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xs)', padding: '3px 8px' }}>
               For reference only — verify bills with your CA before filing
             </span>
           </div>
@@ -309,24 +309,24 @@ export default function NonVatReport() {
                   {vendorRows.map((v, i) => (
                     <tr key={i}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{v.name}</td>
-                      <td style={{ color: v.pan ? 'var(--theme-text3)' : 'var(--theme-red)', fontSize: 12 }}>
+                      <td style={{ color: v.pan ? 'var(--theme-text3)' : 'var(--theme-red-text)', fontSize: 12 }}>
                         {v.pan || <span style={{ fontStyle: 'italic' }}>Missing — add in Vendors</span>}
                       </td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{v.count}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtNPR(v.gross)}</td>
-                      {totalDiscount > 0 && <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontSize: 12 }}>{v.discount > 0 ? `− ${fmtNPR(v.discount)}` : '—'}</td>}
-                      {returnTotal > 0 && <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontSize: 12 }}>{v.returned > 0 ? `− ${fmtNPR(v.returned)}` : '—'}</td>}
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{fmtNPR(v.gross - v.discount - v.returned)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontWeight: 500 }}>NIL</td>
+                      {totalDiscount > 0 && <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontSize: 12 }}>{v.discount > 0 ? `− ${fmtNPR(v.discount)}` : '—'}</td>}
+                      {returnTotal > 0 && <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontSize: 12 }}>{v.returned > 0 ? `− ${fmtNPR(v.returned)}` : '—'}</td>}
+                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmtNPR(v.gross - v.discount - v.returned)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 500 }}>NIL</td>
                     </tr>
                   ))}
                   <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
                     <td colSpan={3} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>PERIOD TOTAL</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtNPR(grossTotal)}</td>
-                    {totalDiscount > 0 && <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>− {fmtNPR(totalDiscount)}</td>}
-                    {returnTotal > 0 && <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>− {fmtNPR(returnTotal)}</td>}
-                    <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{fmtNPR(total)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>NIL</td>
+                    {totalDiscount > 0 && <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>− {fmtNPR(totalDiscount)}</td>}
+                    {returnTotal > 0 && <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>− {fmtNPR(returnTotal)}</td>}
+                    <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(total)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>NIL</td>
                   </tr>
                 </tbody>
               </table>

@@ -176,15 +176,15 @@ export default function VendorBalanceConfirmation() {
       <div className="card no-print" style={{ marginBottom: 20 }}>
         <div className="form-grid form-grid-3">
           <div className="form-field">
-            <label>Vendor</label>
-            <select className="form-select" value={selectedVendorId} onChange={e => setSelectedVendorId(e.target.value)}>
+            <label htmlFor="vendor-f1">Vendor</label>
+            <select id="vendor-f1" className="form-select" value={selectedVendorId} onChange={e => setSelectedVendorId(e.target.value)}>
               <option value="">— Select vendor —</option>
               {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
             </select>
           </div>
           <div className="form-field">
-            <label><Tip text="Nepal fiscal year (Shrawan–Ashadh) the confirmation covers — matches how IRD Annexure 13 is reported, not a calendar year." width={280}>Fiscal Year</Tip></label>
-            <select className="form-select" value={selectedFy} onChange={e => setSelectedFy(e.target.value)} disabled={fyOptions.length === 0}>
+            <label htmlFor="vendor-f2"><Tip text="Nepal fiscal year (Shrawan–Ashadh) the confirmation covers — matches how IRD Annexure 13 is reported, not a calendar year." width={280}>Fiscal Year</Tip></label>
+            <select id="vendor-f2" className="form-select" value={selectedFy} onChange={e => setSelectedFy(e.target.value)} disabled={fyOptions.length === 0}>
               {fyOptions.map(fy => <option key={fy} value={fy}>FY {fy}</option>)}
             </select>
           </div>

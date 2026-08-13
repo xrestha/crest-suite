@@ -168,7 +168,7 @@ export default function App() {
               <Route path="/wastage-report"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="wastage_report" minPlan="starter"><WastageReport /></PremiumGate></ModuleGate>} />
               <Route path="/stock-report"
-                element={<ModuleGate module="ims"><PremiumGate featureKey="stock_report" minPlan="starter"><StockReport /></PremiumGate></ModuleGate>} />
+                element={<ModuleGate module="ims"><PremiumGate featureKey="stock_report" minPlan="growth"><StockReport /></PremiumGate></ModuleGate>} />
               <Route path="/settings"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="settings" minPlan="starter"><Settings /></PremiumGate></ModuleGate>} />
 
