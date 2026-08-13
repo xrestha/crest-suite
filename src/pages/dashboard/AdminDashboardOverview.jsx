@@ -64,6 +64,11 @@ export default function AdminDashboardOverview() {
   const imsCount = active.filter(c => c.ims_enabled !== false).length
   const hrCount  = active.filter(c => c.hr_enabled).length
   const posCount = active.filter(c => c.pos_enabled).length
+  // Crest Suite Pro is an add-on on its own axis (clients.suite_plan), not a module flag —
+  // which is why it was missing from this strip and from the row pills below entirely, while
+  // clientMRR() was quietly billing NPR 2,000/outlet for it. Revenue you cannot see on the
+  // screen that reports revenue.
+  const suiteCount = active.filter(c => c.suite_plan).length
 
   // Subscription health buckets
   const expiring30  = active.filter(c => { const s = getSubStatus(c); return s.days !== null && s.days >= 0 && s.days <= 30 })
@@ -213,6 +218,9 @@ export default function AdminDashboardOverview() {
                 <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS {imsCount}</span>
                 <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.18)' }}>HR {hrCount}</span>
                 <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)', border: '1px solid rgba(167,139,250,0.2)' }}>POS {posCount}</span>
+                {suiteCount > 0 && (
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.20)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.45)' }}>★ SUITE {suiteCount}</span>
+                )}
               </div>
             </div>
 
@@ -382,6 +390,14 @@ export default function AdminDashboardOverview() {
                     const hrDays = c.hr_ends_at ? Math.ceil((new Date(c.hr_ends_at) - Date.now()) / 86400000) : null
                     const hrExpiring = hrDays !== null && hrDays <= 30 && hrDays >= 0
 
+                    // Suite Pro rides its own suite_ends_at, falling back to IMS's window for rows
+                    // written before that column existed — the same resolution clientMRR() uses, so
+                    // the pill and the money always agree about whether Suite is live.
+                    const suiteEndIso = c.suite_ends_at || (isPaying ? endDate : null)
+                    const suiteDays = suiteEndIso ? Math.ceil((new Date(suiteEndIso) - Date.now()) / 86400000) : null
+                    const suiteLive = !!c.suite_plan && suiteDays !== null && suiteDays > 0
+                    const suiteExpiring = suiteLive && suiteDays <= 30
+
                     return (
                       <Fragment key={c.id}>
                       {showBandHeader && (
@@ -419,6 +435,22 @@ export default function AdminDashboardOverview() {
                             {c.pos_enabled && (
                               <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)', border: '1px solid rgba(167,139,250,0.2)' }}>POS</span>
                             )}
+                            {/* Suite is an add-on ABOVE the modules, not a fourth one, so it takes
+                                the accent rather than a fourth hue — the star and the heavier fill
+                                are what separate it from the IMS pill. A lapsed one greys out
+                                instead of disappearing, or an expiry looks like a cancellation. */}
+                            {c.suite_plan && (
+                              <Tip text={suiteLive
+                                ? `Crest Suite Pro — Owner Dashboard, Monthly Owner Report, Group Console, Demand Forecast and Fixed Assets. Sold per outlet.${suiteDays !== null ? ` Renews in ${suiteDays}d.` : ''}`
+                                : 'Crest Suite Pro has lapsed — the Suite features are locked and this outlet is no longer counted in the Suite MRR.'} width={280}>
+                                <span style={{
+                                  fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--radius-sm)',
+                                  background: suiteLive ? 'rgba(201,168,76,0.20)' : 'transparent',
+                                  color: suiteLive ? 'var(--theme-accent-ink)' : 'var(--theme-text3)',
+                                  border: `1px solid ${suiteLive ? 'rgba(201,168,76,0.45)' : 'var(--theme-border)'}`,
+                                }}>★ SUITE</span>
+                              </Tip>
+                            )}
                           </div>
                         </td>
 
@@ -449,6 +481,14 @@ export default function AdminDashboardOverview() {
                             <span style={{ fontSize: 12, color: typeColor }}>{typeLabel}</span>
                             {hrExpiring && c.hr_enabled && (
                               <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2 }}>HR exp. {hrDays}d</div>
+                            )}
+                            {/* Suite could lapse silently: this column tracks IMS, and the only
+                                other module hint was HR's. Losing Suite is NPR 2,000/outlet. */}
+                            {suiteExpiring && (
+                              <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2 }}>Suite exp. {suiteDays}d</div>
+                            )}
+                            {c.suite_plan && !suiteLive && (
+                              <div style={{ fontSize: 10, color: 'var(--theme-red-text)', marginTop: 2 }}>Suite lapsed</div>
                             )}
                           </div>
                         </td>

@@ -447,9 +447,12 @@ export default function AdminClients() {
                       // read "HR · on"/"POS · off" instead of a plan name neither module sells —
                       // they used to show c.hr_plan/c.pos_plan, which made a vestigial column
                       // look like something the client had bought.
-                      { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan, color: 'var(--theme-accent)', borderRgba: 'var(--theme-focus-ring)' },
-                      { key: 'HR',  enabled: !!c.hr_enabled,          plan: null,   color: 'var(--theme-green)', borderRgba: 'rgba(52,211,153,0.35)' },
-                      { key: 'POS', enabled: !!c.pos_enabled,         plan: null,   color: 'var(--theme-purple)', borderRgba: 'rgba(167,139,250,0.35)' },
+                      // These are pill TEXT on a transparent fill, so they take the -text/-ink
+                      // variants, not the base tokens (S549/S551 — the base tokens fail AA on the
+                      // five light presets).
+                      { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan, color: 'var(--theme-accent-ink)', borderRgba: 'var(--theme-focus-ring)' },
+                      { key: 'HR',  enabled: !!c.hr_enabled,          plan: null,   color: 'var(--theme-green-text)', borderRgba: 'rgba(52,211,153,0.35)' },
+                      { key: 'POS', enabled: !!c.pos_enabled,         plan: null,   color: 'var(--theme-purple-text)', borderRgba: 'rgba(167,139,250,0.35)' },
                     ].map(m => (
                       // minWidth + centred text so IMS/HR/POS line up as three columns down the
                       // list. Without it the pills are content-width, so "IMS · Starter" and
@@ -467,6 +470,19 @@ export default function AdminClients() {
                         {m.key}{!m.enabled ? ' · off' : m.plan ? ` · ${planLabel(m.plan)}` : ' · on'}
                       </span>
                     ))}
+                    {/* Crest Suite Pro is an add-on on its own axis (clients.suite_plan), not a
+                        fourth module — so it is rendered only when a client actually has it,
+                        rather than joining the map above and printing "SUITE · off" on every row
+                        that doesn't. It had no representation in the admin UI at all until
+                        2026-08-13, despite being priced into the MRR figure on the dashboard. */}
+                    {c.suite_plan && (
+                      <span style={{
+                        fontSize: 12, fontWeight: 700, padding: '5px 10px', borderRadius: 'var(--radius-sm)',
+                        border: '1px solid rgba(201,168,76,0.45)', background: 'rgba(201,168,76,0.20)',
+                        color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap',
+                        minWidth: 100, textAlign: 'center', boxSizing: 'border-box',
+                      }}>★ SUITE</span>
+                    )}
                   </div>
 
                   {/* Subscription + actions */}

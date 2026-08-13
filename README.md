@@ -158,6 +158,29 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S552 — 2026-08-13 — Crest Suite Pro was billed on a screen that never showed it
+
+Reported from a screenshot of the Admin Dashboard client list: *"one of the clients has Suite Pro, but I don't see any icon or notification."* Correct, and the gap was wider than a missing icon — **`clients.suite_plan` had no representation anywhere in the admin UI**, while the same page was already billing for it.
+
+`AdminDashboardOverview.jsx:34` selects `suite_plan` and `suite_ends_at`, and `clientMRR()` adds NPR 2,000/outlet/month (1,500 annual) whenever Suite is active. That figure feeds the dashboard's own MRR/ARR cards. But the client rows rendered pills off `ims_enabled`/`hr_enabled`/`pos_enabled` only, so a Suite Pro outlet was pixel-identical to one without it, and the revenue it contributed could not be attributed to anything on screen. `AdminClients.js` had the same three-pill map and the same omission. The reason both missed it is structural rather than careless: **Suite is not a module flag.** A new module gets a pill for free by joining an existing map; an axis like `suite_plan` has to be added deliberately, and never was.
+
+The silent-lapse half is the more expensive one. The Sub Status column tracks **IMS specifically** (matching its own tooltip), with a single bolted-on `HR exp. Nd` hint for the one other module that had ever needed one. Suite has its own `suite_ends_at`, entirely independent of IMS — so a Suite subscription could expire, drop out of the MRR calculation, and lock the client out of Owner Dashboard, the Monthly Owner Report, the Group Console, Demand Forecast and Fixed Assets, with **nothing anywhere in the admin UI changing appearance**. The first signal would have been the customer asking why their reports had gone.
+
+Fixed on both surfaces:
+
+- **`★ SUITE` pill** on each client row (Admin Dashboard and Admin → Clients), rendered only when the client actually has Suite. It is deliberately *not* added to the three-pill map: a module's `· off` state is meaningful, whereas printing `SUITE · off` on every non-Suite row is noise on the majority of the list.
+- **`★ SUITE n`** in the Active Properties strip beside the IMS/HR/POS adoption counts.
+- **Expiry surfacing**: `Suite exp. Nd` (amber) inside 30 days, `Suite lapsed` (red) once gone, sitting alongside the existing HR hint.
+
+Two decisions worth keeping:
+
+- **It takes the accent plus a star, not a fourth hue.** Suite is an add-on *above* the modules, not a fourth one, and a fourth brand colour here is precisely the One Accent Rule drift DESIGN.md has now documented seven separate recurrences of. The star and a heavier fill (0.20 vs the module pills' 0.10) at 700 weight carry the distinction instead.
+- **The pill resolves Suite's active window exactly the way `clientMRR()` does** — `suite_ends_at`, falling back to IMS's window only for rows written before that column existed. If the two had computed it independently the pill and the money could disagree about whether Suite was live, which is the same class of bug as the one being fixed. A lapsed Suite greys out rather than disappearing, since an add-on that vanishes reads as one that was never bought.
+
+Also in this pass, since the file was open: `AdminClients.js`'s three module pills were rendering their labels in the **base** signal tokens (`--theme-accent`/`green`/`purple`) as text on a transparent fill — the same AA failure S549/S551 swept out of the rest of the app. Moved to the `-text`/`-ink` variants.
+
+**Not verified in a browser.** The Playwright MCP server disconnected mid-session, so this is confirmed by a clean `CI=true` build and by reading, not by looking at the rendered rows — worth a glance at the two client rows before trusting it, given that the whole finding is about something being invisible.
+
 ### S551 — 2026-08-13 — `/impeccable critique` phase 4: Crest IMS, where four numbers disagreed with each other and one report accused staff of theft
 
 Phase 4 of the phased critique-and-fix pass — all ~40 `src/modules/ims/` routes. Same two-isolated-agent method as S549/S550 (A: design judgment from source, no detector, no browser; B: detector + structural greps + measured browser evidence). Everything below was verified in the running app against Bhatti Choila on Rosé Dawn and Dark.
