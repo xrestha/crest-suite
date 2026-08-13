@@ -68,11 +68,23 @@
    quietest text tier — so it has to acknowledge the pointer and the keyboard, or it reads as
    an icon rather than a control. Same --motion-fast/--ease-standard pairing every other
    interactive element in this file uses; the focus ring is the themed one from DESIGN.md's
-   Inputs section, not a browser default. */
+   Inputs section, not a browser default.
+
+   Its sizing lives here too, not inline in ChartCard.js. It measured 22x18 as `padding:'3px 5px'`
+   around a 12px icon — under WCAG 2.2 SC 2.5.8's 24x24 floor, and missed by both
+   @media (pointer:coarse) blocks below, so it stayed 22x18 on touch as well. A min-width/height
+   plus grid centring holds the floor without changing how the icon looks. */
 .chart-icon-btn {
   color: var(--theme-text3);
   background: transparent;
+  border: none;
   border-radius: var(--radius-sm);
+  cursor: pointer;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
   transition: color var(--motion-fast) var(--ease-standard),
               background var(--motion-fast) var(--ease-standard);
 }
@@ -824,18 +836,28 @@ tr.interactive-row:focus-visible {
    so both share one definition and get real hover feedback instead of reimplementing button
    styling from scratch. */
 .amber-action-btn {
-  flex-shrink: 0;
+  /* NOT flex-shrink: 0. A flex item defaults to a max-content basis, so refusing to shrink pinned
+     this button at its full label width — 241px inside a 365px column at 375px wide, overflowing
+     by 10px and getting silently clipped by .main-content's overflow-x:hidden. No scrollbar, no
+     ellipsis, just a cut edge. Shrinking plus wrapping is the honest failure mode. */
+  flex-shrink: 1;
+  max-width: 100%;
   background: color-mix(in srgb, var(--theme-amber) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--theme-amber) 40%, transparent);
-  color: var(--theme-amber);
+  /* The label is TEXT on a 12%-amber tint — the base token measured 2.05:1 on Rose Dawn. The
+     fill and border keep the base token, which is exactly the split the -text variants exist for. */
+  color: var(--theme-amber-text);
   border-radius: var(--radius-md);
   padding: 8px 18px;
   font-size: 13px;
   font-weight: 600;
-  white-space: nowrap;
+  /* No nowrap: at 375px this button's label ("End Ashadh & Start Shrawan →") overflowed the
+     viewport by 10px and was silently clipped by .main-content's overflow-x:hidden — no
+     scrollbar, no ellipsis, just a cut edge. Wrapping is the honest failure mode. */
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--motion-fast) var(--ease-standard),
+              border-color var(--motion-fast) var(--ease-standard);
 }
 
 .amber-action-btn:hover:not(:disabled) {
@@ -898,7 +920,9 @@ tr.interactive-row:focus-visible {
   color: var(--theme-accent-ink);
 }
 .context-bar-sep {
-  color: var(--theme-border);
+  /* text3, not --theme-border: a border token has no text contract and this measured 1.37:1 on
+     Latte. The separator still needs to read as a separator, not vanish. */
+  color: var(--theme-text3);
 }
 .context-bar-tag {
   font-weight: 600;
@@ -1015,8 +1039,43 @@ tr.interactive-row:focus-visible {
 
 .btn-danger {
   background: var(--theme-input-bg);
-  color: var(--theme-red);
+  /* Signal colour as TEXT takes the -text variant; the base token stays on the border, where it
+     is a fill and reads correctly on every preset. */
+  color: var(--theme-red-text);
   border: 1px solid rgba(248,113,113,0.45);
+}
+
+/* A table cell that navigates. Reads as a link, behaves as a button — used where the row's
+   identity IS the action (an outlet name that switches to that outlet), so the affordance has to
+   sit on the name itself rather than in a trailing Actions column. */
+.btn-linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--theme-accent-ink);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  border-radius: var(--radius-sm);
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.btn-linklike:hover:not(:disabled) {
+  text-decoration-thickness: 2px;
+}
+
+.btn-linklike:disabled {
+  color: var(--theme-text3);
+  cursor: default;
+  text-decoration: none;
+}
+
+.btn-linklike:focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 2px;
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -1052,6 +1111,21 @@ tr.interactive-row:focus-visible {
   .btn-sm,
   table.data-table .btn {
     min-height: 32px;
+  }
+  /* Chart controls were in neither coarse block, so the expand affordance stayed 24px on a
+     tablet — the device most likely to be propped on a pass counter. */
+  .chart-icon-btn,
+  .chart-close-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Scoped to table cells deliberately. The same class is also used inline inside a sentence
+     (Owner Dashboard's subtitle), where WCAG's inline-in-text exception applies and forcing 44px
+     would push the line apart instead of helping anyone. */
+  table.data-table .btn-linklike {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
   }
   /* The shell was left out of the original sweep, so on a tablet the entire navigation — the one
      thing every route depends on — stayed at desktop density: nav links 37px, module tabs 35px,

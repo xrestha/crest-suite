@@ -83,7 +83,7 @@ export default function FoodBeverageSplit({ activePeriod, includeManual, include
                   {pieData.map(entry => <Cell key={entry.name} fill={colorOf(entry.name)} />)}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+                  contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
                   formatter={(v, name) => [`${fmtNpr(v)} (${((v / total) * 100).toFixed(1)}%)`, name]}
                 />
               </PieChart>

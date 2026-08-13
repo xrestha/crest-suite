@@ -96,7 +96,7 @@ export default function Calculator({ open, onClose }) {
     background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
     borderRadius: 6, color: 'var(--theme-text1)', fontFamily: 'inherit',
   }
-  const opBtn = { ...keyBtn, color: 'var(--theme-accent)' }
+  const opBtn = { ...keyBtn, color: 'var(--theme-accent-ink)' }
 
   return createPortal(
     <div
@@ -150,7 +150,7 @@ export default function Calculator({ open, onClose }) {
             title={live !== null ? 'Click to copy' : undefined}
             style={{
               marginTop: 10, textAlign: 'right', fontSize: 32, fontWeight: 700, minHeight: 40,
-              color: live === null ? 'var(--theme-text3)' : 'var(--theme-accent)',
+              color: live === null ? 'var(--theme-text3)' : 'var(--theme-accent-ink)',
               cursor: live !== null ? 'pointer' : 'default',
             }}
           >
@@ -166,7 +166,7 @@ export default function Calculator({ open, onClose }) {
                 {k === '*' ? '×' : k === '/' ? '÷' : k}
               </button>
             )).concat(
-              ri === 0 ? [<button key="clr" onClick={() => setExpr('')} style={{ ...keyBtn, color: 'var(--theme-red)', fontSize: 15 }}>C</button>]
+              ri === 0 ? [<button key="clr" onClick={() => setExpr('')} style={{ ...keyBtn, color: 'var(--theme-red-text)', fontSize: 15 }}>C</button>]
               : ri === 1 ? [<button key="del" onClick={() => setExpr(e => e.slice(0, -1))} style={{ ...keyBtn, fontSize: 15 }}>⌫</button>]
               : ri === 2 ? [<button key="plus" onClick={() => press('+')} style={opBtn}>+</button>]
               : [<button key="eq" onClick={commit} disabled={live === null} style={{ ...keyBtn, background: 'var(--theme-accent)', borderColor: 'var(--theme-accent)', color: 'var(--theme-accent-text)', opacity: live === null ? 0.4 : 1 }}>=</button>]
@@ -206,7 +206,7 @@ export default function Calculator({ open, onClose }) {
         {tape.length > 1 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: '1px solid var(--theme-border)', fontSize: 13 }}>
             <span style={{ flex: 1, color: 'var(--theme-text3)' }}>Sum of tape</span>
-            <span style={{ color: 'var(--theme-accent)', fontWeight: 700 }}>{tapeSum.toLocaleString()}</span>
+            <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{tapeSum.toLocaleString()}</span>
             <button
               onClick={() => setTape([])}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--theme-text3)', fontSize: 12, fontFamily: 'inherit', padding: 0 }}

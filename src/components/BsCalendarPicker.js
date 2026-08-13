@@ -248,7 +248,7 @@ export default function BsCalendarPicker({
           <button
             type="button"
             onClick={goToday}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--theme-accent)', fontWeight: 600, padding: '2px 4px', fontFamily: 'inherit' }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--theme-accent-ink)', fontWeight: 600, padding: '2px 4px', fontFamily: 'inherit' }}
           >
             Today
           </button>

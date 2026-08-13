@@ -20,6 +20,28 @@ import {
 } from '../../modules/hr/payrollConstants'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 
+// Cost & Margin trend series. Fixed hex, for the reason DESIGN.md states by name: the semantic
+// token set is five ROLES, not five distinguishable hues. These four lines were
+// accent/purple/red/green — and accent and purple are literally the same value on Dracula
+// (#bd93f9), Catppuccin Mocha (#cba6f7) and Latte (#8839ef), so on those three presets Food Cost
+// and Labor Cost drew as one indistinguishable line, with matching legend swatches above them.
+// That is the whole proposition of this chart: seeing which of the two is the one climbing.
+//
+// Values are the set already brute-forced against the CVD and normal-vision floors for
+// ClientDashboard's COST_BREAKDOWN_COLORS (worst pair ΔE 16.8 normal / 8.6 deutan), reused here
+// so Food Cost keeps one identity across every surface that draws it. Duplicated rather than
+// shared, matching how FoodBeverageSplit.jsx already duplicates CHART_COLORS.
+//
+// Prime Cost additionally carries a dash: it is the SUM of the two lines above it, not a fifth
+// peer measure, and it previously took red — which on the KPI cards directly above means "over
+// threshold", so the Prime line read as permanently alarming whatever its value.
+const TREND_COLORS = {
+  fc:     '#c9a84c', // gold — same as the Food Cost slice and the FC% trend line
+  labor:  '#60a5fa', // blue — same as the Labor slice
+  prime:  '#8b5cf6', // violet, dashed (a derived total, not a peer)
+  margin: '#34d399', // green — profit reads as good
+}
+
 // Owner Dashboard — Phase 1 (Crest IMS + Crest HR only; POS revenue integration is Phase 2).
 // Every figure is Month-to-Date against the client's single currently-open monthly_periods row —
 // same scoping as Monthly Summary/Wastage Report/Payroll Run, not a rolling 7-day window (every
@@ -358,7 +380,7 @@ export default function OwnerDashboard() {
     style: {
       background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)',
       boxShadow: 'var(--theme-card-shadow)',
-      padding: '14px 16px', cursor: onClick ? 'pointer' : 'default', transition: 'border-color 0.15s',
+      padding: '14px 16px', cursor: onClick ? 'pointer' : 'default', transition: 'border-color var(--motion-fast) var(--ease-standard)',
     },
     ...(onClick ? {
       onClick,
@@ -383,13 +405,11 @@ export default function OwnerDashboard() {
           Cross-module month-to-date view — Crest IMS + Crest HR
           {activePeriod && ` · ${periodLabel} · Open`}
           {' · '}
-          <span
-            role="link" tabIndex={0} onClick={() => navigate('/owner-report')}
-            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/owner-report') } }}
-            style={{ color: 'var(--theme-accent)', cursor: 'pointer' }}
-          >
+          {/* A real button rather than role="link" on a span with a hand-rolled key handler —
+              same affordance, native semantics, and it picks up the shared focus ring. */}
+          <button className="btn-linklike" onClick={() => navigate('/owner-report')}>
             View Full Monthly Report →
-          </span>
+          </button>
         </p>
       </div>
 
@@ -405,7 +425,7 @@ export default function OwnerDashboard() {
             borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
             background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
           }}>
-            <p style={{ color: 'var(--theme-red)', margin: 0, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <p style={{ color: 'var(--theme-red-text)', margin: 0, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
               <TriangleAlert size={14} aria-hidden="true" /> {msg}
             </p>
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
@@ -425,7 +445,7 @@ export default function OwnerDashboard() {
             the missing module, not a missing period. */}
         {!(clientModules.ims && clientModules.hr) && !loading && (
           <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
-            <p style={{ color: 'var(--theme-amber)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <p style={{ color: 'var(--theme-amber-text)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
               <TriangleAlert size={15} aria-hidden="true" /> Owner Dashboard needs both Crest IMS and Crest HR enabled — this property has {clientModules.ims ? 'only IMS' : clientModules.hr ? 'only HR' : 'neither'}.
             </p>
           </div>
@@ -436,7 +456,7 @@ export default function OwnerDashboard() {
             onClick={() => navigate('/periods')} role="button" tabIndex={0}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/periods') } }}
           >
-            <p style={{ color: 'var(--theme-accent)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert size={15} aria-hidden="true" /> No open period. Click here to create one in Periods →</p>
+            <p style={{ color: 'var(--theme-accent-ink)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert size={15} aria-hidden="true" /> No open period. Click here to create one in Periods →</p>
           </div>
         )}
 
@@ -448,7 +468,7 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/sales'))}>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Revenue (MTD)</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-green)', lineHeight: 1.1 }}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fmt(revenueTotal)}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-green-text)', lineHeight: 1.1 }}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fmt(revenueTotal)}</div>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>From sales entries →</div>
           </div>
 
@@ -456,7 +476,7 @@ export default function OwnerDashboard() {
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
               <Tip text="Net purchases ÷ revenue × 100. Healthy range: 28–35% for Nepal F&B." width={240}>Food Cost % (MTD)</Tip>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: fcPct == null ? 'var(--theme-text2)' : fcPct <= 35 ? 'var(--theme-green)' : fcPct <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)' }}>
+            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: fcPct == null ? 'var(--theme-text2)' : fcPct <= 35 ? 'var(--theme-green-text)' : fcPct <= 45 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Target 28–35% →</div>
@@ -464,33 +484,42 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/hr/payroll'))}>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
-              <Tip text="Prorated estimate: gross + overtime + employer SSF, scaled to days elapsed this month. Refines to the exact figure once Payroll Run is finalized." width={280}>Labor Cost % (MTD)</Tip>
+              <Tip text="Prorated estimate: gross + overtime + employer SSF, scaled to days elapsed this month. Refines to the exact figure once Payroll Run is finalized. Healthy range for Nepal F&B: 25-30% of revenue." width={280}>Labor Cost % (MTD)</Tip>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: laborPct == null ? 'var(--theme-text2)' : laborPct <= 37 ? 'var(--theme-green)' : laborPct <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)' }}>
+            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: laborPct == null ? 'var(--theme-text2)' : laborPct <= 30 ? 'var(--theme-green-text)' : laborPct <= 37 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : laborPct != null ? `${laborPct.toFixed(1)}%` : '—'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Estimate →</div>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Target 25-30% · estimate →</div>
           </div>
 
           <div {...kpiCard()}>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
               <Tip text="Food Cost % + Labor Cost % — the two controllable costs combined, the number operators actually benchmark against. Industry standard: 60-65% of revenue." width={280}>Prime Cost % (MTD)</Tip>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: primeCostPct == null ? 'var(--theme-text2)' : primeCostPct <= 60 ? 'var(--theme-green)' : primeCostPct <= 65 ? 'var(--theme-accent)' : 'var(--theme-red)' }}>
+            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: primeCostPct == null ? 'var(--theme-text2)' : primeCostPct <= 60 ? 'var(--theme-green-text)' : primeCostPct <= 65 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : primeCostPct != null ? `${primeCostPct.toFixed(1)}%` : '—'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Target ≤60-65% →</div>
+            {/* Prime and True Net Margin both CONTAIN the prorated labour estimate, and both used
+                to present themselves as exact — only the Labor card said "Estimate", and only in
+                11px text3 with the substance hidden in a hover Tip. A figure carrying a red/amber/
+                green verdict has to disclose its basis where it is read, not on hover. Matches how
+                the Monthly Owner Report prints "· estimated — no payroll finalized for this
+                period" inline. */}
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Target ≤60-65% · includes labour estimate</div>
           </div>
 
-          <div {...kpiCard(canOverheads ? null : () => navigate('/overheads'))}>
+          {/* The ternary was inverted: a client who HAS Overheads got the non-clickable card (the
+              most important number on the page, and the only unclickable one in this row), while a
+              client who does NOT got a card that navigated to a page they cannot open. */}
+          <div {...kpiCard(canOverheads ? () => navigate('/overheads') : null)}>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
               <Tip text="Revenue minus food cost, labor cost, and overheads, as a % of revenue. This is what the business actually keeps." width={260}>True Net Margin % (MTD)</Tip>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: !canOverheads || netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green)' : netMarginPct >= 10 ? 'var(--theme-accent)' : 'var(--theme-red)' }}>
+            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: !canOverheads || netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green-text)' : netMarginPct >= 10 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : !canOverheads ? '—' : netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>
-              {!canOverheads ? 'Requires Overheads (Pro) →' : !loading && overheadTotal === 0 ? 'Excludes overhead — not entered' : 'After food, labor & overhead'}
+              {!canOverheads ? 'Requires Overheads (Pro) →' : !loading && overheadTotal === 0 ? 'Excludes overhead — not entered' : 'After food, labour & overhead · includes labour estimate'}
             </div>
           </div>
         </div>
@@ -500,7 +529,7 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/wastage-report'))}>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Wastage Value (MTD)</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: stats?.wastageValueTotal > 0 ? 'var(--theme-red)' : 'var(--theme-text1)' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: stats?.wastageValueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fmt(stats?.wastageValueTotal)}
             </div>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>This period →</div>
@@ -510,7 +539,7 @@ export default function OwnerDashboard() {
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
               <Tip text="Items whose current stock is at or below par level — a live inventory position, not a monthly total." width={260}>Items Below Par</Tip>
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: reorderStats?.count > 0 ? 'var(--theme-red)' : 'var(--theme-text1)' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: reorderStats?.count > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : (reorderStats?.count ?? 0)}
             </div>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
@@ -522,7 +551,7 @@ export default function OwnerDashboard() {
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
               <Tip text="Credit purchases unpaid for more than 60 days." width={220}>Overdue Payables</Tip>
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: payablesStats?.overdueTotal > 0 ? 'var(--theme-red)' : 'var(--theme-text1)' }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: payablesStats?.overdueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fmt(payablesStats?.overdueTotal)}
             </div>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
@@ -546,15 +575,26 @@ export default function OwnerDashboard() {
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Cost &amp; Margin — Trend</div>
             <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
           </div>
-        ) : hasTrendData && (
+        ) : !hasTrendData ? (
+          /* This used to render `false` — no card, no heading, nothing, just a gap where a chart
+             belongs. A Suite Pro client paying for the trend view deserves to be told it fills in
+             rather than left to assume the page is broken. */
+          <div className="card" style={{ padding: '20px 16px', marginBottom: 20 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Cost &amp; Margin — Trend</div>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+              Your cost and margin history appears here once your first period closes. Each closed
+              period adds a point, so the trend builds up month by month.
+            </p>
+          </div>
+        ) : (
           <ChartCard
             title="Cost & Margin — Trend"
             cardStyle={{ marginBottom: 20 }}
             legend={<>
-              <span style={{ color: colors.accent }}>● Food Cost %</span>
-              <span style={{ color: colors.purple }}>● Labor Cost %</span>
-              <span style={{ color: colors.red }}>● Prime Cost %</span>
-              <span style={{ color: colors.green }}>● Net Margin %</span>
+              <span style={{ color: TREND_COLORS.fc }}>● Food Cost %</span>
+              <span style={{ color: TREND_COLORS.labor }}>● Labor Cost %</span>
+              <span style={{ color: TREND_COLORS.prime }}>● Prime Cost %</span>
+              <span style={{ color: TREND_COLORS.margin }}>● Net Margin %</span>
             </>}
             footer={<p className="sr-only">Trend of Food Cost %, Labor Cost %, Prime Cost %, and Net Margin % across the last {trendChartData.length} closed periods, sourced from each period's frozen Monthly Owner Report snapshot.</p>}
             renderChart={h => (
@@ -564,14 +604,14 @@ export default function OwnerDashboard() {
                   <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
                   <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={40} />
                   <RTooltip
-                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--theme-text1)' }}
                     labelStyle={{ color: 'var(--theme-text1)' }}
                     formatter={(v, name) => [v != null ? `${v}%` : '—', name]}
                   />
-                  <Line type="monotone" dataKey="fc" name="Food Cost %" stroke={colors.accent} strokeWidth={2} connectNulls dot={{ r: 2 }} {...chartMotion()} />
-                  <Line type="monotone" dataKey="labor" name="Labor Cost %" stroke={colors.purple} strokeWidth={2} connectNulls dot={{ r: 2 }} {...chartMotion()} />
-                  <Line type="monotone" dataKey="prime" name="Prime Cost %" stroke={colors.red} strokeWidth={2.5} connectNulls dot={{ r: 3 }} {...chartMotion()} />
-                  <Line type="monotone" dataKey="margin" name="Net Margin %" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2 }} {...chartMotion()} />
+                  <Line type="monotone" dataKey="fc" name="Food Cost %" stroke={TREND_COLORS.fc} strokeWidth={2} connectNulls dot={{ r: 2 }} {...chartMotion()} />
+                  <Line type="monotone" dataKey="labor" name="Labor Cost %" stroke={TREND_COLORS.labor} strokeWidth={2} connectNulls dot={{ r: 2 }} {...chartMotion()} />
+                  <Line type="monotone" dataKey="prime" name="Prime Cost %" stroke={TREND_COLORS.prime} strokeWidth={2.5} strokeDasharray="6 3" connectNulls dot={{ r: 3 }} {...chartMotion()} />
+                  <Line type="monotone" dataKey="margin" name="Net Margin %" stroke={TREND_COLORS.margin} strokeWidth={2} connectNulls dot={{ r: 2 }} {...chartMotion()} />
                 </LineChart>
               </ResponsiveContainer>
             )}

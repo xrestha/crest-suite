@@ -3,7 +3,7 @@ import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
-import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
 import { useHrApprovalCounts } from './useHrApprovalCounts'
 
 const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
@@ -16,9 +16,30 @@ function nextMonthLabel(bs_year, bs_month) {
   return `${BS_MONTHS[nm - 1]} 15, ${ny}`
 }
 
+// SSF is due by the 15th of the month following the payroll period. Returns how that deadline
+// stands relative to today, so the card can be quiet when there is nothing to do — it used to
+// render red unconditionally, which meant a healthy account with weeks of runway showed the same
+// colour as one that had missed the deposit.
+function ssfDeadlineState(bs_year, bs_month) {
+  if (!bs_year || !bs_month) return {}
+  const nm = bs_month === 12 ? 1 : bs_month + 1
+  const ny = bs_month === 12 ? bs_year + 1 : bs_year
+  const today = getBsToday()
+  const dueOrdinal = ny * 12 + nm
+  const nowOrdinal = today.year * 12 + today.month
+  if (nowOrdinal > dueOrdinal || (nowOrdinal === dueOrdinal && today.day > 15)) return { overdue: true }
+  // Same month as the deadline, on or before the 15th: it is now the live task.
+  if (nowOrdinal === dueOrdinal) return { alert: true }
+  return {}
+}
+
 // Clickable KPI card — role/tabIndex/onKeyDown + .interactive-card give keyboard users the same
 // access mouse users already had; this one shared component fixes every KCard instance at once.
-function KCard({ label, value, sub, color = 'var(--theme-text1)', tip, onClick, alert }) {
+// `alert` means "needs attention", which in this design system is AMBER — red means overdue or
+// failed. Every pending-approval card passes it, and a queue waiting on a manager is not an error
+// state; painting them red alongside genuinely-late things trains the reader to discount red.
+// `overdue` is the escalation for something that has actually passed its date.
+function KCard({ label, value, sub, color = 'var(--theme-text1)', tip, onClick, alert, overdue }) {
   return (
     <div
       className={onClick ? 'stat-card interactive-card' : 'stat-card'}
@@ -34,7 +55,7 @@ function KCard({ label, value, sub, color = 'var(--theme-text1)', tip, onClick, 
       <div className="stat-value" style={{ color, fontSize: typeof value === 'string' && value.length > 8 ? 16 : undefined }}>
         {value}
       </div>
-      {sub && <div className="stat-sub" style={alert ? { color: 'var(--theme-red)' } : undefined}>{sub}</div>}
+      {sub && <div className="stat-sub" style={overdue ? { color: 'var(--theme-red-text)' } : alert ? { color: 'var(--theme-amber-text)' } : undefined}>{sub}</div>}
     </div>
   )
 }
@@ -67,6 +88,12 @@ export default function HrDashboard() {
 
   useEffect(() => {
     if (!clientId) { setLoading(false); return }
+    // Rank check BEFORE the fetch, not just before the final render. load() pulls basic_salary,
+    // payslip net pay, employer SSF and named pending requests — so an hr_role='staff' account
+    // used to trigger the entire query set and see the header and skeleton, and was only bounced
+    // once loading finished. Same shape as the S430 leak, inverted: the guard existed but sat
+    // downstream of the thing it was guarding.
+    if (!hasHrAccess('supervisor')) { setLoading(false); return }
     load(++loadIdRef.current)
   }, [clientId]) // eslint-disable-line
 
@@ -177,6 +204,10 @@ export default function HrDashboard() {
     setLoading(false)
   }
 
+  // Redirect first, above the loading return — otherwise an ineligible account renders the page
+  // header and skeleton for the duration of a fetch that should never have started.
+  if (!hasHrAccess('supervisor')) return <Navigate to="/dashboard" replace />
+
   // A skeleton mirroring the page's real layout (header + 3 stat-grid rows) instead of a plain
   // "Loading…" text block — consistent with the per-KPI skeleton pattern used elsewhere on the
   // client and owner dashboards.
@@ -208,8 +239,6 @@ export default function HrDashboard() {
   const pendingSwap  = pendingCounts.swap
   const pendingTotal = pendingLeave + pendingOt + pendingTada + pendingSwap
 
-  if (!hasHrAccess('supervisor')) return <Navigate to="/dashboard" replace />
-
   return (
     <div>
       <div role="status" aria-live="polite" className="sr-only">Dashboard data loaded</div>
@@ -226,7 +255,7 @@ export default function HrDashboard() {
           borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
           background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
         }}>
-          <p style={{ color: 'var(--theme-red)', margin: 0, fontSize: 13 }}>
+          <p style={{ color: 'var(--theme-red-text)', margin: 0, fontSize: 13 }}>
             <span aria-hidden="true">⚠</span> {loadError}
           </p>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
@@ -241,14 +270,14 @@ export default function HrDashboard() {
 
       {/* ── KPI Row 1 — Approvals (everything a staff submission needs a manager to act on) ── */}
       <h2 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-        Approvals {pendingTotal > 0 && <span style={{ color: 'var(--theme-accent)' }}>({pendingTotal} pending)</span>}
+        Approvals {pendingTotal > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingTotal} pending)</span>}
       </h2>
       <div className="stat-grid" style={{ marginBottom: 20 }}>
         <KCard
           label="Leave Pending"
           value={pendingLeave}
           sub={pendingLeave > 0 ? 'awaiting approval' : 'all clear'}
-          color={pendingLeave > 0 ? 'var(--theme-accent)' : 'var(--theme-green)'}
+          color={pendingLeave > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'}
           tip="Leave requests with status Pending — click to go to the Leave page and approve or reject."
           onClick={() => navigate('/hr/leave')}
           alert={pendingLeave > 0}
@@ -257,7 +286,7 @@ export default function HrDashboard() {
           label="OT Pending"
           value={pendingOt}
           sub={pendingOt > 0 ? 'awaiting approval' : 'all clear'}
-          color={pendingOt > 0 ? 'var(--theme-accent)' : 'var(--theme-green)'}
+          color={pendingOt > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'}
           tip="Overtime entries not yet approved. Only approved OT feeds into payroll — approve before running payroll."
           onClick={() => navigate('/hr/overtime')}
           alert={pendingOt > 0}
@@ -266,7 +295,7 @@ export default function HrDashboard() {
           label="TADA Pending"
           value={pendingTada}
           sub={pendingTada > 0 ? 'awaiting approval' : 'all clear'}
-          color={pendingTada > 0 ? 'var(--theme-accent)' : 'var(--theme-green)'}
+          color={pendingTada > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'}
           tip="TADA (travel/daily allowance) claims with status Pending, whether entered by a manager or submitted by the employee themselves via Self-Service — click to go to TADA Claims and approve or reject."
           onClick={() => navigate('/hr/tada')}
           alert={pendingTada > 0}
@@ -275,7 +304,7 @@ export default function HrDashboard() {
           label="Swap Pending"
           value={pendingSwap}
           sub={pendingSwap > 0 ? 'awaiting your approval' : 'all clear'}
-          color={pendingSwap > 0 ? 'var(--theme-accent)' : 'var(--theme-green)'}
+          color={pendingSwap > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'}
           tip="Shift swap requests where the coworker has already accepted and it's now waiting on manager approval (requests still waiting on the coworker aren't shown here — nothing for a manager to do yet)."
           onClick={() => navigate('/hr/roster')}
           alert={pendingSwap > 0}
@@ -349,11 +378,13 @@ export default function HrDashboard() {
             <KCard
               label="SSF Total to Deposit"
               value={`NPR ${fmt(payInfo.ssfEmployee + payInfo.ssfEmployer)}`}
-              sub={`Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`}
-              color="var(--theme-accent)"
+              sub={ssfDeadlineState(payInfo.bsYear, payInfo.bsMonth).overdue
+                ? `Deposit was due ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`
+                : `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`}
+              color="var(--theme-accent-ink)"
               tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}. Deposit with SSF by the 15th of the following month. Go to HR Reports → SSF Challan for the per-employee breakdown.`}
               onClick={() => navigate('/hr/reports')}
-              alert
+              {...ssfDeadlineState(payInfo.bsYear, payInfo.bsMonth)}
             />
           </div>
         </>
@@ -371,7 +402,7 @@ export default function HrDashboard() {
         {/* Leave queue */}
         <div>
           <h3 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            Pending Leave Requests {pendingLeave > 0 && <span style={{ color: 'var(--theme-accent)' }}>({pendingLeave})</span>}
+            Pending Leave Requests {pendingLeave > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingLeave})</span>}
           </h3>
           <div className="card" style={{ padding: 0 }}>
             {leaveList.length === 0 ? (
@@ -389,11 +420,7 @@ export default function HrDashboard() {
                 </thead>
                 <tbody>
                   {leaveList.map(r => (
-                    <tr
-                      key={r.id} className="interactive-row" style={{ cursor: 'pointer' }}
-                      onClick={() => navigate('/hr/leave')} role="button" tabIndex={0}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/hr/leave') } }}
-                    >
+                    <tr key={r.id}>
                       <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[r.employee_id] || '—'}</td>
                       <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{typeMap[r.leave_type_id] || '—'}</td>
                       <td style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{fmtD(r.start_date)}</td>
@@ -415,7 +442,7 @@ export default function HrDashboard() {
         {/* OT queue */}
         <div>
           <h3 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            Pending OT Entries {pendingOt > 0 && <span style={{ color: 'var(--theme-accent)' }}>({pendingOt})</span>}
+            Pending OT Entries {pendingOt > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingOt})</span>}
           </h3>
           <div className="card" style={{ padding: 0 }}>
             {otList.length === 0 ? (
@@ -433,16 +460,12 @@ export default function HrDashboard() {
                 </thead>
                 <tbody>
                   {otList.map(e => (
-                    <tr
-                      key={e.id} className="interactive-row" style={{ cursor: 'pointer' }}
-                      onClick={() => navigate('/hr/overtime')} role="button" tabIndex={0}
-                      onKeyDown={(e2) => { if (e2.key === 'Enter' || e2.key === ' ') { e2.preventDefault(); navigate('/hr/overtime') } }}
-                    >
+                    <tr key={e.id}>
                       <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[e.employee_id] || '—'}</td>
                       <td style={{ textAlign: 'center', fontSize: 12, color: 'var(--theme-text3)' }}>
                         {BS_MONTHS[e.bs_month - 1]} {e.bs_day}
                       </td>
-                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-green)', fontSize: 12 }}>{e.ot_hours}h</td>
+                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-green-text)', fontSize: 12 }}>{e.ot_hours}h</td>
                       <td>
                         <span className={e.ot_type === 'holiday' ? 'badge-amber' : 'badge-gray'} style={{ fontSize: 10 }}>
                           {e.ot_type === 'holiday' ? 'Holiday 2×' : 'Weekday 1.5×'}
@@ -465,7 +488,7 @@ export default function HrDashboard() {
         {/* TADA queue */}
         <div>
           <h3 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            Pending TADA Claims {pendingTada > 0 && <span style={{ color: 'var(--theme-accent)' }}>({pendingTada})</span>}
+            Pending TADA Claims {pendingTada > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingTada})</span>}
           </h3>
           <div className="card" style={{ padding: 0 }}>
             {tadaList.length === 0 ? (
@@ -482,11 +505,7 @@ export default function HrDashboard() {
                 </thead>
                 <tbody>
                   {tadaList.map(c => (
-                    <tr
-                      key={c.id} className="interactive-row" style={{ cursor: 'pointer' }}
-                      onClick={() => navigate('/hr/tada')} role="button" tabIndex={0}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/hr/tada') } }}
-                    >
+                    <tr key={c.id}>
                       <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[c.employee_id] || '—'}</td>
                       <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{c.destination || c.trip_purpose || '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{fmt(c.total_amount)}</td>
@@ -507,7 +526,7 @@ export default function HrDashboard() {
         {/* Shift swap queue */}
         <div>
           <h3 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            Pending Shift Swaps {pendingSwap > 0 && <span style={{ color: 'var(--theme-accent)' }}>({pendingSwap})</span>}
+            Pending Shift Swaps {pendingSwap > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingSwap})</span>}
           </h3>
           <div className="card" style={{ padding: 0 }}>
             {swapList.length === 0 ? (
@@ -523,11 +542,7 @@ export default function HrDashboard() {
                 </thead>
                 <tbody>
                   {swapList.map(s => (
-                    <tr
-                      key={s.id} className="interactive-row" style={{ cursor: 'pointer' }}
-                      onClick={() => navigate('/hr/roster')} role="button" tabIndex={0}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/hr/roster') } }}
-                    >
+                    <tr key={s.id}>
                       <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                         <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{empMap[s.requester_employee_id] || '—'}</span>
                         {' ⇄ '}

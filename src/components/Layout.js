@@ -256,19 +256,7 @@ export default function Layout() {
     if (targetId === clientId) { setOutletDropdownOpen(false); return }
     setOutletError('')
     setSwitchingOutlet(true)
-    try {
-      const { getQueue, getPosOrderQueue } = await import('../utils/offlineQueue')
-      // Both queues matter: stock ops write against the current tenant just as POS orders do.
-      const [stockOps, posOrders] = await Promise.all([getQueue(), getPosOrderQueue()])
-      const pending = (stockOps?.length || 0) + (posOrders?.length || 0)
-      if (pending > 0) {
-        setOutletError(`${pending} offline change${pending === 1 ? '' : 's'} still syncing — reconnect and let them finish before switching outlet.`)
-        setSwitchingOutlet(false)
-        return
-      }
-    } catch {
-      // No offline store on this device: nothing queued, nothing to protect.
-    }
+    // The offline-queue guard lives inside switchOutlet so every entry point gets it.
     const { error } = await switchOutlet(targetId)
     setSwitchingOutlet(false)
     if (error) { setOutletError(error.message || 'Could not switch outlet.'); return }
@@ -697,7 +685,7 @@ export default function Layout() {
                 ? <img src={settings.logo_url} alt="logo" style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 4 }} />
                 /* aria-hidden, not aria-label — the visible wordmark right next to it already
                    names the brand; a labeled icon plus adjacent text double-announces it. */
-                : <Hexagon size={22} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--theme-accent)' }} />}
+                : <Hexagon size={22} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--theme-accent-ink)' }} />}
             </div>
             <div className="sidebar-brand-text">
               <div className="sidebar-brand-name" title={settings?.app_name || 'Crest'}>{settings?.app_name || 'Crest'}</div>
@@ -900,7 +888,7 @@ export default function Layout() {
                 </div>
               )}
               {outletError && (
-                <p role="alert" style={{ fontSize: 10, color: 'var(--theme-red)', margin: '6px 0 0' }}>{outletError}</p>
+                <p role="alert" style={{ fontSize: 10, color: 'var(--theme-red-text)', margin: '6px 0 0' }}>{outletError}</p>
               )}
             </div>
           ) : null
@@ -929,13 +917,13 @@ export default function Layout() {
                       DESIGN.md's badge spec — the previous solid fills paired hardcoded #fff /
                       #000 foregrounds that failed contrast on several presets. */}
                   {pendingTrialCount > 0 && (
-                    <span style={{ fontSize: 11, fontWeight: 800, background: 'rgba(248,113,113,0.15)', color: 'var(--theme-red)', border: '1px solid rgba(248,113,113,0.35)', borderRadius: 10, padding: '2px 8px', lineHeight: 1.4 }}
+                    <span style={{ fontSize: 11, fontWeight: 800, background: 'rgba(248,113,113,0.15)', color: 'var(--theme-red-text)', border: '1px solid rgba(248,113,113,0.35)', borderRadius: 10, padding: '2px 8px', lineHeight: 1.4 }}
                       title="Clients requesting to subscribe">
                       {pendingTrialCount} want to sub
                     </span>
                   )}
                   {newTrialCount > 0 && (
-                    <span style={{ fontSize: 11, fontWeight: 800, background: 'rgba(251,191,36,0.15)', color: 'var(--theme-amber)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 10, padding: '2px 8px', lineHeight: 1.4 }}
+                    <span style={{ fontSize: 11, fontWeight: 800, background: 'rgba(251,191,36,0.15)', color: 'var(--theme-amber-text)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 10, padding: '2px 8px', lineHeight: 1.4 }}
                       title="New trial signups in the last 7 days">
                       {newTrialCount} NEW
                     </span>
@@ -989,7 +977,7 @@ export default function Layout() {
               onClick={() => navigate('/pricing')}
               style={{
                 width: '100%', fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
-                color: plan === 'growth' ? 'var(--theme-accent)' : 'var(--theme-green)',
+                color: plan === 'growth' ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)',
                 background: plan === 'growth' ? 'rgba(201,168,76,0.1)' : 'rgba(52,211,153,0.1)',
                 border: `1px solid ${plan === 'growth' ? 'rgba(201,168,76,0.25)' : 'rgba(52,211,153,0.25)'}`,
                 borderRadius: 'var(--radius-md)', padding: '7px 8px', cursor: 'pointer', display: 'block'
@@ -1047,7 +1035,7 @@ export default function Layout() {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
           }} role="status">
             <div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-red)' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-red-text)' }}>
                 ⚠️ Your subscription has expired — access ends in {graceDaysLeft} day{graceDaysLeft !== 1 ? 's' : ''}
               </span>
               <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 10 }}>
@@ -1062,7 +1050,7 @@ export default function Layout() {
                 {subscribing ? 'Sending…' : 'Renew Now →'}
               </button>
             ) : (
-              <span style={{ fontSize: 12, color: 'var(--theme-red)', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
+              <span style={{ fontSize: 12, color: 'var(--theme-red-text)', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
             )}
           </div>
         )}
@@ -1075,7 +1063,7 @@ export default function Layout() {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
           }} role="status">
             <div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-amber)' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
                 ⏳ {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial
               </span>
               <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 10 }}>
@@ -1090,7 +1078,7 @@ export default function Layout() {
                 {subscribing ? 'Sending…' : 'I Want to Subscribe →'}
               </button>
             ) : (
-              <span style={{ fontSize: 12, color: 'var(--theme-amber)', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
+              <span style={{ fontSize: 12, color: 'var(--theme-amber-text)', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
             )}
           </div>
         )}

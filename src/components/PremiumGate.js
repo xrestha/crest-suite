@@ -45,7 +45,7 @@ export default function PremiumGate({ children, featureKey, minPlan = 'growth' }
         </h2>
         <p style={{ fontSize: 14, color: 'var(--theme-text2)', margin: '0 0 28px', lineHeight: 1.6 }}>
           This module is available on the{' '}
-          <strong style={{ color: 'var(--theme-accent)' }}>{planNeeded} plan</strong> and above.{' '}
+          <strong style={{ color: 'var(--theme-accent-ink)' }}>{planNeeded} plan</strong> and above.{' '}
           {upgradeDesc}
         </p>
 
@@ -58,19 +58,19 @@ export default function PremiumGate({ children, featureKey, minPlan = 'growth' }
           </p>
           {phone && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <span style={{ color: 'var(--theme-accent)', fontSize: 14 }}>📞</span>
+              <span style={{ color: 'var(--theme-accent-ink)', fontSize: 14 }}>📞</span>
               <a href={`tel:${phone}`} style={{ color: 'var(--theme-text1)', fontSize: 14, textDecoration: 'none' }}>{phone}</a>
             </div>
           )}
           {email && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <span style={{ color: 'var(--theme-accent)', fontSize: 14 }}>✉</span>
+              <span style={{ color: 'var(--theme-accent-ink)', fontSize: 14 }}>✉</span>
               <a href={`mailto:${email}`} style={{ color: 'var(--theme-text1)', fontSize: 14, textDecoration: 'none' }}>{email}</a>
             </div>
           )}
           {website && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ color: 'var(--theme-accent)', fontSize: 14 }}>🌐</span>
+              <span style={{ color: 'var(--theme-accent-ink)', fontSize: 14 }}>🌐</span>
               <a href={website.startsWith('http') ? website : `https://${website}`}
                 target="_blank" rel="noopener noreferrer"
                 style={{ color: 'var(--theme-text1)', fontSize: 14, textDecoration: 'none' }}>{website}</a>

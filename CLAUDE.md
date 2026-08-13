@@ -256,11 +256,16 @@ All periods and dates in the app use the Nepali calendar. Key utilities in `src/
 
 - `bsToAd(year, month, day)` → JS Date
 - `adToBs(date)` → `{ year, month, day }`
+- `formatAd(date)` → `YYYY-MM-DD` from the Date's **local** getters
+- `bsDayBoundaryIso(y, m, d, endOfDay)` → an AD instant carrying Nepal's `+05:45`
+
 - `daysInBsMonth(year, month)` — each BS month has a different number of days (28–32); never assume 30
 - `getBsToday()` → current BS date
 - Nepal fiscal year runs **Shrawan (month 4) → Ashadh (month 3)** of the following BS year
 
 The lookup table covers BS 2079–2087. Out-of-range years fall back to a 30-day approximation.
+
+**Never `.toISOString()` a Date that came from `bsToAd`.** It returns local midnight, so at Nepal's UTC+05:45 `.toISOString()` lands at 18:15Z on the *previous* day and `.slice(0,10)` yields the wrong date for every user in the country. This shipped twice: `ClientDashboard` documented and worked around it, then `GroupDashboard` reintroduced it and silently shifted both bounds of the multi-outlet comparison by a day (fixed S550 by lifting the helper into `bsCalendar.js`). Use `formatAd` where a bare date string is wanted — including any RPC declaring its parameter as `date`, which is what `get_group_summary` does — and `bsDayBoundaryIso` where the value is compared against a real `timestamptz` such as `pos_orders.closed_at`.
 
 ### HR payroll engine (pure functions)
 
@@ -299,6 +304,8 @@ All colors must use CSS variables, not hardcoded hex. The full token set:
 --theme-sidebar     --theme-input-bg    --theme-table-hover --theme-focus-ring
 --theme-green-text  --theme-red-text    --theme-amber-text  --theme-purple-text --theme-accent-ink
 ```
+
+**Three exceptions to the `*-text` rule, all found by applying it too broadly (S550).** A **legend swatch** keeps the series colour — it must equal the line it labels, and the label text beside it carries the contrast. A prop that receives a **series colour** (`StatPill`'s `color`, which drives its dot) keeps it; that component now takes a separate `textColor` for the value, because a chart hex set as 13px/700 type measured ~1.9:1 on a light card. And **a `color:` inside a ternary is still a `color:`** — about half the real sites are `x <= 35 ? green : amber : red`, which a property-level regex silently skips, so a sweep can report success having fixed under half. For JS (Recharts reads values, not CSS variables), `useTheme()`'s `colors` resolves `greenText`/`redText`/`amberText`/`purpleText`/`accentInk` with base fallbacks so they are defined on dark presets too. **The worst light preset is Rosé Dawn/Solarized (10/10 combinations failing, worst 2.05:1), not Latte (4/10)** — spot-check colour work on Rosé Dawn.
 
 **A signal color used as TEXT takes the `*-text` variant; used as a FILL it takes the base token (S549).** This is not a style preference — one value cannot do both jobs on a light preset. Measured across the five light presets, **23 of 25 signal-color/surface combinations failed WCAG AA**, and `--theme-text3` failed on all five. `ThemeContext.js` now emits a darkened, hue-preserving text variant per light preset (dark presets fall back to the base color, so nothing changes there), and the neutral ramp was corrected in place. The palettes themselves are deliberately untouched — Latte/Rosé Dawn/Solarized are faithful reproductions people pick *because* they recognise those values, and the base tokens are still correct for charts, tints, borders and dots.
 

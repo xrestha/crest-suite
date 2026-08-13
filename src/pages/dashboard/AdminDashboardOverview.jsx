@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useSettings } from '../../context/SettingsContext'
@@ -21,6 +21,8 @@ export default function AdminDashboardOverview() {
   const [adminLoading, setAdminLoading]   = useState(true)
   const [activeTodayClients, setActiveTodayClients] = useState([])
   const [search, setSearch]               = useState('')
+  // Which attention KPI card is currently narrowing the table below. null = show everything.
+  const [filter, setFilter]               = useState(null)
 
   useEffect(() => { loadAdminStats() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -133,17 +135,39 @@ export default function AdminDashboardOverview() {
     ...inactive,
   ]
   const searchQ = search.trim().toLowerCase()
-  const visibleSorted = searchQ
-    ? sorted.filter(c => c.name.toLowerCase().includes(searchQ) || (c.location || '').toLowerCase().includes(searchQ))
-    : sorted
+
+  // The KPI cards used to be dead ends: "Expiring ≤30 Days: 4" named a number with no way to find
+  // out WHICH four, so an operator had to search the table by names they did not have. Each
+  // attention card is now a filter over the same list.
+  const FILTERS = {
+    expiring:  { label: 'Expiring ≤30 days', test: c => expiring30.some(x => x.id === c.id) },
+    churn:     { label: 'Critical ≤7 days',  test: c => churnRisk.some(x => x.id === c.id) },
+    noPeriod:  { label: 'No open period',    test: c => noPeriod.some(x => x.id === c.id) },
+    activeToday: { label: 'Active today',    test: c => activeTodayClients.some(x => x.id === c.id) },
+  }
+  const activeFilter = FILTERS[filter]
+  const visibleSorted = sorted.filter(c => {
+    if (activeFilter && !activeFilter.test(c)) return false
+    if (!searchQ) return true
+    return c.name.toLowerCase().includes(searchQ) || (c.location || '').toLowerCase().includes(searchQ)
+  })
 
   const statCard = (borderColor) => ({
     background: 'var(--theme-card)', border: `1px solid ${borderColor || 'var(--theme-border)'}`,
     borderRadius: 'var(--radius-lg)', boxShadow: 'var(--theme-card-shadow)', padding: '16px 18px'
   })
+
+  // Props that turn an attention card into a real filter control. A card naming a count the
+  // operator cannot act on is a dead end, and these are the counts the whole page exists for.
+  const filterCard = (key, borderColor) => ({
+    style: { ...statCard(borderColor), cursor: 'pointer', textAlign: 'left', width: '100%', font: 'inherit' },
+    className: 'interactive-card',
+    onClick: () => setFilter(filter === key ? null : key),
+    'aria-pressed': filter === key,
+  })
   const planBadge = (plan) => ({
     fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)',
-    color:       plan === 'pro' ? 'var(--theme-accent)'  : plan === 'growth' ? 'var(--theme-green)'               : 'var(--theme-text2)',
+    color:       plan === 'pro' ? 'var(--theme-accent-ink)'  : plan === 'growth' ? 'var(--theme-green-text)'               : 'var(--theme-text2)',
     background:  plan === 'pro' ? 'rgba(201,168,76,0.12)': plan === 'growth' ? 'rgba(52,211,153,0.10)'            : 'rgba(138,146,163,0.10)',
     border: `1px solid ${plan === 'pro' ? 'rgba(201,168,76,0.25)' : plan === 'growth' ? 'rgba(52,211,153,0.20)' : 'rgba(138,146,163,0.20)'}`,
   })
@@ -158,10 +182,27 @@ export default function AdminDashboardOverview() {
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => navigate('/admin/clients')}>Manage Clients →</button>
       </div>
 
-      {adminLoading ? <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p> : (
+      {adminLoading ? (
+        <>
+          <div role="status" aria-live="polite" className="sr-only">Loading platform overview…</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, marginBottom: 20, alignItems: 'start' }}>
+            {[0, 1, 2, 3, 4, 5].map(i => (
+              <div key={i} style={statCard()}>
+                <span className="skeleton" style={{ display: 'block', width: '60%', height: 11, marginBottom: 10 }} />
+                <span className="skeleton" style={{ display: 'block', width: '40%', height: 26 }} />
+              </div>
+            ))}
+          </div>
+          <div className="card" style={{ padding: 20 }}>
+            {[0, 1, 2, 3, 4].map(i => (
+              <span key={i} className="skeleton" style={{ display: 'block', width: '100%', height: 34, marginBottom: 8 }} />
+            ))}
+          </div>
+        </>
+      ) : (
         <>
           {/* ── 5 KPI cards ── */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 14, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, marginBottom: 20, alignItems: 'start' }}>
 
             {/* 1 — Active Properties + module adoption */}
             <div style={statCard()}>
@@ -169,57 +210,60 @@ export default function AdminDashboardOverview() {
               <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>{active.length}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>{inactive.length} inactive · {adminClients.length} total</div>
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS {imsCount}</span>
-                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green)', border: '1px solid rgba(52,211,153,0.18)' }}>HR {hrCount}</span>
-                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple)', border: '1px solid rgba(167,139,250,0.2)' }}>POS {posCount}</span>
+                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS {imsCount}</span>
+                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.18)' }}>HR {hrCount}</span>
+                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)', border: '1px solid rgba(167,139,250,0.2)' }}>POS {posCount}</span>
               </div>
             </div>
 
             {/* 2 — Active Today */}
-            <div style={statCard(activeTodayClients.length > 0 ? 'rgba(52,211,153,0.25)' : undefined)}>
+            <button {...filterCard('activeToday', activeTodayClients.length > 0 ? 'rgba(52,211,153,0.25)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: activeTodayClients.length > 0 ? '#34d399' : '#374151', flexShrink: 0 }} />
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: activeTodayClients.length > 0 ? 'var(--theme-green)' : 'var(--theme-border)', flexShrink: 0 }} />
                 Active Today
               </div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: activeTodayClients.length > 0 ? 'var(--theme-green)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 32, fontWeight: 800, color: activeTodayClients.length > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
                 {activeTodayClients.length}
               </div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5, lineHeight: 1.7 }}>
                 {activeTodayClients.length === 0
                   ? 'No logins in last 24 h'
-                  : activeTodayClients.map(c => <div key={c.id}>· {c.name}</div>)}
+                  : <>
+                      {activeTodayClients.slice(0, 4).map(c => <div key={c.id}>· {c.name}</div>)}
+                      {activeTodayClients.length > 4 && <div>and {activeTodayClients.length - 4} more</div>}
+                    </>}
               </div>
-            </div>
+            </button>
 
             {/* 3 — Expiring ≤30 days + churn risk sub-count */}
-            <div style={statCard(churnRisk.length > 0 ? 'rgba(248,113,113,0.30)' : expiring30.length > 0 ? 'rgba(217,119,6,0.15)' : undefined)}>
+            <button {...filterCard(churnRisk.length > 0 ? 'churn' : 'expiring', churnRisk.length > 0 ? 'rgba(248,113,113,0.30)' : expiring30.length > 0 ? 'rgba(217,119,6,0.15)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Expiring ≤30 Days</div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: churnRisk.length > 0 ? 'var(--theme-red)' : expiring30.length > 0 ? 'var(--theme-amber)' : 'var(--theme-green)', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 32, fontWeight: 800, color: churnRisk.length > 0 ? 'var(--theme-red-text)' : expiring30.length > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>
                 {expiring30.length}
               </div>
               {churnRisk.length > 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--theme-red)', fontWeight: 700, marginTop: 5 }}>⚠ {churnRisk.length} critical ≤7 days</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 5 }}>⚠ {churnRisk.length} critical ≤7 days</div>
               ) : (
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Within 30 days</div>
               )}
-            </div>
+            </button>
 
             {/* 4 — No Open Period */}
-            <div style={statCard(noPeriod.length > 0 ? 'rgba(248,113,113,0.35)' : undefined)}>
+            <button {...filterCard('noPeriod', noPeriod.length > 0 ? 'rgba(248,113,113,0.35)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>No Open Period</div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: noPeriod.length > 0 ? 'var(--theme-red)' : 'var(--theme-green)', lineHeight: 1.1 }}>{noPeriod.length}</div>
+              <div style={{ fontSize: 32, fontWeight: 800, color: noPeriod.length > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>{noPeriod.length}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Active clients — need setup</div>
-            </div>
+            </button>
 
             {/* 5 — MRR + ARR */}
             <div style={statCard()}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Est. Monthly Revenue</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--theme-accent)', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--theme-accent-ink)', lineHeight: 1.1 }}>
                 NPR {estMRR.toLocaleString('en-NP')}
               </div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>
                 {payingCount} paying · ARR{' '}
-                <span style={{ color: 'var(--theme-accent)', fontWeight: 700 }}>NPR {estARR.toLocaleString('en-NP')}</span>
+                <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>NPR {estARR.toLocaleString('en-NP')}</span>
               </div>
             </div>
 
@@ -229,12 +273,12 @@ export default function AdminDashboardOverview() {
               onClick={() => navigate('/admin/clients')}
             >
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Trial Signups</div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: trialSignups.length > 0 ? 'var(--theme-accent)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 32, fontWeight: 800, color: trialSignups.length > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
                 {trialSignups.length}
               </div>
               {wantToSub.length > 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--theme-red)', fontWeight: 700, marginTop: 5, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f87171', flexShrink: 0 }} />
+                <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 5, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--theme-red)', flexShrink: 0 }} />
                   {wantToSub.length} want{wantToSub.length === 1 ? 's' : ''} to subscribe
                 </div>
               ) : (
@@ -249,13 +293,24 @@ export default function AdminDashboardOverview() {
           <div className="card" style={{ padding: 0 }}>
             <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>All Properties</span>
+              {/* A placeholder is a last-resort accessible name and disappears the moment you
+                  type. type="search" + a real label, per DESIGN.md's every-field-needs-htmlFor. */}
+              <label htmlFor="admin-client-search" className="sr-only">Search properties by name or location</label>
               <input
-                type="text" value={search} onChange={e => setSearch(e.target.value)}
+                id="admin-client-search"
+                type="search" value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search by name or location…"
                 className="form-select" style={{ fontSize: 12, maxWidth: 220 }}
               />
+              {/* Without this the table just silently shows fewer rows than the operator expects
+                  and there is nothing on screen saying why, or how to get back. */}
+              {activeFilter && (
+                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setFilter(null)}>
+                  Filtered: {activeFilter.label} ({visibleSorted.length}) · clear ✕
+                </button>
+              )}
               <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-                MRR: <span style={{ color: 'var(--theme-accent)', fontWeight: 700 }}>NPR {estMRR.toLocaleString('en-NP')}</span>
+                MRR: <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>NPR {estMRR.toLocaleString('en-NP')}</span>
                 {' '}· {payingCount} paying
               </span>
             </div>
@@ -280,7 +335,18 @@ export default function AdminDashboardOverview() {
                   {visibleSorted.length === 0 && (
                     <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>No properties match "{search}".</td></tr>
                   )}
-                  {visibleSorted.map(c => {
+                  {visibleSorted.map((c, idx) => {
+                    // The rows are ALREADY sorted needs-attention → healthy → inactive, and that
+                    // grouping was invisible: no divider, no badge, no header, so an operator
+                    // scanning the list could not tell where trouble ended and healthy began. The
+                    // page did the analysis and then threw the result away.
+                    const bandOf = x => !x.is_active ? 'inactive' : needsAttention.has(x.id) ? 'attention' : 'healthy'
+                    const band = bandOf(c)
+                    const showBandHeader = idx === 0 || bandOf(visibleSorted[idx - 1]) !== band
+                    const bandLabel = { attention: 'Needs attention', healthy: 'Healthy', inactive: 'Inactive' }[band]
+                    const bandCount = visibleSorted.filter(x => bandOf(x) === band).length
+                    const bandColor = { attention: 'var(--theme-amber-text)', healthy: 'var(--theme-green-text)', inactive: 'var(--theme-text3)' }[band]
+
                     const mrr     = clientMRR(c)
                     const endDate = c.ims_ends_at || c.subscription_ends_at
                     // IMS-specific status, matching this column's own tooltip ("IMS subscription
@@ -303,10 +369,10 @@ export default function AdminDashboardOverview() {
                     }
 
                     let typeLabel, typeColor
-                    if (!c.is_active)       { typeLabel = 'Inactive';     typeColor = 'var(--theme-text3)' }
-                    else if (isPaying)      { typeLabel = 'Subscription'; typeColor = 'var(--theme-green)' }
-                    else if (isTrial)       { typeLabel = 'Trial';        typeColor = 'var(--theme-accent)' }
-                    else if (sub.days !== null && sub.days < 0) { typeLabel = 'Expired'; typeColor = 'var(--theme-red)' }
+                    if (!c.is_active)       { typeLabel = 'Inactive';     typeColor = 'var(--theme-text2)' }
+                    else if (isPaying)      { typeLabel = 'Subscription'; typeColor = 'var(--theme-green-text)' }
+                    else if (isTrial)       { typeLabel = 'Trial';        typeColor = 'var(--theme-accent-ink)' }
+                    else if (sub.days !== null && sub.days < 0) { typeLabel = 'Expired'; typeColor = 'var(--theme-red-text)' }
                     else                    { typeLabel = 'No billing';   typeColor = 'var(--theme-text3)' }
 
                     const period = clientPeriods[c.id]
@@ -317,14 +383,22 @@ export default function AdminDashboardOverview() {
                     const hrExpiring = hrDays !== null && hrDays <= 30 && hrDays >= 0
 
                     return (
-                      <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45, cursor: 'pointer' }}
+                      <Fragment key={c.id}>
+                      {showBandHeader && (
+                        <tr>
+                          <td colSpan={9} style={{ padding: '10px 12px 4px', fontSize: 10, fontWeight: 800, letterSpacing: '0.09em', textTransform: 'uppercase', color: bandColor, background: 'var(--theme-bg)' }}>
+                            {bandLabel} ({bandCount})
+                          </td>
+                        </tr>
+                      )}
+                      <tr style={{ cursor: 'pointer' }}
                         onClick={() => switchAdminClient(c.id, c.name)}>
 
                         {/* Property + active-today dot */}
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                             {isActiveToday && (
-                              <span title="Active today" style={{ width: 7, height: 7, borderRadius: '50%', background: '#34d399', flexShrink: 0 }} />
+                              <span title="Active today" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--theme-green)', flexShrink: 0 }} />
                             )}
                             <div>
                               <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{c.name}</div>
@@ -337,13 +411,13 @@ export default function AdminDashboardOverview() {
                         <td>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                             {c.ims_enabled !== false && (
-                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS</span>
+                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS</span>
                             )}
                             {c.hr_enabled && (
-                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green)', border: '1px solid rgba(52,211,153,0.18)' }}>HR</span>
+                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.18)' }}>HR</span>
                             )}
                             {c.pos_enabled && (
-                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple)', border: '1px solid rgba(167,139,250,0.2)' }}>POS</span>
+                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)', border: '1px solid rgba(167,139,250,0.2)' }}>POS</span>
                             )}
                           </div>
                         </td>
@@ -358,7 +432,7 @@ export default function AdminDashboardOverview() {
                         </td>
 
                         {/* Monthly Value (IMS + HR + POS) */}
-                        <td style={{ textAlign: 'right', fontWeight: mrr > 0 ? 700 : 400, color: mrr > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>
+                        <td style={{ textAlign: 'right', fontWeight: mrr > 0 ? 700 : 400, color: mrr > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
                           {mrr > 0 ? (
                             <>
                               NPR {mrr.toLocaleString('en-NP')}
@@ -374,7 +448,7 @@ export default function AdminDashboardOverview() {
                           <div>
                             <span style={{ fontSize: 12, color: typeColor }}>{typeLabel}</span>
                             {hrExpiring && c.hr_enabled && (
-                              <div style={{ fontSize: 10, color: 'var(--theme-amber)', marginTop: 2 }}>HR exp. {hrDays}d</div>
+                              <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2 }}>HR exp. {hrDays}d</div>
                             )}
                           </div>
                         </td>
@@ -387,7 +461,7 @@ export default function AdminDashboardOverview() {
                         {/* Subscription badge */}
                         <td>
                           {sub.label
-                            ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: sub.color, background: sub.bg, border: `1px solid ${sub.border}` }}>{sub.label}</span>
+                            ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)', color: sub.color, background: sub.bg, border: `1px solid ${sub.border}` }}>{sub.label}</span>
                             : <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>—</span>}
                         </td>
 
@@ -396,7 +470,7 @@ export default function AdminDashboardOverview() {
                           {isOpen ? (
                             <span style={{ fontSize: 12, color: 'var(--theme-text1)' }}>
                               {BS_MONTHS[period.bs_month - 1]} {period.bs_year}
-                              {' '}<span style={{ fontSize: 10, color: 'var(--theme-green)' }}>● Open</span>
+                              {' '}<span style={{ fontSize: 10, color: 'var(--theme-green-text)' }}>● Open</span>
                             </span>
                           ) : period ? (
                             <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
@@ -404,7 +478,7 @@ export default function AdminDashboardOverview() {
                               {' '}<span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>● Closed</span>
                             </span>
                           ) : (
-                            <span style={{ fontSize: 11, color: 'var(--theme-red)', fontWeight: 600 }}>⚠ No period</span>
+                            <span style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 600 }}>⚠ No period</span>
                           )}
                         </td>
 
@@ -412,16 +486,21 @@ export default function AdminDashboardOverview() {
                         <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                             <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
+                              onClick={() => switchAdminClient(c.id, c.name)}>
+                              View as
+                            </button>
+                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
                               onClick={() => { switchAdminClient(c.id, c.name); navigate('/periods') }}>
                               Periods
                             </button>
-                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.3)' }}
+                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent-ink)', borderColor: 'rgba(201,168,76,0.3)' }}
                               onClick={() => navigate('/admin/clients')}>
                               Manage →
                             </button>
                           </div>
                         </td>
                       </tr>
+                      </Fragment>
                     )
                   })}
                 </tbody>
@@ -430,7 +509,7 @@ export default function AdminDashboardOverview() {
                     <td colSpan={3} style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--theme-text2)', fontSize: 12 }}>
                       Total — {payingCount} paying · {active.length - payingCount} non-paying
                     </td>
-                    <td style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 800, color: 'var(--theme-accent)', fontSize: 15 }}>
+                    <td style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 15 }}>
                       NPR {estMRR.toLocaleString('en-NP')}
                     </td>
                     <td colSpan={5} />

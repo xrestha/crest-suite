@@ -286,7 +286,24 @@ export function AuthProvider({ children }) {
   // guard_profiles_privileged_columns()'s allow-list. The RPC validates group membership and
   // fails closed. Reloading the profile afterwards re-runs the whole waterfall against the new
   // outlet, which is what repoints clientId and every page's data.
+  //
+  // The offline-queue check lives HERE rather than in the caller. It used to sit in Layout.js's
+  // handler, which made it a property of one particular switcher UI — any second entry point
+  // (the Group Console's outlet links) would have had to reimplement it, and a missed copy
+  // silently flushes a queued write against the wrong tenant. Guarding the privileged action
+  // itself makes that unbypassable.
   async function switchOutlet(targetClientId) {
+    try {
+      const { getQueue, getPosOrderQueue } = await import('../utils/offlineQueue')
+      // Both queues matter: stock ops write against the current tenant just as POS orders do.
+      const [stockOps, posOrders] = await Promise.all([getQueue(), getPosOrderQueue()])
+      const pending = (stockOps?.length || 0) + (posOrders?.length || 0)
+      if (pending > 0) {
+        return { error: { message: `${pending} offline change${pending === 1 ? '' : 's'} still syncing — reconnect and let them finish before switching outlet.` } }
+      }
+    } catch {
+      // No offline store on this device: nothing queued, nothing to protect.
+    }
     const { error } = await supabase.rpc('set_active_outlet', { p_client_id: targetClientId || null })
     if (error) return { error }
     // sessionStorage caches are namespaced per clientId, but clearing is cheaper than reasoning

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, useMemo } from 'react'
 
 // Curated, trending palettes (Tokyo Night, Dracula, Nord, Catppuccin, Rosé Pine, Solarized…).
 // `sidebar` is theme-appropriate (dark sidebar for dark themes, light for light) so the sidebar
@@ -202,8 +202,25 @@ export function ThemeProvider({ children }) {
     switchPreset(key || (themeKey === 'dark' ? 'dark' : 'light'))
   }
 
+  // The -text/-ink variants exist only on the five light presets — a dark preset's base signal
+  // colour is already legible as type, so there was nothing to darken. applyTheme() resolves that
+  // asymmetry for CSS; this resolves it for JS.
+  //
+  // It matters because Recharts reads plain values, not CSS variables: a chart that wants the
+  // legible variant would otherwise have to write `colors.greenText || colors.green` at every
+  // call site, and the one place someone forgets is a dark-preset crash or a silent revert to
+  // the low-contrast base. Resolving once here means `resolved.greenText` is always a colour.
+  const resolved = useMemo(() => ({
+    ...colors,
+    greenText:  colors.greenText  || colors.green,
+    redText:    colors.redText    || colors.red,
+    amberText:  colors.amberText  || colors.amber,
+    purpleText: colors.purpleText || colors.purple,
+    accentInk:  colors.accentInk  || colors.accent,
+  }), [colors])
+
   return (
-    <ThemeContext.Provider value={{ themeKey, colors, switchPreset, updateColor, resetToPreset, PRESETS }}>
+    <ThemeContext.Provider value={{ themeKey, colors: resolved, switchPreset, updateColor, resetToPreset, PRESETS }}>
       {children}
     </ThemeContext.Provider>
   )

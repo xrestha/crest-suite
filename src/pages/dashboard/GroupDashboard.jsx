@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
 import SuiteGate from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
-import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
 
 // Multi-Outlet Group Console — every branch in the group on one screen.
 //
@@ -24,15 +24,19 @@ import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth } from '../../utils/bsCale
 const fmtNpr = n => n == null ? '—' : `NPR ${Math.round(n).toLocaleString('en-NP')}`
 const fmtPct = n => n == null || !isFinite(n) ? '—' : `${n.toFixed(1)}%`
 
+// Every percentage on this page is TEXT, so these are the -text variants, not the base tokens.
+// The base signal colours are tuned as fills and dots; used as type on the five light presets
+// they measure as low as 2.05:1, well under AA.
 function pctColor(v, good, warn) {
   if (v == null || !isFinite(v)) return 'var(--theme-text3)'
-  if (v <= good) return 'var(--theme-green)'
-  if (v <= warn) return 'var(--theme-amber)'
-  return 'var(--theme-red)'
+  if (v <= good) return 'var(--theme-green-text)'
+  if (v <= warn) return 'var(--theme-amber-text)'
+  return 'var(--theme-red-text)'
 }
 
 export default function GroupDashboard() {
-  const { groupId } = useAuth()
+  const { groupId, clientId, canSwitchOutlet, switchOutlet } = useAuth()
+  const [switching, setSwitching] = useState(null)
   const today = getBsToday()
   const [bsYear, setBsYear] = useState(today.year)
   const [bsMonth, setBsMonth] = useState(today.month)
@@ -45,9 +49,16 @@ export default function GroupDashboard() {
     setError('')
     // pos_orders has no period_id or BS columns — only AD closed_at — so the BS month is
     // converted here and passed through, matching SalesReport.jsx's own convention.
+    //
+    // formatAd, NOT .toISOString(). bsToAd returns a Date at local midnight; .toISOString() then
+    // converts using the runtime's offset, which at Nepal's +05:45 lands on the PREVIOUS day and
+    // shifted both bounds back one day for every user in the country. formatAd reads the Date's
+    // local getters, so the calendar day survives. get_group_summary declares both parameters as
+    // `date`, so a bare YYYY-MM-DD is the right shape here — see bsDayBoundaryIso in bsCalendar.js
+    // for the offset-carrying form used where a timestamptz column is filtered directly.
     const start = bsToAd(bsYear, bsMonth, 1)
     const end = bsToAd(bsYear, bsMonth, daysInBsMonth(bsYear, bsMonth))
-    const iso = d => d instanceof Date && !isNaN(d) ? d.toISOString().slice(0, 10) : null
+    const iso = d => d instanceof Date && !isNaN(d) ? formatAd(d) : null
     const { data, error: err } = await supabase.rpc('get_group_summary', {
       p_bs_year: bsYear,
       p_bs_month: bsMonth,
@@ -60,6 +71,16 @@ export default function GroupDashboard() {
   }, [bsYear, bsMonth])
 
   useEffect(() => { if (groupId) load() }, [groupId, load])
+
+  async function handleGoToOutlet(targetId) {
+    setSwitching(targetId)
+    setError('')
+    const { error: err } = await switchOutlet(targetId)
+    setSwitching(null)
+    // switchOutlet refuses while the offline queue is non-empty, so this is a real message the
+    // reader needs, not a generic failure.
+    if (err) setError(err.message || 'Could not switch outlet.')
+  }
 
   const included = rows.filter(r => r.is_included)
   const excluded = rows.filter(r => !r.is_included)
@@ -76,7 +97,7 @@ export default function GroupDashboard() {
   const years = [today.year - 1, today.year, today.year + 1]
 
   return (
-    <div style={{ padding: '24px 28px' }}>
+    <div>
       <div className="page-header no-print">
         <div>
           <h1 className="page-title">Group Console</h1>
@@ -96,24 +117,32 @@ export default function GroupDashboard() {
           </div>
         ) : (
           <>
-            <div className="card no-print" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <select className="form-select" style={{ maxWidth: 140 }} value={bsMonth} onChange={e => setBsMonth(Number(e.target.value))}>
-                {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-              </select>
-              <select className="form-select" style={{ maxWidth: 120 }} value={bsYear} onChange={e => setBsYear(Number(e.target.value))}>
-                {years.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
+            {/* flex-end, not center: the two labelled fields are taller than the button, and
+                centring would float the button halfway up their labels. */}
+            <div className="card no-print" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div className="form-field" style={{ margin: 0 }}>
+                <label htmlFor="group-bs-month">Month</label>
+                <select id="group-bs-month" className="form-select" style={{ maxWidth: 140 }} value={bsMonth} onChange={e => setBsMonth(Number(e.target.value))}>
+                  {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                </select>
+              </div>
+              <div className="form-field" style={{ margin: 0 }}>
+                <label htmlFor="group-bs-year">Year</label>
+                <select id="group-bs-year" className="form-select" style={{ maxWidth: 120 }} value={bsYear} onChange={e => setBsYear(Number(e.target.value))}>
+                  {years.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
               <button className="btn btn-ghost" onClick={load} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
             </div>
 
-            {error && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 13 }}>{error}</p>}
+            {error && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13 }}>{error}</p>}
 
             {/* Coverage first, not as a footnote. A group total that silently omits an outlet is
                 worse than no total, so the reader is told what this figure covers before they
                 read it. */}
             {(excluded.length > 0 || noPeriod.length > 0) && (
               <div className="card" style={{ marginBottom: 16, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)' }}>
-                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-amber)' }}>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
                   Showing {included.length} of {rows.length} outlets
                 </p>
                 {excluded.length > 0 && (
@@ -170,10 +199,25 @@ export default function GroupDashboard() {
                     const rev = Number(r.revenue) || 0
                     const fc = r.is_included && rev > 0 ? (Number(r.net_purchases) / rev) * 100 : null
                     const lab = r.is_included && rev > 0 ? (Number(r.payroll) / rev) * 100 : null
+                    // No opacity dimming on excluded rows. It read as de-emphasis but multiplies
+                    // straight through the text colour — text2 at 0.55 measured under 3:1 — and the
+                    // "No Suite Pro" badge plus a row of em-dashes already says the same thing
+                    // without costing anyone legibility.
                     return (
-                      <tr key={r.client_id} style={{ opacity: r.is_included ? 1 : 0.55 }}>
+                      <tr key={r.client_id}>
                         <td>
-                          {r.client_name}
+                          {/* The point of spotting a bad outlet here is to go into it. Without this
+                              the reader has to leave, find the sidebar switcher and re-pick by name. */}
+                          {canSwitchOutlet && r.client_id !== clientId ? (
+                            <button
+                              className="btn-linklike"
+                              onClick={() => handleGoToOutlet(r.client_id)}
+                              disabled={switching === r.client_id}
+                            >
+                              {switching === r.client_id ? 'Switching…' : r.client_name}
+                            </button>
+                          ) : r.client_name}
+                          {r.client_id === clientId && <span className="badge-yellow" style={{ marginLeft: 6 }}>Viewing</span>}
                           {!r.is_included && <span className="badge-gray" style={{ marginLeft: 6 }}>No Suite Pro</span>}
                           {r.is_included && !r.has_period && <span className="badge-amber" style={{ marginLeft: 6 }}>No period</span>}
                         </td>
@@ -187,6 +231,21 @@ export default function GroupDashboard() {
                     )
                   })}
                 </tbody>
+                {/* The four cards above ARE these totals, but they sit a screen-scroll away from
+                    the rows they total. A tfoot puts the sum where the eye already is. */}
+                {!loading && included.length > 0 && (
+                  <tfoot>
+                    <tr style={{ fontWeight: 700 }}>
+                      <td>Group total ({included.length} outlet{included.length === 1 ? '' : 's'})</td>
+                      <td style={{ textAlign: 'right' }}>{fmtNpr(groupRevenue)}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtNpr(groupPurchases)}</td>
+                      <td style={{ textAlign: 'right', color: pctColor(groupFc, 35, 45) }}>{fmtPct(groupFc)}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtNpr(groupPayroll)}</td>
+                      <td style={{ textAlign: 'right', color: pctColor(groupLabour, 25, 35) }}>{fmtPct(groupLabour)}</td>
+                      <td style={{ textAlign: 'right' }}>{groupCovers ? groupCovers.toLocaleString('en-NP') : '—'}</td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           </>

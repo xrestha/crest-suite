@@ -16,11 +16,42 @@
    font/padding shrink from the original 1-page pass is gone. What stays: no duplicate header, no
    floating-card chrome, no dead hover affordance, plus real pagination control so a section
    doesn't split awkwardly across a page boundary. */
+@page {
+  size: A4 portrait;
+  margin: 16mm 14mm;
+}
+
 @media print {
   /* The letterhead inside the report already carries the title — the app-chrome page header
      shown above it on every other page (title + subtitle) is pure duplication once printed. */
   .owner-report-page-header {
     display: none !important;
+  }
+
+  /* Repeat column headers on every page a table spills onto. Layout.css already does this, but
+     scoped to .print-sheet-table, which this report does not use — so a long table (Menu
+     Engineering, Vendor aging, Dead Stock) lost its headers the moment it crossed a page
+     boundary, leaving a reader with columns of bare numbers. */
+  .owner-report-table thead {
+    display: table-header-group;
+  }
+  .owner-report-table tfoot {
+    display: table-row-group;
+  }
+
+  /* Page identification. The letterhead renders once, at the top of page 1, so page 3 of a
+     nine-section report carried nothing saying which business or period it belonged to — a real
+     problem for a document that gets printed, handed over and filed. */
+  .owner-report-running-foot {
+    display: block !important;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    font-size: 9px;
+    color: #555 !important;
+    border-top: 1px solid #ccc;
+    padding-top: 3px;
   }
 
   /* Read as a plain printed page, not a floating rounded UI card. */

@@ -24,6 +24,21 @@ import FoodBeverageSplit from '../../modules/dashboard/FoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
 
+// Daily Purchases vs Sales — fixed hex for the same reason COST_BREAKDOWN_COLORS is (see the long
+// note at its definition): CSS var() does not resolve in Recharts SVG props, and the semantic
+// token set is five roles rather than five distinguishable hues.
+//
+// The shape matters more than the values here. This chart draws a metric and its month-end
+// PROJECTION, and those were four unrelated hues — purchases gold, its projection red; sales
+// green, its projection violet. So the projection of purchases rendered in the one colour this
+// dashboard uses to mean "over threshold", and neither dashed line shared a hue with the solid
+// line it extends. A projection is the same measure, less certain: same hue, dash carries the
+// distinction. That drops the chart from four hues to two and makes the legend self-evident.
+const DAILY_TREND_COLORS = {
+  purchases: '#c9a84c', // gold — ties to the Food Cost card and the FC% trend line
+  sales:     '#34d399', // green
+}
+
 // Least-squares trend on a day→value map, extended to monthEndDay — shared by both the Sales and
 // Purchases month-end projections on the Daily Purchases vs Sales chart. Dampened so a steep slope
 // fitted to a few volatile early days can't run away: each projected day is clamped to
@@ -651,6 +666,35 @@ export default function ClientDashboard() {
   const nextAdvMonth = activePeriod ? (activePeriod.bs_month === 12 ? 1 : activePeriod.bs_month + 1) : null
 
   const periodLabel = activePeriod ? `${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}` : '—'
+
+  // How far into the period we are.
+  //
+  // Food Cost % and Net Margin % divide a numerator that arrives in LUMPS (a bulk restock) by a
+  // denominator that accrues DAILY (sales). Early in a month those are wildly out of step: a
+  // restaurant three days in, having just bought a month of rice, reads a Food Cost % in the
+  // hundreds and gets painted red under a tooltip saying "investigate immediately" — then reads a
+  // healthy 33% green by day 30 with nothing having changed. Nothing on the card said the figure
+  // was partial.
+  //
+  // The formula is NOT changed — this is the deliberate periodic-inventory model. What changes is
+  // that an unsettled figure no longer wears a verdict colour it hasn't earned.
+  const bsNow = getBsToday()
+  const isCurrentPeriod = !!activePeriod && activePeriod.bs_year === bsNow.year && activePeriod.bs_month === bsNow.month
+  const periodDays = activePeriod ? daysInBsMonth(activePeriod.bs_year, activePeriod.bs_month) : 30
+  const dayOfPeriod = isCurrentPeriod ? bsNow.day : periodDays
+  // Ten days is roughly where a single bulk purchase stops dominating a month's sales base. Before
+  // that the ratio is arithmetic, not a signal.
+  const SETTLE_DAY = 10
+  const periodTooEarly = isCurrentPeriod && dayOfPeriod < SETTLE_DAY
+  const partialNote = isCurrentPeriod ? `Day ${dayOfPeriod} of ${periodDays} · settles at month end` : null
+  // Grey, not green/amber/red, while the ratio is still meaningless. A neutral number that says
+  // "not yet meaningful" is more trustworthy than a red one that isn't true.
+  const verdict = (value, bands) => {
+    if (value == null) return 'var(--theme-text2)'
+    if (periodTooEarly) return 'var(--theme-text1)'
+    return bands(value)
+  }
+
   const fcPct = stats?.revenueTotal > 0 ? (stats.purchaseTotal / stats.revenueTotal) * 100 : null
   const ohPct = stats?.revenueTotal > 0 && stats?.overheadTotal > 0 ? (stats.overheadTotal / stats.revenueTotal) * 100 : null
   const netMarginPct = stats?.revenueTotal > 0
@@ -774,7 +818,7 @@ export default function ClientDashboard() {
       background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)',
       boxShadow: 'var(--theme-card-shadow)',
       padding: '10px 14px', cursor: onClick ? 'pointer' : 'default',
-      transition: 'border-color 0.15s'
+      transition: 'border-color var(--motion-fast) var(--ease-standard)'
     },
     ...(onClick ? {
       onClick,
@@ -828,13 +872,13 @@ export default function ClientDashboard() {
       style={{
         background: 'color-mix(in srgb, var(--theme-purple) 8%, transparent)',
         border: '1px dashed color-mix(in srgb, var(--theme-purple) 40%, transparent)',
-        borderRadius: 'var(--radius-lg)', padding: '10px 14px', cursor: 'pointer', transition: 'border-color 0.15s'
+        borderRadius: 'var(--radius-lg)', padding: '10px 14px', cursor: 'pointer', transition: 'border-color var(--motion-fast) var(--ease-standard)'
       }}
     >
       <div style={{ ...kpiLabelStyle, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
         <span>{label}</span><Lock size={12} aria-hidden="true" />
       </div>
-      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-purple)', lineHeight: 1.2 }}>Unlock with {tier}</div>
+      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-purple-text)', lineHeight: 1.2 }}>Unlock with {tier}</div>
       <div style={kpiSubtextStyle}>{blurb} · View plans →</div>
     </div>
   )
@@ -886,7 +930,7 @@ export default function ClientDashboard() {
     <div {...kpiCard(() => navigate('/purchases'))}>
       {kpiIcon(ArrowDown, 'blue')}
       <div style={kpiLabelStyle}>Net Purchases</div>
-      <div style={{ ...kpiValueStyle(18), color: 'var(--theme-accent)' }}>
+      <div style={{ ...kpiValueStyle(18), color: 'var(--theme-accent-ink)' }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
       </div>
       <div style={kpiSubtextStyle}>Gross − returns · {periodLabel} →</div>
@@ -897,7 +941,7 @@ export default function ClientDashboard() {
     <div {...kpiCard(() => navigate('/sales'))}>
       {kpiIcon(ArrowUp, 'green')}
       <div style={kpiLabelStyle}>Revenue</div>
-      <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green)' }}>
+      <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green-text)' }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
       </div>
       <div style={kpiSubtextStyle}>From sales entries →</div>
@@ -908,16 +952,25 @@ export default function ClientDashboard() {
     <div {...kpiCard(() => navigate(canVariance ? '/variance' : '/summary'))}>
       {kpiIcon(Percent, 'amber')}
       <div style={kpiLabelStyle}>
-        <Tip text="Net purchases ÷ revenue × 100. Shows what portion of sales goes to ingredient cost. Healthy range: 28–35% for Nepal F&B." width={240}>Food Cost %</Tip>
+        {/* Keeps the industry label — Owner Dashboard, the Group Console, the Monthly Owner Report,
+            Period Comparison and Help's glossary all call this Food Cost %, and renaming it on one
+            page out of six would trade a small precision gain for a real consistency loss. What is
+            fixed is the DESCRIPTION: this figure divides purchases by sales and ignores opening and
+            closing stock entirely (the deliberate periodic model), so "what portion of sales goes to
+            ingredient cost" was telling a non-accountant owner something the number does not say.
+            Whether the whole product should adopt a more literal name is a product-wide call. */}
+        <Tip text="What you spent on stock this period, against what you sold. Buy a month of rice in one go and this spikes — it settles once you finish the month-end stock count. Healthy range once settled: 28–35% for Nepal F&B." width={260}>Food Cost %</Tip>
       </div>
       <div style={{
         ...kpiValueStyle(22, 800),
-        color: fcPct == null ? 'var(--theme-text2)' : fcPct <= 35 ? 'var(--theme-green)' : fcPct <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)'
+        color: verdict(fcPct, v => v <= 35 ? 'var(--theme-green-text)' : v <= 45 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
       }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
       </div>
       <div style={kpiSubtextStyle}>
-        <Tip text="Industry benchmark for Nepal cafes & restaurants. Green = healthy, yellow = watch, red = investigate immediately." width={240}>Target 28–35%</Tip> →
+        {partialNote
+          ? partialNote
+          : <><Tip text="Industry benchmark for Nepal cafes & restaurants. Green = healthy, yellow = watch, red = investigate immediately." width={240}>Target 28–35%</Tip> →</>}
       </div>
     </div>
   ) : null
@@ -930,7 +983,7 @@ export default function ClientDashboard() {
       </div>
       <div style={{
         ...kpiValueStyle(22, 800),
-        color: ohPct == null ? 'var(--theme-text2)' : ohPct <= 50 ? 'var(--theme-green)' : ohPct <= 65 ? 'var(--theme-accent)' : 'var(--theme-red)'
+        color: ohPct == null ? 'var(--theme-text2)' : ohPct <= 50 ? 'var(--theme-green-text)' : ohPct <= 65 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)'
       }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : ohPct != null ? `${ohPct.toFixed(1)}%` : '—'}
       </div>
@@ -950,11 +1003,12 @@ export default function ClientDashboard() {
       </div>
       <div style={{
         ...kpiValueStyle(22, 800),
-        color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green)' : netMarginPct >= 10 ? 'var(--theme-accent)' : 'var(--theme-red)'
+        color: verdict(netMarginPct, v => v >= 20 ? 'var(--theme-green-text)' : v >= 10 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
       }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
       </div>
-      <div style={kpiSubtextStyle}>After food & overheads · target ≥20%</div>
+      {/* Inherits Food Cost's lumpiness through purchaseTotal, so it carries the same caveat. */}
+      <div style={kpiSubtextStyle}>{partialNote || 'After food & overheads · target ≥20%'}</div>
     </div>
   ) : null
 
@@ -962,7 +1016,7 @@ export default function ClientDashboard() {
     <div {...kpiCard(null)}>
       <div style={kpiLabelStyle}>Active Period</div>
       <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : periodLabel}</div>
-      <div style={{ ...kpiSubtextStyle, color: activePeriod ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+      <div style={{ ...kpiSubtextStyle, color: activePeriod ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
         {activePeriod ? '● Open' : '● No open period'}
       </div>
     </div>
@@ -1001,10 +1055,10 @@ export default function ClientDashboard() {
       <div style={kpiLabelStyle}>
         <Tip text="Dishes whose current food-cost % is above their target — priced too low to hit the margin you set. Open the Menu Repricing report for the prices to charge." width={300}>Menu Health</Tip>
       </div>
-      <div style={{ ...kpiValueStyle(18), color: stats?.underpricedCount > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+      <div style={{ ...kpiValueStyle(18), color: stats?.underpricedCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${stats?.underpricedCount || 0} of ${stats?.costedPricedCount || 0}`}
       </div>
-      <div style={{ ...kpiSubtextStyle, color: stats?.menuOpportunityTotal > 0 ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>
+      <div style={{ ...kpiSubtextStyle, color: stats?.menuOpportunityTotal > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
         {loading ? 'under target →'
           : stats?.menuOpportunityTotal > 0
             ? `NPR ${Math.round(stats.menuOpportunityTotal).toLocaleString('en-NP')}/mo opportunity →`
@@ -1020,7 +1074,7 @@ export default function ClientDashboard() {
       <div style={kpiLabelStyle}>
         <Tip text="Total NPR value of wastage recorded this period — qty wasted × unit rate per item." width={220}>Wastage Value</Tip>
       </div>
-      <div style={{ ...kpiValueStyle(18), color: stats?.wastageValueTotal > 0 ? 'var(--theme-red)' : 'var(--theme-text1)' }}>
+      <div style={{ ...kpiValueStyle(18), color: stats?.wastageValueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(stats?.wastageValueTotal || 0).toLocaleString('en-NP')}`}
       </div>
       <div style={kpiSubtextStyle}>This period →</div>
@@ -1074,7 +1128,7 @@ export default function ClientDashboard() {
                       {categorySpend.map((entry, i) => <Cell key={entry.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
                       formatter={(v, name) => [`NPR ${Number(v).toLocaleString()} (${((v / categorySpendTotal) * 100).toFixed(1)}%)`, name]}
                       labelFormatter={name => name}
                     />
@@ -1084,7 +1138,7 @@ export default function ClientDashboard() {
                   {categorySpend.map((entry, i) => {
                     return (
                       <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
+                        <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
                         <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{entry.name}</span>
                         {big && <span style={{ fontSize: 10, color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString()}</span>}
                         <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
@@ -1105,10 +1159,14 @@ export default function ClientDashboard() {
           smallHeight={160}
           cardStyle={{ minWidth: 0 }}
           legend={<>
-            <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-accent)' }}>●</span> Purchases</span>
-            {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-green)' }}>●</span> Sales</span>}
-            {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-purple)', letterSpacing: '-2px' }}>┄</span> Sales Proj.</span>}
-            {purchProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: 'var(--theme-red)', letterSpacing: '-2px' }}>┄</span> Purch. Proj.</span>}
+            {/* A legend swatch must equal the series it labels, so these take the chart's own
+                fixed hex rather than a theme token — the label text beside each carries the
+                readable contrast. The two projections repeat their metric's hue and are told
+                apart by the dashed glyph, exactly as the lines are. */}
+            <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.purchases }}>●</span> Purchases</span>
+            {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.sales }}>●</span> Sales</span>}
+            {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.sales, letterSpacing: '-2px' }}>┄</span> Sales Proj.</span>}
+            {purchProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.purchases, letterSpacing: '-2px' }}>┄</span> Purch. Proj.</span>}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
           </>}
           footer={<>
@@ -1116,12 +1174,12 @@ export default function ClientDashboard() {
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '2px 16px' }}>
                 {salesProjection && (
                   <span>
-                    Projected month-end revenue: <strong style={{ color: 'var(--theme-purple)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString()}</strong>
+                    Projected month-end revenue: <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString()}</strong>
                   </span>
                 )}
                 {purchProjection && (
                   <span>
-                    Projected month-end purchases: <strong style={{ color: 'var(--theme-red)' }}>NPR {purchProjection.projectedMonthEnd.toLocaleString()}</strong>
+                    Projected month-end purchases: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchProjection.projectedMonthEnd.toLocaleString()}</strong>
                   </span>
                 )}
                 <span style={{ color: 'var(--theme-text3)' }}>· trend estimate</span>
@@ -1143,12 +1201,12 @@ export default function ClientDashboard() {
                   {big && (
                     <defs>
                       <linearGradient id="dtPurchasesFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={colors.accent} stopOpacity={0.28} />
-                        <stop offset="100%" stopColor={colors.accent} stopOpacity={0} />
+                        <stop offset="0%" stopColor={DAILY_TREND_COLORS.purchases} stopOpacity={0.28} />
+                        <stop offset="100%" stopColor={DAILY_TREND_COLORS.purchases} stopOpacity={0} />
                       </linearGradient>
                       <linearGradient id="dtSalesFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={colors.green} stopOpacity={0.28} />
-                        <stop offset="100%" stopColor={colors.green} stopOpacity={0} />
+                        <stop offset="0%" stopColor={DAILY_TREND_COLORS.sales} stopOpacity={0.28} />
+                        <stop offset="100%" stopColor={DAILY_TREND_COLORS.sales} stopOpacity={0} />
                       </linearGradient>
                     </defs>
                   )}
@@ -1156,23 +1214,23 @@ export default function ClientDashboard() {
                   <XAxis dataKey="day" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} interval={0} tickFormatter={v => v.replace('Day ', '')} />
                   <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
                   <Tooltip
-                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: big ? 12 : 11 }}
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: big ? 12 : 11 }}
                     labelStyle={{ color: colors.text1 }}
                     formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
                     labelFormatter={l => l}
                   />
                   {big ? (
-                    <Area type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2.5} fill="url(#dtPurchasesFill)" connectNulls dot={{ r: 3, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.accent }} {...chartMotion()} />
+                    <Area type="monotone" dataKey="purchases" name="Purchases" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2.5} fill="url(#dtPurchasesFill)" connectNulls dot={{ r: 3, fill: DAILY_TREND_COLORS.purchases, strokeWidth: 0 }} activeDot={{ r: 5, fill: DAILY_TREND_COLORS.purchases }} {...chartMotion()} />
                   ) : (
-                    <Line type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.accent }} {...chartMotion()} />
+                    <Line type="monotone" dataKey="purchases" name="Purchases" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2} connectNulls dot={{ r: 2, fill: DAILY_TREND_COLORS.purchases, strokeWidth: 0 }} activeDot={{ r: 4, fill: DAILY_TREND_COLORS.purchases }} {...chartMotion()} />
                   )}
                   {hasDailySales && (big ? (
-                    <Area type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={2.5} fill="url(#dtSalesFill)" connectNulls dot={{ r: 3, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.green }} {...chartMotion()} />
+                    <Area type="monotone" dataKey="sales" name="Sales" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2.5} fill="url(#dtSalesFill)" connectNulls dot={{ r: 3, fill: DAILY_TREND_COLORS.sales, strokeWidth: 0 }} activeDot={{ r: 5, fill: DAILY_TREND_COLORS.sales }} {...chartMotion()} />
                   ) : (
-                    <Line type="monotone" dataKey="sales" name="Sales" stroke={colors.green} strokeWidth={2} connectNulls dot={{ r: 2, fill: colors.green, strokeWidth: 0 }} activeDot={{ r: 4, fill: colors.green }} {...chartMotion()} />
+                    <Line type="monotone" dataKey="sales" name="Sales" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} connectNulls dot={{ r: 2, fill: DAILY_TREND_COLORS.sales, strokeWidth: 0 }} activeDot={{ r: 4, fill: DAILY_TREND_COLORS.sales }} {...chartMotion()} />
                   ))}
-                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={colors.purple} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.purple }} {...chartMotion()} />}
-                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={colors.red} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: colors.red }} {...chartMotion()} />}
+                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: DAILY_TREND_COLORS.sales }} {...chartMotion()} />}
+                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: DAILY_TREND_COLORS.purchases }} {...chartMotion()} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )
@@ -1180,10 +1238,10 @@ export default function ClientDashboard() {
               <>
                 {big && (
                   <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                    <StatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString()}`} color={colors.accent} />
-                    {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString()}`} color={colors.green} />}
-                    {salesProjection && <StatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString()}`} color={colors.purple} />}
-                    {purchProjection && <StatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString()}`} color={colors.red} />}
+                    <StatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString()}`} color={DAILY_TREND_COLORS.purchases} />
+                    {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString()}`} color={DAILY_TREND_COLORS.sales} />}
+                    {salesProjection && <StatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString()}`} color={DAILY_TREND_COLORS.sales} />}
+                    {purchProjection && <StatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString()}`} color={DAILY_TREND_COLORS.purchases} />}
                     <StatPill label="Period" value={periodLabel} />
                   </div>
                 )}
@@ -1227,7 +1285,7 @@ export default function ClientDashboard() {
                     <XAxis type="number" hide />
                     <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
                     <Tooltip
-                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
                       formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}${purchaseTotal > 0 ? ` (${((v / purchaseTotal) * 100).toFixed(1)}% of purchases)` : ''}`, p.payload.fullName || n]}
                       labelFormatter={() => ''}
                     />
@@ -1253,9 +1311,9 @@ export default function ClientDashboard() {
               title="Food Cost % — Monthly Trend"
               footer={<>
                 <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10, flexWrap: 'wrap' }}>
-                  <span style={{ color: 'var(--theme-green)' }}>● ≤35% Good</span>
-                  <span style={{ color: 'var(--theme-accent)' }}>● 35–45% Watch</span>
-                  <span style={{ color: 'var(--theme-red)' }}>● &gt;45% High</span>
+                  <span style={{ color: 'var(--theme-green-text)' }}>● ≤35% Good</span>
+                  <span style={{ color: 'var(--theme-accent-ink)' }}>● 35–45% Watch</span>
+                  <span style={{ color: 'var(--theme-red-text)' }}>● &gt;45% High</span>
                   <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period</span>
                 </div>
                 <p className="sr-only">{fcTrendSummary}</p>
@@ -1266,9 +1324,9 @@ export default function ClientDashboard() {
                 <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
                   {big && fcTrendAvg != null && (
                     <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                      <StatPill label="Average" value={`${fcTrendAvg.toFixed(1)}%`} color={colors.accent} />
-                      <StatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.green} />
-                      <StatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.red} />
+                      <StatPill label="Average" value={`${fcTrendAvg.toFixed(1)}%`} color={colors.text2} />
+                      <StatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.greenText} />
+                      <StatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.redText} />
                     </div>
                   )}
                   <div style={{ minWidth: Math.max(0, fcTrend.length * 64), height: big ? h - 60 : h }}>
@@ -1277,11 +1335,11 @@ export default function ClientDashboard() {
                         <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
                         <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
                         <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
-                        <ReferenceLine y={35} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '35%', fill: colors.green, fontSize: 9, position: 'right' }} />
-                        <ReferenceLine y={45} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '45%', fill: colors.red, fontSize: 9, position: 'right' }} />
-                        {big && fcTrendAvg != null && <ReferenceLine y={fcTrendAvg} stroke={colors.purple} strokeDasharray="2 3" strokeOpacity={0.7} label={{ value: `avg ${fcTrendAvg.toFixed(1)}%`, fill: colors.purple, fontSize: 9, position: 'insideBottomRight' }} />}
+                        <ReferenceLine y={35} stroke={colors.greenText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '35%', fill: colors.greenText, fontSize: 9, position: 'right' }} />
+                        <ReferenceLine y={45} stroke={colors.redText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '45%', fill: colors.redText, fontSize: 9, position: 'right' }} />
+                        {big && fcTrendAvg != null && <ReferenceLine y={fcTrendAvg} stroke={colors.text2} strokeDasharray="2 3" strokeOpacity={0.85} label={{ value: `avg ${fcTrendAvg.toFixed(1)}%`, fill: colors.text2, fontSize: 9, position: 'insideBottomRight' }} />}
                         <Tooltip
-                          contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11, color: 'var(--theme-text1)' }}
+                          contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--theme-text1)' }}
                           labelStyle={{ color: 'var(--theme-text1)' }}
                           itemStyle={{ color: 'var(--theme-text1)' }}
                           formatter={(v, _n, props) => {
@@ -1292,13 +1350,13 @@ export default function ClientDashboard() {
                             return [lines.join(' · '), 'Food Cost %']
                           }}
                         />
-                        <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false} {...chartMotion()}
+                        <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accentInk} connectNulls={false} {...chartMotion()}
                           dot={(props) => {
                             const { cx, cy, payload } = props
-                            const col = payload.fc <= 35 ? colors.green : payload.fc <= 45 ? colors.accent : colors.red
+                            const col = payload.fc <= 35 ? colors.greenText : payload.fc <= 45 ? colors.accentInk : colors.redText
                             return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
                           }}
-                          activeDot={{ r: 5, fill: colors.accent }}
+                          activeDot={{ r: 5, fill: colors.accentInk }}
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -1317,7 +1375,7 @@ export default function ClientDashboard() {
               title="Revenue vs Cost Breakdown"
               smallHeight={140}
               footer={<>
-                <div style={{ fontSize: 11, marginTop: 6, color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                <div style={{ fontSize: 11, marginTop: 6, color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                   Net margin: {netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
                   {netMarginPct != null && netMarginPct < 0 && ' — costs exceeded revenue this period'}
                 </div>
@@ -1328,7 +1386,7 @@ export default function ClientDashboard() {
                   {netMarginPct != null && netMarginPct > 0 ? '% of revenue' : '% of total cost'} · from Overheads page buckets
                 </div>
                 {laborBucketMissing && (
-                  <div style={{ fontSize: 10, marginTop: 4, color: 'var(--theme-amber)' }}>
+                  <div style={{ fontSize: 10, marginTop: 4, color: 'var(--theme-amber-text)' }}>
                     Labor not included — the Labor bucket on Overheads is empty this period, but HR payroll is NPR {Math.round(hrStats.payroll).toLocaleString('en-NP')}.
                   </div>
                 )}
@@ -1371,7 +1429,7 @@ export default function ClientDashboard() {
                         {costBreakdown.map(entry => <Cell key={entry.name} fill={COST_BREAKDOWN_COLORS[entry.name] || colors.text3} />)}
                       </Pie>
                       <Tooltip
-                        contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6, fontSize: 11 }}
+                        contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
                         formatter={(v, name) => [`NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })} (${(v / costBreakdownTotal * 100).toFixed(1)}%)`, name]}
                       />
                     </PieChart>
@@ -1379,7 +1437,7 @@ export default function ClientDashboard() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 6 }}>
                     {costBreakdown.map(entry => (
                       <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: 2, background: COST_BREAKDOWN_COLORS[entry.name] || colors.text3, flexShrink: 0 }} />
+                        <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: COST_BREAKDOWN_COLORS[entry.name] || colors.text3, flexShrink: 0 }} />
                         <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
                           {entry.name} <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</span>
                           {' '}<span style={{ color: 'var(--theme-text3)' }}>({(entry.value / costBreakdownTotal * 100).toFixed(1)}%)</span>
@@ -1427,8 +1485,8 @@ export default function ClientDashboard() {
                   {topVariance.map((row, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid var(--theme-bg)' }}>
                       <td style={{ padding: '5px 0', fontWeight: 600, color: 'var(--theme-text1)' }}>{row.name}</td>
-                      <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--theme-red)' }}>+{Number(row.variance.toFixed(1)).toLocaleString()} {row.uom}</td>
-                      <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-red)' }}>NPR {Number(row.value.toFixed(0)).toLocaleString()}</td>
+                      <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--theme-red-text)' }}>+{Number(row.variance.toFixed(1)).toLocaleString()} {row.uom}</td>
+                      <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {Number(row.value.toFixed(0)).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1452,7 +1510,7 @@ export default function ClientDashboard() {
                 No items below par.{' '}
                 <button
                   onClick={() => navigate('/reorder')} className="interactive-card"
-                  style={{ background: 'none', border: 'none', padding: '4px 6px', margin: '-4px -6px', font: 'inherit', color: 'var(--theme-accent)', cursor: 'pointer' }}
+                  style={{ background: 'none', border: 'none', padding: '4px 6px', margin: '-4px -6px', font: 'inherit', color: 'var(--theme-accent-ink)', cursor: 'pointer' }}
                 >Set par levels →</button>
               </p>
             ) : (
@@ -1464,7 +1522,7 @@ export default function ClientDashboard() {
                       <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>Stock: {item.currentStock} · Par: {item.par} {item.uom}</div>
                     </div>
                     <div style={{ textAlign: 'right', marginLeft: 12, flexShrink: 0 }}>
-                      <div style={{ fontSize: 11, color: 'var(--theme-red)', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}><ArrowDown size={11} aria-hidden="true" /> {item.shortfall} {item.uom}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}><ArrowDown size={11} aria-hidden="true" /> {item.shortfall} {item.uom}</div>
                       <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>NPR {item.estValue.toLocaleString()}</div>
                     </div>
                   </div>
@@ -1504,7 +1562,7 @@ export default function ClientDashboard() {
           borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
           background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
         }}>
-          <p style={{ color: 'var(--theme-red)', margin: 0, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <p style={{ color: 'var(--theme-red-text)', margin: 0, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
             <TriangleAlert size={14} aria-hidden="true" /> {msg}
           </p>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
@@ -1540,15 +1598,62 @@ export default function ClientDashboard() {
           onClick={() => navigate('/periods')} role="button" tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/periods') } }}
         >
-          <p style={{ color: 'var(--theme-accent)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert size={15} aria-hidden="true" /> No open period. Click here to create one in Periods →</p>
+          <p style={{ color: 'var(--theme-accent-ink)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert size={15} aria-hidden="true" /> No open period. Click here to create one in Periods →</p>
+        </div>
+      )}
+
+      {/* First run.
+          A brand-new client with a period but no data saw eleven KPI cards reading NPR 0 / — / 0,
+          three charts saying "no data", and a reorder panel saying "No items below par" — which is
+          true and reads as GOOD NEWS when the real state is "you have no items". The per-panel
+          empty strings are individually well written and collectively unreadable as guidance,
+          because they appear in whatever order the data happens to load. This gives the sequence
+          once, at the top, and disappears the moment any step is done. */}
+      {showIms && activePeriod && !loading && stats && stats.itemCount === 0 && stats.purchaseTotal === 0 && (
+        <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}>
+          <p style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>Let’s get {periodLabel} set up</p>
+          <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+            Your figures below stay at zero until there’s something to count. Four steps, in order —
+            each one feeds the next.
+          </p>
+          <ol style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'grid', gap: 8 }}>
+            {[
+              { n: 1, label: 'Add your items', hint: 'Everything you buy — ingredients, drinks, supplies', to: '/items', done: stats.itemCount > 0 },
+              { n: 2, label: 'Record your purchases', hint: 'Bills from your vendors for this period', to: '/purchases', done: stats.purchaseTotal > 0 },
+              { n: 3, label: 'Build your recipes', hint: 'What each dish uses — this is what costs it', to: '/recipes', done: stats.recipeCount > 0 },
+              { n: 4, label: 'Enter your sales', hint: 'Daily or bulk — this is the base every % is measured against', to: '/sales', done: stats.revenueTotal > 0 },
+            ].map(s => (
+              <li key={s.n}>
+                <button
+                  className="btn btn-ghost"
+                  style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px' }}
+                  onClick={() => navigate(s.to)}
+                >
+                  <span style={{
+                    flexShrink: 0, width: 22, height: 22, borderRadius: 'var(--radius-full)',
+                    display: 'inline-grid', placeItems: 'center', fontSize: 11, fontWeight: 800,
+                    background: s.done ? 'color-mix(in srgb, var(--theme-green) 18%, transparent)' : 'var(--theme-input-bg)',
+                    color: s.done ? 'var(--theme-green-text)' : 'var(--theme-text2)',
+                    border: '1px solid var(--theme-border)',
+                  }}>{s.done ? '✓' : s.n}</span>
+                  <span style={{ display: 'grid', gap: 1 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{s.label}</span>
+                    <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{s.hint}</span>
+                  </span>
+                  <span style={{ marginLeft: 'auto', color: 'var(--theme-text3)' }} aria-hidden="true">→</span>
+                </button>
+              </li>
+            ))}
+          </ol>
         </div>
       )}
 
       {periodExpired && !loading && (
         <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+          {/* wrap: at 375px the message and its action button cannot share a row. */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
             <div>
-              <p style={{ color: 'var(--theme-amber)', margin: 0, fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <p style={{ color: 'var(--theme-amber-text)', margin: 0, fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Clock size={15} aria-hidden="true" /> {BS_MONTHS[activePeriod.bs_month - 1]} {activePeriod.bs_year} has ended
               </p>
               <p style={{ color: 'var(--theme-text2)', margin: '4px 0 0', fontSize: 12 }}>
@@ -1622,18 +1727,18 @@ export default function ClientDashboard() {
             </div>
             <div {...kpiCard(() => navigate('/hr/employees'))}>
               <div style={kpiLabelStyle}>Active</div>
-              <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-green)' }}>
+              <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-green-text)' }}>
                 {!hrStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrStats.active}
               </div>
               {hrStats && hrStats.probation > 0 && (
-                <div style={{ ...kpiSubtextStyle, color: 'var(--theme-accent)' }}>{hrStats.probation} on probation</div>
+                <div style={{ ...kpiSubtextStyle, color: 'var(--theme-accent-ink)' }}>{hrStats.probation} on probation</div>
               )}
             </div>
             <div {...kpiCard(null)}>
               <div style={kpiLabelStyle}>
                 <Tip text="Sum of basic salary for active and probation employees. Full payroll with allowances, SSF and TDS is computed during payroll run." width={260}>Basic Payroll / Month</Tip>
               </div>
-              <div style={{ ...kpiValueStyle(18, 800), color: 'var(--theme-accent)' }}>
+              <div style={{ ...kpiValueStyle(18, 800), color: 'var(--theme-accent-ink)' }}>
                 {!hrStats
                   ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
                   : `NPR ${Math.round(hrStats.payroll).toLocaleString('en-NP')}`}
@@ -1650,7 +1755,7 @@ export default function ClientDashboard() {
             return (
           <div {...approvalsCardProps} style={{ ...approvalsCardProps.style, marginTop: 10 }}>
             <div style={kpiLabelStyle}>Pending Approvals</div>
-            <div style={{ ...kpiValueStyle(18, 800), color: hrApprovals.total > 0 ? 'var(--theme-amber)' : 'var(--theme-text1)' }}>
+            <div style={{ ...kpiValueStyle(18, 800), color: hrApprovals.total > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
               {hrApprovals.loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrApprovals.total}
             </div>
             <div style={kpiSubtextStyle}>
@@ -1684,7 +1789,7 @@ export default function ClientDashboard() {
                   <div style={kpiLabelStyle}>
                     <Tip text="Open tickets sent more than 15 minutes ago — same threshold the ticket display itself flags." width={220}>Late</Tip>
                   </div>
-                  <div style={{ ...kpiValueStyle(18), color: posStats?.lateCount > 0 ? 'var(--theme-red)' : 'var(--theme-text1)' }}>
+                  <div style={{ ...kpiValueStyle(18), color: posStats?.lateCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
                     {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.lateCount}
                   </div>
                   <div style={kpiSubtextStyle}>&gt; 15 min →</div>
@@ -1714,7 +1819,7 @@ export default function ClientDashboard() {
               <>
                 <div {...kpiCard(() => navigate('/pos/sales-report'))}>
                   <div style={kpiLabelStyle}>Revenue</div>
-                  <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green)' }}>
+                  <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green-text)' }}>
                     {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-NP')}`}
                   </div>
                   <div style={kpiSubtextStyle}>{periodLabel} · billed →</div>
@@ -1744,7 +1849,7 @@ export default function ClientDashboard() {
                     open it; the card itself still shows the live count either way. */}
                 <div {...kpiCard(hasPosAccess('manager') ? () => navigate('/pos/tables') : null)}>
                   <div style={kpiLabelStyle}>Tables Occupied</div>
-                  <div style={{ ...kpiValueStyle(18), color: posStats?.tablesOccupied > 0 ? 'var(--theme-accent)' : 'var(--theme-text1)' }}>
+                  <div style={{ ...kpiValueStyle(18), color: posStats?.tablesOccupied > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>
                     {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${posStats.tablesOccupied} / ${posStats.tablesTotal}`}
                   </div>
                   <div style={kpiSubtextStyle}>{hasPosAccess('manager') ? 'Right now →' : 'Right now'}</div>

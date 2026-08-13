@@ -131,6 +131,25 @@ export function bsAddDays(bsYear, bsMonth, bsDay, n) {
   return adToBs(ad)
 }
 
+/**
+ * A BS date as an AD day boundary carrying Nepal's own +05:45 offset.
+ *
+ * Never build one of these with `.toISOString()`. bsToAd returns a Date at LOCAL midnight, so
+ * .toISOString() converts it using the RUNTIME's offset — at Nepal's +05:45 that lands at 18:15Z
+ * on the PREVIOUS day, and slicing the first 10 characters then yields the wrong date for every
+ * user in the country. Formatting from the Date's local getters (what formatAd does) reproduces
+ * the calendar day the caller asked for whatever the runtime's timezone, and pinning the offset
+ * explicitly makes the comparison against a genuine timestamptz column (pos_orders.closed_at)
+ * mean the same thing for a viewer inside Nepal and an admin outside it.
+ *
+ * @param endOfDay  false → start of that day, true → last millisecond of it.
+ */
+export function bsDayBoundaryIso(bsYear, bsMonth, bsDay, endOfDay) {
+  const d = bsToAd(bsYear, bsMonth, bsDay)
+  if (!(d instanceof Date) || isNaN(d)) return null
+  return `${formatAd(d)}${endOfDay ? 'T23:59:59.999+05:45' : 'T00:00:00.000+05:45'}`
+}
+
 /** Number of days from BS date 1 to BS date 2 (positive if date 2 is later). */
 export function bsDiffDays(y1, m1, d1, y2, m2, d2) {
   const ad1 = bsToAd(y1, m1, d1)

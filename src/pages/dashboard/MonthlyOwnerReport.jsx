@@ -18,7 +18,7 @@ const num = n => (n == null ? '—' : Math.round(n).toLocaleString('en-NP'))
 
 const sectionTitleStyle = {
   fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
-  color: 'var(--theme-accent)', margin: '0 0 8px', paddingBottom: 4, borderBottom: '1px solid var(--theme-border-lt)',
+  color: 'var(--theme-accent-ink)', margin: '0 0 8px', paddingBottom: 4, borderBottom: '1px solid var(--theme-border-lt)',
 }
 
 // A two-column "Label ... Value" line item — the document convention used throughout this
@@ -33,17 +33,45 @@ function Row({ label, value, tip, color }) {
   )
 }
 
+// Direction, spelled out.
+//
+// Colour is the ONLY encoding these delta cells had, and it does not survive printing: Layout.css's
+// print block sets `th, td { color: black !important }`, which beats every inline colour in this
+// file. So the primary deliverable — the document an owner is handed — showed "+2.3pp" with
+// nothing to say whether that was good or bad, and the reader has to know that up is bad for a
+// cost metric and good for margin. On screen it was a WCAG 1.4.1 (Use of Color) failure for the
+// same reason. A glyph plus a word survives both the print override and a screen reader.
+// `rose` is which way the number actually moved; `good` is whether that is the direction you want.
+// They come apart on Net Margin %, where up is good, while for every cost metric up is bad — so
+// the arrow tracks the movement and the word carries the judgement. Deriving the arrow from `good`
+// alone would print a down-arrow next to a margin that had risen.
+function DirectionMark({ good, rose }) {
+  if (good == null) return null
+  return (
+    <span style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>
+      {' '}{rose ? '▲' : '▼'} {good ? 'better' : 'worse'}
+    </span>
+  )
+}
+
 // Trend row for a money-basis metric — `delta` is the {absoluteChange, pctChange} shape
 // computeMonthlyReport.js's buildDeltas() returns, or null if either side is missing.
+// Only used for Revenue and POS Net Sales, where up is unambiguously good.
 function TrendRow({ label, cur, prior, delta, fmtFn }) {
-  const color = delta == null ? undefined : delta.absoluteChange > 0 ? 'var(--theme-green)' : delta.absoluteChange < 0 ? 'var(--theme-red)' : undefined
+  const good = delta == null || delta.absoluteChange === 0 ? null : delta.absoluteChange > 0
+  const color = good == null ? undefined : good ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
   return (
     <tr>
       <td style={{ color: 'var(--theme-text2)' }}>{label}</td>
       <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtFn(cur)}</td>
       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtFn(prior)}</td>
       <td style={{ textAlign: 'right', fontWeight: 600, color }}>
-        {delta == null ? '—' : `${delta.absoluteChange >= 0 ? '+' : ''}${fmtFn(delta.absoluteChange)}${delta.pctChange != null ? ` (${delta.pctChange >= 0 ? '+' : ''}${delta.pctChange.toFixed(1)}%)` : ''}`}
+        {delta == null ? '—' : <>
+          {`${delta.absoluteChange >= 0 ? '+' : ''}${fmtFn(delta.absoluteChange)}${delta.pctChange != null ? ` (${delta.pctChange >= 0 ? '+' : ''}${delta.pctChange.toFixed(1)}%)` : ''}`}
+          {/* Revenue up is better, so the arrow points the way the money went, not the way the
+              cost metrics below read it. */}
+          {good != null && <span style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{' '}{good ? '▲' : '▼'} {good ? 'better' : 'worse'}</span>}
+        </>}
       </td>
     </tr>
   )
@@ -54,14 +82,16 @@ function TrendRow({ label, cur, prior, delta, fmtFn }) {
 // `higherIsBetter` flips the color logic for Net Margin % (up = good), vs the default (down =
 // good) for cost metrics like Food/Labor/Prime Cost %.
 function TrendPctRow({ label, cur, prior, delta, higherIsBetter = false }) {
-  const good = delta == null ? null : higherIsBetter ? delta > 0 : delta < 0
-  const color = good == null ? undefined : good ? 'var(--theme-green)' : delta === 0 ? undefined : 'var(--theme-red)'
+  const good = delta == null || delta === 0 ? null : higherIsBetter ? delta > 0 : delta < 0
+  const color = good == null ? undefined : good ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
   return (
     <tr>
       <td style={{ color: 'var(--theme-text2)' }}>{label}</td>
       <td style={{ textAlign: 'right', fontWeight: 600 }}>{cur == null ? '—' : `${cur.toFixed(1)}%`}</td>
       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{prior == null ? '—' : `${prior.toFixed(1)}%`}</td>
-      <td style={{ textAlign: 'right', fontWeight: 600, color }}>{delta == null ? '—' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}pp`}</td>
+      <td style={{ textAlign: 'right', fontWeight: 600, color }}>
+        {delta == null ? '—' : <>{`${delta >= 0 ? '+' : ''}${delta.toFixed(1)}pp`}<DirectionMark good={good} rose={delta > 0} /></>}
+      </td>
     </tr>
   )
 }
@@ -183,10 +213,16 @@ export default function MonthlyOwnerReport() {
 
   // Color bands match Owner Dashboard's live KPI cards exactly, so the same rough magnitude
   // never reads as a different "health" color depending on which page you're looking at.
-  const fcColor = v => (v == null ? undefined : v <= 35 ? 'var(--theme-green)' : v <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)')
-  const lcColor = v => (v == null ? undefined : v <= 37 ? 'var(--theme-green)' : v <= 45 ? 'var(--theme-accent)' : 'var(--theme-red)')
-  const pcColor = v => (v == null ? undefined : v <= 60 ? 'var(--theme-green)' : v <= 65 ? 'var(--theme-accent)' : 'var(--theme-red)')
-  const nmColor = v => (!canOverheads || v == null ? undefined : v >= 20 ? 'var(--theme-green)' : v >= 10 ? 'var(--theme-accent)' : 'var(--theme-red)')
+  //
+  // -text variants because every one of these lands on a <td> as type. And labour's green band is
+  // 30, not 37: the Target cell printed in the same table row reads "25-30%", so a client at 34%
+  // used to get a reassuring green number sitting immediately beside a target it fails by four
+  // points. Cross-page consistency had been achieved; consistency within one row had not.
+  // Owner Dashboard's laborPct band moved with it.
+  const fcColor = v => (v == null ? undefined : v <= 35 ? 'var(--theme-green-text)' : v <= 45 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
+  const lcColor = v => (v == null ? undefined : v <= 30 ? 'var(--theme-green-text)' : v <= 37 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
+  const pcColor = v => (v == null ? undefined : v <= 60 ? 'var(--theme-green-text)' : v <= 65 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
+  const nmColor = v => (!canOverheads || v == null ? undefined : v >= 20 ? 'var(--theme-green-text)' : v >= 10 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
 
   return (
     <div>
@@ -237,7 +273,7 @@ export default function MonthlyOwnerReport() {
 
         {!loading && !generating && genError && (
           <div className="card" style={{ borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)' }}>
-            <p style={{ color: 'var(--theme-red)', margin: 0, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <p style={{ color: 'var(--theme-red-text)', margin: 0, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
               <TriangleAlert size={14} aria-hidden="true" /> {genError}
             </p>
           </div>
@@ -253,6 +289,11 @@ export default function MonthlyOwnerReport() {
 
         {!loading && !generating && report && snapshot && (
           <div className="card owner-report-doc" style={{ maxWidth: 760, margin: '0 auto', padding: '22px 30px' }}>
+            {/* Running footer — hidden on screen, fixed to the foot of every printed page so a
+                sheet separated from page 1 still says which business and period it belongs to. */}
+            <div className="owner-report-running-foot" style={{ display: 'none' }}>
+              {bizInfo.name || '—'} · Monthly Owner/Manager Report · {periodLabel}
+            </div>
             {/* Letterhead */}
             <div className="owner-report-letterhead" style={{ textAlign: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid var(--theme-border)' }}>
               <h2 style={{ margin: '0 0 3px', fontSize: 17, fontWeight: 800, letterSpacing: '0.02em' }}>{bizInfo.name || '—'}</h2>
@@ -527,7 +568,7 @@ export default function MonthlyOwnerReport() {
                             <thead><tr><th>Dead/Slow Item</th><th style={{ textAlign: 'right' }}>Status</th><th style={{ textAlign: 'right' }}>Value at Risk</th></tr></thead>
                             <tbody>
                               {inv.deadSlowStock.items.slice(0, 10).map(i => (
-                                <tr key={i.itemId}><td>{i.name}</td><td style={{ textAlign: 'right', color: i.status === 'Dead' ? 'var(--theme-red)' : 'var(--theme-amber)' }}>{i.status}</td><td style={{ textAlign: 'right' }}>{fmt(i.valueAtRisk)}</td></tr>
+                                <tr key={i.itemId}><td>{i.name}</td><td style={{ textAlign: 'right', color: i.status === 'Dead' ? 'var(--theme-red-text)' : 'var(--theme-amber-text)' }}>{i.status}</td><td style={{ textAlign: 'right' }}>{fmt(i.valueAtRisk)}</td></tr>
                               ))}
                             </tbody>
                           </table>
@@ -553,7 +594,7 @@ export default function MonthlyOwnerReport() {
                               {inv.variance.items.filter(i => i.flag !== 'ok').slice(0, 10).map(i => (
                                 <tr key={i.itemId}>
                                   <td>{i.name}</td><td style={{ textAlign: 'right' }}>{i.actualUsed.toFixed(1)}</td><td style={{ textAlign: 'right' }}>{i.theoreticalUsed.toFixed(1)}</td>
-                                  <td style={{ textAlign: 'right', color: i.flag === 'over' ? 'var(--theme-red)' : 'var(--theme-accent)' }}>{i.variancePct >= 0 ? '+' : ''}{i.variancePct.toFixed(1)}%</td>
+                                  <td style={{ textAlign: 'right', color: i.flag === 'over' ? 'var(--theme-red-text)' : 'var(--theme-accent-ink)' }}>{i.variancePct >= 0 ? '+' : ''}{i.variancePct.toFixed(1)}%</td>
                                   <td style={{ textAlign: 'right' }}>{fmt(i.value)}</td>
                                 </tr>
                               ))}
@@ -648,7 +689,7 @@ export default function MonthlyOwnerReport() {
 
             {snapshot.sectionErrors && (
               <div className="no-print card" style={{ marginTop: 16, borderColor: 'color-mix(in srgb, var(--theme-amber) 25%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
-                <p style={{ color: 'var(--theme-amber)', margin: 0, fontSize: 12 }}>
+                <p style={{ color: 'var(--theme-amber-text)', margin: 0, fontSize: 12 }}>
                   Some sections could not be generated: {Object.keys(snapshot.sectionErrors).join(', ')}. Try Regenerate Snapshot, or contact support if this keeps happening.
                 </p>
               </div>

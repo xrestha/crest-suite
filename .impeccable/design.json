@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-12T12:00:00.000Z",
+  "generatedAt": "2026-08-13T01:36:17.851Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -311,6 +311,86 @@
         "displayName": "Print Fill",
         "canonical": "#f3f3f3",
         "purpose": "Table header row background. Valid only inside a print-only component or an @media print block; never on screen."
+      },
+      "signal-success-text": {
+        "role": "text-variant",
+        "displayName": "Success Green (as text)",
+        "canonical": "#2f7620",
+        "purpose": "Success/positive wording, a healthy KPI figure, a green variance number. The FILL half of the same role keeps --theme-green: badge tints, chart series, status dots, borders. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.signal-success} unchanged. Per-preset: latte #2f7620, dawn #417179, solarized #5f6d00, light #137538, bright #117c38.",
+        "tonalRamp": [
+          "#183c10",
+          "#2a681c",
+          "#3b9428",
+          "#4dc134",
+          "#73d35f",
+          "#99df8b",
+          "#c3edbb",
+          "#edfaeb"
+        ]
+      },
+      "signal-danger-text": {
+        "role": "text-variant",
+        "displayName": "Danger Red (as text)",
+        "canonical": "#b00d30",
+        "purpose": "Error copy, an overdue figure, a negative margin, .btn-danger's label. Fills keep --theme-red. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.signal-danger} unchanged. Per-preset: latte #b00d30, dawn #965266, solarized #c32c2a, light #c92323, bright #cf2424.",
+        "tonalRamp": [
+          "#470513",
+          "#7b0922",
+          "#b00d30",
+          "#e4113e",
+          "#f14167",
+          "#f57591",
+          "#f9aebe",
+          "#fde7ec"
+        ]
+      },
+      "signal-warning-text": {
+        "role": "text-variant",
+        "displayName": "Warning Amber (as text)",
+        "canonical": "#925d13",
+        "purpose": "Needs-attention wording: pending counts, an expiry countdown, .amber-action-btn's label. The worst measured base-token failure in the product was this role on Rosé Dawn at 2.05:1. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.signal-warning} unchanged. Per-preset: latte #925d13, dawn #906020, solarized #816200, light #a44c08, bright #a55a05.",
+        "tonalRamp": [
+          "#442b09",
+          "#754b0f",
+          "#a76a16",
+          "#d98a1c",
+          "#e8a64a",
+          "#eebe7c",
+          "#f5d9b2",
+          "#fcf4e8"
+        ]
+      },
+      "signal-categorical-text": {
+        "role": "text-variant",
+        "displayName": "Categorical Violet (as text)",
+        "canonical": "#7c33d9",
+        "purpose": "The rationed 4th/5th category used as type. Fills keep --theme-purple. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.signal-categorical} unchanged. Per-preset: latte #7c33d9, dawn #746389, solarized #5d61a8, light #7c3aed, bright #7c3aed.",
+        "tonalRamp": [
+          "#230c40",
+          "#3d1570",
+          "#571e9f",
+          "#7026ce",
+          "#9153df",
+          "#af82e8",
+          "#d0b6f1",
+          "#f1eafb"
+        ]
+      },
+      "accent-ink": {
+        "role": "text-variant",
+        "displayName": "Aged Brass Ink",
+        "canonical": "#7c33d9",
+        "purpose": "The accent used AS text on a normal surface: a link, an active nav item, a plan label, a table total. NOT accent-text, which is the foreground that sits ON an accent fill — the two are easy to confuse and mean opposite things. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.aged-brass} unchanged. Per-preset: latte #7c33d9, dawn #955a57, solarized #1e6da5, light #865f21, bright #3563db.",
+        "tonalRamp": [
+          "#230c40",
+          "#3d1570",
+          "#571e9f",
+          "#7026ce",
+          "#9153df",
+          "#af82e8",
+          "#d0b6f1",
+          "#f1eafb"
+        ]
       }
     },
     "typographyMeta": {
@@ -439,7 +519,43 @@
         "name": "mobile",
         "value": "768px"
       }
-    ]
+    ],
+    "chartPalette": {
+      "purpose": "Chart series are fixed literal hex on purpose and are NOT theme tokens. Two independent reasons: CSS var() does not resolve inside SVG presentation attributes, and the five semantic tokens are five ROLES rather than five distinguishable hues — --theme-accent and --theme-purple are the same value on Dracula, Catppuccin Mocha and Latte. A hex appearing in a chart palette is not an accent-drift violation; the One Accent Rule governs UI chrome.",
+      "validatedAgainst": "Brute-forced across five card surfaces (three dark presets, two light) to a worst pair of dE 16.8 normal vision / 8.6 deuteranopia. Tritan lands at 7.7, acceptable only with the secondary encoding these charts already carry (paddingAngle gaps, on-slice percent labels, name+value legends).",
+      "slots": [
+        {
+          "name": "Food Cost",
+          "value": "#c9a84c",
+          "note": "Gold. Kept identical across the cost pie, the FC% trend line and the Owner trend so one measure has one identity everywhere."
+        },
+        {
+          "name": "Labor",
+          "value": "#60a5fa",
+          "note": "Blue."
+        },
+        {
+          "name": "Overheads / Prime",
+          "value": "#8b5cf6",
+          "note": "Violet. Prime Cost draws it DASHED because it is the sum of the two lines above it, not a fifth peer."
+        },
+        {
+          "name": "Tax & Fees",
+          "value": "#ec4899",
+          "note": "Pink."
+        },
+        {
+          "name": "Net Margin",
+          "value": "#34d399",
+          "note": "Green — the one slice that stays semantic, because profit reading as good is not a coincidence worth breaking."
+        }
+      ],
+      "rules": [
+        "A legend swatch must equal the series it labels. Darkening the swatch for contrast while the line keeps the series colour desynchronises them, which is worse than the contrast it fixes; the adjacent label text carries the readable contrast.",
+        "Prefer encoding a relationship over adding a hue. A metric's month-end projection repeats its metric's colour and is distinguished by a dash; a derived total reads as a dashed composite.",
+        "Red is not spent on a merely-categorical slice. On these dashboards red means \"over threshold\", so using it for \"Overheads\" or for the Prime Cost line made a neutral fact read as an alarm."
+      ]
+    }
   },
   "components": [
     {
@@ -537,6 +653,38 @@
       "description": "A nav row in the unified 240px sidebar column. Active state is accent text on the focus-ring tint at weight 600 — the same treatment the active tab pill uses, so \"selected\" reads identically everywhere.",
       "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-link\" href=\"#\">Purchases</a><a class=\"ds-nav-link ds-nav-link-active\" href=\"#\">Stock Count</a><a class=\"ds-nav-link\" href=\"#\">Recipes</a></nav>",
       "css": ".ds-nav { display: flex; flex-direction: column; background: var(--theme-sidebar, #0e1117); padding: 8px 0; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-nav-link { display: flex; align-items: center; gap: 10px; margin: 1px 10px; padding: 8px 12px; border-radius: 12px; font-size: 13px; color: var(--theme-text2, #8a92a3); text-decoration: none; white-space: nowrap; transition: color 160ms cubic-bezier(0.4,0,0.2,1), background 160ms cubic-bezier(0.4,0,0.2,1); }\n.ds-nav-link:hover { color: var(--theme-text1, #e8e0d0); background: var(--theme-table-hover, rgba(255,255,255,0.03)); }\n.ds-nav-link-active { color: var(--theme-accent, #c9a84c); background: var(--theme-focus-ring, rgba(201,168,76,0.15)); font-weight: 600; }"
+    },
+    {
+      "name": "Chart Expand Button",
+      "kind": "button",
+      "refersTo": "chart-icon-btn",
+      "description": "The only affordance saying a chart card opens. Sits in the quietest text tier, so it must acknowledge pointer and keyboard or it reads as an icon rather than a control. Holds a 24px minimum target (44px on coarse pointers) around a 12px glyph.",
+      "html": "<button class=\"ds-chart-icon-btn\" aria-label=\"Expand chart: Spend by Category\" aria-haspopup=\"dialog\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 12 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" aria-hidden=\"true\"><path d=\"M1 4.5V1h3.5M7.5 1H11v3.5M11 7.5V11H7.5M4.5 11H1V7.5\"/></svg></button>",
+      "css": ".ds-chart-icon-btn { color: var(--theme-text3); background: transparent; border: none; border-radius: var(--radius-sm); cursor: pointer; min-width: 24px; min-height: 24px; padding: 0; display: inline-grid; place-items: center; transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard); } .ds-chart-icon-btn:hover { color: var(--theme-accent); background: var(--theme-table-hover); } .ds-chart-icon-btn:focus-visible { outline: none; color: var(--theme-accent); box-shadow: 0 0 0 3px var(--theme-focus-ring); }"
+    },
+    {
+      "name": "Stat Pill",
+      "kind": "chip",
+      "refersTo": "stat-pill",
+      "description": "A compact KPI callout for a ChartCard's expanded-only stat strip. The dot carries the SERIES colour (legitimately a chart hex); the value is text and defaults to text1, because a fill hex set as 13px/700 type measured about 1.9:1 on a light card.",
+      "html": "<div class=\"ds-stat-pill\"><span class=\"ds-stat-pill-label\"><span class=\"ds-stat-pill-dot\"></span>Purchases so far</span><span class=\"ds-stat-pill-value\">NPR 248,300</span></div>",
+      "css": ".ds-stat-pill { display: flex; flex-direction: column; gap: 2px; padding: 7px 14px; background: var(--theme-input-bg); border: 1px solid var(--theme-border); border-radius: var(--radius-md); } .ds-stat-pill-label { font-size: 9px; color: var(--theme-text3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 5px; } .ds-stat-pill-dot { width: 6px; height: 6px; border-radius: 50%; background: #c9a84c; flex-shrink: 0; } .ds-stat-pill-value { font-size: 13px; font-weight: 700; color: var(--theme-text1); }"
+    },
+    {
+      "name": "Link-like Button",
+      "kind": "button",
+      "refersTo": "btn-linklike",
+      "description": "A table cell that navigates, or an inline action in a sentence. Reads as a link, behaves as a button — used where the row's identity IS the action (an outlet name that switches to that outlet), so the affordance sits on the name rather than in a trailing Actions column.",
+      "html": "<button class=\"ds-btn-linklike\">Thamel Branch</button>",
+      "css": ".ds-btn-linklike { background: none; border: none; padding: 0; font: inherit; color: var(--theme-accent-ink); text-align: left; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; border-radius: var(--radius-sm); transition: color var(--motion-fast) var(--ease-standard); } .ds-btn-linklike:hover:not(:disabled) { text-decoration-thickness: 2px; } .ds-btn-linklike:disabled { color: var(--theme-text3); cursor: default; text-decoration: none; } .ds-btn-linklike:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 2px; }"
+    },
+    {
+      "name": "Chart Modal Panel",
+      "kind": "custom",
+      "refersTo": "chart-modal-panel",
+      "description": "The expanded chart view. Keeps its own look (blurred backdrop, wide panel, legend inline in the header) but carries the full dialog contract: role/aria-modal/labelled title, initial focus on the panel rather than its Close button, a Tab trap, Escape, and focus restored to the trigger.",
+      "html": "<div class=\"ds-chart-modal-panel\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"ds-cm-title\" tabindex=\"-1\"><div class=\"ds-chart-modal-head\"><div id=\"ds-cm-title\" class=\"ds-chart-modal-title\">Spend by Category</div><button class=\"ds-chart-close-btn\">✕ Close</button></div><div class=\"ds-chart-modal-body\">chart</div></div>",
+      "css": ".ds-chart-modal-panel { background: var(--theme-card); border: 1px solid var(--theme-border); border-radius: var(--radius-xl); padding: 20px 28px; max-width: 1100px; box-shadow: 0 8px 60px rgba(0,0,0,0.5); outline: none; } .ds-chart-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--theme-border); } .ds-chart-modal-title { font-size: 13px; font-weight: 700; color: var(--theme-text1); } .ds-chart-modal-body { color: var(--theme-text2); font-size: 12px; } .ds-chart-close-btn { color: var(--theme-text2); background: transparent; border: 1px solid var(--theme-border); border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px; cursor: pointer; transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard); } .ds-chart-close-btn:hover { color: var(--theme-text1); background: var(--theme-table-hover); border-color: var(--theme-accent); } .ds-chart-close-btn:focus-visible { outline: none; border-color: var(--theme-accent); box-shadow: 0 0 0 3px var(--theme-focus-ring); }"
     }
   ],
   "narrative": {
@@ -638,6 +786,46 @@
         "name": "Any tab row needs real tablist semantics",
         "body": "Not just buttons that look selected: role=tablist on the row, role=tab + aria-selected + aria-controls per tab, role=tabpanel + aria-labelledby on the body, and a roving tabIndex so the whole row is one stop in the page's tab order with the arrow keys (plus Home/End) moving inside it. Without the roving index, reaching the eighth tab by keyboard costs eight Tab presses — and the eighth tab is where the destructive actions live.",
         "section": "components"
+      },
+      {
+        "name": "The Text-vs-Fill Rule",
+        "section": "colors",
+        "body": "A signal colour used as TEXT takes the *-text variant; used as a FILL it takes the base token. One value cannot do both jobs on a light preset. Three exceptions, each found by applying the rule too broadly: a legend swatch keeps the series colour, a prop that receives a series colour keeps it, and a colour: inside a ternary is still a colour: — about half the real sites are ternaries a property-level regex silently skips."
+      },
+      {
+        "name": "Rosé Dawn is the floor, not Latte",
+        "section": "colors",
+        "body": "Failing signal-colour/surface combinations per light preset: Rosé Dawn 10/10, Solarized 10/10, Bright 6/10, Latte 4/10, Warm Light 3/10. Spot-check colour work on Rosé Dawn, not on the preset that is easiest to recall."
+      },
+      {
+        "name": "Never build a multi-series chart palette from the semantic tokens",
+        "section": "colors",
+        "body": "They are five roles, not five hues. accent and purple are the same hex on three of ten presets, which drew Food Cost and Labor Cost as one indistinguishable line on the chart whose entire purpose is telling them apart."
+      },
+      {
+        "name": "Form controls do not inherit font-family, and must be told to",
+        "section": "typography",
+        "body": "Every browser substitutes its own UA default into input, button, select and textarea. One rule in index.css covers all four plus optgroup, which Firefox styles separately. Do not re-add per-class patches."
+      },
+      {
+        "name": "A modal is a dialog or it is a trap",
+        "section": "components",
+        "body": "role=\"dialog\" + aria-modal + a labelled title, initial focus, a Tab trap, Escape, and focus restored to the trigger. A second modal implementation that skips these is only visually a modal: the page behind it stays fully focusable and Escape does nothing."
+      },
+      {
+        "name": "Never .toISOString() a Date built from BS components",
+        "section": "components",
+        "body": "bsToAd returns local midnight; at Nepal's UTC+05:45 .toISOString() lands at 18:15Z on the previous day, so slicing the first ten characters yields the wrong date for every user in the country. Use formatAd for a bare date string, bsDayBoundaryIso where the value meets a real timestamptz."
+      },
+      {
+        "name": "A verdict colour on an unsettled figure is a lie",
+        "section": "colors",
+        "body": "A ratio whose numerator arrives in lumps and whose denominator accrues daily is arithmetic, not signal, early in a period. Render it neutral with an explicit \"Day N of M · settles at month end\" rather than painting it red and telling the reader to investigate immediately."
+      },
+      {
+        "name": "Opacity is not de-emphasis on text",
+        "section": "colors",
+        "body": "It multiplies straight through the text colour — text2 at 0.45 measured well under AA. If a row is inactive, say so with a label; do not dim it."
       }
     ],
     "dos": [
@@ -646,14 +834,22 @@
       "Do wrap every wide table in the horizontal-scroll container rather than shrinking columns.",
       "Do reserve the rationed 4th color (purple) for a genuine 4th/5th categorical need, not as a second accent.",
       "Do put labels above form fields, always - never a placeholder standing in for a label.",
-      "Do give every status message a live region - role=\"alert\" for errors, role=\"status\" for confirmations. A message that is only *shown* announces nothing, and on a destructive surface that means no confirmation an action ran at all."
+      "Do give every status message a live region - role=\"alert\" for errors, role=\"status\" for confirmations. A message that is only *shown* announces nothing, and on a destructive surface that means no confirmation an action ran at all.",
+      "Do use the *-text variant whenever a signal colour is set as `color:` — and check the ternaries, which is where about half the real sites are.",
+      "Do keep a legend swatch identical to the series it labels, and let the adjacent label text carry the readable contrast.",
+      "Do give any modal the full dialog contract: role, aria-modal, a labelled title, initial focus, a Tab trap, Escape, and focus restored to the trigger.",
+      "Do disclose an estimate where it is read, inline and visible, not in a hover tooltip — a figure carrying a red/amber/green verdict has to say what it is built from."
     ],
     "donts": [
       "Don't build dense, hierarchy-less layouts in the name of \"fitting more in\" - that's the legacy-ERP failure mode this product is explicitly positioned against.",
       "Don't reach for purple gradients, Inter-everywhere, or a templated hero-plus-three-cards layout - the generic-AI-SaaS look PRODUCT.md names directly as an anti-reference.",
       "Don't invent a stronger/different shadow to mean \"important\" or \"premium.\" Card elevation (--theme-card-shadow) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning (see Elevation).",
       "Don't hardcode white or black as text on an accent background - use the paired accent-text token.",
-      "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (Bright's colorful KPI badges on ClientDashboard.jsx are the one named exception - see Badges / Status Chips.)"
+      "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (Bright's colorful KPI badges on ClientDashboard.jsx are the one named exception - see Badges / Status Chips.)",
+      "Don't build a multi-series chart palette from the semantic tokens — accent and purple are the same hex on three of ten presets.",
+      "Don't dim a row with opacity to de-emphasise it; opacity multiplies through the text colour and takes it below AA. Label the state instead.",
+      "Don't put role=\"button\" on a <tr>. It removes the row from the table's structure, so the cells stop being associated with their column headers.",
+      "Don't paint a verdict colour on a figure that has not settled yet — early in a period a lumpy-numerator ratio is arithmetic, not signal."
     ]
   }
 }
