@@ -19,7 +19,9 @@ function nextMonthLabel(bs_year, bs_month) {
 // SSF is due by the 15th of the month following the payroll period. Returns how that deadline
 // stands relative to today, so the card can be quiet when there is nothing to do — it used to
 // render red unconditionally, which meant a healthy account with weeks of runway showed the same
-// colour as one that had missed the deposit.
+// colour as one that had missed the deposit. Callers must also gate this on the deposit amount
+// being > 0 — a client with no SSF-enrolled staff has nothing to deposit, so a passed 15th is not
+// a missed deadline, just an inapplicable one.
 function ssfDeadlineState(bs_year, bs_month) {
   if (!bs_year || !bs_month) return {}
   const nm = bs_month === 12 ? 1 : bs_month + 1
@@ -375,17 +377,27 @@ export default function HrDashboard() {
               sub="company contribution"
               tip="Total employer SSF contribution (20% of capped basic) — paid by the company on top of net pay."
             />
-            <KCard
-              label="SSF Total to Deposit"
-              value={`NPR ${fmt(payInfo.ssfEmployee + payInfo.ssfEmployer)}`}
-              sub={ssfDeadlineState(payInfo.bsYear, payInfo.bsMonth).overdue
-                ? `Deposit was due ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`
-                : `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`}
-              color="var(--theme-accent-ink)"
-              tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}. Deposit with SSF by the 15th of the following month. Go to HR Reports → SSF Challan for the per-employee breakdown.`}
-              onClick={() => navigate('/hr/reports')}
-              {...ssfDeadlineState(payInfo.bsYear, payInfo.bsMonth)}
-            />
+            {(() => {
+              const ssfTotal = payInfo.ssfEmployee + payInfo.ssfEmployer
+              // Nothing owed (no SSF-enrolled staff this run) means a passed 15th isn't a missed
+              // deadline — stay neutral instead of painting a NPR 0 deposit red.
+              const deadline = ssfTotal > 0 ? ssfDeadlineState(payInfo.bsYear, payInfo.bsMonth) : {}
+              return (
+                <KCard
+                  label="SSF Total to Deposit"
+                  value={`NPR ${fmt(ssfTotal)}`}
+                  sub={ssfTotal === 0
+                    ? 'no staff enrolled in SSF this period'
+                    : deadline.overdue
+                      ? `Deposit was due ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`
+                      : `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`}
+                  color="var(--theme-accent-ink)"
+                  tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}. Deposit with SSF by the 15th of the following month. Go to HR Reports → SSF Challan for the per-employee breakdown.`}
+                  onClick={() => navigate('/hr/reports')}
+                  {...deadline}
+                />
+              )
+            })()}
           </div>
         </>
       )}

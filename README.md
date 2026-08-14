@@ -158,6 +158,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S555 — 2026-08-14 — HR Dashboard's SSF pill was red for a client with nobody enrolled
+
+Reported directly: 4 staff, none SSF-enrolled, and the "SSF Total to Deposit" card still showed NPR 0 in red with "Deposit was due …". `ssfDeadlineState()` in `HrDashboard.jsx` only ever looked at the calendar — has the 15th passed? — and never at whether there was actually anything owed. `hr_payslips.ssf_employee`/`ssf_employer` compute to 0 for any employee with `ssf_enrolled` false (`payrollCompute.js`), so the amount was correctly zero but the card escalated to red anyway, on a client that had missed nothing.
+
+Fixed by gating the deadline check itself on the deposit total: `ssfDeadlineState()` now only runs (and only feeds `overdue`/`alert` into the card's color) when `ssfEmployee + ssfEmployer > 0`. At zero, the card stays neutral and reads "no staff enrolled in SSF this period" instead of a due-date message — red is reserved for clients who have real SSF contributions sitting undeposited past the deadline.
+
+**Files:** `src/modules/hr/dashboard/HrDashboard.jsx`, `README.md`
+
 ### S554 — 2026-08-14 — Documented the access model (docs only, no code change)
 
 Asked directly off a screenshot of IMS Staff → Manage IMS Roles: *"how will a cafe/restaurant owner access the crest-suite?"* Answerable only by reading `AuthContext.js`, `admin-user-ops/index.ts` and `ClientDrawer.js` together, which is the definition of something that should have been written down. Now a section in CLAUDE.md ("Who logs in where, and how an Owner account comes to exist"). No code changed.
