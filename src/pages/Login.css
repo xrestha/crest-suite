@@ -27,7 +27,7 @@
   max-width: 1240px;
   margin: 0 auto;
   padding: 0 32px;
-  height: 68px;
+  height: clamp(58px, 7vh, 68px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -58,20 +58,36 @@
 
 /* ── Hero ── */
 /* Holds the footer at the bottom of the viewport when the page is short (e.g. after a successful
-   trial signup collapses the form to a one-line confirmation). */
+   trial signup collapses the form to a one-line confirmation). The leftover height goes to the
+   hero, which centres its own content — so on a tall window the page breathes around the sign-in
+   card rather than pooling a band of empty background above the footer. */
 .login-page > main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.login-hero {
   flex: 1;
 }
 
+/* ── Fitting one viewport ────────────────────────────────────────────────────────────────────
+   Everything on this page — header, hero, trial band, footer — is meant to land inside one screen
+   without scrolling on a normal laptop (~900px of viewport height and up). The section paddings
+   are therefore `clamp(floor, Nvh, ceiling)` rather than fixed: they give the design its full
+   breathing room on a tall monitor and compress toward the floor on a short one, instead of
+   pushing the trial band below the fold. Below ~820px of height the page simply scrolls, which is
+   correct — squeezing past the floors would start costing legibility, and legibility is the whole
+   reason this pass raised the type scale in the first place. ── */
 .login-hero {
   width: 100%;
   max-width: 1240px;
   margin: 0 auto;
-  padding: 72px 32px 76px;
+  padding: clamp(20px, 4vh, 64px) 32px clamp(22px, 4.4vh, 68px);
   box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(400px, 0.95fr);
-  gap: 64px;
+  gap: clamp(36px, 4vw, 60px);
   align-items: center;
 }
 
@@ -93,7 +109,7 @@
   font-weight: 600;
   letter-spacing: 0.05em;
   color: var(--theme-accent-ink, #c9a84c);
-  margin-bottom: 22px;
+  margin-bottom: clamp(14px, 2vh, 22px);
 }
 
 .login-pitch-headline {
@@ -116,10 +132,10 @@
 .login-highlights {
   list-style: none;
   padding: 0;
-  margin: 30px 0 0 0;
+  margin: clamp(18px, 2.6vh, 30px) 0 0 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: clamp(8px, 1.2vh, 12px);
 }
 
 .login-highlights li {
@@ -146,7 +162,7 @@
   border: 1px solid var(--theme-border, #2a2f3d);
   border-radius: var(--radius-xl, 24px);
   box-shadow: var(--theme-card-shadow, 0 4px 40px rgba(0,0,0,0.35));
-  padding: 34px 34px 32px;
+  padding: clamp(20px, 3.2vh, 34px) 32px clamp(20px, 3vh, 32px);
   display: flex;
   flex-direction: column;
 }
@@ -155,13 +171,13 @@
   font-size: 24px;
   font-weight: 700;
   color: var(--theme-text1);
-  margin: 0 0 6px 0;
+  margin: 0 0 4px 0;
 }
 
 .login-sub {
   font-size: 15px;
   color: var(--theme-text2);
-  margin: 0 0 22px 0;
+  margin: 0 0 clamp(14px, 2.2vh, 22px) 0;
 }
 
 /* ── Trial signup band ── */
@@ -177,11 +193,18 @@
 .login-trial-inner {
   max-width: 1240px;
   margin: 0 auto;
-  padding: 54px 32px 60px;
+  padding: clamp(20px, 3.6vh, 48px) 32px clamp(22px, 4vh, 52px);
 }
 
+/* Title and subline share one baseline row rather than stacking — the subline is a qualifier on
+   the heading ("free for 7 days, no card"), not a paragraph under it, and stacked they cost a
+   row this page cannot spare. */
 .login-band-head {
-  margin-bottom: 26px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: clamp(14px, 2.2vh, 22px);
 }
 
 .login-band-title {
@@ -195,7 +218,7 @@
 .login-band-sub {
   font-size: 15px;
   color: var(--theme-text2);
-  margin: 6px 0 0;
+  margin: 0;
 }
 
 /* ── Footer ── */
@@ -203,39 +226,47 @@
   max-width: 1240px;
   width: 100%;
   margin: 0 auto;
-  padding: 26px 32px 34px;
+  padding: clamp(9px, 1.6vh, 22px) 32px clamp(11px, 1.8vh, 24px);
   box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  text-align: center;
   font-size: 13px;
   color: var(--theme-text3);
-}
-
-.login-footer-link {
-  background: none;
-  border: none;
-  padding: 6px 2px;
-  min-height: 24px;
-  font-size: 13px;
-  color: var(--theme-text2);
-  text-decoration: underline;
-  cursor: pointer;
 }
 
 /* ── Form ── */
 .login-form {
   display: flex;
   flex-direction: column;
+  gap: clamp(9px, 1.3vh, 13px);
+}
+
+/* Sign in (primary, takes the remaining width) beside Staff Login (secondary, sized to its text). */
+.login-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.login-actions > .login-btn,
+.login-actions > .login-staff-btn {
+  margin-top: 0;
+}
+
+/* Field label on the left, an optional inline action ("Forgot password?") pushed right. */
+.login-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 
-/* Trial signup form's top row (Business Name/Email/Password/Show password). Grid's `end`-aligned
-   tracks let the no-label checkbox sit flush with the bottom of the row's inputs instead of the
-   top. */
-.login-row-top {
+/* The trial signup form is ONE grid, both rows: Business Name / Business email / Create a password
+   / Show password, then Your Name / Phone / Start Free Trial. One container is what guarantees the
+   two rows share column edges — as two separate grids each row's `fr` tracks resolved against its
+   own content and the fields below sat wider than the fields above them. `end`-aligned tracks let
+   the label-less checkbox and button sit flush with the bottom of their row's inputs. */
+.login-trial-grid {
   display: grid;
   grid-template-columns: 1.3fr 1.3fr 1.1fr auto;
   gap: 16px;
@@ -247,14 +278,9 @@
   padding-bottom: 10px;
 }
 
-/* Trial signup form's second row (Your Name/Phone/Start Free Trial) — same `end`-aligned-grid
-   treatment as .login-row-top, so the label-less button sits flush with the bottom of the row's
-   inputs. */
-.login-row-second {
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: 16px;
-  align-items: end;
+/* Spans the last two tracks so the CTA's right edge lands on the grid's, under Show password. */
+.login-trial-grid > .login-btn--inline {
+  grid-column: 3 / -1;
 }
 
 .login-btn--inline {
@@ -438,16 +464,17 @@
   text-decoration: none;
 }
 
-/* Was an inline style prop; every one of its properties moved here together. The padding is the
-   point — as a bare unpadded button this was a 96x14px target, under the 24x24 floor. */
+/* Sits inside .login-label-row now, not on a line of its own. The padding is still the point — as
+   a bare unpadded button this was a 96x14px target, under WCAG 2.2 SC 2.5.8's 24x24 floor, and
+   moving it into a tighter row is exactly where that would be easy to lose. */
 .login-forgot {
-  align-self: flex-end;
+  flex-shrink: 0;
   background: none;
   border: none;
-  padding: 6px 2px;
-  min-height: 26px;
+  padding: 4px 2px;
+  min-height: 24px;
   font-size: 13px;
-  color: var(--theme-accent, #c9a84c);
+  color: var(--theme-accent-ink, #c9a84c);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -459,13 +486,6 @@
 .login-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.login-trial-note {
-  font-size: 13px;
-  color: var(--theme-text3);
-  text-align: center;
-  margin: 6px 0 0;
 }
 
 .login-consent {
@@ -490,7 +510,7 @@
   font-weight: 700;
   cursor: pointer;
   letter-spacing: 0.02em;
-  margin-top: 12px;
+  margin-top: clamp(8px, 1.2vh, 12px);
   transition: background 0.15s;
 }
 
@@ -523,7 +543,7 @@
    Material both call for on a finger target.
    Scoped to `pointer: coarse` rather than a width breakpoint, on purpose: the trigger is the input
    method, not the screen size, and the desktop layout's carefully balanced two-column height (see
-   .login-row-top's note) stays exactly as it was. ── */
+   .login-trial-grid's note) stays exactly as it was. ── */
 @media (pointer: coarse) {
   .login-field input {
     font-size: 16px;
@@ -550,6 +570,24 @@
   }
 }
 
+/* ── Short desktop viewports ─────────────────────────────────────────────────────────────────
+   Measured with Playwright against the real build at four viewport sizes. On the `vh` clamps
+   alone a 1920x950 window fit with 0px to spare and a 1536x864 laptop overflowed by 27px — a fit
+   that lands exactly on the line is not a fit, since one extra validation message or a Caps Lock
+   hint pushes it over. So the section paddings drop to their floors across the whole common
+   desktop band (≤1000px of viewport height, which is every laptop and every 1080p window with
+   browser chrome), leaving the roomier rhythm to genuinely tall monitors. Measured after: 71px of
+   slack at 1920x950, 68px at 1920x912, 27px at 1536x864.
+
+   Below ~820px of viewport height the page scrolls, and it should: the only thing left to
+   compress there is the controls themselves, and shrinking those is what this pass was undoing. ── */
+@media (min-width: 981px) and (max-height: 1000px) {
+  .login-hero        { padding-top: 24px; padding-bottom: 26px; }
+  .login-trial-inner { padding-top: 22px; padding-bottom: 24px; }
+  .login-card        { padding-top: 22px; padding-bottom: 20px; }
+  .login-highlights  { margin-top: 16px; gap: 8px; }
+}
+
 /* ── Below the hero's two-column comfort width, stack. Sign-in first: most traffic here is a
    returning user, and the pitch is what backs it up rather than what gates it. ── */
 @media (max-width: 980px) {
@@ -568,9 +606,12 @@
    ("you@restaurant.com", "e.g. Ramesh Shrestha" visibly clip in the ~641-750px range). Collapse
    just these sub-grids earlier so there's no pinch zone between the two breakpoints. ── */
 @media (max-width: 800px) {
-  .login-row-top,
-  .login-row-second {
+  .login-trial-grid {
     grid-template-columns: 1fr;
+  }
+
+  .login-trial-grid > .login-btn--inline {
+    grid-column: auto;
   }
 }
 
@@ -586,6 +627,12 @@
 
   .login-card {
     padding: 26px 20px 24px;
+  }
+
+  /* Two 46px buttons side by side stop fitting their own labels around here — and vertical space
+     is not the constraint on a phone, scroll is expected. */
+  .login-actions {
+    grid-template-columns: 1fr;
   }
 
   .login-trial-inner {

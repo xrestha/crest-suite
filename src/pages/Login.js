@@ -288,7 +288,17 @@ export default function Login() {
                     <input id="signin-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus={!startOnTrial} />
                   </div>
                   <div className="login-field">
-                    <label htmlFor="signin-password">Password</label>
+                    {/* "Forgot password?" sits in the label row rather than on its own line below
+                        the field — it is the conventional place for it, and it buys back a full
+                        36px row in a card that has to fit the viewport alongside everything else. */}
+                    <div className="login-label-row">
+                      <label htmlFor="signin-password">Password</label>
+                      <button
+                        type="button" className="login-forgot"
+                        onClick={() => { setForgotMode(true); setForgotEmail(email) }}>
+                        Forgot password?
+                      </button>
+                    </div>
                     <input
                       id="signin-password"
                       type={showPassword ? 'text' : 'password'}
@@ -302,19 +312,21 @@ export default function Login() {
                       Show password
                     </label>
                   </div>
-                  <button
-                    type="button" className="login-forgot"
-                    onClick={() => { setForgotMode(true); setForgotEmail(email) }}>
-                    Forgot password?
-                  </button>
                   {error && <p className="login-error" role="alert">{error}</p>}
-                  <button type="submit" className="login-btn" disabled={loading}>
-                    {loading ? 'Signing in…' : 'Sign in'}
-                  </button>
+                  {/* Sign in and Staff Login share a row rather than stacking. Staff Login stays
+                      inside the card — it is a login alternative and belongs where someone looks
+                      for a way in, not in the header among the marketing links — and paired like
+                      this it costs the page a column instead of a whole row. type="button" keeps
+                      it from submitting the form it now sits inside. */}
+                  <div className="login-actions">
+                    <button type="submit" className="login-btn" disabled={loading}>
+                      {loading ? 'Signing in…' : 'Sign in'}
+                    </button>
+                    <button type="button" className="login-staff-btn" onClick={() => navigate('/pos/login')}>
+                      Staff Login →
+                    </button>
+                  </div>
                 </form>
-                <button type="button" className="login-staff-btn" onClick={() => navigate('/pos/login')}>
-                  Staff Login →
-                </button>
               </>
             )}
           </div>
@@ -330,7 +342,7 @@ export default function Login() {
               the quietest text tier in the system. */}
           <div className="login-band-head">
             <h2 className="login-band-title">Start your free trial</h2>
-            <p className="login-band-sub">Set up your outlet in a couple of minutes. Nothing to install.</p>
+            <p className="login-band-sub">Starter plan, free for 7 days · No credit card · Nothing to install</p>
           </div>
 
           {trialSuccess ? (
@@ -342,7 +354,11 @@ export default function Login() {
             // browser's native bubbles firing first and pre-empting them. `required` stays on the
             // inputs regardless — it's what conveys "this field is mandatory" to assistive tech.
             <form onSubmit={handleTrialSignup} className="login-form" noValidate>
-              <div className="login-row-top">
+              {/* One grid for both rows, not two stacked grids. As two, each row's `fr` tracks
+                  resolved against its own content, so Your Name's right edge sat ~45px past
+                  Business Name's directly above it — the kind of misalignment that is obvious in
+                  a render and invisible in the source. */}
+              <div className="login-trial-grid">
                 <div className="login-field">
                   <label htmlFor="trial-biz">Business Name *</label>
                   <input id="trial-biz" value={tBiz} onChange={e => setTBiz(e.target.value)} placeholder="e.g. Sunrise Café" required {...trialFieldAria('trial-biz')} autoFocus={startOnTrial} />
@@ -367,8 +383,6 @@ export default function Login() {
                   <input type="checkbox" checked={tShowPass} onChange={e => setTShowPass(e.target.checked)} />
                   Show password
                 </label>
-              </div>
-              <div className="login-row-second">
                 <div className="login-field">
                   <label htmlFor="trial-name">Your Name <span className="login-optional">(optional)</span></label>
                   <input id="trial-name" value={tName} onChange={e => setTName(e.target.value)} placeholder="e.g. Ramesh Shrestha" />
@@ -383,7 +397,11 @@ export default function Login() {
                 </button>
               </div>
               {tError && <p className="login-error" role="alert">{tError}</p>}
-              <p className="login-trial-note">7-day free trial · Starter plan · No credit card needed</p>
+
+              {/* The old "7-day free trial · Starter plan · No credit card needed" line that sat
+                  here said the same thing as the hero eyebrow and this band's own subline — three
+                  statements of one fact, on a page that has to fit a viewport. It now lives in the
+                  subline above only. */}
               <p className="login-consent">
                 By starting a trial you agree to our Terms of Service and Privacy Policy.
               </p>
@@ -393,9 +411,10 @@ export default function Login() {
         </section>
       </main>
 
+      {/* One line, no links: the only one it had was Pricing, which is already a button in the
+          header 900px above — a second route to the same page reads as a different destination. */}
       <footer className="login-footer">
-        <span>© {new Date().getFullYear()} {settings?.app_name || 'Crest Suite'} · Built for Nepal's F&amp;B industry</span>
-        <button type="button" className="login-footer-link" onClick={() => navigate('/pricing')}>Pricing</button>
+        © {new Date().getFullYear()} {settings?.app_name || 'Crest Suite'} · Built for Nepal's F&amp;B industry
       </footer>
     </div>
   )

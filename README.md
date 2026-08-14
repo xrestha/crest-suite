@@ -179,9 +179,24 @@ Three things worth keeping from the pass:
 - **Only the wrappers moved.** Every id/`htmlFor` pair, `role="alert"`/`role="status"` region, Caps Lock hint, per-field validation message, `autoComplete` value, the `signInErrorMessage` rate-limit/network/credential split and the single-accent CTA hierarchy are untouched. The one markup change beyond layout: `Welcome back` / `Reset password` demote from `h1` to `h2`, since the page's `h1` is now the hero headline and the card is a section of the page rather than the page.
 - **Mobile ordering keeps its S534 reasoning** — the hero stacks at ≤980px with the sign-in card first and the pitch below it, because most traffic here is a returning user. The old `display: contents` trick on `.login-top` is gone with the wrapper it existed for; a two-item grid with `order` does it directly.
 
-**Not verified in a browser** — confirmed by a clean `CI=true` build and by reading. Worth a glance on Rosé Dawn, the preset DESIGN.md names as worst for contrast.
+**Second pass, same session — "make it fit all in 1 screen", and a duplicate link.** The first pass was not measured, and measuring it was the whole point: at 1920x950 the page came to 1164px, so the trial band sat below the fold on every screen. Playwright drives `playwright-core` + the Chromium already installed on this machine, serving the real `build/` over a throwaway static server — so these are measured numbers, not estimates.
 
-**Files:** `src/pages/Login.js`, `src/pages/Login.css` (rewritten), `public/service-worker.js` (`crest-v74`), `README.md`, `CLAUDE.md`
+Four cuts, each of which is also a better design than what it replaced:
+
+- **"Forgot password?" moved into the password field's label row.** It is the conventional position, and it buys back a full row in the card that governs the page's height.
+- **Sign in and Staff Login share a row** (`grid: minmax(0,1fr) auto`). Staff Login stays *in the card* rather than moving to the header — it is a login alternative and belongs where someone looks for a way in.
+- **The footer's Pricing link is gone.** Reported directly: there is already a Pricing button in the header, and a second route to the same page reads as a different destination. The footer is now one centred line.
+- **The trial band's "7-day free trial · Starter plan · No credit card needed" line is gone**, folded into the band's subline — the hero eyebrow, the subline and that note were three statements of one fact.
+
+**A fit that lands exactly on the line is not a fit.** On `vh`-based clamps alone, 1920x950 came to exactly 950 and a 1536x864 laptop overflowed by 27px. The section paddings now drop to their floors across the whole common desktop band (`@media (max-height: 1000px)`), leaving the roomier rhythm to genuinely tall monitors. Measured after: **1920x950 → 91px of slack, 1920x912 → 61px, 1536x864 → 23px.** 1366x768 still overflows by 60px and is left to scroll: the only thing left to compress there is the controls themselves, which is what this whole pass was undoing.
+
+**The trial form is now one grid, not two stacked ones.** As two, each row's `fr` tracks resolved against its own content, so Your Name's right edge sat ~45px past Business Name's directly above it. Visible immediately in a screenshot, invisible in the source — this is the class of bug that only a render catches.
+
+**Measured on Rosé Dawn** (the preset DESIGN.md names as worst): fits 1920x912, and every text colour on the page is ≥5.09:1 — footer 5.09, eyebrow 5.14, header trial CTA 5.29, Sign in 5.69, forgot link 5.89, band title 7.59.
+
+**Two false alarms from the measuring script itself, both worth remembering.** It first reported the eyebrow at 3.42 and the header CTA at 3.41, i.e. two AA failures that did not exist. First cause: an alpha tint was read as an opaque fill (`rgba(215,130,126,0.1)` is not `#d7827e`) — a semi-transparent layer has to be composited over its ancestors. Second: **Chrome serialises a `color-mix()` result as `color(srgb 0.98 0.92 0.89)`, with components in 0..1 rather than 0..255**, so a naive parse turns a near-white tint into near-black. A contrast script that does not handle both will confidently report failures on any element using the codebase's own tint pattern.
+
+**Files:** `src/pages/Login.js`, `src/pages/Login.css` (rewritten), `public/service-worker.js` (`crest-v75`), `README.md`, `CLAUDE.md`
 
 ### S552 — 2026-08-13 — Crest Suite Pro was billed on a screen that never showed it
 
