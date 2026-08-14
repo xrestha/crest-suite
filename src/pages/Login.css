@@ -1,173 +1,250 @@
-.login-root {
+/* ── Page shell ───────────────────────────────────────────────────────────────────────────────
+   This screen used to be a single 1020px card centred in the viewport — a modal with nothing
+   behind it. It is now a page: sticky header, hero, signup band, footer, in the same structural
+   language as Pricing.js (64px sticky nav, centred max-width content, full-bleed section bands),
+   so the two public pages read as one site.
+
+   The base scale also went up ~20% across the board (inputs 14→15px, buttons 40→46px, hero
+   headline 20→up to 44px), because the old sizing only read comfortably at 125% browser zoom. ── */
+.login-page {
   min-height: 100vh;
   background: var(--theme-bg, #0f1117);
+  color: var(--theme-text1, #e8e0d0);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ── */
+.login-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--theme-card, #181c27);
+  border-bottom: 1px solid var(--theme-border, #2a2f3d);
+}
+
+.login-nav-inner {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 0 32px;
+  height: 68px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 16px;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-/* ── Card ── */
-.login-split {
+.login-nav-actions {
   display: flex;
-  flex-direction: column;
-  width: 100%;
-  max-width: 1020px;
-  background: var(--theme-card, #181c27);
-  border: 1px solid var(--theme-border, #2a2f3d);
-  border-radius: var(--radius-xl, 24px);
-  box-shadow: var(--theme-card-shadow, 0 4px 40px rgba(0,0,0,0.35));
-  overflow: hidden;
-}
-
-/* ── Two-column top: pitch (left) vs sign-in (right) ── */
-.login-top {
-  display: flex;
-}
-
-.login-left {
-  flex: 1.1;
-  padding: 22px 30px;
-  display: flex;
-  flex-direction: column;
-}
-
-.login-vdivider {
-  width: 1px;
-  background: var(--theme-border, #2a2f3d);
-  flex-shrink: 0;
-}
-
-.login-right {
-  flex: 0.9;
-  padding: 22px 34px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-}
-
-/* ── Trial signup: one full-width block below the two-column top, so the whole form reads as a
-   single left-to-right flow instead of being split by .login-vdivider above. ── */
-.login-hdivider {
-  height: 1px;
-  background: var(--theme-border, #2a2f3d);
-  flex-shrink: 0;
-}
-
-.login-trial-block {
-  padding: 20px 30px 24px;
+  align-items: center;
+  gap: 10px;
 }
 
 /* ── Brand ── */
-.login-brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 12px;
-}
-
-/* Brand mark on the left, View Pricing pushed to the right. Both of these were inline styles on
-   the elements themselves; moved here whole rather than in part, since an inline style outranks a
-   class and a half-migrated element fails silently on exactly the properties left behind. */
-.login-brand--split {
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .login-brand-mark {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
 }
 
 .login-brand-name {
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--theme-text1, #e8e0d0);
   letter-spacing: 0.03em;
   font-family: 'Georgia', serif;
 }
 
-/* ── Pitch ── */
-.login-pitch {
-  margin-bottom: 10px;
+/* ── Hero ── */
+/* Holds the footer at the bottom of the viewport when the page is short (e.g. after a successful
+   trial signup collapses the form to a one-line confirmation). */
+.login-page > main {
+  flex: 1;
+}
+
+.login-hero {
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 72px 32px 76px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(400px, 0.95fr);
+  gap: 64px;
+  align-items: center;
+}
+
+.login-hero-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Same pill treatment as Pricing.js's hero eyebrow — accent rather than green, since green means
+   paid/approved/healthy everywhere else in the product (see the CTA-hierarchy note below). */
+.login-eyebrow {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-accent, #c9a84c) 28%, transparent);
+  border-radius: var(--radius-full, 999px);
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--theme-accent-ink, #c9a84c);
+  margin-bottom: 22px;
 }
 
 .login-pitch-headline {
-  font-size: 20px;
+  font-size: clamp(24px, 3.4vw, 32px);
   font-weight: 800;
   color: var(--theme-text1);
-  letter-spacing: -0.02em;
-  line-height: 1.2;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin: 0;
 }
 
 .login-pitch-sub {
-  font-size: 13px;
+  font-size: 18px;
   color: var(--theme-text2);
-  margin-top: 3px;
+  margin: 12px 0 0;
+  line-height: 1.5;
 }
 
 /* ── Highlights ── */
 .login-highlights {
   list-style: none;
   padding: 0;
-  margin: 0 0 10px 0;
+  margin: 30px 0 0 0;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 12px;
 }
 
 .login-highlights li {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 15px;
   color: var(--theme-text2);
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 .login-highlight-bullet {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--theme-accent, #c9a84c);
   flex-shrink: 0;
+  margin-top: 8px;
 }
 
-/* ── Section label ── */
-.login-divider-label {
-  font-size: 11px;
+/* ── Sign-in card ── */
+.login-card {
+  background: var(--theme-card, #181c27);
+  border: 1px solid var(--theme-border, #2a2f3d);
+  border-radius: var(--radius-xl, 24px);
+  box-shadow: var(--theme-card-shadow, 0 4px 40px rgba(0,0,0,0.35));
+  padding: 34px 34px 32px;
+  display: flex;
+  flex-direction: column;
+}
+
+.login-heading {
+  font-size: 24px;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  color: var(--theme-text1);
+  margin: 0 0 6px 0;
+}
+
+.login-sub {
+  font-size: 15px;
+  color: var(--theme-text2);
+  margin: 0 0 22px 0;
+}
+
+/* ── Trial signup band ── */
+.login-trial-band {
+  background: var(--theme-card, #181c27);
+  border-top: 1px solid var(--theme-border, #2a2f3d);
+  border-bottom: 1px solid var(--theme-border, #2a2f3d);
+  /* The header's "Start free trial →" jumps here, and the header is sticky — without this the
+     band's heading lands underneath it. */
+  scroll-margin-top: 84px;
+}
+
+.login-trial-inner {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 54px 32px 60px;
+}
+
+.login-band-head {
+  margin-bottom: 26px;
+}
+
+.login-band-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--theme-text1);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.login-band-sub {
+  font-size: 15px;
+  color: var(--theme-text2);
+  margin: 6px 0 0;
+}
+
+/* ── Footer ── */
+.login-footer {
+  max-width: 1240px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 26px 32px 34px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
   color: var(--theme-text3);
-  margin-bottom: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--theme-border);
+}
+
+.login-footer-link {
+  background: none;
+  border: none;
+  padding: 6px 2px;
+  min-height: 24px;
+  font-size: 13px;
+  color: var(--theme-text2);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 /* ── Form ── */
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
-/* Trial signup form's top row (Business Name/Email/Password/Show password) — condensed
-   (2026-07-29) so the left column's height stops dwarfing the sign-in column on the right.
-   Grid's `end`-aligned tracks let the no-label checkbox sit flush with the bottom of the row's
-   inputs instead of the top. */
+/* Trial signup form's top row (Business Name/Email/Password/Show password). Grid's `end`-aligned
+   tracks let the no-label checkbox sit flush with the bottom of the row's inputs instead of the
+   top. */
 .login-row-top {
   display: grid;
   grid-template-columns: 1.3fr 1.3fr 1.1fr auto;
-  gap: 10px;
+  gap: 16px;
   align-items: end;
 }
 
 .login-show-pw--inline {
   white-space: nowrap;
-  padding-bottom: 8px;
+  padding-bottom: 10px;
 }
 
 /* Trial signup form's second row (Your Name/Phone/Start Free Trial) — same `end`-aligned-grid
@@ -176,7 +253,7 @@
 .login-row-second {
   display: grid;
   grid-template-columns: 1fr 1fr auto;
-  gap: 10px;
+  gap: 16px;
   align-items: end;
 }
 
@@ -188,11 +265,11 @@
 .login-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .login-field label {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--theme-text2, #8a92a3);
   letter-spacing: 0.02em;
@@ -202,8 +279,8 @@
   background: var(--theme-input-bg, #0f1117);
   border: 1px solid var(--theme-border, #2a2f3d);
   border-radius: var(--radius-md, 12px);
-  padding: 7px 10px;
-  font-size: 14px;
+  padding: 11px 14px;
+  font-size: 15px;
   color: var(--theme-text1, #e8e0d0);
   outline: none;
   transition: border-color 0.15s;
@@ -221,7 +298,7 @@
 }
 
 .login-optional {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--theme-text3);
   font-weight: 400;
 }
@@ -229,10 +306,10 @@
 .login-show-pw {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 24px;
+  gap: 8px;
+  min-height: 26px;
   align-self: flex-start;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--theme-text2, #8a92a3);
   cursor: pointer;
   user-select: none;
@@ -243,8 +320,8 @@
    does the work; the box itself is bumped to 16px so it doesn't look lost inside it. */
 .login-show-pw input[type="checkbox"] {
   accent-color: var(--theme-accent, #c9a84c);
-  width: 16px;
-  height: 16px;
+  width: 17px;
+  height: 17px;
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -254,10 +331,10 @@
    before this change: the Caps Lock hint 2.62:1, the confirmation panel and both green CTAs
    3.34:1. See the block comment above PRESETS in ThemeContext.js. */
 .login-error {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--theme-red-text, #f87171);
   margin: 0;
-  padding: 7px 10px;
+  padding: 10px 14px;
   background: color-mix(in srgb, var(--theme-red, #f87171) 8%, transparent);
   border-radius: var(--radius-md, 12px);
 }
@@ -265,7 +342,7 @@
 /* Per-field validation message, sitting directly under the input it belongs to. Carries role=alert
    in the markup so it's announced, not just shown. */
 .login-field-error {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--theme-red-text, #f87171);
   line-height: 1.4;
 }
@@ -277,7 +354,7 @@
 /* Caps Lock is the most common cause of a password that's typed correctly and still rejected.
    Amber rather than red — it's a heads-up about the keyboard, not an error in the form. */
 .login-caps-hint {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--theme-amber-text, #fbbf24);
   line-height: 1.4;
 }
@@ -285,11 +362,11 @@
 /* Confirmation panel (reset link sent / trial account created). Was an inline style object
    duplicated at both call sites; both now render this class with role="status". */
 .login-notice {
-  padding: 16px;
+  padding: 18px;
   background: color-mix(in srgb, var(--theme-green, #34d399) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--theme-green, #34d399) 25%, transparent);
   border-radius: var(--radius-sm, 8px);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--theme-green-text, #34d399);
   line-height: 1.6;
 }
@@ -299,14 +376,14 @@
   color: var(--theme-accent-text, #0f1117);
   border: none;
   border-radius: var(--radius-md, 12px);
-  padding: 9px 20px;
-  min-height: 40px;
-  font-size: 14px;
+  padding: 12px 24px;
+  min-height: 46px;
+  font-size: 15px;
   font-weight: 700;
   cursor: pointer;
   transition: background 0.15s;
   letter-spacing: 0.02em;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 /* ── CTA hierarchy, rebuilt 2026-08-12 ───────────────────────────────────────────────────────
@@ -319,8 +396,8 @@
    Both also measured 2.75–3.34:1 on the light presets.
    Now: one hue. Sign in stays the solid accent (most traffic is returning). Start Free Trial is
    the accent-tinted second-strongest control — it is the conversion action and previously
-   rendered at 163px against Sign in's 400px. View Pricing and Staff Login are neutral, which is
-   what a navigation link should look like. ── */
+   rendered at 163px against Sign in's 400px. Pricing and Staff Login are neutral, which is what
+   a navigation link should look like. ── */
 .login-btn--trial {
   background: color-mix(in srgb, var(--theme-accent, #c9a84c) 12%, var(--theme-input-bg, #0f1117));
   color: var(--theme-accent-ink, #c9a84c);
@@ -331,20 +408,34 @@
   background: color-mix(in srgb, var(--theme-accent, #c9a84c) 20%, var(--theme-input-bg, #0f1117));
 }
 
-/* View Pricing is a secondary link-weight action sitting inside the brand row, not a form CTA —
-   it keeps its own smaller sizing rather than inheriting .login-btn's 40px min-height. Still
-   clears WCAG 2.2 SC 2.5.8's 24x24 target floor. Declared after .login-btn so it wins on order,
-   both rules being single-class specificity. Previously an inline style prop on the element. */
-/* Neutral, not accent-tinted: this is navigation sitting in the brand row, and it inherits
-   .login-btn--trial's fill from the class list on the element. Overrides it back to quiet. */
+/* Pricing is a secondary link-weight action sitting in the header, not a form CTA — it keeps its
+   own smaller sizing rather than inheriting .login-btn's 46px min-height. Still clears WCAG 2.2
+   SC 2.5.8's 24x24 target floor. Neutral, not accent-tinted: this is navigation. */
 .login-btn--pricing {
   background: transparent;
   color: var(--theme-text2);
   border: 1px solid var(--theme-border-lt);
-  padding: 7px 16px;
-  min-height: 32px;
-  font-size: 12px;
+  padding: 9px 18px;
+  min-height: 38px;
+  font-size: 14px;
   margin-top: 0;
+}
+
+.login-btn--pricing:hover {
+  color: var(--theme-text1);
+  border-color: var(--theme-accent);
+}
+
+/* The header's trial CTA is an <a href="#start-trial"> — an in-page jump, so a link and not a
+   button — and needs the box/centring an <a> doesn't get from .login-btn alone. */
+.login-btn--nav {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 20px;
+  min-height: 38px;
+  font-size: 14px;
+  margin-top: 0;
+  text-decoration: none;
 }
 
 /* Was an inline style prop; every one of its properties moved here together. The padding is the
@@ -354,8 +445,8 @@
   background: none;
   border: none;
   padding: 6px 2px;
-  min-height: 24px;
-  font-size: 12px;
+  min-height: 26px;
+  font-size: 13px;
   color: var(--theme-accent, #c9a84c);
   text-decoration: underline;
   cursor: pointer;
@@ -371,31 +462,18 @@
 }
 
 .login-trial-note {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--theme-text3);
   text-align: center;
-  margin: 0;
+  margin: 6px 0 0;
 }
 
 .login-consent {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--theme-text3);
   text-align: center;
   margin: 0;
   line-height: 1.5;
-}
-
-.login-heading {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--theme-text1);
-  margin: 0 0 4px 0;
-}
-
-.login-sub {
-  font-size: 14px;
-  color: var(--theme-text2);
-  margin: 0 0 16px 0;
 }
 
 /* ── Staff (PIN) login shortcut — same size as the Sign in button. Tinted/bordered rather
@@ -406,13 +484,13 @@
   color: var(--theme-text2);
   border: 1px solid var(--theme-border-lt);
   border-radius: var(--radius-md, 12px);
-  padding: 9px 20px;
-  min-height: 40px;
-  font-size: 14px;
+  padding: 12px 24px;
+  min-height: 46px;
+  font-size: 15px;
   font-weight: 700;
   cursor: pointer;
   letter-spacing: 0.02em;
-  margin-top: 10px;
+  margin-top: 12px;
   transition: background 0.15s;
 }
 
@@ -429,7 +507,9 @@
 .login-btn:focus-visible,
 .login-btn--trial:focus-visible,
 .login-btn--pricing:focus-visible,
+.login-btn--nav:focus-visible,
 .login-staff-btn:focus-visible,
+.login-footer-link:focus-visible,
 .login-forgot:focus-visible {
   outline: 2px solid var(--theme-accent);
   outline-offset: 2px;
@@ -447,16 +527,17 @@
 @media (pointer: coarse) {
   .login-field input {
     font-size: 16px;
-    padding: 11px 12px;
+    padding: 13px 14px;
   }
 
   .login-btn,
   .login-staff-btn {
-    min-height: 44px;
+    min-height: 48px;
   }
 
-  .login-btn--pricing {
-    min-height: 36px;
+  .login-btn--pricing,
+  .login-btn--nav {
+    min-height: 42px;
   }
 
   .login-forgot {
@@ -469,60 +550,59 @@
   }
 }
 
+/* ── Below the hero's two-column comfort width, stack. Sign-in first: most traffic here is a
+   returning user, and the pitch is what backs it up rather than what gates it. ── */
+@media (max-width: 980px) {
+  .login-hero {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    padding: 44px 24px 52px;
+  }
+
+  .login-hero-copy { order: 2; }
+  .login-card      { order: 1; }
+}
+
 /* ── Just above the mobile breakpoint, the trial-form rows (Business Name/Email/Password/Show
    password, then Your Name/Phone/Start Free Trial) get too narrow for their own placeholder text
-   ("you@restaurant.com", "e.g. Ramesh Shrestha" visibly clip in the ~641-750px range) before
-   .login-top itself collapses to a single column at 640px below. Collapse just these sub-grids
-   earlier so there's no pinch zone between the two breakpoints. ── */
-@media (max-width: 750px) {
+   ("you@restaurant.com", "e.g. Ramesh Shrestha" visibly clip in the ~641-750px range). Collapse
+   just these sub-grids earlier so there's no pinch zone between the two breakpoints. ── */
+@media (max-width: 800px) {
   .login-row-top,
   .login-row-second {
     grid-template-columns: 1fr;
   }
 }
 
-/* ── Mobile: stack vertically ──
-   Order is sign-in → free trial → pitch, which needs the two-column wrapper to stop being a box
-   of its own: `display: contents` promotes .login-left/.login-vdivider/.login-right to direct
-   children of .login-split, so all five blocks sit in one column flex context and `order` can
-   interleave the trial block between them. (Safe here — .login-top is a presentational div with
-   no role of its own, which is the case `display: contents` is fine for.)
-   The old rule was `flex-direction: column-reverse` on .login-top alone. That got sign-in above
-   the pitch, which is right for a returning user, but it also left the marketing pitch sitting
-   BETWEEN sign-in and "Start your free trial" — so a first-time visitor had to scroll past ~600px
-   of feature bullets to reach the form this page exists to drive. Now both audiences get their
-   destination first and the pitch backs them up underneath. ── */
 @media (max-width: 640px) {
-  .login-top {
-    display: contents;
+  .login-nav-inner {
+    padding: 0 18px;
+    height: 62px;
   }
 
-  .login-right       { order: 1; }
-  .login-hdivider    { order: 2; }
-  .login-trial-block { order: 3; }
-  .login-vdivider    { order: 4; }
-  .login-left        { order: 5; }
-
-  .login-vdivider {
-    width: 100%;
-    height: 1px;
+  .login-hero {
+    padding: 32px 18px 40px;
   }
 
-  .login-left,
-  .login-right,
-  .login-trial-block {
-    padding: 28px 20px;
+  .login-card {
+    padding: 26px 20px 24px;
   }
 
-  .login-row-top,
-  .login-row-second {
-    grid-template-columns: 1fr;
+  .login-trial-inner {
+    padding: 40px 18px 46px;
   }
 
-  /* "View Pricing" and a long white-label app_name were colliding at 390px and wrapping the
-     brand name mid-phrase. Let the row wrap as a row instead. */
-  .login-brand--split {
+  .login-footer {
+    padding: 22px 18px 30px;
+  }
+
+  /* "Start free trial" and a long white-label app_name were colliding at 390px. Let the header
+     wrap as a row instead of squeezing the brand. */
+  .login-nav-inner {
     flex-wrap: wrap;
+    height: auto;
+    padding-top: 12px;
+    padding-bottom: 12px;
     row-gap: 10px;
   }
 }

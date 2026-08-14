@@ -203,31 +203,42 @@ export default function Login() {
   })
 
   return (
-    <main className="login-root">
-      <div className="login-split">
+    <div className="login-page">
 
-        <div className="login-top">
-          {/* ── Left: Pitch ── */}
-          <div className="login-left">
-            <div className="login-brand login-brand--split">
-              <div className="login-brand-mark">
-                <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />
-                <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
-              </div>
-              {/* type="button" explicitly — a <button> with no type defaults to submit, which is
-                  harmless only for as long as this stays outside a <form>. */}
-              <button
-                type="button"
-                onClick={() => navigate('/pricing')}
-                className="login-btn login-btn--trial login-btn--pricing">
-                View Pricing →
-              </button>
-            </div>
+      {/* ── Site header ─────────────────────────────────────────────────────────────────────
+          This page reads as a real page rather than one boxed card floating in the middle of a
+          dark field: a sticky header, a hero, a signup band and a footer, matching Pricing.js's
+          own structure (sticky nav, brand row, centred max-width content) so the two public pages are
+          recognisably one site rather than two unrelated screens. ── */}
+      <header className="login-nav">
+        <div className="login-nav-inner">
+          <div className="login-brand-mark">
+            <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />
+            <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
+          </div>
+          <nav className="login-nav-actions" aria-label="Site">
+            {/* type="button" explicitly — a <button> with no type defaults to submit, which is
+                harmless only for as long as these stay outside a <form>. */}
+            <button
+              type="button"
+              onClick={() => navigate('/pricing')}
+              className="login-btn login-btn--pricing">
+              Pricing
+            </button>
+            <a href="#start-trial" className="login-btn login-btn--trial login-btn--nav">
+              Start free trial →
+            </a>
+          </nav>
+        </div>
+      </header>
 
-            <div className="login-pitch">
-              <div className="login-pitch-headline">Smarter menus. Better margins.</div>
-              <div className="login-pitch-sub">Built for Nepal's F&amp;B industry.</div>
-            </div>
+      <main>
+        <section className="login-hero">
+          {/* ── Pitch ── */}
+          <div className="login-hero-copy">
+            <span className="login-eyebrow">7-day free trial · No credit card needed</span>
+            <h1 className="login-pitch-headline">Smarter menus. Better margins.</h1>
+            <p className="login-pitch-sub">Built for Nepal's F&amp;B industry.</p>
 
             <ul className="login-highlights">
               {HIGHLIGHTS.map((text, i) => (
@@ -239,14 +250,13 @@ export default function Login() {
             </ul>
           </div>
 
-          {/* ── Divider ── */}
-          <div className="login-vdivider" />
-
-          {/* ── Right: Sign in ── */}
-          <div className="login-right">
+          {/* ── Sign in ── */}
+          <div className="login-card">
             {forgotMode ? (
               <>
-                <h1 className="login-heading">Reset password</h1>
+                {/* h2, not h1 — the page's h1 is the hero headline above; the card is a section
+                    of the page now, not the page itself. */}
+                <h2 className="login-heading">Reset password</h2>
                 <p className="login-sub">We'll email you a link to set a new one</p>
                 {forgotSent ? (
                   <div className="login-notice" role="status">
@@ -270,7 +280,7 @@ export default function Login() {
               </>
             ) : (
               <>
-                <h1 className="login-heading">Welcome back</h1>
+                <h2 className="login-heading">Welcome back</h2>
                 <p className="login-sub">Sign in to your account</p>
                 <form onSubmit={handleSignIn} className="login-form">
                   <div className="login-field">
@@ -308,18 +318,20 @@ export default function Login() {
               </>
             )}
           </div>
-        </div>
+        </section>
 
-        {/* ── Trial signup: one full-width block below both columns, so the whole form reads
-            left-to-right in a single continuous flow instead of being split by the vertical
-            divider above. ── */}
-        <div className="login-hdivider" />
-        <div className="login-trial-block">
+        {/* ── Trial signup: its own full-bleed band, so account creation reads as a distinct
+            section of the page rather than a footnote inside the sign-in card. ── */}
+        <section className="login-trial-band" id="start-trial">
+          <div className="login-trial-inner">
           {/* A real heading, not a styled div: this block creates a live client account, and the
               page's only heading was "Welcome back" — so the sign-in form and the account-creation
               form were indistinguishable in the heading outline, and the conversion CTA sat under
               the quietest text tier in the system. */}
-          <h2 className="login-divider-label">Start your free trial</h2>
+          <div className="login-band-head">
+            <h2 className="login-band-title">Start your free trial</h2>
+            <p className="login-band-sub">Set up your outlet in a couple of minutes. Nothing to install.</p>
+          </div>
 
           {trialSuccess ? (
             <div className="login-notice" role="status">
@@ -377,9 +389,14 @@ export default function Login() {
               </p>
             </form>
           )}
-        </div>
+          </div>
+        </section>
+      </main>
 
-      </div>
-    </main>
+      <footer className="login-footer">
+        <span>© {new Date().getFullYear()} {settings?.app_name || 'Crest Suite'} · Built for Nepal's F&amp;B industry</span>
+        <button type="button" className="login-footer-link" onClick={() => navigate('/pricing')}>Pricing</button>
+      </footer>
+    </div>
   )
 }

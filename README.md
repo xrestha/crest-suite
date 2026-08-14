@@ -158,6 +158,31 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S553 — 2026-08-14 — The login screen was a modal with nothing behind it
+
+Two reports from one screenshot: *"I want the login screen to be of this size — I had to increase the zoom to 125%"*, then *"can't the login page look like a web page instead of the modal?"* Both are the same finding from different angles. `/login` rendered a single 1020px card centred in an empty viewport — a modal without a page under it — and every size inside it was tuned small enough to fit that box, which is why it only read comfortably at 125% browser zoom.
+
+The card was doing two jobs: containing the sign-in form (correct — a form is a card) and standing in for the page itself (not correct). Splitting those apart is the whole change.
+
+**Now a page**, in the same structural language as `Pricing.js` so the two public surfaces read as one site rather than two unrelated screens:
+
+- **Sticky header** — brand left; `Pricing` (neutral) and `Start free trial →` (accent-tinted, an in-page `#start-trial` jump) right, on a 1240px centred rail.
+- **Hero** — two columns laid out on the page, not inside a box: pitch and highlights left under an accent eyebrow pill, sign-in in the one element that is still a card.
+- **Trial signup** — its own full-bleed band on `--theme-card` with a real heading and subline, so creating a live client account reads as a section of the page instead of a footnote under the sign-in form.
+- **Footer** — copyright plus a Pricing link, held to the bottom of the viewport by `flex: 1` on `<main>` for the short-page case (a successful trial signup collapses the form to a one-line confirmation).
+
+**The scale went up ~20% so 100% zoom reads like the old 125%**: inputs 14→15px with taller padding, buttons 40→46px min-height (48px on touch), labels 12→13px, highlights 13→15px, card heading 22→24px, hero headline 20px → `clamp(24px, 3.4vw, 32px)`.
+
+Three things worth keeping from the pass:
+
+- **The first draft's hero was 46px and the impeccable hook was right to flag it.** DESIGN.md's type ramp is a closed set (32/24/22/20/18/17/16/15/14/13/12/11/10/9) and 46/28/26 were all off it. Pulled to 32/24 rather than suppressed — `Pricing.js`'s own 44px hero escapes the check only because it is an inline style in JS, which is drift the hook cannot see, not a precedent. If the hero should be larger, the step goes into DESIGN.md first.
+- **Only the wrappers moved.** Every id/`htmlFor` pair, `role="alert"`/`role="status"` region, Caps Lock hint, per-field validation message, `autoComplete` value, the `signInErrorMessage` rate-limit/network/credential split and the single-accent CTA hierarchy are untouched. The one markup change beyond layout: `Welcome back` / `Reset password` demote from `h1` to `h2`, since the page's `h1` is now the hero headline and the card is a section of the page rather than the page.
+- **Mobile ordering keeps its S534 reasoning** — the hero stacks at ≤980px with the sign-in card first and the pitch below it, because most traffic here is a returning user. The old `display: contents` trick on `.login-top` is gone with the wrapper it existed for; a two-item grid with `order` does it directly.
+
+**Not verified in a browser** — confirmed by a clean `CI=true` build and by reading. Worth a glance on Rosé Dawn, the preset DESIGN.md names as worst for contrast.
+
+**Files:** `src/pages/Login.js`, `src/pages/Login.css` (rewritten), `public/service-worker.js` (`crest-v74`), `README.md`, `CLAUDE.md`
+
 ### S552 — 2026-08-13 — Crest Suite Pro was billed on a screen that never showed it
 
 Reported from a screenshot of the Admin Dashboard client list: *"one of the clients has Suite Pro, but I don't see any icon or notification."* Correct, and the gap was wider than a missing icon — **`clients.suite_plan` had no representation anywhere in the admin UI**, while the same page was already billing for it.
