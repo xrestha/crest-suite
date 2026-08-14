@@ -158,6 +158,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S554 — 2026-08-14 — Documented the access model (docs only, no code change)
+
+Asked directly off a screenshot of IMS Staff → Manage IMS Roles: *"how will a cafe/restaurant owner access the crest-suite?"* Answerable only by reading `AuthContext.js`, `admin-user-ops/index.ts` and `ClientDrawer.js` together, which is the definition of something that should have been written down. Now a section in CLAUDE.md ("Who logs in where, and how an Owner account comes to exist"). No code changed.
+
+The substance, briefly:
+
+- **Three front doors, and an owner uses exactly one.** `/login` (email + password) serves the Owner, **IMS staff and HR staff** alike — they share the entrance and are separated by role. `/pos/login` and `/hr/self-service` are PIN doors for till staff and employees. An owner never uses a PIN, which is what IMS Staff's own subtitle ("same as you do") is telling the reader.
+- **Two creation paths, one identical result.** `register_trial` from the public form, or Admin → Clients → Manage → Users (`createUser` + the same profile upsert). Both write `role:'client'` + `client_id` and nothing else. There is no "owner" flag anywhere.
+- **The trap: Owner is the absence of staff markers.** `isOwner` is `role==='client'` with none of `pos_role`/`ims_role`/`hr_role`/`hr_self_service` — which is exactly what makes an owner resolve to `'manager'` on all three axes. Assign the owner's own login an IMS role from the very page this question came from and the negative test flips: they drop to that rank and lose Owner-level access, Suite features included. The owner should never appear in a staff list.
+
+**Files:** `CLAUDE.md`, `README.md`
+
 ### S553 — 2026-08-14 — The login screen was a modal with nothing behind it
 
 Two reports from one screenshot: *"I want the login screen to be of this size — I had to increase the zoom to 125%"*, then *"can't the login page look like a web page instead of the modal?"* Both are the same finding from different angles. `/login` rendered a single 1020px card centred in an empty viewport — a modal without a page under it — and every size inside it was tuned small enough to fit that box, which is why it only read comfortably at 125% browser zoom.

@@ -252,6 +252,24 @@ Each axis gates two things that must both be kept in sync when adding a page: th
 
 `pos_discount_limit` (nullable numeric %, `NULL` = unlimited) and `pos_allow_void` (boolean, default `false`, added S517) are two more per-staff overrides on `profiles`, same family as `pos_team` — a manager sets them per staff member on `/pos/staff` (POS Staff), and both are enforced in `PosOrders.jsx` against `profile.pos_discount_limit`/`pos_allow_void` from `useAuth()` (never against rank alone — a Supervisor isn't automatically capped/voidable, only whoever has the flag set). **`admin-user-ops`'s `update_pos_role` action must build every field it writes conditionally** (`if (x !== undefined) updatePayload.x = x`), never unconditionally as `x || null` — `updateTeam`/`updateDiscountLimit`/`updateAllowVoid` each call this one action with only their own single field in the request body, so any field written unconditionally gets silently reset to its default on every other field's update. This bit `pos_role` itself: it was unconditional from the start (only `pos_team` got the conditional treatment when added at S431), so setting a staff member's Discount Limit or Allow Void was silently wiping their role to "No Access" — found live smoke-testing S517 against a real staff account, fixed by making `pos_role`/`pos_job_title` conditional too. Any future field added to this same staff-permission family must follow the conditional pattern from the start, not retrofit it after the same bug repeats.
 
+### Who logs in where, and how an Owner account comes to exist
+
+Asked directly (S554) and answerable only by reading three files, so it belongs here. **There are three front doors, and a client owner uses exactly one of them.**
+
+| Door | Route | Credential | Who |
+| --- | --- | --- | --- |
+| Main | `/login` | email + password | Owner, **IMS staff, HR staff**, Crest admin |
+| POS | `/pos/login` | 4–6 digit PIN on a device-bound picker | POS till staff |
+| Self-Service | `/hr/self-service` | 4–6 digit PIN | Employees checking payslips/leave/roster |
+
+IMS and HR staff share the owner's front door and are separated by role, not by entrance — which is what IMS Staff's own subtitle ("Staff log in with their email and password, same as you do") means. Only POS and Self-Service have their own PIN entrances, and **an owner never uses a PIN.**
+
+An Owner account is created by one of two paths, and they produce a byte-identical profile: `register_trial` (the public trial form on `/login` — creates the `clients` row, the auth user and a `profiles` row of `role:'client'` + `client_id`, then signs them straight in), or Admin → Clients → Manage → Users, which calls the generic `createUser` action and upserts the same `{ id, client_id, full_name, role:'client' }` (`ClientDrawer.js`). Nothing anywhere writes an "owner" flag, because there isn't one.
+
+**That is the trap worth stating plainly: Owner is the ABSENCE of staff markers, so giving the owner's own login a staff role demotes them.** `isOwner` is `role==='client'` with none of `pos_role`/`ims_role`/`hr_role`/`hr_self_service` set, which is what makes an owner resolve to `'manager'` on all three rank axes for free. Assign that same login an IMS role from `/ims-staff` and the negative test flips: they lose Owner-level access — Suite features included — and get only what that rank permits. The owner should never appear in a staff list; those rows are for staff. (Same mechanism as the `isOwner`/`isCallerOwner`/`is_client_owner()` triplet above — a new marker column must be added to all three.)
+
+What an owner sees after signing in is then four independent things: the module flags (sidebar sections + route access), `clients.plan` (which IMS tier features), `clients.suite_plan` (the owner-altitude features behind `SuiteGate`), and `getAccessState` (a lapsed subscription shows `SubscriptionLock` instead of the app). A multi-outlet owner switches outlets from the sidebar. A locked-out owner self-serves via "Forgot password?" on the login card; failing that, admin can reset it — `requireStaffTarget` deliberately exempts admin callers so that stays possible.
+
 ### Splitting a page component once it outgrows one file
 
 As of 2026-07-06, the six pages that had grown past 1,200 lines (`AdminClients.js`, `Roster.jsx`, `Dashboard.js`, `Purchases.js`, `Recipes.js`, `PosOrders.jsx`) were each split, using whichever of these fits what's actually inside — don't force a pattern that doesn't match:
