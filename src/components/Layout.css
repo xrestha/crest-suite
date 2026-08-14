@@ -1696,6 +1696,22 @@ textarea:focus-visible {
   }
 }
 
+/* ClientDashboard.jsx's Spend by Category / Daily Purchases vs Sales row — was a 3-card
+   repeat(auto-fit, minmax(280px,1fr)) row until Top Items by Spend was folded into the Spend by
+   Category card as a second tab (freeing a column), specifically so Daily Purchases vs Sales could
+   take the reclaimed space rather than the two cards splitting it evenly. Same inline-style-can't-
+   be-media-overridden reasoning as .dash-3col-* above, hence a class instead of a JS style object. */
+.dash-spend-purchases-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 14px;
+}
+@media (max-width: 768px) {
+  .dash-spend-purchases-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .stat-card {
   background: var(--theme-card);
   border: 1px solid var(--theme-border);

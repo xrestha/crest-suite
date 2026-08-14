@@ -34,15 +34,34 @@ const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#f
 // dashboard uses to mean "over threshold", and neither dashed line shared a hue with the solid
 // line it extends. A projection is the same measure, less certain: same hue, dash carries the
 // distinction. That drops the chart from four hues to two and makes the legend self-evident.
+//
+// The frozen Target line (added alongside the live projection) breaks that rule on purpose: with
+// three series per metric — actual, live projection, frozen target — two of them sharing both hue
+// AND a dash/dot stroke read as near-duplicates at compact-card size. Target gets its own hue per
+// metric, reusing two colours already in this file's own CHART_COLORS palette (so nothing foreign
+// enters the page), and keeps the dotted glyph on top of that so it's told apart two ways at once.
 const DAILY_TREND_COLORS = {
   purchases: '#c9a84c', // gold — ties to the Food Cost card and the FC% trend line
   sales:     '#34d399', // green
+  purchTarget: '#fb923c', // orange — frozen Purch. Target, deliberately not gold
+  salesTarget: '#60a5fa', // blue — frozen Sales Target, deliberately not green
 }
+
+// Sunday-first, one letter each, exactly as asked for — S/M/T/W/T/F/S. Tue and Thu (and Sun/Sat)
+// share a letter; that ambiguity is accepted on purpose rather than solved with two-letter codes,
+// matching the plain single-glyph weekday row this was modeled on. Index matches JS Date.getDay().
+const WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
 // Least-squares trend on a day→value map, extended to monthEndDay — shared by both the Sales and
 // Purchases month-end projections on the Daily Purchases vs Sales chart. Dampened so a steep slope
 // fitted to a few volatile early days can't run away: each projected day is clamped to
 // [0, 1.25 × recent (up-to-7-day) peak]. Needs ≥5 data points to bother projecting at all.
+//
+// Returns slope/intercept/cap alongside the usual projDays/projectedTotal so a caller can freeze
+// this exact fit (see the sales/purch_projection_snapshot capture in loadStats) and reconstruct a
+// static full-month line from it later via targetLineValue() below — projDays alone only covers
+// days after the last actual, which is enough for the live forward tail but not for a frozen
+// month-long reference line.
 function projectTrend(dayNums, valueMap, monthEndDay) {
   if (dayNums.length < 5) return null
   const xs = dayNums, ys = xs.map(d => valueMap[d]), n = xs.length
@@ -60,7 +79,16 @@ function projectTrend(dayNums, valueMap, monthEndDay) {
     const v = Math.min(cap, Math.max(0, Math.round(slope * d + intercept)))
     projDays[d] = v; projSum += v
   }
-  return { projDays, projectedTotal: Math.round(sumY + projSum), lastActual }
+  return { projDays, projectedTotal: Math.round(sumY + projSum), lastActual, slope, intercept, cap }
+}
+
+// Reconstructs one day's value on a frozen projection snapshot ({slope, intercept, cap} captured
+// once by loadStats — see sales/purch_projection_snapshot below), using the same clamp
+// projectTrend() applies to its own live projected days. Unlike projDays (only future-of-capture
+// days), this is called for every day 1..monthEndDay so the frozen line spans the whole period.
+function targetLineValue(snap, day) {
+  if (!snap) return null
+  return Math.min(snap.cap, Math.max(0, Math.round(snap.slope * day + snap.intercept)))
 }
 
 export default function ClientDashboard() {
@@ -90,11 +118,20 @@ export default function ClientDashboard() {
   const [hasDailySales, setHasDailySales] = useState(() => readDashboardCache('hasDailySales', effectiveClientId) ?? false)
   const [salesProjection, setSalesProjection] = useState(() => readDashboardCache('salesProjection', effectiveClientId)) // { projectedMonthEnd } | null
   const [purchProjection, setPurchProjection] = useState(() => readDashboardCache('purchProjection', effectiveClientId)) // { projectedMonthEnd } | null
+  // Frozen, never-recalculated trend fit — captured once by loadStats the first time each metric
+  // crosses the 5-point threshold, so it can be compared against as the period plays out instead of
+  // silently moving with every new day of actuals the way salesProjection/purchProjection do.
+  const [salesTargetSnap, setSalesTargetSnap] = useState(() => readDashboardCache('salesTargetSnap', effectiveClientId)) // { slope, intercept, cap, capturedDay, projectedMonthEnd } | null
+  const [purchTargetSnap, setPurchTargetSnap] = useState(() => readDashboardCache('purchTargetSnap', effectiveClientId)) // { slope, intercept, cap, capturedDay, projectedMonthEnd } | null
   const [topItemSpend, setTopItemSpend] = useState(() => readDashboardCache('topItemSpend', effectiveClientId) ?? [])
   const [reorderItems, setReorderItems]   = useState(() => readDashboardCache('reorderItems', effectiveClientId) ?? [])
   const [fcTrend, setFcTrend]             = useState(() => readDashboardCache('fcTrend', effectiveClientId) ?? [])
   const [hrStats, setHrStats]             = useState(() => readDashboardCache('hrStats', effectiveClientId) ?? null)
   const [posStats, setPosStats]           = useState(() => readDashboardCache('posStats', effectiveClientId) ?? null)
+  // Which visual the merged Spend by Category / Top Items card is showing — plain UI state, not
+  // page data, so it isn't seeded from or written to dashboardCache like the state above; it
+  // resets to the default tab on remount the same way ChartCard's own `expanded` does.
+  const [spendView, setSpendView]         = useState('category') // 'category' | 'items'
   // Wraps a normal setState call to also persist the same value to the cache above, under the
   // given section key. Only ever called from inside loadStats/loadHrStats/loadPosStats/
   // loadKitchenPosStats/loadFcTrend, all of which already check `loadIdRef.current !== myId`
@@ -382,6 +419,44 @@ export default function ClientDashboard() {
     setAndCache(setSalesProjection, 'salesProjection', salesTrend ? { projectedMonthEnd: salesTrend.projectedTotal } : null)
     setAndCache(setPurchProjection, 'purchProjection', purchTrend ? { projectedMonthEnd: purchTrend.projectedTotal } : null)
 
+    // Freeze a one-time "Target" snapshot the first time each metric crosses projectTrend()'s
+    // 5-point threshold, so a later visit can compare actual performance against what was
+    // projected EARLY in the period — salesTrend/purchTrend above are intentionally live and
+    // refit to all actuals on every load, so without a frozen copy there is no way to look back at
+    // an earlier forecast; it has already moved on by the time you'd check it. Read whatever
+    // snapshot already exists on the period row first (arrives for free once the migration lands,
+    // scopedFrom selects '*'); only capture a new one when none exists yet — never overwritten
+    // automatically afterward, matching the Monthly Owner Report's own frozen-snapshot precedent.
+    let nextSalesTargetSnap = period?.sales_projection_snapshot || null
+    let nextPurchTargetSnap = period?.purch_projection_snapshot || null
+    if (period && isCurrentMonth) {
+      if (!nextSalesTargetSnap && salesTrend) {
+        nextSalesTargetSnap = {
+          slope: salesTrend.slope, intercept: salesTrend.intercept, cap: salesTrend.cap,
+          capturedDay: salesTrend.lastActual, capturedAt: new Date().toISOString(),
+          projectedMonthEnd: salesTrend.projectedTotal,
+        }
+        // Best-effort: a failed save just means this loads uncaptured again next visit, and the
+        // .is(...) guard means a second tab racing this same capture can't stomp a snapshot the
+        // other just wrote (both would compute the same numbers from the same data anyway).
+        scopedUpdate('monthly_periods', { sales_projection_snapshot: nextSalesTargetSnap })
+          .eq('id', period.id).is('sales_projection_snapshot', null)
+          .then(({ error }) => { if (error) console.error('Failed to save sales target snapshot', error) })
+      }
+      if (!nextPurchTargetSnap && purchTrend) {
+        nextPurchTargetSnap = {
+          slope: purchTrend.slope, intercept: purchTrend.intercept, cap: purchTrend.cap,
+          capturedDay: purchTrend.lastActual, capturedAt: new Date().toISOString(),
+          projectedMonthEnd: purchTrend.projectedTotal,
+        }
+        scopedUpdate('monthly_periods', { purch_projection_snapshot: nextPurchTargetSnap })
+          .eq('id', period.id).is('purch_projection_snapshot', null)
+          .then(({ error }) => { if (error) console.error('Failed to save purchase target snapshot', error) })
+      }
+    }
+    setAndCache(setSalesTargetSnap, 'salesTargetSnap', nextSalesTargetSnap)
+    setAndCache(setPurchTargetSnap, 'purchTargetSnap', nextPurchTargetSnap)
+
     // Build the unified day axis, full month (Day 1 → month end for the current month; full actual
     // range for past months). The compact card slices this down to a 10-day window (6 days back →
     // 3 days ahead) at render time — see `dailyTrendWindowed` below — while the expanded modal shows
@@ -406,6 +481,11 @@ export default function ClientDashboard() {
           : (d === lastActualSalesDay && hasProj ? daySalesMap[d] : null),
         purchProj: isPurchProj ? purchProjDays[d]
           : (d === lastActualPurchDay && hasPurchProj ? dayPurchMap[d] : null),
+        // Frozen full-month line, unlike salesProj/purchProj above — non-null for every day in
+        // range (not just from the last actual onward) so it's a static reference the actual line
+        // can be compared against retroactively, not just a forward-looking tail.
+        salesTarget: targetLineValue(nextSalesTargetSnap, d),
+        purchTarget: targetLineValue(nextPurchTargetSnap, d),
       })
     }
     setAndCache(setDailyTrend, 'dailyTrend', trend)
@@ -725,7 +805,7 @@ export default function ClientDashboard() {
   const dailyTrendSalesTotal = dailyTrend.reduce((s, d) => s + (d.sales || 0), 0)
   const dailyTrendSummary = dailyTrend.length === 0
     ? 'No purchase or sales data for this period.'
-    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-NP')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-NP')}.` : ''}${salesProjection ? ` Projected month-end revenue: NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}`
+    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-NP')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-NP')}.` : ''}${salesProjection ? ` Projected month-end revenue: NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}${salesTargetSnap ? ` Sales target locked on Day ${salesTargetSnap.capturedDay}: NPR ${salesTargetSnap.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}${purchTargetSnap ? ` Purchase target locked on Day ${purchTargetSnap.capturedDay}: NPR ${purchTargetSnap.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}`
   const topItemSpendSummary = topItemSpend.length === 0
     ? 'No purchase data for this period.'
     : `Top items by spend: ${topItemSpend.slice(0, 3).map(i => `${i.fullName} at NPR ${i.value.toLocaleString('en-NP')}`).join(', ')}.`
@@ -1089,63 +1169,134 @@ export default function ClientDashboard() {
   // full-width in both layouts.
   const imsChartsAndTables = !loading && activePeriod && (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
+      <div className="dash-spend-purchases-row" style={{ marginBottom: 14 }}>
 
-        {/* Pie — Category Spend */}
+        {/* Pie — Category Spend, and Bar — Top Items, combined behind a tab so Daily Purchases vs
+            Sales (genuinely the more information-dense chart of the three, especially once the
+            Target lines shipped) could take the reclaimed column instead of the row splitting
+            evenly three ways — see .dash-spend-purchases-row in Layout.css for the width side. */}
         <ChartCard
-          title="Spend by Category"
-          smallHeight={140}
-          footer={<p className="sr-only">{categorySpendSummary}</p>}
+          title={spendView === 'category' ? 'Spend by Category' : 'Top Items by Spend'}
+          // 140 was the original single-purpose card's height — folding the tab row in on top of
+          // that budget left only 114px for a 120px-diameter donut (38/60 inner/outer radius),
+          // clipping it top and bottom. +32 buys back that room and then some, so the donut below
+          // could also grow a little rather than just stop clipping.
+          smallHeight={172}
+          footer={<>
+            <p className="sr-only">{categorySpendSummary}</p>
+            <p className="sr-only">{topItemSpendSummary}</p>
+          </>}
           renderChart={h => {
-            if (categorySpend.length === 0) return (
-              <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
+            const big = h > 200
+            // 26px for the tab row itself, same figure regardless of card size — .tab-btn is a
+            // fixed ~24px pill, not something that scales with `big` the way the rest of this
+            // chart's chrome does.
+            const contentH = h - 26
+            const tabs = (
+              <div className="tab-bar" role="tablist" aria-label="Spend breakdown views" style={{ marginBottom: 6 }}>
+                <button type="button" role="tab" aria-selected={spendView === 'category'}
+                  className={`tab-btn${spendView === 'category' ? ' tab-btn--active' : ''}`}
+                  onClick={() => setSpendView('category')}>By Category</button>
+                <button type="button" role="tab" aria-selected={spendView === 'items'}
+                  className={`tab-btn${spendView === 'items' ? ' tab-btn--active' : ''}`}
+                  onClick={() => setSpendView('items')}>Top Items</button>
               </div>
             )
-            const big = h > 200
+            if (spendView === 'category') {
+              if (categorySpend.length === 0) return (
+                <>
+                  {tabs}
+                  <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
+                  </div>
+                </>
+              )
+              return (
+                <>
+                  {tabs}
+                  {big && (
+                    <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                      <StatPill label="Total spend" value={`NPR ${categorySpendTotal.toLocaleString()}`} />
+                      <StatPill label="Top category" value={`${categorySpend[0].name} (${((categorySpend[0].value / categorySpendTotal) * 100).toFixed(0)}%)`} color={CHART_COLORS[0]} />
+                      <StatPill label="Categories" value={categorySpend.length} />
+                    </div>
+                  )}
+                  <ResponsiveContainer width="100%" height={big ? contentH - 60 : contentH}>
+                    <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                      <Pie
+                        {...chartMotion()}
+                        data={categorySpend} dataKey="value" nameKey="name"
+                        cx="50%" cy="50%"
+                        innerRadius={big ? 80 : 42} outerRadius={big ? 140 : 66}
+                        paddingAngle={2}
+                        {...(big ? {
+                          label: ({ percent }) => `${(percent * 100).toFixed(0)}%`,
+                          labelLine: { stroke: colors.text3, strokeWidth: 1 },
+                        } : {})}
+                      >
+                        {categorySpend.map((entry, i) => <Cell key={entry.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
+                        formatter={(v, name) => [`NPR ${Number(v).toLocaleString()} (${((v / categorySpendTotal) * 100).toFixed(1)}%)`, name]}
+                        labelFormatter={name => name}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
+                    {categorySpend.map((entry, i) => {
+                      return (
+                        <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
+                          <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{entry.name}</span>
+                          {big && <span style={{ fontSize: 10, color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString()}</span>}
+                          <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )
+            }
+            // spendView === 'items'
+            const count = big ? topItemSpend.length : 6
+            if (topItemSpend.length === 0) return (
+              <>
+                {tabs}
+                <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
+                </div>
+              </>
+            )
+            const shown = topItemSpend.slice(0, count)
+            const shownTotal = shown.reduce((s, r) => s + r.value, 0)
+            const purchaseTotal = stats?.purchaseTotal || 0
             return (
               <>
+                {tabs}
                 {big && (
                   <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                    <StatPill label="Total spend" value={`NPR ${categorySpendTotal.toLocaleString()}`} />
-                    <StatPill label="Top category" value={`${categorySpend[0].name} (${((categorySpend[0].value / categorySpendTotal) * 100).toFixed(0)}%)`} color={CHART_COLORS[0]} />
-                    <StatPill label="Categories" value={categorySpend.length} />
+                    <StatPill label={`Top ${shown.length} total`} value={`NPR ${shownTotal.toLocaleString()}`} color={colors.accent} />
+                    <StatPill label="Top item" value={shown[0].fullName || shown[0].name} color={CHART_COLORS[0]} />
+                    {purchaseTotal > 0 && <StatPill label="Share of net purchases" value={`${((shownTotal / purchaseTotal) * 100).toFixed(0)}%`} />}
                   </div>
                 )}
-                <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
-                  <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                    <Pie
-                      {...chartMotion()}
-                      data={categorySpend} dataKey="value" nameKey="name"
-                      cx="50%" cy="50%"
-                      innerRadius={big ? 80 : 38} outerRadius={big ? 140 : 60}
-                      paddingAngle={2}
-                      {...(big ? {
-                        label: ({ percent }) => `${(percent * 100).toFixed(0)}%`,
-                        labelLine: { stroke: colors.text3, strokeWidth: 1 },
-                      } : {})}
-                    >
-                      {categorySpend.map((entry, i) => <Cell key={entry.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                    </Pie>
+                <ResponsiveContainer width="100%" height={big ? contentH - 60 : contentH}>
+                  <BarChart data={shown} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
+                    <XAxis type="number" hide />
+                    <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
                     <Tooltip
                       contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
-                      formatter={(v, name) => [`NPR ${Number(v).toLocaleString()} (${((v / categorySpendTotal) * 100).toFixed(1)}%)`, name]}
-                      labelFormatter={name => name}
+                      formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}${purchaseTotal > 0 ? ` (${((v / purchaseTotal) * 100).toFixed(1)}% of purchases)` : ''}`, p.payload.fullName || n]}
+                      labelFormatter={() => ''}
                     />
-                  </PieChart>
+                    <Bar dataKey="value" fill={colors.accent} radius={[0, 3, 3, 0]} barSize={big ? 18 : 10} {...chartMotion()}>
+                      {shown.map((entry, i) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
                 </ResponsiveContainer>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
-                  {categorySpend.map((entry, i) => {
-                    return (
-                      <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
-                        <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{entry.name}</span>
-                        {big && <span style={{ fontSize: 10, color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString()}</span>}
-                        <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
-                      </div>
-                    )
-                  })}
-                </div>
               </>
             )
           }}
@@ -1157,20 +1308,42 @@ export default function ClientDashboard() {
         <ChartCard
           title="Daily Purchases vs Sales"
           smallHeight={160}
+          // This card's modal carries more chrome than most ChartCard users — 6 legend chips, 6
+          // stat pills, a 2-line X-axis (day + weekday) and a 2-line-wrapping footer — so the
+          // default 440px chart plus all of that no longer fits inside a typical viewport without
+          // scrolling to see the X-axis. Shrinking just this instance's plotted chart area (via
+          // ChartCard's modalHeight prop, default 440 unchanged for every other chart) buys back
+          // the room instead of shrinking the modal's own maxHeight, which would just move the
+          // scroll requirement rather than remove it.
+          modalHeight={340}
           cardStyle={{ minWidth: 0 }}
           legend={<>
             {/* A legend swatch must equal the series it labels, so these take the chart's own
                 fixed hex rather than a theme token — the label text beside each carries the
-                readable contrast. The two projections repeat their metric's hue and are told
-                apart by the dashed glyph, exactly as the lines are. */}
+                readable contrast. The live projections repeat their metric's hue and are told
+                apart by the dashed glyph, exactly as the lines are. The frozen Target chips break
+                from that: their own hue (see DAILY_TREND_COLORS) plus a dotted glyph, so three
+                same-metric series never reduce to "dash pattern soup" at compact-card size. */}
             <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.purchases }}>●</span> Purchases</span>
             {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.sales }}>●</span> Sales</span>}
             {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.sales, letterSpacing: '-2px' }}>┄</span> Sales Proj.</span>}
             {purchProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.purchases, letterSpacing: '-2px' }}>┄</span> Purch. Proj.</span>}
+            {salesTargetSnap && (
+              <span style={{ color: 'var(--theme-text2)' }}>
+                <span style={{ color: DAILY_TREND_COLORS.salesTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
+                <Tip text={`Locked in on Day ${salesTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual sales line against it to see if you're ahead or behind pace — unlike Sales Proj. above, which updates every day to reflect today's pace instead.`}>Sales Target</Tip>
+              </span>
+            )}
+            {purchTargetSnap && (
+              <span style={{ color: 'var(--theme-text2)' }}>
+                <span style={{ color: DAILY_TREND_COLORS.purchTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
+                <Tip text={`Locked in on Day ${purchTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual purchases line against it to see if you're ahead or behind pace — unlike Purch. Proj. above, which updates every day to reflect today's pace instead.`}>Purch. Target</Tip>
+              </span>
+            )}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
           </>}
           footer={<>
-            {(salesProjection || purchProjection) && (
+            {(salesProjection || purchProjection || salesTargetSnap || purchTargetSnap) && (
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '2px 16px' }}>
                 {salesProjection && (
                   <span>
@@ -1180,6 +1353,16 @@ export default function ClientDashboard() {
                 {purchProjection && (
                   <span>
                     Projected month-end purchases: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchProjection.projectedMonthEnd.toLocaleString()}</strong>
+                  </span>
+                )}
+                {salesTargetSnap && (
+                  <span>
+                    Sales target (locked Day {salesTargetSnap.capturedDay}): <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesTargetSnap.projectedMonthEnd.toLocaleString()}</strong>
+                  </span>
+                )}
+                {purchTargetSnap && (
+                  <span>
+                    Purchase target (locked Day {purchTargetSnap.capturedDay}): <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchTargetSnap.projectedMonthEnd.toLocaleString()}</strong>
                   </span>
                 )}
                 <span style={{ color: 'var(--theme-text3)' }}>· trend estimate</span>
@@ -1195,6 +1378,25 @@ export default function ClientDashboard() {
             )
             const big = h > 200
             const chartData = big ? dailyTrend : dailyTrendWindowed
+            // Two-line X-axis tick: the BS day number, and below it the day-of-week initial —
+            // needs activePeriod's bs_year/bs_month to convert each day to an AD date for
+            // .getDay(). Recharts passes the RAW "Day N" axis value via payload.value to a custom
+            // tick function (tickFormatter is not auto-applied — verified against the installed
+            // recharts source), so the "Day " prefix is stripped here rather than via tickFormatter.
+            const dayAxisTick = ({ x, y, payload }) => {
+              const dayNum = parseInt(String(payload.value).replace('Day ', ''), 10)
+              const dow = activePeriod ? WEEKDAY_INITIALS[bsToAd(activePeriod.bs_year, activePeriod.bs_month, dayNum).getDay()] : ''
+              return (
+                <g transform={`translate(${x},${y})`}>
+                  <text x={0} y={0} dy={big ? 12 : 10} textAnchor="middle" fill={colors.text3} fontSize={big ? 11 : 9}>{dayNum}</text>
+                  {/* colors.text1 (the theme's brightest text token, resolved per-preset — not a
+                      literal #fff, which would go invisible on every light preset's white card)
+                      rather than the dim text3 this used originally: reported as too hard to read
+                      against text3's tertiary contrast, full opacity to match. */}
+                  {dow && <text x={0} y={0} dy={big ? 24 : 20} textAnchor="middle" fill={colors.text1} fontSize={big ? 9 : 8}>{dow}</text>}
+                </g>
+              )
+            }
             const chart = (
               <ResponsiveContainer width="100%" height={h}>
                 <ComposedChart data={chartData} margin={{ top: big ? 8 : 4, right: big ? 16 : 8, bottom: big ? 4 : 0, left: big ? 8 : 0 }}>
@@ -1211,7 +1413,7 @@ export default function ClientDashboard() {
                     </defs>
                   )}
                   <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="day" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} interval={0} tickFormatter={v => v.replace('Day ', '')} />
+                  <XAxis dataKey="day" tick={dayAxisTick} height={big ? 32 : 26} tickLine={false} axisLine={false} interval={0} />
                   <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
                   <Tooltip
                     contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: big ? 12 : 11 }}
@@ -1219,6 +1421,14 @@ export default function ClientDashboard() {
                     formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
                     labelFormatter={l => l}
                   />
+                  {/* Frozen full-month reference lines, drawn first (so they sit BEHIND the more
+                      prominent actual/adaptive-projection lines below) — thin, dotted, and each in
+                      its own hue (DAILY_TREND_COLORS.salesTarget/purchTarget) rather than reusing
+                      Purchases/Sales' gold/green, so it doesn't collapse into a same-colour dash
+                      variant of the line already sharing this metric's hue. Never moves once
+                      captured; see targetLineValue()/salesTargetSnap above for why that's the point. */}
+                  {salesTargetSnap && <Line type="monotone" dataKey="salesTarget" name="Sales Target" stroke={DAILY_TREND_COLORS.salesTarget} strokeWidth={1.5} strokeDasharray="2 3" strokeOpacity={0.75} connectNulls dot={false} {...chartMotion()} />}
+                  {purchTargetSnap && <Line type="monotone" dataKey="purchTarget" name="Purchases Target" stroke={DAILY_TREND_COLORS.purchTarget} strokeWidth={1.5} strokeDasharray="2 3" strokeOpacity={0.75} connectNulls dot={false} {...chartMotion()} />}
                   {big ? (
                     <Area type="monotone" dataKey="purchases" name="Purchases" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2.5} fill="url(#dtPurchasesFill)" connectNulls dot={{ r: 3, fill: DAILY_TREND_COLORS.purchases, strokeWidth: 0 }} activeDot={{ r: 5, fill: DAILY_TREND_COLORS.purchases }} {...chartMotion()} />
                   ) : (
@@ -1242,6 +1452,8 @@ export default function ClientDashboard() {
                     {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString()}`} color={DAILY_TREND_COLORS.sales} />}
                     {salesProjection && <StatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString()}`} color={DAILY_TREND_COLORS.sales} />}
                     {purchProjection && <StatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString()}`} color={DAILY_TREND_COLORS.purchases} />}
+                    {salesTargetSnap && <StatPill label="Sales target" value={`NPR ${salesTargetSnap.projectedMonthEnd.toLocaleString()}`} color={DAILY_TREND_COLORS.salesTarget} />}
+                    {purchTargetSnap && <StatPill label="Purchase target" value={`NPR ${purchTargetSnap.projectedMonthEnd.toLocaleString()}`} color={DAILY_TREND_COLORS.purchTarget} />}
                     <StatPill label="Period" value={periodLabel} />
                   </div>
                 )}
@@ -1255,51 +1467,6 @@ export default function ClientDashboard() {
           }}
         />
 
-        {/* Bar — Top Items */}
-        <ChartCard
-          title="Top Items by Spend"
-          smallHeight={160}
-          footer={<p className="sr-only">{topItemSpendSummary}</p>}
-          renderChart={h => {
-            const big = h > 200
-            const count = big ? topItemSpend.length : 6
-            if (topItemSpend.length === 0) return (
-              <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
-              </div>
-            )
-            const shown = topItemSpend.slice(0, count)
-            const shownTotal = shown.reduce((s, r) => s + r.value, 0)
-            const purchaseTotal = stats?.purchaseTotal || 0
-            return (
-              <>
-                {big && (
-                  <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                    <StatPill label={`Top ${shown.length} total`} value={`NPR ${shownTotal.toLocaleString()}`} color={colors.accent} />
-                    <StatPill label="Top item" value={shown[0].fullName || shown[0].name} color={CHART_COLORS[0]} />
-                    {purchaseTotal > 0 && <StatPill label="Share of net purchases" value={`${((shownTotal / purchaseTotal) * 100).toFixed(0)}%`} />}
-                  </div>
-                )}
-                <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
-                  <BarChart data={shown} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
-                    <XAxis type="number" hide />
-                    <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
-                    <Tooltip
-                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
-                      formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}${purchaseTotal > 0 ? ` (${((v / purchaseTotal) * 100).toFixed(1)}% of purchases)` : ''}`, p.payload.fullName || n]}
-                      labelFormatter={() => ''}
-                    />
-                    <Bar dataKey="value" fill={colors.accent} radius={[0, 3, 3, 0]} barSize={big ? 18 : 10} {...chartMotion()}>
-                      {shown.map((entry, i) => (
-                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </>
-            )
-          }}
-        />
       </div>
 
       {/* ── FC% Trend + Cost Breakdown, side by side ── */}

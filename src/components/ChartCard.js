@@ -19,7 +19,7 @@ const DEFAULT_TITLE_STYLE = {
 // the same four behaviours Modal gained at S521 — dialog semantics, initial focus, a Tab trap and
 // focus restore — because without them the page behind an overlay stays fully focusable and
 // Escape does nothing. This component backs every chart in the product, so the fix lands ~9 places.
-function ChartModal({ title, legend, footer, renderChart, onClose }) {
+function ChartModal({ title, legend, footer, renderChart, onClose, modalHeight }) {
   const titleId = useId()
   const panelRef = useRef(null)
   const triggerRef = useRef(null)
@@ -68,7 +68,13 @@ function ChartModal({ title, legend, footer, renderChart, onClose }) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xl)', padding: '20px 28px', width: '92%', maxWidth: 1100, boxShadow: '0 8px 60px rgba(0,0,0,0.5)', outline: 'none' }}
+        // maxHeight matches the backdrop's own 24px top+bottom padding (48px), with overflowY as
+        // the release valve — without both, a panel taller than the viewport (a chart with a full
+        // stat-pill row, a wide legend and a footer easily exceeds a laptop's height) has nowhere
+        // to go but off-screen equally in both directions, since the backdrop centers it with
+        // align-items:center. Scrolling inside the panel keeps Escape/backdrop-click as the way
+        // out rather than a half-visible Close button no longer being reachable.
+        style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xl)', padding: '20px 28px', width: '92%', maxWidth: 1100, maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', boxShadow: '0 8px 60px rgba(0,0,0,0.5)', outline: 'none' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--theme-border)' }}>
           <div id={titleId} style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>{title}</div>
@@ -81,7 +87,7 @@ function ChartModal({ title, legend, footer, renderChart, onClose }) {
             >✕ Close</button>
           </div>
         </div>
-        {renderChart(440)}
+        {renderChart(modalHeight)}
         {footer && <div style={{ marginTop: 12 }}>{footer}</div>}
       </div>
     </div>,
@@ -90,7 +96,7 @@ function ChartModal({ title, legend, footer, renderChart, onClose }) {
 }
 
 export default function ChartCard({
-  title, legend, footer, cardStyle, smallHeight = 160,
+  title, legend, footer, cardStyle, smallHeight = 160, modalHeight = 440,
   renderChart, titleStyle,
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -124,6 +130,7 @@ export default function ChartCard({
           legend={legend}
           footer={footer}
           renderChart={renderChart}
+          modalHeight={modalHeight}
           onClose={() => setExpanded(false)}
         />
       )}
