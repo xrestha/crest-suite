@@ -158,6 +158,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S560 — 2026-08-15 — Login screen overflowed on short desktop windows
+
+A real screenshot showed `/login` cut off at the bottom in an ordinary (non-maximized) browser window — the S553 "fits one screen" work assumed ~830px of viewport height and up, and this window measured 1366x613, well under that floor. Measured the actual overflow with Playwright: 201px past the fold.
+
+Added a second, more aggressive `@media (min-width: 981px) and (max-height: 700px)` tier on top of S553's existing one, stepping nav height, section padding, headings, and form-field/button sizing down further on the shared `.login-field`/`.login-btn`/`.login-staff-btn` rules — same floor-seeking approach as the page's existing `pointer: coarse` tier, just shrinking instead of growing. Verified with Playwright at 1366x613: 0px overflow, nothing clipped or overlapping. Deliberately scoped to ≤700px rather than widened to also close S553's documented 1366x768/60px-scroll case, which was an intentional tradeoff, not a bug.
+
+**Files:** `src/pages/Login.css`, `CLAUDE.md`, `README.md`
+
 ### S559 — 2026-08-15 — BS_CALENDAR extended back to 2000, after a real date-of-birth bug in the sister HSS app
 
 A employee's date of birth, 30 Dec 1979, displayed as "15 Poush 2036" and round-tripped back to 4 Jan 1980 — five days out. `bsToAd`/`adToBs` don't throw outside the verified table (2079–2087 before this), they silently return a plausible wrong date, so the wrong AD date was being *stored*, not just shown.
