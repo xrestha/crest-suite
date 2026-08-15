@@ -87,23 +87,16 @@ Deno.serve(async (req) => {
       .from('profiles')
       // client_id is selected only so the vault backfill below can stamp it. It is never returned
       // to the caller — this function's response is still tokens or an error, nothing else.
-      // hr_employees(status) is embedded so a deactivated employee (Employees page "Deactivate",
-      // which only ever writes hr_employees.status — it never touches this profiles row) can be
-      // refused here instead of keeping full self-service access forever after leaving.
-      .select('hr_self_service_email, client_id, hr_employees(status)')
+      .select('hr_self_service_email, client_id')
       .eq('id', staff_id)
       .eq('hr_self_service', true)
       .maybeSingle()
 
-    // Same generic message for "no such staff_id", "wrong pin" and "deactivated employee" below
-    // (an invalid staff_id is not itself sensitive here, but there's no reason to let a caller
-    // distinguish these paths via response shape/timing either). Deliberately does NOT record a
-    // failed attempt for any of these — there is no account to lock, and doing so would let
-    // anyone lock an arbitrary uuid's counter.
+    // Same generic message for "no such staff_id" and "wrong pin" below (an invalid staff_id is
+    // not itself sensitive here, but there's no reason to let a caller distinguish the two paths
+    // via response shape/timing either). Deliberately does NOT record a failed attempt — there is
+    // no account to lock, and doing so would let anyone lock an arbitrary uuid's counter.
     if (profileErr || !profile?.hr_self_service_email) {
-      return json({ error: 'Invalid credentials' }, 401)
-    }
-    if (profile.hr_employees?.status === 'inactive') {
       return json({ error: 'Invalid credentials' }, 401)
     }
 

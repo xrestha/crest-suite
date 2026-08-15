@@ -321,15 +321,9 @@ export default function EmployeeList() {
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         {selfServiceMap[e.id] ? (
-                          e.status === 'inactive' ? (
-                            <Tip text="Self-Service is enabled on this account, but login is blocked because this employee is marked Inactive.">
-                              <span className="badge badge-gray" style={{ fontSize: 10 }}>Self-Service (blocked)</span>
-                            </Tip>
-                          ) : (
-                            <Tip text="This employee can log in via the Self-Service link to view their own payslip, submit leave, and see their roster.">
-                              <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Self-Service</span>
-                            </Tip>
-                          )
+                          <Tip text="This employee can log in via the Self-Service link to view their own payslip, submit leave, and see their roster.">
+                            <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Self-Service</span>
+                          </Tip>
                         ) : (
                           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEnableSelfService(e)}>
                             Enable Self-Service

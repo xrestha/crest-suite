@@ -158,13 +158,15 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
-### S561 — 2026-08-15 — Deactivating an HR employee didn't revoke their Self-Service login
+### S561 — 2026-08-15 — Deactivating an HR employee didn't revoke Self-Service login — first fix collided with Payroll, reverted same day
 
-A screenshot showed an employee row marked both "Inactive" and "✓ Self-Service" at once — asked directly whether a deactivated staff member should still be able to log in to Self-Service. Checked `hr-selfservice-login`: it only ever verified `profiles.hr_self_service = true`, and "Deactivate" on the Employees page only ever writes `hr_employees.status = 'inactive'` — two unrelated columns, so login kept working indefinitely after an employee left.
+A screenshot showed an employee row marked both "Inactive" and "✓ Self-Service" at once. `hr-selfservice-login` only ever verified `profiles.hr_self_service = true`, and "Deactivate" on the Employees page only ever writes `hr_employees.status = 'inactive'` — two unrelated columns, so login kept working indefinitely after an employee left.
 
-Fixed at the Edge Function: the profile lookup now embeds `hr_employees(status)` via the existing `profiles.hr_employee_id` FK, and a `status === 'inactive'` match is refused with the same generic "Invalid credentials" the wrong-PIN and unknown-staff-id paths already return — no response-shape or timing difference to distinguish the three. Deployed (`supabase functions deploy hr-selfservice-login`). `EmployeeList.jsx`'s badge now reads "Self-Service (blocked)" in grey instead of the green checkmark once status flips to inactive, so the list stops implying access that no longer works.
+First fix gated login on `hr_employees.status === 'inactive'`. Deployed, then immediately hit a real case: an employee resigns, gets deactivated, and *still needs their final payroll run* — but `PayrollRun.jsx`/`PayrollCalculation.jsx`/`FinalSettlement.jsx` all query employees via `.in('status', ['active','probation'])`, so the same status flip that blocked login also silently dropped the employee from every payroll picker (and broke the name lookup on an already-generated draft payslip). Reverted both the Edge Function and the `EmployeeList.jsx` badge change back to pre-fix behavior; `status` stays a single-purpose payroll-eligibility field, not a login gate too.
 
-**Files:** `supabase/functions/hr-selfservice-login/index.ts`, `src/modules/hr/employees/EmployeeList.jsx`, `CLAUDE.md`, `README.md`
+Drafted (not yet applied or wired up) a proper fix: `access_blocked`, a new boolean on `hr_employees` fully independent of `status`, migration `20260815100000`. The plan — not yet built — is a checkbox-select + bulk Activate/Deactivate button on the Employees page that toggles this column and nothing else, so blocking login can never again affect payroll eligibility. Until that ships, a resigned/inactive employee's Self-Service login is unblocked, same as before S561.
+
+**Files:** `supabase/functions/hr-selfservice-login/index.ts`, `src/modules/hr/employees/EmployeeList.jsx`, `CLAUDE.md`, `README.md`, `supabase/migrations/20260815100000_hr_employee_access_blocked.sql` (drafted, unapplied)
 
 ### S560 — 2026-08-15 — Login screen overflowed on short desktop windows
 
