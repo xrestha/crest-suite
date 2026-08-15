@@ -158,6 +158,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S561 — 2026-08-15 — Deactivating an HR employee didn't revoke their Self-Service login
+
+A screenshot showed an employee row marked both "Inactive" and "✓ Self-Service" at once — asked directly whether a deactivated staff member should still be able to log in to Self-Service. Checked `hr-selfservice-login`: it only ever verified `profiles.hr_self_service = true`, and "Deactivate" on the Employees page only ever writes `hr_employees.status = 'inactive'` — two unrelated columns, so login kept working indefinitely after an employee left.
+
+Fixed at the Edge Function: the profile lookup now embeds `hr_employees(status)` via the existing `profiles.hr_employee_id` FK, and a `status === 'inactive'` match is refused with the same generic "Invalid credentials" the wrong-PIN and unknown-staff-id paths already return — no response-shape or timing difference to distinguish the three. Deployed (`supabase functions deploy hr-selfservice-login`). `EmployeeList.jsx`'s badge now reads "Self-Service (blocked)" in grey instead of the green checkmark once status flips to inactive, so the list stops implying access that no longer works.
+
+**Files:** `supabase/functions/hr-selfservice-login/index.ts`, `src/modules/hr/employees/EmployeeList.jsx`, `CLAUDE.md`, `README.md`
+
 ### S560 — 2026-08-15 — Login screen overflowed on short desktop windows
 
 A real screenshot showed `/login` cut off at the bottom in an ordinary (non-maximized) browser window — the S553 "fits one screen" work assumed ~830px of viewport height and up, and this window measured 1366x613, well under that floor. Measured the actual overflow with Playwright: 201px past the fold.
