@@ -158,6 +158,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S562 — 2026-08-15 — Employees had no way back from "Inactive" except Delete
+
+`EmployeeForm.jsx`'s footer only ever rendered a **Deactivate** button when `employee.status === 'active'` — there was no matching button for the reverse. Once an employee was marked Inactive (e.g. Jeevan Tamang from the S561 screenshots), reopening their Edit form left Deactivate, Save, and Delete as the only options; getting them back to Active meant deleting and re-adding the employee, losing their history.
+
+Added `handleActivate()` (mirrors `handleDeactivate()` — `scopedUpdate('hr_employees', { status: 'active' })`) and a green "Activate" button that renders when `employee.status === 'inactive'`, same `btn btn-ghost` + `color: var(--theme-green)` pattern already used for Approve actions elsewhere in HR (TadaClaims, Advances, Overtime, LeaveManagement).
+
+**Files:** `src/modules/hr/employees/EmployeeForm.jsx`, `CLAUDE.md`, `README.md`
+
 ### S561 — 2026-08-15 — Deactivating an HR employee didn't revoke Self-Service login — first fix collided with Payroll, reverted same day
 
 A screenshot showed an employee row marked both "Inactive" and "✓ Self-Service" at once. `hr-selfservice-login` only ever verified `profiles.hr_self_service = true`, and "Deactivate" on the Employees page only ever writes `hr_employees.status = 'inactive'` — two unrelated columns, so login kept working indefinitely after an employee left.
