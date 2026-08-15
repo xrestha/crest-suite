@@ -29,8 +29,8 @@ import { explodeRecipeIngredients } from '../../utils/recipeCost'
 //
 // Values are the set already brute-forced against the CVD and normal-vision floors for
 // ClientDashboard's COST_BREAKDOWN_COLORS (worst pair ΔE 16.8 normal / 8.6 deutan), reused here
-// so Food Cost keeps one identity across every surface that draws it. Duplicated rather than
-// shared, matching how FoodBeverageSplit.jsx already duplicates CHART_COLORS.
+// so Food Cost keeps one identity across every surface that draws it. Duplicated locally rather
+// than shared, since that constant lives in a page file, not a shared module.
 //
 // Prime Cost additionally carries a dash: it is the SUM of the two lines above it, not a fifth
 // peer measure, and it previously took red — which on the KPI cards directly above means "over

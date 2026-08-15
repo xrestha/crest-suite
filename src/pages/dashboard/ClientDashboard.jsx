@@ -1280,7 +1280,7 @@ export default function ClientDashboard() {
     </div>
   )
 
-  // ── HR/POS card content, extracted the same way as the IMS cards above (S557 dashboard density
+  // ── HR/POS card content, extracted the same way as the IMS cards above (S558 dashboard density
   // fix) — one "headline" card per section, sized/positioned as the section's focal point but
   // (after reconsidering against real dashboard UX guidance — a dashboard's job is a 5-second
   // at-a-glance read of the business, and hiding numbers people check daily is the most common

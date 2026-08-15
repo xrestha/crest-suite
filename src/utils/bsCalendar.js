@@ -2,7 +2,28 @@
 // Bikram Sambat (BS) <-> Gregorian (AD) conversion utilities
 //
 // The BS_CALENDAR table below gives the number of days in each BS
-// month for years 2079–2087 (covers roughly AD 2022–2031).
+// month for years 2000–2087 (covers roughly AD 1943–2031).
+//
+// Extended back to 2000 BS (2026-08-15) so dates of birth and historic joining dates convert
+// correctly. Before this the table started at 2079, and anything older fell through to the flat
+// 365-day/30-day fallback — which does not throw, it silently returns a plausible wrong date. Found
+// live in the sister HSS app: an employee born 30 Dec 1979 displayed as "15 Poush 2036" and round-
+// tripped back to 4 Jan 1980, five days out, so the WRONG AD DATE WAS BEING STORED, not just shown.
+//
+// The 2000–2078 rows were cross-checked month by month against FOUR independent open-source
+// implementations, which agree unanimously on every one of those 79 years:
+//   nepali-date-converter (JS), @sbmdkl/nepali-date-converter (TS),
+//   bikram-sambat (JS, bit-encoded — queried through its own decoder rather than read as a table),
+//   nepali-datetime (TS, anchored at Baisakh 1 2000 BS = 14 April 1943).
+// Two independent checks on the merge: those same four also reproduce the S352-verified 2079–2083
+// rows below exactly (a different verification route reaching the same answer), and every added
+// year sums to 365 or 366 days. Verified afterwards by round-tripping all 32,039 consecutive days
+// from 14 Apr 1943 to 1 Jan 2031 AD -> BS -> AD with zero failures.
+//
+// 2084–2087 are DELIBERATELY LEFT AS THEY WERE — see the warning below. The four libraries disagree
+// with each other from 2084 onward; the BS calendar is astronomically determined and officially
+// published year by year, so far-future rows are extrapolations, not facts, and no library's guess
+// outranks another. Do not "fix" them to match whichever library you happen to consult.
 //
 // Corrected S352 (2026-07-11) — the whole table (all 9 years) and the EPOCH_AD anchor below were
 // re-derived from scratch and cross-checked against two independent, actively-maintained
@@ -24,6 +45,85 @@ export const BS_MONTHS = [
 ]
 
 const BS_CALENDAR = {
+  2000: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2001: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2002: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2003: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2004: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2005: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2006: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2007: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2008: [31, 31, 31, 32, 31, 31, 29, 30, 30, 29, 29, 31],
+  2009: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2010: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2011: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2012: [31, 31, 31, 32, 31, 31, 29, 30, 30, 29, 30, 30],
+  2013: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2014: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2015: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2016: [31, 31, 31, 32, 31, 31, 29, 30, 30, 29, 30, 30],
+  2017: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2018: [31, 32, 31, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2019: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2020: [31, 31, 31, 32, 31, 31, 30, 29, 30, 29, 30, 30],
+  2021: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2022: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
+  2023: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2024: [31, 31, 31, 32, 31, 31, 30, 29, 30, 29, 30, 30],
+  2025: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2026: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2027: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2028: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2029: [31, 31, 32, 31, 32, 30, 30, 29, 30, 29, 30, 30],
+  2030: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2031: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2032: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2033: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2034: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2035: [30, 32, 31, 32, 31, 31, 29, 30, 30, 29, 29, 31],
+  2036: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2037: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2038: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2039: [31, 31, 31, 32, 31, 31, 29, 30, 30, 29, 30, 30],
+  2040: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2041: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2042: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2043: [31, 31, 31, 32, 31, 31, 29, 30, 30, 29, 30, 30],
+  2044: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2045: [31, 32, 31, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2046: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2047: [31, 31, 31, 32, 31, 31, 30, 29, 30, 29, 30, 30],
+  2048: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2049: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
+  2050: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2051: [31, 31, 31, 32, 31, 31, 30, 29, 30, 29, 30, 30],
+  2052: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2053: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
+  2054: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2055: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2056: [31, 31, 32, 31, 32, 30, 30, 29, 30, 29, 30, 30],
+  2057: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2058: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2059: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2060: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2061: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2062: [30, 32, 31, 32, 31, 31, 29, 30, 29, 30, 29, 31],
+  2063: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2064: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2065: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2066: [31, 31, 31, 32, 31, 31, 29, 30, 30, 29, 29, 31],
+  2067: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2068: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2069: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2070: [31, 31, 31, 32, 31, 31, 29, 30, 30, 29, 30, 30],
+  2071: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2072: [31, 32, 31, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+  2073: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 31],
+  2074: [31, 31, 31, 32, 31, 31, 30, 29, 30, 29, 30, 30],
+  2075: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+  2076: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
+  2077: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+  2078: [31, 31, 31, 32, 31, 31, 30, 29, 30, 29, 30, 30],
   2079: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
   2080: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
   2081: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
@@ -33,6 +133,30 @@ const BS_CALENDAR = {
   2085: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
   2086: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
   2087: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+}
+
+// The verified range, derived from the table above so that adding a row widens it automatically.
+// OUTSIDE this range the conversion is NOT trustworthy: bsYearLength() falls back to a flat 365 and
+// daysInBsMonth() to a flat 30, but real BS years are 365/366 and months run 29–32 days, so the
+// error accumulates silently. It does not throw — it returns a plausible-looking wrong date, and
+// just outside the range it can even yield an out-of-bounds month index (BS_MONTHS[-1] =>
+// "undefined"). Anything that DISPLAYS a converted date must go through adToBsSafe(), not adToBs().
+export const BS_YEAR_MIN = Math.min(...Object.keys(BS_CALENDAR).map(Number))
+export const BS_YEAR_MAX = Math.max(...Object.keys(BS_CALENDAR).map(Number))
+
+/**
+ * adToBs() with a range guard: returns null instead of a silently-wrong date when the result falls
+ * outside the verified table. Callers render the AD date in that case. This is what keeps a
+ * pre-1943 value — an employee's date of birth, say — from printing as a confident wrong BS date.
+ */
+export function adToBsSafe(adDate) {
+  const d = adDate instanceof Date ? adDate : new Date(adDate)
+  if (!d || isNaN(d.getTime())) return null
+  const bs = adToBs(d)
+  if (!bs || !Number.isFinite(bs.year) || bs.year < BS_YEAR_MIN || bs.year > BS_YEAR_MAX) return null
+  if (!Number.isFinite(bs.month) || bs.month < 1 || bs.month > 12) return null
+  if (!Number.isFinite(bs.day) || bs.day < 1) return null
+  return bs
 }
 
 const EPOCH_BS = { year: 2079, month: 1, day: 1 }

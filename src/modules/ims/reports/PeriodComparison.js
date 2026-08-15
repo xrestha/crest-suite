@@ -20,8 +20,9 @@ import { useSettings } from '../../../context/SettingsContext'
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 // Fallback categorical rotation for any recipe category beyond Food/Beverage (which get fixed
-// semantic colors) — mirrors FoodBeverageSplit.jsx's own convention so a category reads the same
-// color everywhere in the app, duplicated locally since that constant lives in a dashboard file.
+// semantic colors) — mirrors the Dashboard's Sales Mix convention (ClientDashboard.jsx) so a
+// category reads the same color everywhere in the app, duplicated locally since that constant
+// lives in a page file.
 const FALLBACK_HEX = ['#c9a84c', '#60a5fa', '#f87171', '#fb923c', '#22d3ee', '#f472b6', '#facc15', '#818cf8']
 
 function periodLabel(p, short) {
@@ -144,8 +145,8 @@ export default function PeriodComparison() {
         return s + parseFloat(r.qty_sold||0) * price - (parseFloat(r.discount) || 0)
       },0)
       // Revenue by menu category (same recipes.category taxonomy as the Dashboard's Sales Mix
-      // pie) — 'Sub-Recipe' rows are prep items, not menu sales, same exclusion FoodBeverageSplit
-      // uses.
+      // pie) — 'Sub-Recipe' rows are prep items, not menu sales, same exclusion the Dashboard's
+      // Sales Mix logic uses.
       const catRev = {}
       periodSales.forEach(r => {
         const cat = r.recipes?.category

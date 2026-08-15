@@ -158,7 +158,17 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
-### S557 — 2026-08-15 — Dashboard period-close safety, a density fix that had to be reverted once, load-time jank, and two Stock.js table fixes
+### S559 — 2026-08-15 — BS_CALENDAR extended back to 2000, after a real date-of-birth bug in the sister HSS app
+
+A employee's date of birth, 30 Dec 1979, displayed as "15 Poush 2036" and round-tripped back to 4 Jan 1980 — five days out. `bsToAd`/`adToBs` don't throw outside the verified table (2079–2087 before this), they silently return a plausible wrong date, so the wrong AD date was being *stored*, not just shown.
+
+Extended `BS_CALENDAR` back to 2000 BS (~1943 AD). The added 79 years were cross-checked against four independent open-source BS↔AD converters, which agree unanimously on all of them and reproduce the existing S352-verified 2079–2083 rows exactly, then verified by round-tripping all 32,000+ consecutive days from 1943 to 2031 through AD→BS→AD with zero mismatches. 2084–2087 deliberately left alone — the four libraries disagree with each other that far out, since the BS calendar is officially published year by year and a far-future row is an extrapolation, not a fact.
+
+Added `adToBsSafe(adDate)` — returns `null` instead of a silently-wrong date when the result falls outside the verified range (`BS_YEAR_MIN`/`BS_YEAR_MAX`, derived from the table itself), so a caller can fall back to displaying the raw AD date. **This is the half of the fix that isn't finished**: the table and the guard function both exist and are tested, but nothing in the app calls `adToBsSafe` yet, so the original bug stays open until some caller (starting with wherever HR displays a date of birth) actually adopts it instead of the unguarded `adToBs`.
+
+**Files:** `src/utils/bsCalendar.js`, `src/utils/bsCalendar.test.js`, `CLAUDE.md`, `README.md`
+
+### S558 — 2026-08-15 — Dashboard period-close safety, a density fix that had to be reverted once, load-time jank, and two Stock.js table fixes
 
 Picked up from the S556 `/impeccable critique dashboard` findings (28/40), fixing the P0 and P1 items directly.
 
@@ -171,6 +181,14 @@ Picked up from the S556 `/impeccable critique dashboard` findings (28/40), fixin
 **Two Stock.js Summary tab fixes, from screenshots.** The category-rollup table had `(NPR)` repeated on 6 of 9 headers — real width for nothing, since sibling reports state the currency once; dropped it, unclipping the COGS column. The item-level table below it is a genuinely different problem — 17 real columns (qty *and* value per metric) — so the actual complaint was scrolling all the way down to reach the horizontal scrollbar, dragging it right, then losing track of which row it was for. Fixed with the same sticky-column pattern already shipped on `Purchases.js`'s Daily Register and `Sales.js`'s pivot: sticky header, sticky Item (left), sticky COGS (right) — identity and bottom-line figure stay on screen regardless of scroll position.
 
 **Files:** `src/pages/dashboard/ClientDashboard.jsx`, `src/modules/ims/stockcount/Stock.js`, `CLAUDE.md`, `README.md`
+
+### S557 — 2026-08-15 — Sales Mix folded into a tab on Revenue vs Cost Breakdown; `FoodBeverageSplit.jsx` deleted
+
+The Sales Mix pie used to be its own card, sharing the Sales Breakdown row with the manual/POS sales pivots — only ever rendered at 2+ modules even though a single-module IMS client always had the revenue data for it, and it was competing for row width the pivots needed more.
+
+Folded into a second tab on the Revenue vs Cost Breakdown card instead, the same `costCardEffectiveView`/tab pattern S556 already used for Spend by Category/Top Items — `ChartCard`'s title switches with the tab, and its height only grows (140→172) when both tabs actually exist. The pie's own logic is unchanged: `useFoodBeverageSplit.js` (the hook) still computes the buckets off its own independent effect. `FoodBeverageSplit.jsx` (the component file, not the hook) is deleted — nothing imports it anymore — along with its locally-duplicated `CHART_COLORS` fallback, which now lives once in `ClientDashboard.jsx` instead of twice. `PeriodComparison.js` and `OwnerDashboard.jsx` each had a comment pointing at `FoodBeverageSplit.jsx` as the color-fallback convention they mirror — repointed at "the Dashboard's Sales Mix" now that the file's gone.
+
+**Files:** `src/pages/dashboard/ClientDashboard.jsx`, `src/modules/dashboard/FoodBeverageSplit.jsx` (deleted), `src/modules/ims/reports/PeriodComparison.js`, `src/pages/dashboard/OwnerDashboard.jsx`, `CLAUDE.md`, `README.md`
 
 ### S556 — 2026-08-14 — Daily Purchases vs Sales: a frozen Target line, and the room Top Items by Spend used to take
 
