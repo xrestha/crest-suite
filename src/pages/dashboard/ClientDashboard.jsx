@@ -11,7 +11,7 @@ import {
   BarChart, Bar
 } from 'recharts'
 import { chartMotion } from '../../shared/chartMotion'
-import { ArrowDown, ArrowUp, Percent, Receipt, Target, Lock, TriangleAlert, Clock, LayoutGrid } from 'lucide-react'
+import { ArrowDown, ArrowUp, Percent, Receipt, Target, Lock, TriangleAlert, Clock, LayoutGrid, ChevronDown } from 'lucide-react'
 import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
@@ -20,7 +20,7 @@ import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
 import SalesPivot from '../../modules/dashboard/SalesPivot'
-import FoodBeverageSplit from '../../modules/dashboard/FoodBeverageSplit'
+import { useFoodBeverageSplit } from '../../modules/dashboard/useFoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
 
@@ -132,6 +132,20 @@ export default function ClientDashboard() {
   // page data, so it isn't seeded from or written to dashboardCache like the state above; it
   // resets to the default tab on remount the same way ChartCard's own `expanded` does.
   const [spendView, setSpendView]         = useState('category') // 'category' | 'items'
+  // Same treatment for the merged Revenue vs Cost Breakdown / Sales Mix card below (S557) — plain
+  // UI state, not persisted, resets to 'cost' on remount.
+  const [costCardView, setCostCardView]   = useState('cost') // 'cost' | 'mix'
+  // Progressive disclosure, IMS's reference-card row only (dashboard density critique,
+  // 2026-08-14, P1) — Active Period/Items/Vendors/Recipes/Menu Health/Fixed Costs% are genuinely
+  // low-frequency reference data (S439 already treated them as a secondary tier below the "money"
+  // row). HR and POS's cards are NOT behind this: headcount, covers, avg check and tables occupied
+  // are exactly what a mid-shift glance needs, so hiding them would defeat the dashboard's own
+  // purpose — reversed after checking that against real dashboard UX guidance (a KPI dashboard's
+  // job is a 5-second read of business state; hiding daily-checked numbers is the most common way
+  // progressive disclosure breaks that). Plain UI state, same treatment as spendView/costCardView
+  // above — resets closed on remount.
+  const [openDetails, setOpenDetails] = useState({ ims: false })
+  const toggleDetails = (key) => setOpenDetails(prev => ({ ...prev, [key]: !prev[key] }))
   // Wraps a normal setState call to also persist the same value to the cache above, under the
   // given section key. Only ever called from inside loadStats/loadHrStats/loadPosStats/
   // loadKitchenPosStats/loadFcTrend, all of which already check `loadIdRef.current !== myId`
@@ -150,6 +164,7 @@ export default function ClientDashboard() {
   // still current before committing any setState.
   const loadIdRef = useRef(0)
   const [advancingPeriod, setAdvancingPeriod] = useState(false)
+  const [periodCloseError, setPeriodCloseError] = useState('')
   // Every load function used to destructure only { data } from each Supabase call and silently
   // discard { error } — a failed query either zeroed out a KPI (indistinguishable from "this
   // client genuinely has none") or, for the period fetch specifically, showed the misleading
@@ -163,7 +178,7 @@ export default function ClientDashboard() {
     if (section === 'ims') loadStats(myId)
     else if (section === 'hr') loadHrStats(myId)
     else if (section === 'pos') loadPosStats(myId)
-    else if (section === 'fcTrend') loadFcTrend(activePeriod, stats?.revenueTotal > 0 ? (stats.purchaseTotal / stats.revenueTotal) * 100 : null, myId)
+    else if (section === 'fcTrend') loadFcTrend(activePeriod, myId)
   }
 
   useEffect(() => {
@@ -189,6 +204,25 @@ export default function ClientDashboard() {
     // cache window keeps showing last-known figures while this reloads quietly underneath.
     if (stats === null) setLoading(true)
 
+    // These eight don't touch period_id at all (item/vendor/recipe counts, recipe/item/par_levels
+    // reference data) — fired immediately instead of sitting inside the same Promise.all as the
+    // seven period-scoped queries below, which used to make all fifteen wait on the period lookup
+    // even though most of them had no reason to.
+    const independentPromise = Promise.all([
+      scopedFrom('items', '*', { count: 'exact', head: true }).eq('is_active', true).eq('is_sub_recipe', false),
+      scopedFrom('vendors', '*', { count: 'exact', head: true }).eq('is_active', true),
+      scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).neq('category', 'Sub-Recipe'),
+      scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).eq('category', 'Sub-Recipe'),
+      scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct'),
+      scopedFrom('items', 'id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
+      scopedFrom('par_levels', 'item_id, par_qty'),
+      // Unfiltered by is_active — an item deactivated mid-period still has real purchase/wastage
+      // history for that period. Used for Top Items by Spend and itemRateMap below so those don't
+      // silently drop/zero-cost that history, unlike the active-only `items` fetch above (which
+      // still correctly limits Variance/Reorder/the item COUNT to currently-active stock items).
+      scopedFrom('items', 'id, name, per_uom_rate').eq('is_sub_recipe', false),
+    ])
+
     // .single() reports error.code 'PGRST116' when the result set isn't exactly one row — for
     // this query that just means "no open period right now," a normal, common state, not a
     // failure. Only anything else is a genuine fetch failure worth surfacing.
@@ -200,11 +234,16 @@ export default function ClientDashboard() {
 
     setAndCache(setActivePeriod, 'activePeriod', period)
 
-    const results = await Promise.all([
-      scopedFrom('items', '*', { count: 'exact', head: true }).eq('is_active', true).eq('is_sub_recipe', false),
-      scopedFrom('vendors', '*', { count: 'exact', head: true }).eq('is_active', true),
-      scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).neq('category', 'Sub-Recipe'),
-      scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).eq('category', 'Sub-Recipe'),
+    // Fired here (as soon as `period` is known) rather than after this whole function finishes —
+    // it used to run only once loadStats had computed Food Cost % from its own big batch below,
+    // which meant the FC Trend chart's own (separate, ~11-period) query never even started until
+    // everything else on the page was already done, guaranteeing it was the last thing to render.
+    // It now derives the open period's own point from its own query batch instead of being handed
+    // a precomputed figure, so it has everything it needs up front and can run fully alongside the
+    // Promise.all below instead of after it. Not awaited — same fire-and-forget shape it always had.
+    loadFcTrend(period, myId)
+
+    const dependentPromise = Promise.all([
       period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, bs_day').eq('period_id', period.id).order('id')) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
       // Fetches every source (including 'pos_comp') — revenue figures below filter comps out
@@ -213,52 +252,56 @@ export default function ClientDashboard() {
       // etc. per PosOrders.jsx's own source-taxonomy comment) — a comped dish still used real
       // stock even though it collected no revenue.
       period ? supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount, source').eq('period_id', period.id) : { data: [] },
-      scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct'),
       period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id) : { data: [] },
-      scopedFrom('items', 'id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
-      scopedFrom('par_levels', 'item_id, par_qty'),
       // `bucket` is selected (not just `amount`) because the Overheads page splits fixed costs
       // into three buckets — overhead / labor / tax_fees — and the Revenue vs Cost Breakdown pie
       // needs them apart. The KPI cards still use the all-bucket sum; see overheadBuckets below.
       period ? supabase.from('overheads').select('amount, bucket').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('wastages').select('item_id, qty').eq('period_id', period.id) : { data: [] },
-      // Unfiltered by is_active — an item deactivated mid-period still has real purchase/wastage
-      // history for that period. Used for Top Items by Spend and itemRateMap below so those don't
-      // silently drop/zero-cost that history, unlike the active-only `items` fetch above (which
-      // still correctly limits Variance/Reorder/the item COUNT to currently-active stock items).
-      scopedFrom('items', 'id, name, per_uom_rate').eq('is_sub_recipe', false),
     ])
-    const hadRealError = (periodErr && periodErr.code !== 'PGRST116') || results.some(r => r.error)
-    setLoadErrors(prev => ({ ...prev, ims: hadRealError ? 'Inventory data failed to load — figures below may be incomplete or stale.' : '' }))
 
+    const independentResults = await independentPromise
     const [
       { count: itemCount },
       { count: vendorCount },
       { count: recipeCount },
       { count: subRecipeCount },
+      { data: recipes },
+      { data: items },
+      { data: parLevels },
+      { data: allItems }
+    ] = independentResults
+
+    // recipe_ingredients has no client_id — must be scoped by this client's recipe IDs.
+    // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct — the
+    // previous direct recipe_ingredients read (removed) only picked up rows with a direct item_id,
+    // silently dropping any ingredient that was itself a sub-recipe, and the Menu Health cost map
+    // didn't apply yield_pct at all. One call now feeds both theoreticalMap (item usage) and
+    // recipeCostMap (recipe cost) below. It only needs `recipes` (just resolved above), nothing
+    // from dependentPromise, so it's kicked off now and runs alongside the period-scoped batch
+    // rather than waiting for that too.
+    const dashRecipeIds = (recipes || []).map(r => r.id)
+    const ingredientBreakdownPromise = dashRecipeIds.length > 0
+      ? explodeRecipeIngredients(supabase, dashRecipeIds)
+      : Promise.resolve({})
+
+    const [dependentResults, ingredientBreakdown] = await Promise.all([dependentPromise, ingredientBreakdownPromise])
+    if (loadIdRef.current !== myId) return // superseded again after these more awaits
+
+    const [
       { data: purchases },
       { data: returns },
       { data: salesData },
-      { data: recipes },
       { data: opening },
       { data: closing },
-      { data: items },
-      { data: parLevels },
       { data: overheadsData },
-      { data: wastagesData },
-      { data: allItems }
-    ] = results
+      { data: wastagesData }
+    ] = dependentResults
 
-    // recipe_ingredients has no client_id — must be scoped by this client's recipe IDs
-    const dashRecipeIds = (recipes || []).map(r => r.id)
-    // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
-    // the previous direct recipe_ingredients read (below, now removed) only picked up rows with
-    // a direct item_id, silently dropping any ingredient that was itself a sub-recipe, and the
-    // Menu Health cost map didn't apply yield_pct at all. One call now feeds both theoreticalMap
-    // (item usage) and recipeCostMap (recipe cost) below.
-    const ingredientBreakdown = dashRecipeIds.length > 0 ? await explodeRecipeIngredients(supabase, dashRecipeIds) : {}
-    if (loadIdRef.current !== myId) return // superseded again after these two more awaits
+    const hadRealError = (periodErr && periodErr.code !== 'PGRST116')
+      || independentResults.some(r => r.error) || dependentResults.some(r => r.error)
+    setLoadErrors(prev => ({ ...prev, ims: hadRealError ? 'Inventory data failed to load — figures below may be incomplete or stale.' : '' }))
 
     // PATCHED: purchaseTotal = gross − returns
     const grossTotal  = (purchases || []).reduce((s, p) => s + p.qty * p.rate, 0)
@@ -531,7 +574,7 @@ export default function ClientDashboard() {
         })
         .filter(r => r.needsReorder)
         .sort((a, b) => b.estValue - a.estValue)
-        .slice(0, 8)
+        .slice(0, 5)
       setAndCache(setReorderItems, 'reorderItems', reorderRows)
     } else {
       setAndCache(setReorderItems, 'reorderItems', [])
@@ -554,8 +597,6 @@ export default function ClientDashboard() {
 
     setAndCache(setStats, 'stats', { itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, overheadBuckets, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
     setLoading(false)
-    const fcPctNow = revenueTotal > 0 ? (purchaseTotal / revenueTotal) * 100 : null
-    loadFcTrend(period, fcPctNow, myId)
   }
 
   async function loadHrStats(myId) {
@@ -666,20 +707,34 @@ export default function ClientDashboard() {
 
   async function closeAndAdvancePeriod() {
     if (!activePeriod || !effectiveClientId || advancingPeriod) return
-    setAdvancingPeriod(true)
     const nextMonth = activePeriod.bs_month === 12 ? 1 : activePeriod.bs_month + 1
     const nextYear  = activePeriod.bs_month === 12 ? activePeriod.bs_year + 1 : activePeriod.bs_year
-    await scopedUpdate('monthly_periods', { status: 'closed' }).eq('id', activePeriod.id)
-    await scopedInsert('monthly_periods', {
-      bs_year: nextYear,
-      bs_month: nextMonth,
-      status: 'open'
-    })
-    setAdvancingPeriod(false)
-    loadStats(loadIdRef.current)
+    if (!window.confirm(
+      `Close ${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year} and open ${BS_MONTHS[nextMonth - 1]} ${nextYear}?`
+    )) return
+    setAdvancingPeriod(true)
+    setPeriodCloseError('')
+    try {
+      const { error: closeError } = await scopedUpdate('monthly_periods', { status: 'closed' }).eq('id', activePeriod.id)
+      if (closeError) throw closeError
+      const { error: insertError } = await scopedInsert('monthly_periods', {
+        bs_year: nextYear,
+        bs_month: nextMonth,
+        status: 'open'
+      })
+      // A duplicate here means the next period already exists (e.g. a retried click after a
+      // slow response) — the close above still succeeded, so this isn't a real failure.
+      if (insertError && insertError.code !== '23505' && !insertError.message?.includes('unique')) throw insertError
+      loadStats(loadIdRef.current)
+    } catch (err) {
+      console.error('Failed to close period:', err)
+      setPeriodCloseError(err?.message || 'Something went wrong closing the period. Please try again.')
+    } finally {
+      setAdvancingPeriod(false)
+    }
   }
 
-  async function loadFcTrend(currentPeriod, currentFcPct, myId) {
+  async function loadFcTrend(currentPeriod, myId) {
     const { data: closedPeriods, error: closedErr } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month')
       .eq('status', 'closed')
       .order('bs_year', { ascending: false })
@@ -687,7 +742,13 @@ export default function ClientDashboard() {
       .limit(11)
 
     const closed = closedPeriods || []
-    const periodIds = closed.map(p => p.id)
+    // The open period's own id is folded into the same query batch (rather than this function
+    // being handed a Food Cost % that loadStats' own, much heavier pipeline had to finish
+    // computing first) so this whole function can run concurrently with loadStats instead of
+    // waiting on it — see the call site's comment. Costs one extra period's worth of duplicate
+    // purchase/sales rows (loadStats' own Promise.all fetches the open period too); worth it to
+    // decouple the two pipelines.
+    const periodIds = [...closed.map(p => p.id), ...(currentPeriod ? [currentPeriod.id] : [])]
 
     const trendResults = await Promise.all([
       periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', periodIds).order('id')) : { data: [] },
@@ -727,12 +788,16 @@ export default function ClientDashboard() {
       return { label: `${BS_MONTHS[p.bs_month - 1].slice(0, 3)} ${p.bs_year}`, fc, purchases: Math.round(net), revenue: Math.round(rev), open: false }
     }).reverse()
 
-    if (currentPeriod && currentFcPct != null) {
-      points.push({
-        label: `${BS_MONTHS[currentPeriod.bs_month - 1].slice(0, 3)} ${currentPeriod.bs_year}`,
-        fc: parseFloat(currentFcPct.toFixed(1)),
-        purchases: null, revenue: null, open: true
-      })
+    if (currentPeriod) {
+      const net = (grossMap[currentPeriod.id] || 0) - (retMap[currentPeriod.id] || 0)
+      const rev = revMap[currentPeriod.id] || 0
+      const fc  = rev > 0 ? parseFloat(((net / rev) * 100).toFixed(1)) : null
+      if (fc != null) {
+        points.push({
+          label: `${BS_MONTHS[currentPeriod.bs_month - 1].slice(0, 3)} ${currentPeriod.bs_year}`,
+          fc, purchases: null, revenue: null, open: true
+        })
+      }
     }
 
     setAndCache(setFcTrend, 'fcTrend', points.filter(p => p.fc !== null))
@@ -908,6 +973,22 @@ export default function ClientDashboard() {
       onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }
     } : {})
   })
+  // The "N more" disclosure button — currently only IMS's reference-card row uses this (see the
+  // openDetails note above for why HR/POS don't), kept generic on (key, count, panelId) in case a
+  // genuinely reference-only row shows up in another section later.
+  const detailsToggle = (key, count, panelId) => (
+    <button
+      type="button"
+      onClick={() => toggleDetails(key)}
+      aria-expanded={openDetails[key]}
+      aria-controls={panelId}
+      className="btn btn-ghost"
+      style={{ fontSize: 11, padding: '4px 10px', marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+    >
+      {openDetails[key] ? 'Hide details' : `Show ${count} more`}
+      <ChevronDown size={12} aria-hidden="true" style={{ transform: openDetails[key] ? 'rotate(180deg)' : 'none', transition: 'transform var(--motion-fast) var(--ease-standard)' }} />
+    </button>
+  )
   // Shared KPI text styles — single source of truth for label/value/subtext sizing across every
   // KPI grid section (IMS Row 1/2, HR, POS), so a future re-tune is a 3-line edit, not a sweep of
   // 15+ inline style objects. kpiValueStyle keeps the hero (bigger/bolder) vs secondary two-tier
@@ -1001,6 +1082,44 @@ export default function ClientDashboard() {
     : (showIms && showHr && showPos) ? 'dash-3col-all'
     : (showHr && showPos) ? 'dash-3col-hr-pos'
     : 'dash-3col-ims-plus' // IMS+HR or IMS+POS
+
+  // Sales Mix (S557) — used to be its own card (FoodBeverageSplit.jsx, deleted) living only in the
+  // Sales Breakdown section below, 2+ modules only. Now folded into a second tab on the Revenue vs
+  // Cost Breakdown card further down, so it (a) reaches single-module IMS clients too — they always
+  // had the revenue data for it, just no card showing it — and (b) frees a whole column in the
+  // Sales Breakdown row for the sales pivot table(s) to grow into. Own hook, own effect,
+  // independent of loadStats' load cycle — unchanged from when FoodBeverageSplit.jsx owned this.
+  const salesMixIncludeManual = showIms && canSales
+  const salesMixIncludePos = showPos && !posIsStationTeam
+  const { buckets: salesMixBuckets, loading: salesMixLoading } = useFoodBeverageSplit({
+    activePeriod, includeManual: salesMixIncludeManual, includePos: salesMixIncludePos,
+  })
+  const salesMixCategories = Object.keys(salesMixBuckets).filter(c => salesMixBuckets[c] > 0).sort((a, b) => salesMixBuckets[b] - salesMixBuckets[a])
+  const salesMixTotal = salesMixCategories.reduce((s, c) => s + salesMixBuckets[c], 0)
+  // Food/Beverage keep the fixed semantic colors FoodBeverageSplit.jsx always gave them; any other
+  // category rotates through CHART_COLORS (the page's own categorical palette) rather than a
+  // second, duplicated fallback array — FoodBeverageSplit.jsx used to duplicate this exact set
+  // locally specifically because it lived outside the page file; now that this logic lives here,
+  // that duplication is gone.
+  const salesMixColorOf = (() => {
+    let nextFallback = 0
+    const assigned = {}
+    return (cat) => {
+      if (assigned[cat]) return assigned[cat]
+      if (cat === 'Food') return (assigned[cat] = colors.green)
+      if (cat === 'Beverage') return (assigned[cat] = colors.purple)
+      return (assigned[cat] = CHART_COLORS[nextFallback++ % CHART_COLORS.length])
+    }
+  })()
+  const salesMixSummary = salesMixTotal <= 0
+    ? 'No sales data for this period.'
+    : `Sales mix this period: ${salesMixCategories.map(c => `${c} NPR ${Math.round(salesMixBuckets[c]).toLocaleString('en-NP')} (${((salesMixBuckets[c] / salesMixTotal) * 100).toFixed(0)}%)`).join(', ')}.`
+  // Whether each half of the merged card has anything to offer at all — "available" means
+  // entitled/configured to see that view, not "has data this period" (an empty period still gets
+  // the tab, with its own inline empty state, same as the Spend by Category / Top Items tabs).
+  const costTabAvailable = canOverheads
+  const mixTabAvailable = salesMixIncludeManual || salesMixIncludePos
+  const costCardEffectiveView = (costTabAvailable && mixTabAvailable) ? costCardView : (costTabAvailable ? 'cost' : 'mix')
 
   // ── IMS card content, extracted into variables so the same JSX composes into two different
   // shapes below: the full single-page layout when IMS is the only module, or a trimmed top-pill
@@ -1159,6 +1278,146 @@ export default function ClientDashboard() {
       </div>
       <div style={kpiSubtextStyle}>This period →</div>
     </div>
+  )
+
+  // ── HR/POS card content, extracted the same way as the IMS cards above (S557 dashboard density
+  // fix) — one "headline" card per section, sized/positioned as the section's focal point but
+  // (after reconsidering against real dashboard UX guidance — a dashboard's job is a 5-second
+  // at-a-glance read of the business, and hiding numbers people check daily is the most common
+  // way to break that) never hidden. Everything below still renders unconditionally; only the
+  // headline card gets extra visual weight in the 2+ module layout.
+  const hrHeadlineCard = (
+    <div {...kpiCard(() => navigate('/hr/dashboard'))}>
+      <div style={kpiLabelStyle}>Pending Approvals</div>
+      <div style={{ ...kpiValueStyle(22, 800), color: hrApprovals.total > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
+        {hrApprovals.loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrApprovals.total}
+      </div>
+      <div style={kpiSubtextStyle}>
+        {hrApprovals.loading ? 'Loading…' : `${hrApprovals.leave} Leave · ${hrApprovals.ot} OT · ${hrApprovals.tada} TADA · ${hrApprovals.swap} Swap →`}
+      </div>
+    </div>
+  )
+
+  const hrSecondaryCards = (
+    <>
+      <div {...kpiCard(() => navigate('/hr/employees'))}>
+        <div style={kpiLabelStyle}>Total Employees</div>
+        <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-text1)' }}>
+          {!hrStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrStats.total}
+        </div>
+        <div style={kpiSubtextStyle}>All statuses →</div>
+      </div>
+      <div {...kpiCard(() => navigate('/hr/employees'))}>
+        <div style={kpiLabelStyle}>Active</div>
+        <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-green-text)' }}>
+          {!hrStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrStats.active}
+        </div>
+        {hrStats && hrStats.probation > 0 && (
+          <div style={{ ...kpiSubtextStyle, color: 'var(--theme-accent-ink)' }}>{hrStats.probation} on probation</div>
+        )}
+      </div>
+      <div {...kpiCard(null)}>
+        <div style={kpiLabelStyle}>
+          <Tip text="Sum of basic salary for active and probation employees. Full payroll with allowances, SSF and TDS is computed during payroll run." width={260}>Basic Payroll / Month</Tip>
+        </div>
+        <div style={{ ...kpiValueStyle(18, 800), color: 'var(--theme-accent-ink)' }}>
+          {!hrStats
+            ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            : `NPR ${Math.round(hrStats.payroll).toLocaleString('en-NP')}`}
+        </div>
+        <div style={kpiSubtextStyle}>Basic salary only</div>
+      </div>
+    </>
+  )
+
+  const posKitchenHeadlineCard = (
+    <div {...kpiCard(() => navigate('/pos/kds'))}>
+      <div style={kpiLabelStyle}>Open Tickets</div>
+      <div style={kpiValueStyle(22, 800)}>
+        {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.openNow}
+      </div>
+      <div style={kpiSubtextStyle}>
+        {!posStats
+          ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+          : <>New + In Progress →</>}
+      </div>
+    </div>
+  )
+
+  const posKitchenSecondaryCards = (
+    <>
+      <div {...kpiCard(() => navigate('/pos/kds'))}>
+        <div style={kpiLabelStyle}>
+          <Tip text="Open tickets sent more than 15 minutes ago — same threshold the ticket display itself flags." width={220}>Late</Tip>
+        </div>
+        <div style={{ ...kpiValueStyle(18), color: posStats?.lateCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.lateCount}
+        </div>
+        <div style={kpiSubtextStyle}>&gt; 15 min →</div>
+      </div>
+      <div {...kpiCard(() => navigate('/pos/kds'))}>
+        <div style={kpiLabelStyle}>Ready &amp; Waiting</div>
+        <div style={kpiValueStyle(18)}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.readyWaiting}
+        </div>
+        <div style={kpiSubtextStyle}>Last 20 min →</div>
+      </div>
+      <div {...kpiCard(null)}>
+        <div style={kpiLabelStyle}>Avg Prep Time</div>
+        <div style={kpiValueStyle(18)}>
+          {!posStats
+            ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            : posStats.avgPrepMin != null ? `${posStats.avgPrepMin} min` : '—'}
+        </div>
+        <div style={kpiSubtextStyle}>
+          {!posStats
+            ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            : <>{posStats.completedToday} completed today</>}
+        </div>
+      </div>
+    </>
+  )
+
+  const posFrontHeadlineCard = (
+    <div {...kpiCard(() => navigate('/pos/sales-report'))}>
+      <div style={kpiLabelStyle}>Revenue</div>
+      <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-green-text)' }}>
+        {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-NP')}`}
+      </div>
+      <div style={kpiSubtextStyle}>{periodLabel} · billed →</div>
+    </div>
+  )
+
+  const posFrontSecondaryCards = (
+    <>
+      <div {...kpiCard(() => navigate('/pos/covers-report'))}>
+        <div style={kpiLabelStyle}>
+          <Tip text="Total covers (guests) served across all billed orders this period." width={220}>Covers Served</Tip>
+        </div>
+        <div style={kpiValueStyle(18)}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.coversTotal}
+        </div>
+        <div style={kpiSubtextStyle}>
+          {!posStats
+            ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            : <>{posStats.billCount} bill{posStats.billCount === 1 ? '' : 's'} →</>}
+        </div>
+      </div>
+      <div {...kpiCard(null)}>
+        <div style={kpiLabelStyle}>Avg Check</div>
+        <div style={kpiValueStyle(18)}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-NP')}`}
+        </div>
+        <div style={kpiSubtextStyle}>Revenue ÷ bills</div>
+      </div>
+      <div {...kpiCard(hasPosAccess('manager') ? () => navigate('/pos/tables') : null)}>
+        <div style={kpiLabelStyle}>Tables Occupied</div>
+        <div style={{ ...kpiValueStyle(18), color: posStats?.tablesOccupied > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${posStats.tablesOccupied} / ${posStats.tablesTotal}`}
+        </div>
+        <div style={kpiSubtextStyle}>{hasPosAccess('manager') ? 'Right now →' : 'Right now'}</div>
+      </div>
+    </>
   )
 
   // Charts + FC trend + Variance/Reorder — identical regardless of module count. Pre-S438 this
@@ -1469,8 +1728,8 @@ export default function ClientDashboard() {
 
       </div>
 
-      {/* ── FC% Trend + Cost Breakdown, side by side ── */}
-      {((fcTrend.length >= 2 && canSales) || (canOverheads && costBreakdown.length > 0)) && (
+      {/* ── FC% Trend + Cost Breakdown/Sales Mix, side by side ── */}
+      {((fcTrend.length >= 2 && canSales) || costTabAvailable || mixTabAvailable) && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
 
           {fcTrend.length >= 2 && canSales && (
@@ -1534,85 +1793,178 @@ export default function ClientDashboard() {
             />
           )}
 
-          {/* Pie — Revenue vs Cost Breakdown. Pro-gated (canOverheads) since overheads, the
-              biggest lever in the split, are a Pro-only figure — same gate as the Est. Net
-              Margin % KPI card this chart is a composition view of. */}
-          {canOverheads && (
+          {/* Pie — Revenue vs Cost Breakdown, tabbed with Sales Mix (S557 — see the note above
+              costTabAvailable/mixTabAvailable). Cost Breakdown stays Pro-gated (canOverheads) since
+              overheads, the biggest lever in the split, are a Pro-only figure — same gate as the
+              Est. Net Margin % KPI card that view is a composition of; Sales Mix has no tier gate,
+              only a data-source one, matching what FoodBeverageSplit.jsx always did. */}
+          {(costTabAvailable || mixTabAvailable) && (
             <ChartCard
-              title="Revenue vs Cost Breakdown"
-              smallHeight={140}
-              footer={<>
-                <div style={{ fontSize: 11, marginTop: 6, color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-                  Net margin: {netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
-                  {netMarginPct != null && netMarginPct < 0 && ' — costs exceeded revenue this period'}
-                </div>
-                {/* Percentages below the slices are a share of whatever the pie actually contains,
-                    which flips with the sign of the margin — say which, rather than leaving a bare
-                    "23.4%" to be read against the wrong denominator. */}
-                <div style={{ fontSize: 10, marginTop: 2, color: 'var(--theme-text3)' }}>
-                  {netMarginPct != null && netMarginPct > 0 ? '% of revenue' : '% of total cost'} · from Overheads page buckets
-                </div>
-                {laborBucketMissing && (
-                  <div style={{ fontSize: 10, marginTop: 4, color: 'var(--theme-amber-text)' }}>
-                    Labor not included — the Labor bucket on Overheads is empty this period, but HR payroll is NPR {Math.round(hrStats.payroll).toLocaleString('en-NP')}.
-                  </div>
-                )}
-                <p className="sr-only">{costBreakdownSummary}</p>
-              </>}
-              renderChart={h => {
-                if (costBreakdown.length === 0) return (
-                  <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No cost data</p>
-                  </div>
-                )
-                const big = h > 200
-                return (
+              title={costCardEffectiveView === 'cost' ? 'Revenue vs Cost Breakdown' : 'Sales Mix'}
+              // 140 was each single-purpose card's own height; +32 buys back the tab row's ~26px
+              // the same way the Spend by Category / Top Items merge did — only when both tabs
+              // actually exist, so a client with just one view keeps that view's original height.
+              smallHeight={costTabAvailable && mixTabAvailable ? 172 : 140}
+              footer={costCardEffectiveView === 'cost' ? (
                 <>
-                  {big && (
-                    <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                      <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`} />
-                      {/* Matches the Food Cost slice, not colors.accent — on a preset where accent
-                          isn't gold the pill would otherwise disagree with the slice it summarizes. */}
-                      {fcPct != null && <StatPill label="Food cost %" value={`${fcPct.toFixed(1)}%`} color={COST_BREAKDOWN_COLORS['Food Cost']} />}
-                      <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
+                  <div style={{ fontSize: 11, marginTop: 6, color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                    Net margin: {netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
+                    {netMarginPct != null && netMarginPct < 0 && ' — costs exceeded revenue this period'}
+                  </div>
+                  {/* Percentages below the slices are a share of whatever the pie actually contains,
+                      which flips with the sign of the margin — say which, rather than leaving a bare
+                      "23.4%" to be read against the wrong denominator. */}
+                  <div style={{ fontSize: 10, marginTop: 2, color: 'var(--theme-text3)' }}>
+                    {netMarginPct != null && netMarginPct > 0 ? '% of revenue' : '% of total cost'} · from Overheads page buckets
+                  </div>
+                  {laborBucketMissing && (
+                    <div style={{ fontSize: 10, marginTop: 4, color: 'var(--theme-amber-text)' }}>
+                      Labor not included — the Labor bucket on Overheads is empty this period, but HR payroll is NPR {Math.round(hrStats.payroll).toLocaleString('en-NP')}.
                     </div>
                   )}
-                  <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
-                    <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                      <Pie
-                        {...chartMotion()}
-                        data={costBreakdown} dataKey="value" nameKey="name"
-                        cx="50%" cy="50%"
-                        innerRadius={big ? 80 : 38} outerRadius={big ? 140 : 60}
-                        paddingAngle={2}
-                        // Percent-on-slice labels only in the expanded view — at dashboard-tile
-                        // size (h ≤ 200) the label lines would overlap the small donut, so the
-                        // legend below (which carries NPR + %) is the only detail there.
-                        {...(big ? {
-                          label: ({ percent }) => `${(percent * 100).toFixed(0)}%`,
-                          labelLine: { stroke: colors.text3, strokeWidth: 1 },
-                        } : {})}
-                      >
-                        {costBreakdown.map(entry => <Cell key={entry.name} fill={COST_BREAKDOWN_COLORS[entry.name] || colors.text3} />)}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
-                        formatter={(v, name) => [`NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })} (${(v / costBreakdownTotal * 100).toFixed(1)}%)`, name]}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 6 }}>
-                    {costBreakdown.map(entry => (
-                      <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: COST_BREAKDOWN_COLORS[entry.name] || colors.text3, flexShrink: 0 }} />
-                        <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
-                          {entry.name} <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</span>
-                          {' '}<span style={{ color: 'var(--theme-text3)' }}>({(entry.value / costBreakdownTotal * 100).toFixed(1)}%)</span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <p className="sr-only">{costBreakdownSummary}</p>
                 </>
+              ) : (
+                <p className="sr-only">{salesMixSummary}</p>
+              )}
+              renderChart={h => {
+                const big = h > 200
+                const showTabs = costTabAvailable && mixTabAvailable
+                const contentH = showTabs ? h - 26 : h
+                const tabs = showTabs && (
+                  <div className="tab-bar" role="tablist" aria-label="Revenue breakdown views" style={{ marginBottom: 6 }}>
+                    <button type="button" role="tab" aria-selected={costCardView === 'cost'}
+                      className={`tab-btn${costCardView === 'cost' ? ' tab-btn--active' : ''}`}
+                      onClick={() => setCostCardView('cost')}>Cost Breakdown</button>
+                    <button type="button" role="tab" aria-selected={costCardView === 'mix'}
+                      className={`tab-btn${costCardView === 'mix' ? ' tab-btn--active' : ''}`}
+                      onClick={() => setCostCardView('mix')}>Sales Mix</button>
+                  </div>
+                )
+
+                if (costCardEffectiveView === 'cost') {
+                  if (costBreakdown.length === 0) return (
+                    <>
+                      {tabs}
+                      <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No cost data</p>
+                      </div>
+                    </>
+                  )
+                  return (
+                    <>
+                      {tabs}
+                      {big && (
+                        <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                          <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`} />
+                          {/* Matches the Food Cost slice, not colors.accent — on a preset where accent
+                              isn't gold the pill would otherwise disagree with the slice it summarizes. */}
+                          {fcPct != null && <StatPill label="Food cost %" value={`${fcPct.toFixed(1)}%`} color={COST_BREAKDOWN_COLORS['Food Cost']} />}
+                          <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
+                        </div>
+                      )}
+                      <ResponsiveContainer width="100%" height={big ? contentH - 60 : contentH}>
+                        <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                          <Pie
+                            {...chartMotion()}
+                            data={costBreakdown} dataKey="value" nameKey="name"
+                            cx="50%" cy="50%"
+                            innerRadius={big ? 80 : 38} outerRadius={big ? 140 : 60}
+                            paddingAngle={2}
+                            // Percent-on-slice labels only in the expanded view — at dashboard-tile
+                            // size (h ≤ 200) the label lines would overlap the small donut, so the
+                            // legend below (which carries NPR + %) is the only detail there.
+                            {...(big ? {
+                              label: ({ percent }) => `${(percent * 100).toFixed(0)}%`,
+                              labelLine: { stroke: colors.text3, strokeWidth: 1 },
+                            } : {})}
+                          >
+                            {costBreakdown.map(entry => <Cell key={entry.name} fill={COST_BREAKDOWN_COLORS[entry.name] || colors.text3} />)}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
+                            formatter={(v, name) => [`NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })} (${(v / costBreakdownTotal * 100).toFixed(1)}%)`, name]}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 6 }}>
+                        {costBreakdown.map(entry => (
+                          <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: COST_BREAKDOWN_COLORS[entry.name] || colors.text3, flexShrink: 0 }} />
+                            <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
+                              {entry.name} <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</span>
+                              {' '}<span style={{ color: 'var(--theme-text3)' }}>({(entry.value / costBreakdownTotal * 100).toFixed(1)}%)</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )
+                }
+
+                // costCardEffectiveView === 'mix'
+                if (salesMixLoading) return (
+                  <>
+                    {tabs}
+                    <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
+                  </>
+                )
+                if (salesMixTotal <= 0) return (
+                  <>
+                    {tabs}
+                    <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No sales data</p>
+                    </div>
+                  </>
+                )
+                const mixPieData = salesMixCategories.map(c => ({ name: c, value: salesMixBuckets[c] }))
+                return (
+                  <>
+                    {tabs}
+                    {big && (
+                      <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                        <StatPill label="Total revenue" value={`NPR ${Math.round(salesMixTotal).toLocaleString('en-NP')}`} />
+                        <StatPill label="Top category" value={`${salesMixCategories[0]} (${((salesMixBuckets[salesMixCategories[0]] / salesMixTotal) * 100).toFixed(0)}%)`} color={salesMixColorOf(salesMixCategories[0])} />
+                        <StatPill label="Categories" value={salesMixCategories.length} />
+                      </div>
+                    )}
+                    <ResponsiveContainer width="100%" height={big ? contentH - 60 : contentH}>
+                      <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                        <Pie
+                          {...chartMotion()}
+                          data={mixPieData} dataKey="value" nameKey="name"
+                          cx="50%" cy="50%"
+                          innerRadius={big ? 80 : 38} outerRadius={big ? 140 : 60}
+                          paddingAngle={2}
+                          {...(big ? {
+                            label: ({ percent }) => `${(percent * 100).toFixed(0)}%`,
+                            labelLine: { stroke: colors.text3, strokeWidth: 1 },
+                          } : {})}
+                        >
+                          {mixPieData.map(entry => <Cell key={entry.name} fill={salesMixColorOf(entry.name)} />)}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
+                          formatter={(v, name) => [`NPR ${Math.round(v).toLocaleString('en-NP')} (${((v / salesMixTotal) * 100).toFixed(1)}%)`, name]}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+                      {salesMixCategories.map(cat => {
+                        const amount = salesMixBuckets[cat]
+                        const pct = (amount / salesMixTotal) * 100
+                        return (
+                          <div key={cat} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12.5 }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--theme-text1)' }}>
+                              <span style={{ width: 8, height: 8, borderRadius: '50%', background: salesMixColorOf(cat), flexShrink: 0 }} />
+                              {cat}
+                            </span>
+                            <span style={{ color: 'var(--theme-text2)' }}>NPR {Math.round(amount).toLocaleString('en-NP')} · {pct.toFixed(0)}%</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
                 )
               }}
             />
@@ -1839,6 +2191,11 @@ export default function ClientDashboard() {
               </button>
             )}
           </div>
+          {periodCloseError && (
+            <p role="alert" style={{ color: 'var(--theme-red-text)', margin: '10px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <TriangleAlert size={13} aria-hidden="true" /> {periodCloseError}
+            </p>
+          )}
         </div>
       )}
 
@@ -1857,10 +2214,14 @@ export default function ClientDashboard() {
       {moduleHeader('Inventory')}
       {showModuleHeaders ? (
         /* Trimmed top-pill row — card count matched to HR/POS (5, vs their 4) — the "money"
-           numbers. Everything else (reference cards, charts, tables) renders full-width below
-           the equal-width grid instead, in the imsDetails section further down. */
+           numbers. Food Cost % spans 2 columns as this row's headline tile (dashboard density
+           critique, 2026-08-14, P1) rather than sitting at identical weight to its four
+           siblings — it's the one figure with its own health-verdict color, so it's the natural
+           focal point. Everything else (reference cards, charts, tables) renders full-width
+           below the equal-width grid instead, in the imsDetails section further down. */
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
-          {netPurchasesCard}{revenueCard}{foodCostCard}{netMarginCard}{wastageCard}
+          <div style={{ gridColumn: 'span 2' }}>{foodCostCard}</div>
+          {netPurchasesCard}{revenueCard}{netMarginCard}{wastageCard}
         </div>
       ) : (
         <>
@@ -1884,53 +2245,18 @@ export default function ClientDashboard() {
       {showHr && (
         <div style={{ marginBottom: 14, marginTop: showIms ? 6 : 0 }}>
           {moduleHeader('Human Resources')}
+          {/* A dashboard's whole job is a 5-second "state of things" glance — headcount, active
+              staff and payroll are exactly that for HR, not reference data, so every card here
+              stays visible always (reversed from an earlier pass that hid them behind a click;
+              hiding numbers people check daily is the #1 progressive-disclosure failure mode).
+              Pending Approvals is still the section's headline — spans 2 columns for visual
+              weight, same instinct as IMS's Food Cost % above — but "headline" means "biggest,"
+              not "only thing shown." */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
-            <div {...kpiCard(() => navigate('/hr/employees'))}>
-              <div style={kpiLabelStyle}>Total Employees</div>
-              <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-text1)' }}>
-                {!hrStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrStats.total}
-              </div>
-              <div style={kpiSubtextStyle}>All statuses →</div>
-            </div>
-            <div {...kpiCard(() => navigate('/hr/employees'))}>
-              <div style={kpiLabelStyle}>Active</div>
-              <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-green-text)' }}>
-                {!hrStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrStats.active}
-              </div>
-              {hrStats && hrStats.probation > 0 && (
-                <div style={{ ...kpiSubtextStyle, color: 'var(--theme-accent-ink)' }}>{hrStats.probation} on probation</div>
-              )}
-            </div>
-            <div {...kpiCard(null)}>
-              <div style={kpiLabelStyle}>
-                <Tip text="Sum of basic salary for active and probation employees. Full payroll with allowances, SSF and TDS is computed during payroll run." width={260}>Basic Payroll / Month</Tip>
-              </div>
-              <div style={{ ...kpiValueStyle(18, 800), color: 'var(--theme-accent-ink)' }}>
-                {!hrStats
-                  ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
-                  : `NPR ${Math.round(hrStats.payroll).toLocaleString('en-NP')}`}
-              </div>
-              <div style={kpiSubtextStyle}>Basic salary only</div>
-            </div>
+            {showModuleHeaders && <div style={{ gridColumn: 'span 2' }}>{hrHeadlineCard}</div>}
+            {hrSecondaryCards}
           </div>
-
-          {/* Approvals-lite — same counts HrDashboard.jsx's own Approvals row shows (shared via
-              useHrApprovalCounts), just compact for this narrower column. Always shown (even at
-              zero) so "nothing pending" is a visible, confirmed state, not an absent one. */}
-          {(() => {
-            const approvalsCardProps = kpiCard(() => navigate('/hr/dashboard'))
-            return (
-          <div {...approvalsCardProps} style={{ ...approvalsCardProps.style, marginTop: 10 }}>
-            <div style={kpiLabelStyle}>Pending Approvals</div>
-            <div style={{ ...kpiValueStyle(18, 800), color: hrApprovals.total > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
-              {hrApprovals.loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrApprovals.total}
-            </div>
-            <div style={kpiSubtextStyle}>
-              {hrApprovals.loading ? 'Loading…' : `${hrApprovals.leave} Leave · ${hrApprovals.ot} OT · ${hrApprovals.tada} TADA · ${hrApprovals.swap} Swap →`}
-            </div>
-          </div>
-            )
-          })()}
+          {!showModuleHeaders && <div style={{ marginTop: 10 }}>{hrHeadlineCard}</div>}
         </div>
       )}
 
@@ -1938,91 +2264,15 @@ export default function ClientDashboard() {
       {showPos && (
         <div style={{ marginBottom: 14, marginTop: (showIms || showHr) ? 6 : 0 }}>
           {moduleHeader(posTeam === 'bar' ? 'Bar' : posTeam === 'kitchen' ? 'Kitchen' : 'Point of Sale')}
+          {/* Same reversal as HR above — Covers Served/Avg Check/Tables Occupied (or Late/Ready &
+              Waiting/Avg Prep for a kitchen/bar station) are exactly what a mid-rush glance needs,
+              not occasional reference data, so they stay visible. Revenue/Open Tickets is still
+              the headline via size + position, not via hiding its siblings. */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
-            {posIsStationTeam ? (
-              <>
-                <div {...kpiCard(() => navigate('/pos/kds'))}>
-                  <div style={kpiLabelStyle}>Open Tickets</div>
-                  <div style={kpiValueStyle(18)}>
-                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.openNow}
-                  </div>
-                  <div style={kpiSubtextStyle}>
-                    {!posStats
-                      ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
-                      : <>New + In Progress →</>}
-                  </div>
-                </div>
-                <div {...kpiCard(() => navigate('/pos/kds'))}>
-                  <div style={kpiLabelStyle}>
-                    <Tip text="Open tickets sent more than 15 minutes ago — same threshold the ticket display itself flags." width={220}>Late</Tip>
-                  </div>
-                  <div style={{ ...kpiValueStyle(18), color: posStats?.lateCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
-                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.lateCount}
-                  </div>
-                  <div style={kpiSubtextStyle}>&gt; 15 min →</div>
-                </div>
-                <div {...kpiCard(() => navigate('/pos/kds'))}>
-                  <div style={kpiLabelStyle}>Ready &amp; Waiting</div>
-                  <div style={kpiValueStyle(18)}>
-                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.readyWaiting}
-                  </div>
-                  <div style={kpiSubtextStyle}>Last 20 min →</div>
-                </div>
-                <div {...kpiCard(null)}>
-                  <div style={kpiLabelStyle}>Avg Prep Time</div>
-                  <div style={kpiValueStyle(18)}>
-                    {!posStats
-                      ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
-                      : posStats.avgPrepMin != null ? `${posStats.avgPrepMin} min` : '—'}
-                  </div>
-                  <div style={kpiSubtextStyle}>
-                    {!posStats
-                      ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
-                      : <>{posStats.completedToday} completed today</>}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div {...kpiCard(() => navigate('/pos/sales-report'))}>
-                  <div style={kpiLabelStyle}>Revenue</div>
-                  <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green-text)' }}>
-                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-NP')}`}
-                  </div>
-                  <div style={kpiSubtextStyle}>{periodLabel} · billed →</div>
-                </div>
-                <div {...kpiCard(() => navigate('/pos/covers-report'))}>
-                  <div style={kpiLabelStyle}>
-                    <Tip text="Total covers (guests) served across all billed orders this period." width={220}>Covers Served</Tip>
-                  </div>
-                  <div style={kpiValueStyle(18)}>
-                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posStats.coversTotal}
-                  </div>
-                  <div style={kpiSubtextStyle}>
-                    {!posStats
-                      ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
-                      : <>{posStats.billCount} bill{posStats.billCount === 1 ? '' : 's'} →</>}
-                  </div>
-                </div>
-                <div {...kpiCard(null)}>
-                  <div style={kpiLabelStyle}>Avg Check</div>
-                  <div style={kpiValueStyle(18)}>
-                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-NP')}`}
-                  </div>
-                  <div style={kpiSubtextStyle}>Revenue ÷ bills</div>
-                </div>
-                {/* Tables page became Manager-only (S430 follow-up) — a Staff/Supervisor viewer
-                    would just get redirected away, so only link through when they can actually
-                    open it; the card itself still shows the live count either way. */}
-                <div {...kpiCard(hasPosAccess('manager') ? () => navigate('/pos/tables') : null)}>
-                  <div style={kpiLabelStyle}>Tables Occupied</div>
-                  <div style={{ ...kpiValueStyle(18), color: posStats?.tablesOccupied > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>
-                    {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${posStats.tablesOccupied} / ${posStats.tablesTotal}`}
-                  </div>
-                  <div style={kpiSubtextStyle}>{hasPosAccess('manager') ? 'Right now →' : 'Right now'}</div>
-                </div>
-              </>
-            )}
+            {showModuleHeaders && <div style={{ gridColumn: 'span 2' }}>{posIsStationTeam ? posKitchenHeadlineCard : posFrontHeadlineCard}</div>}
+            {posIsStationTeam
+              ? <>{!showModuleHeaders && posKitchenHeadlineCard}{posKitchenSecondaryCards}</>
+              : <>{!showModuleHeaders && posFrontHeadlineCard}{posFrontSecondaryCards}</>}
           </div>
 
           {/* POS-sourced sales pivot — kitchen/bar station accounts have no use for a revenue
@@ -2036,29 +2286,36 @@ export default function ClientDashboard() {
       </div>
 
       {/* ── IMS details (2+ modules only) — reference cards + charts + tables, full-width below
-          the equal-width pill grid instead of squeezed into IMS's own narrower column. ── */}
+          the equal-width pill grid instead of squeezed into IMS's own narrower column. The
+          reference-card row is behind a disclosure (dashboard density critique, 2026-08-14, P1)
+          — it's status/master-data, not a daily figure, so it doesn't need to cost default
+          scroll length; charts stay visible, they already have their own ChartCard compact/
+          expand pattern for progressive disclosure at the individual-chart level. ── */}
       {showIms && showModuleHeaders && (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
-            {activePeriodCard}{itemsCard}{vendorsCard}{recipesCard}{menuHealthCard}{fixedCostsCard}
-          </div>
+          {detailsToggle('ims', 6, 'ims-details-panel')}
+          {openDetails.ims && (
+            <div id="ims-details-panel" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginTop: 10, marginBottom: 14 }}>
+              {activePeriodCard}{itemsCard}{vendorsCard}{recipesCard}{menuHealthCard}{fixedCostsCard}
+            </div>
+          )}
           {imsChartsAndTables}
         </div>
       )}
 
       {/* ── Sales Breakdown (2+ modules only) — manual + POS pivots side by side (never mutually
-          exclusive — a client can carry real revenue on both), plus the Food/Beverage split. ── */}
+          exclusive — a client can carry real revenue on both). The Food/Beverage split used to
+          share this row as a third card; S557 folded it into a tab on Revenue vs Cost Breakdown
+          above instead, so the pivot table(s) here now get the whole row to themselves — with one
+          fewer card competing for width, the same auto-fit grid gives each pivot more room on its
+          own, which is what actually widens "Manual Sales by Category" now that it's not sharing
+          the row three ways. ── */}
       {showModuleHeaders && ((showIms && canSales) || (showPos && !posIsStationTeam)) && (
         <div style={{ marginBottom: 20 }}>
           {moduleHeader('Sales Breakdown')}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
             {showIms && canSales && <SalesPivot activePeriod={activePeriod} posEnabled={false} title="Manual Sales by Category" />}
             {showPos && !posIsStationTeam && <SalesPivot activePeriod={activePeriod} posEnabled={true} title="POS Sales by Category" />}
-            <FoodBeverageSplit
-              activePeriod={activePeriod}
-              includeManual={showIms && canSales}
-              includePos={showPos && !posIsStationTeam}
-            />
           </div>
         </div>
       )}

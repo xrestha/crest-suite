@@ -158,6 +158,20 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S557 — 2026-08-15 — Dashboard period-close safety, a density fix that had to be reverted once, load-time jank, and two Stock.js table fixes
+
+Picked up from the S556 `/impeccable critique dashboard` findings (28/40), fixing the P0 and P1 items directly.
+
+**P0 — period-close had no confirmation or error handling.** `closeAndAdvancePeriod()` now confirms via `window.confirm` (matching `Periods.js`'s wording for the same action), wraps both writes in try/catch/finally so the busy flag always resolves, shows a dismissible error on failure, and treats a duplicate-period insert (`23505`) as benign rather than a real error.
+
+**P1 — page density at 2-3 modules — shipped twice.** First pass hid HR's and POS's secondary KPI cards (Total Employees/Active/Payroll; Covers Served/Avg Check/Tables Occupied) behind a collapsed "Show 3 more" disclosure, leaving one headline tile per module visible by default. Challenged directly: *"what's the point of hiding pills in the dashboard? what is the main purpose of the dashboard."* Web research on dashboard UX backed the pushback — a KPI dashboard's job is a 5-second read of business state, and hiding numbers people check *regularly* (not just occasionally) is the most-cited progressive-disclosure failure mode. Reverted for HR/POS: every card is visible again, unconditionally; the headline tile gets visual weight only, via a bigger font and a 2-column grid span, never via hiding its siblings. Kept the collapse for IMS's reference row (Active Period/Items/Vendors/Recipes/Menu Health/Fixed Costs %) — that one was already the codebase's own established secondary tier from S439, not something invented for this fix.
+
+**Dashboard load-time/jank.** Reported after login: "loading time is taking some time and the charts are loading in a jerking fashion." Traced to `loadFcTrend` only starting after `loadStats` fully finished (period fetch → 15-query batch → sub-recipe tree walk), so the FC Trend chart was always the last thing to render, well after its neighbors had already animated in. Decoupled: `loadFcTrend` now fires as soon as the open period is known, deriving its own Food Cost % point from its own query batch instead of waiting on `loadStats` to compute one. Also split `loadStats`' 15 queries by real dependency — 8 that don't touch the open period fire immediately instead of waiting behind the period lookup for no reason, and the sub-recipe explosion runs alongside the period-scoped batch instead of after it. Critical path dropped from ~4 serial stages to ~2 concurrent ones.
+
+**Two Stock.js Summary tab fixes, from screenshots.** The category-rollup table had `(NPR)` repeated on 6 of 9 headers — real width for nothing, since sibling reports state the currency once; dropped it, unclipping the COGS column. The item-level table below it is a genuinely different problem — 17 real columns (qty *and* value per metric) — so the actual complaint was scrolling all the way down to reach the horizontal scrollbar, dragging it right, then losing track of which row it was for. Fixed with the same sticky-column pattern already shipped on `Purchases.js`'s Daily Register and `Sales.js`'s pivot: sticky header, sticky Item (left), sticky COGS (right) — identity and bottom-line figure stay on screen regardless of scroll position.
+
+**Files:** `src/pages/dashboard/ClientDashboard.jsx`, `src/modules/ims/stockcount/Stock.js`, `CLAUDE.md`, `README.md`
+
 ### S556 — 2026-08-14 — Daily Purchases vs Sales: a frozen Target line, and the room Top Items by Spend used to take
 
 Reported directly: the existing month-end projection line only shows the final numbers once a day is already finalized, so there was no way to look back mid-month and see how the period was actually tracking against an early forecast — the line recalculates from all actuals on every load, so it has no memory of what it said yesterday. Confirmed via AskUserQuestion: store a genuinely static forecast, captured once, shown alongside the existing adaptive line.

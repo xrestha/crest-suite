@@ -631,14 +631,14 @@ export default function Stock() {
                       <thead>
                         <tr>
                           <th style={{ width: 36, textAlign: 'center', color: 'var(--theme-text2)' }}>S.No</th>
-                          <th>Category</th>
-                          <th style={thStyle}>Opening Stock (NPR)</th>
-                          <th style={thStyle}><Tip text="Value of goods received via purchases this period. 'Production' = sub-recipes processed in-house from existing stock." width={280}>Production / Purchase (NPR)</Tip></th>
-                          <th style={thStyle}><Tip text="Value of goods sent back to the vendor this period — a short delivery, a damaged crate, wrong item. Already netted off COGS." width={270}>Returns (NPR)</Tip></th>
-                          <th style={thStyle}>Closing Stock (NPR)</th>
-                          <th style={thStyle}>Wastage (NPR)</th>
-                          <th style={thStyle}>Staff Meals (NPR)</th>
-                          <th style={thStyle}><Tip text={`Cost of Goods Sold = ${COGS_FORMULA}, in NPR.`} width={280}>COGS (NPR)</Tip></th>
+                          <th><Tip text="All figures in NPR." width={140}>Category</Tip></th>
+                          <th style={thStyle}>Opening Stock</th>
+                          <th style={thStyle}><Tip text="Value of goods received via purchases this period. 'Production' = sub-recipes processed in-house from existing stock." width={280}>Purchase</Tip></th>
+                          <th style={thStyle}><Tip text="Value of goods sent back to the vendor this period — a short delivery, a damaged crate, wrong item. Already netted off COGS." width={270}>Returns</Tip></th>
+                          <th style={thStyle}>Closing Stock</th>
+                          <th style={thStyle}>Wastage</th>
+                          <th style={thStyle}>Staff Meals</th>
+                          <th style={thStyle}><Tip text={`Cost of Goods Sold = ${COGS_FORMULA}, in NPR.`} width={280}>COGS</Tip></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -686,24 +686,33 @@ export default function Stock() {
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
+                  {/* Sticky header (top:0) + sticky Item/COGS columns (left:0 / right:0) — this
+                      table is 17 columns wide by nature (qty + value per metric), so reading any
+                      one row used to mean scrolling all the way down past every item to reach the
+                      table-wrap's horizontal scrollbar, dragging it right, then losing track of
+                      which item or which column you were even looking at. Pinning the header plus
+                      the two columns that matter most for identifying a row (Item) and reading its
+                      bottom line (COGS) means neither scroll direction ever hides both at once —
+                      same pattern already used for Purchases.js's Daily Register (sticky Total,
+                      right:0) and Sales.js's pivot (sticky Menu Item, left:0). */}
                   <tr>
-                    <th>Item</th>
-                    <th>Category</th>
-                    <th>UOM</th>
-                    <th style={{ textAlign: 'right' }}>Opening</th>
-                    <th style={{ textAlign: 'right' }}>Purchased</th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returned</th>
-                    <th style={{ textAlign: 'right' }}>Wastage</th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from Used separately from wastage." width={240}>Staff Meals</Tip></th>
-                    <th style={{ textAlign: 'right' }}>Closing</th>
-                    <th style={{ textAlign: 'right' }}><Tip text={`${COGS_FORMULA}. What was actually consumed this period.`} width={250}>Used</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-text2)' }}><Tip text="Total qty issued from the store via requisition slips this period. Should align with Used quantity." width={240}>Requisitioned</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)' }}><Tip text="Opening quantity × per-unit rate. Value of stock carried forward from the previous period." width={240}>Open. Value</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Purchased quantity × per-unit purchase rate." width={220}>Purch. Value</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Wastage quantity × per-unit rate. NPR cost of goods recorded as waste." width={240}>Wastage Value</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}><Tip text="Staff meals quantity × per-unit rate. NPR cost of complimentary/staff consumption." width={260}>Staff Meals Value</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}><Tip text="Closing (physical count) quantity × per-unit rate." width={220}>Close Value</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text={`Cost of Goods Sold = ${COGS_FORMULA}, in NPR.`} width={280}>COGS (NPR)</Tip></th>
+                    <th style={{ position: 'sticky', top: 0, left: 0, zIndex: 4, background: 'var(--theme-card)' }}>Item</th>
+                    <th style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Category</th>
+                    <th style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>UOM</th>
+                    <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Opening</th>
+                    <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Purchased</th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Returned</th>
+                    <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Wastage</th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-purple-text)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from Used separately from wastage." width={240}>Staff Meals</Tip></th>
+                    <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Closing</th>
+                    <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text={`${COGS_FORMULA}. What was actually consumed this period.`} width={250}>Used</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-text2)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Total qty issued from the store via requisition slips this period. Should align with Used quantity." width={240}>Requisitioned</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Opening quantity × per-unit rate. Value of stock carried forward from the previous period." width={240}>Open. Value</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Purchased quantity × per-unit purchase rate." width={220}>Purch. Value</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Wastage quantity × per-unit rate. NPR cost of goods recorded as waste." width={240}>Wastage Value</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-purple-text)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Staff meals quantity × per-unit rate. NPR cost of complimentary/staff consumption." width={260}>Staff Meals Value</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-green-text)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Closing (physical count) quantity × per-unit rate." width={220}>Close Value</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', top: 0, right: 0, zIndex: 4, background: 'var(--theme-card)' }}><Tip text={`Cost of Goods Sold = ${COGS_FORMULA}, in NPR.`} width={280}>COGS</Tip></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -721,9 +730,15 @@ export default function Stock() {
                     const fmtVal   = (qty) => rate > 0 && qty !== 0
                       ? `NPR ${Math.round(qty * rate).toLocaleString('en-NP')}`
                       : '—'
+                    // The row's own opacity dimming (hasData ? 1 : 0.4) can't live on the sticky
+                    // cells' background — a sticky cell needs a fully OPAQUE background so
+                    // horizontally-scrolled-away columns don't show through underneath it, so the
+                    // dimming is applied to each sticky cell's own content/border instead of via
+                    // the shared row-level opacity every other cell already gets for free.
+                    const stickyBg = 'var(--theme-card)'
                     return (
                       <tr key={item.id} style={{ opacity: hasData ? 1 : 0.4 }}>
-                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.name}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)', position: 'sticky', left: 0, zIndex: 1, background: stickyBg, opacity: hasData ? 1 : 0.4 }}>{item.name}</td>
                         <td><span className="badge badge-yellow">{item.categories?.name}</span></td>
                         <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
                         <td style={{ textAlign: 'right' }}>{row.opening !== '' ? Number(row.opening).toLocaleString() : '—'}</td>
@@ -743,7 +758,7 @@ export default function Stock() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmtVal(wastQty)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>{fmtVal(staffQty)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{fmtVal(closeQty)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: used < 0 ? 'var(--theme-red-text)' : 'var(--theme-accent-ink)' }}>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: used < 0 ? 'var(--theme-red-text)' : 'var(--theme-accent-ink)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 1, background: stickyBg, opacity: hasData ? 1 : 0.4 }}>
                           {hasData ? fmtVal(used) : '—'}
                         </td>
                       </tr>
