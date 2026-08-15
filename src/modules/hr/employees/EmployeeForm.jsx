@@ -152,6 +152,12 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
     onSave()
   }
 
+  async function handleActivate() {
+    if (!window.confirm(`Reactivate ${employee.full_name}?`)) return
+    await scopedUpdate('hr_employees', { status: 'active' }).eq('id', employee.id)
+    onSave()
+  }
+
   async function handleDelete() {
     if (!window.confirm(`Delete ${employee.full_name}? This cannot be undone.`)) return
     if (!window.confirm(`Are you sure? All data for ${employee.full_name} will be permanently deleted.`)) return
@@ -480,6 +486,11 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
             {isEdit && employee.status === 'active' && (
               <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleDeactivate}>
                 Deactivate
+              </button>
+            )}
+            {isEdit && employee.status === 'inactive' && (
+              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-green)' }} onClick={handleActivate}>
+                Activate
               </button>
             )}
             {isEdit && (
