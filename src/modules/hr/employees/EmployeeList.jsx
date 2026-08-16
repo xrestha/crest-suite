@@ -38,7 +38,7 @@ function fmtDate(dateStr) {
 export default function EmployeeList() {
   const { clientId, profile, hasHrAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
-  const { scopedFrom } = useScopedDb()
+  const { scopedFrom, scopedUpdate } = useScopedDb()
 
   const [employees, setEmployees] = useState([])
   const [loading, setLoading]     = useState(true)
@@ -57,6 +57,13 @@ export default function EmployeeList() {
   const [ssBusy, setSsBusy] = useState(false)
   const [ssMsg, setSsMsg] = useState('')
   const [linkCopied, setLinkCopied] = useState(false)
+
+  // Row selection for the bulk Activate/Deactivate action, keyed by employee id. This toggles
+  // hr_employees.access_blocked ONLY — a login-access flag fully independent of `status`, which
+  // stays the single-purpose field Payroll Run/Calculation and Final Settlement filter on. See
+  // CLAUDE.md's S561/S562 notes: status-gating login collided head-on with payroll eligibility.
+  const [selected, setSelected] = useState(() => new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   useEffect(() => {
     if (effectiveClientId) { fetchEmployees(); fetchSelfServiceStatus() }
@@ -92,6 +99,33 @@ export default function EmployeeList() {
     }
     setSsTarget(null); setSsBusy(false)
     fetchSelfServiceStatus()
+  }
+
+  function toggleSelect(id) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll(rows) {
+    setSelected(prev => {
+      const allSelected = rows.length > 0 && rows.every(e => prev.has(e.id))
+      if (allSelected) return new Set()
+      return new Set(rows.map(e => e.id))
+    })
+  }
+
+  // Bulk-toggles access_blocked only — never touches status, so this can never remove anyone from
+  // a Payroll Run/Calculation/Final Settlement picker (all three filter on status alone).
+  async function bulkSetAccess(blocked) {
+    if (selected.size === 0) return
+    setBulkBusy(true)
+    await scopedUpdate('hr_employees', { access_blocked: blocked }).in('id', Array.from(selected))
+    setSelected(new Set())
+    await fetchEmployees()
+    setBulkBusy(false)
   }
 
   function openAdd() { setEditing(null); setDrawer(true) }
@@ -232,6 +266,26 @@ export default function EmployeeList() {
         </button>
       </div>
 
+      {selected.size > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
+          padding: '8px 12px', borderRadius: 8, background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
+        }}>
+          <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{selected.size} selected</span>
+          <Tip text="Blocks Self-Service PIN login for the selected employees only. Does not change their Status, so they stay fully visible to Payroll Run, Payroll Calculation and Final Settlement.">
+            <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)' }} disabled={bulkBusy} onClick={() => bulkSetAccess(true)}>
+              {bulkBusy ? 'Working…' : 'Deactivate (block login)'}
+            </button>
+          </Tip>
+          <Tip text="Restores Self-Service PIN login for the selected employees.">
+            <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-green)' }} disabled={bulkBusy} onClick={() => bulkSetAccess(false)}>
+              {bulkBusy ? 'Working…' : 'Activate (allow login)'}
+            </button>
+          </Tip>
+          <button className="btn btn-ghost" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => setSelected(new Set())}>Clear</button>
+        </div>
+      )}
+
       {/* Table */}
       {loading ? (
         <div className="loading-state">Loading…</div>
@@ -249,6 +303,14 @@ export default function EmployeeList() {
           <table className="data-table">
             <thead>
               <tr>
+                <th style={{ width: 32 }}>
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && filtered.every(e => selected.has(e.id))}
+                    onChange={() => toggleSelectAll(filtered)}
+                    aria-label="Select all employees"
+                  />
+                </th>
                 <th><Tip text="Auto-generated employee code used as a short reference on payroll, attendance, and reports.">Code</Tip></th>
                 <th>Name</th>
                 <th>Designation</th>
@@ -273,6 +335,14 @@ export default function EmployeeList() {
                 const s = STATUS_COLORS[e.status] || STATUS_COLORS.inactive
                 return (
                   <tr key={e.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(e.id)}
+                        onChange={() => toggleSelect(e.id)}
+                        aria-label={`Select ${e.full_name}`}
+                      />
+                    </td>
                     <td style={{ color: 'var(--theme-accent)', fontWeight: 700, fontSize: 12 }}>
                       {e.employee_code || '—'}
                     </td>
@@ -321,9 +391,15 @@ export default function EmployeeList() {
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         {selfServiceMap[e.id] ? (
-                          <Tip text="This employee can log in via the Self-Service link to view their own payslip, submit leave, and see their roster.">
-                            <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Self-Service</span>
-                          </Tip>
+                          e.access_blocked ? (
+                            <Tip text="Self-Service is enabled on this account, but login is blocked. Select this employee and use Activate above to restore it.">
+                              <span className="badge badge-gray" style={{ fontSize: 10 }}>Self-Service (blocked)</span>
+                            </Tip>
+                          ) : (
+                            <Tip text="This employee can log in via the Self-Service link to view their own payslip, submit leave, and see their roster.">
+                              <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Self-Service</span>
+                            </Tip>
+                          )
                         ) : (
                           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEnableSelfService(e)}>
                             Enable Self-Service
