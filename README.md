@@ -158,6 +158,14 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S563 — 2026-08-15 — Self-Service Activate/Deactivate, decoupled from `status` for real
+
+Built the fix S561 drafted but didn't wire up: a checkbox column on Employees (header select-all + per-row) and a bulk action bar (Deactivate = block login, Activate = restore it) that appears once anything is selected. Both buttons call `scopedUpdate('hr_employees', { access_blocked })` on the selected ids — nothing else. `hr-selfservice-login` now embeds `hr_employees(access_blocked)` via `profiles.hr_employee_id` and refuses login when it's true, with the same generic "Invalid credentials" every other rejection path already returns. `status` is untouched by any of this, so Payroll Run/Calculation/Final Settlement (all three filtered on `status` alone) can never again lose an employee because someone blocked their login. The Self-Service badge now reads off `access_blocked` instead of `status`.
+
+**Requires migration `20260815100000` to actually be applied** (`ALTER TABLE hr_employees ADD COLUMN access_blocked boolean NOT NULL DEFAULT false`) — pasted into the Supabase SQL Editor, not run from this machine (no DB credentials available here). Deployed the Edge Function regardless since the column doesn't exist yet in a fresh project either way; until the migration runs, confirm it did before relying on this.
+
+**Files:** `src/modules/hr/employees/EmployeeList.jsx`, `supabase/functions/hr-selfservice-login/index.ts`, `CLAUDE.md`, `README.md`
+
 ### S562 — 2026-08-15 — Employees had no way back from "Inactive" except Delete
 
 `EmployeeForm.jsx`'s footer only ever rendered a **Deactivate** button when `employee.status === 'active'` — there was no matching button for the reverse. Once an employee was marked Inactive (e.g. Jeevan Tamang from the S561 screenshots), reopening their Edit form left Deactivate, Save, and Delete as the only options; getting them back to Active meant deleting and re-adding the employee, losing their history.
