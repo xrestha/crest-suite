@@ -7,7 +7,7 @@ import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import TadaSettingsModal from './TadaSettingsModal'
-import { adToBs, formatAd } from '../../../utils/bsCalendar'
+import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount } from './tadaShared'
 
 const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
@@ -45,6 +45,11 @@ export default function TadaClaims() {
   const [loading,   setLoading]   = useState(true)
 
   const [filterStatus, setFilterStatus] = useState('pending') // pending | approved | rejected | paid | all
+  // hr_tada_claims has no bs_year/bs_month of its own — it's a standalone ledger of plain AD
+  // start_date/end_date, deliberately not plumbed through monthly_periods. Month filter buckets
+  // by start_date's BS month client-side instead. 'all' shows full history same as before.
+  const [periods,        setPeriods]        = useState([])
+  const [monthFilter,    setMonthFilter]    = useState('all') // 'all' | `${bsYear}-${bsMonth}`
   const [selected,     setSelected]     = useState(null)
   const [showAdd,      setShowAdd]      = useState(false)
   const [addForm,      setAddForm]      = useState(emptyAddForm)
@@ -67,17 +72,24 @@ export default function TadaClaims() {
   const load = useCallback(async () => {
     if (!clientId) return
     setLoading(true)
-    const [{ data: emps }, { data: vends }, { data: cls }, { data: settingsRow }] = await Promise.all([
+    const [{ data: emps }, { data: vends }, { data: cls }, { data: settingsRow }, { data: pers }] = await Promise.all([
       scopedFrom('hr_employees', 'id, full_name, employee_code, status').order('full_name'),
       scopedFrom('vendors', 'id, name').eq('is_active', true).order('name'),
       scopedFrom('hr_tada_claims').order('created_at', { ascending: false }),
       // settings has a nullable client_id (no free-default tier for it, unlike most tables) —
       // stays on raw supabase.from() rather than scopedDb, same as every other settings read.
       supabase.from('settings').select('tada_vehicle_rates, tada_purpose_options, tada_start_points').eq('client_id', clientId).maybeSingle(),
+      scopedFrom('monthly_periods', 'id, bs_year, bs_month, status').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
     ])
     setEmployees(emps || [])
     setVendors(vends || [])
     setClaims(cls || [])
+    setPeriods(pers || [])
+    setMonthFilter(prev => {
+      if (prev !== 'all') return prev
+      const open = (pers || []).find(p => p.status === 'open') || (pers || [])[0]
+      return open ? `${open.bs_year}-${open.bs_month}` : 'all'
+    })
     setVehicleRates({ '2w': null, '4w': null, ev: null, ...(settingsRow?.tada_vehicle_rates || {}) })
     setPurposeOptions(settingsRow?.tada_purpose_options?.length ? settingsRow.tada_purpose_options : DEFAULT_PURPOSE_OPTIONS)
     setStartPoints(settingsRow?.tada_start_points?.length ? settingsRow.tada_start_points : DEFAULT_START_POINTS)
@@ -119,12 +131,20 @@ export default function TadaClaims() {
   const itemsByClaimId = {}
   items.forEach(i => { (itemsByClaimId[i.claim_id] = itemsByClaimId[i.claim_id] || []).push(i) })
 
-  const filtered = filterStatus === 'all' ? claims : claims.filter(c => c.status === filterStatus)
+  // Buckets each claim by its start_date's BS month — hr_tada_claims carries no bs_year/bs_month
+  // column of its own to filter on directly.
+  const monthClaims = monthFilter === 'all' ? claims : claims.filter(c => {
+    if (!c.start_date) return false
+    const bs = adToBs(new Date(c.start_date + 'T00:00:00'))
+    return `${bs.year}-${bs.month}` === monthFilter
+  })
 
-  const pendingCount  = claims.filter(c => c.status === 'pending').length
-  const pendingTotal  = claims.filter(c => c.status === 'pending').reduce((s, c) => s + parseFloat(c.total_amount), 0)
-  const approvedTotal = claims.filter(c => c.status === 'approved').reduce((s, c) => s + parseFloat(c.total_amount), 0)
-  const paidThisYear  = claims.filter(c => c.status === 'paid').reduce((s, c) => s + parseFloat(c.total_amount), 0)
+  const filtered = filterStatus === 'all' ? monthClaims : monthClaims.filter(c => c.status === filterStatus)
+
+  const pendingCount  = monthClaims.filter(c => c.status === 'pending').length
+  const pendingTotal  = monthClaims.filter(c => c.status === 'pending').reduce((s, c) => s + parseFloat(c.total_amount), 0)
+  const approvedTotal = monthClaims.filter(c => c.status === 'approved').reduce((s, c) => s + parseFloat(c.total_amount), 0)
+  const paidThisYear  = monthClaims.filter(c => c.status === 'paid').reduce((s, c) => s + parseFloat(c.total_amount), 0)
 
   function setAdd(f, v) { setAddForm(p => ({ ...p, [f]: v })) }
   function setItem(idx, f, v) {
@@ -299,9 +319,9 @@ export default function TadaClaims() {
       {/* Summary cards */}
       <div className="stat-grid" style={{ marginBottom: 20 }}>
         {[
-          { label: 'Pending Review', value: `NPR ${fmt(pendingTotal)}`, tip: `${pendingCount} claim(s) awaiting approval.` },
-          { label: 'Approved, Unpaid', value: `NPR ${fmt(approvedTotal)}`, tip: 'Approved claims not yet marked paid.' },
-          { label: 'Paid', value: `NPR ${fmt(paidThisYear)}`, tip: 'Total of all claims marked paid.' },
+          { label: 'Pending Review', value: `NPR ${fmt(pendingTotal)}`, tip: `${pendingCount} claim(s) awaiting approval, for the month selected below.` },
+          { label: 'Approved, Unpaid', value: `NPR ${fmt(approvedTotal)}`, tip: 'Approved claims not yet marked paid, for the month selected below.' },
+          { label: 'Paid', value: `NPR ${fmt(paidThisYear)}`, tip: 'Total of claims marked paid, for the month selected below.' },
         ].map(c => (
           <div key={c.label} className="card" style={{ padding: '14px 16px' }}>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }}><Tip text={c.tip}>{c.label}</Tip></div>
@@ -310,12 +330,24 @@ export default function TadaClaims() {
         ))}
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 16 }}>
-        {tabBtn('pending',  filterStatus, setFilterStatus, 'Pending')}
-        {tabBtn('approved', filterStatus, setFilterStatus, 'Approved')}
-        {tabBtn('paid',     filterStatus, setFilterStatus, 'Paid')}
-        {tabBtn('rejected', filterStatus, setFilterStatus, 'Rejected')}
-        {tabBtn('all',      filterStatus, setFilterStatus, 'All')}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="tab-bar" style={{ marginBottom: 0 }}>
+          {tabBtn('pending',  filterStatus, setFilterStatus, 'Pending')}
+          {tabBtn('approved', filterStatus, setFilterStatus, 'Approved')}
+          {tabBtn('paid',     filterStatus, setFilterStatus, 'Paid')}
+          {tabBtn('rejected', filterStatus, setFilterStatus, 'Rejected')}
+          {tabBtn('all',      filterStatus, setFilterStatus, 'All')}
+        </div>
+        <Tip text="Filters claims by the BS month of their trip start date. Pick All Months to see full history.">
+          <select className="form-select" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}>
+            <option value="all">All Months</option>
+            {periods.map(p => (
+              <option key={p.id} value={`${p.bs_year}-${p.bs_month}`}>
+                {BS_MONTHS[p.bs_month - 1]} {p.bs_year}{p.status === 'open' ? ' (open)' : ''}
+              </option>
+            ))}
+          </select>
+        </Tip>
       </div>
 
       <div className="table-wrap">
