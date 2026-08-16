@@ -29,16 +29,23 @@ export async function fetchYtdMap(scopedFrom, period) {
   return map
 }
 
-// Approved TADA claims (from the TADA Claims ledger) whose trip dates fall inside this BS period,
-// per employee. Feeds the TADA column's auto-fill — Finalize marks these claims Paid so the same
-// trip is never reimbursed both through TADA Claims and through payroll.
+// TADA claims (from the TADA Claims ledger) whose trip dates fall inside this BS period, per
+// employee — Approved claims still awaiting payroll, PLUS claims already marked Paid BY payroll
+// (paid_method:'Payroll') for this same period. The latter half matters because Finalize marks a
+// claim's status 'paid' the moment it locks in — an 'approved'-only filter would make this map go
+// empty for an already-finalized period, understating live TADA by the paid amount on both the
+// draft auto-fill (harmless, run's locked) and the Calculation page's live-vs-stored comparison
+// (not harmless — it manufactured a false "Stale" flag on every employee with paid TADA, S564).
+// A claim marked paid by some OTHER method (cash, bank — TadaClaims.jsx's manual "mark paid") is
+// deliberately excluded even if its trip date falls in this window; it was never part of payroll.
 export async function fetchApprovedTadaMap(scopedFrom, period) {
   const periodStart = formatAd(bsToAd(period.bs_year, period.bs_month, 1))
   const periodEnd   = formatAd(bsToAd(period.bs_year, period.bs_month, daysInBsMonth(period.bs_year, period.bs_month)))
-  const { data } = await scopedFrom('hr_tada_claims', 'id, employee_id, total_amount, start_date, end_date')
-    .eq('status', 'approved')
+  const { data } = await scopedFrom('hr_tada_claims', 'id, employee_id, total_amount, start_date, end_date, status, paid_method')
+    .in('status', ['approved', 'paid'])
   const map = {}
   ;(data || []).forEach(c => {
+    if (c.status === 'paid' && c.paid_method !== 'Payroll') return
     if (c.start_date > periodEnd || c.end_date < periodStart) return
     const e = map[c.employee_id] || { total: 0, ids: [] }
     e.total += parseFloat(c.total_amount) || 0
