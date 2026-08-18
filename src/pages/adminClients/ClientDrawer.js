@@ -146,6 +146,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // Danger Zone state — tracks which specific action is in flight so only that
   // button shows "Working…"; all buttons still disable together to block concurrent runs.
   const [deletingAction, setDeletingAction] = useState(null)
+  // Typed-name confirmation for the three whole-client actions (Archive, Clear Client Data,
+  // Delete Client). Every destructive path here used to be a single window.confirm OK — the same
+  // one keypress for "Clear IMS Transactions" as for deleting the entire client, with no defence
+  // against having the wrong drawer open (the drawer opens from a click anywhere on a client
+  // card). Module-level clears keep window.confirm; whole-client blast radius requires typing the
+  // client's name (phase 7, S574).
+  const [confirmAction, setConfirmAction] = useState(null)  // 'archive' | 'clientData' | 'deleteClient'
+  const [confirmName, setConfirmName] = useState('')
   const deleting = !!deletingAction
   const [deleteMsg, setDeleteMsg] = useState('')
 
@@ -690,16 +698,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setDeletingAction(null)
   }
 
+  // Confirmation happens in the typed-name modal (confirmAction) before this is called.
   async function handleDeleteClientData() {
-    if (!window.confirm(
-      `Clear ALL operational data for "${client.name}"?\n\n` +
-      `This removes everything across all modules:\n` +
-      `IMS — categories, items, vendors, recipes, purchases, stock, sales, overheads, payables, and all periods\n` +
-      `HR — employees, salary setup, attendance, payroll, leave, advances, roster, holidays\n` +
-      `POS — tables, orders, shifts, customers, stock movements\n\n` +
-      `The client record, user accounts, feature flags, and settings are kept intact.\n\n` +
-      `This cannot be undone.`
-    )) return
     setDeletingAction('clientData')
     setDeleteMsg('')
     try {
@@ -720,13 +720,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // being a badge colour and started locking the app via SubscriptionLock.
   //
   // The result is fully reversible: a restore brings the data back and the logins never left.
+  // Confirmation happens in the typed-name modal (confirmAction) before this is called.
   async function handleArchiveClient() {
-    if (!window.confirm(
-      `Archive "${client.name}"?\n\n` +
-      `A backup is taken first, then all operational data is cleared and the client is deactivated.\n\n` +
-      `Their user accounts, logins, settings and the client record are KEPT — so this can be fully ` +
-      `reversed by restoring the backup. Use this rather than Delete for a client who is leaving.`
-    )) return
     setDeletingAction('archive')
     setDeleteMsg('')
     try {
@@ -742,12 +737,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setDeletingAction(null)
   }
 
+  // Confirmation happens in the typed-name modal (confirmAction) before this is called.
   async function handleDeleteClient() {
-    if (!window.confirm(
-      `Permanently DELETE the client "${client.name}"?\n\n` +
-      `This removes EVERYTHING: all operational data, user accounts, feature flags, settings, and the client record itself.\n\n` +
-      `This cannot be undone.`
-    )) return
     setDeletingAction('deleteClient')
     setDeleteMsg('')
     try {
@@ -1804,8 +1795,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     ? <>⚠ <strong style={{ color: 'var(--theme-red)' }}>Backups are off.</strong> The actions below will run with no safety copy.</>
                     : <>🛡 A full backup is written <strong style={{ color: 'var(--theme-text1)' }}>before</strong> any action below runs. If it fails, nothing is deleted.</>}
                 </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 9, fontSize: 11, color: 'var(--theme-text3)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={skipBackup} onChange={e => setSkipBackup(e.target.checked)} />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9, fontSize: 12, color: 'var(--theme-text2)', cursor: 'pointer', minHeight: 24 }}>
+                  {/* 16px box + 24px label height: this is the control that disables the backup
+                      safety net, and it measured 13×13px — the smallest target on the page (S574). */}
+                  <input type="checkbox" checked={skipBackup} onChange={e => setSkipBackup(e.target.checked)}
+                    style={{ width: 16, height: 16, accentColor: 'var(--theme-red)', flexShrink: 0 }} />
                   I have backed up elsewhere — proceed without a backup
                 </label>
               </div>
@@ -1815,7 +1809,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 padding: '14px 16px', marginBottom: 24,
                 background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 'var(--radius-lg)'
               }}>
-                <p style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 700, margin: '0 0 6px' }}>Archive Client</p>
+                <p style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 700, margin: '0 0 6px' }}>Archive Client</p>
                 <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px', lineHeight: 1.65 }}>
                   The recommended way to close out a client who has left. Takes a backup, clears their operational
                   data, and locks the account — but <strong style={{ color: 'var(--theme-text1)' }}>keeps their user
@@ -1823,8 +1817,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 </p>
                 <button
                   className="btn btn-ghost"
-                  style={{ fontSize: 12, color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.35)' }}
-                  onClick={handleArchiveClient}
+                  style={{ fontSize: 12, color: 'var(--theme-accent-ink)', borderColor: 'var(--theme-focus-ring)' }}
+                  onClick={() => { setConfirmName(''); setConfirmAction('archive') }}
                   disabled={deleting}
                 >
                   {deletingAction === 'archive' ? 'Archiving…' : 'Archive Client'}
@@ -1835,20 +1829,20 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 padding: '14px 16px', marginBottom: 24,
                 background: 'rgba(248,113,113,0.04)', border: '1px solid rgba(248,113,113,0.15)', borderRadius: 'var(--radius-lg)'
               }}>
-                <p style={{ fontSize: 13, color: 'var(--theme-red)', fontWeight: 700, margin: '0 0 6px' }}>⚠ Danger Zone</p>
+                <p style={{ fontSize: 13, color: 'var(--theme-red-text)', fontWeight: 700, margin: '0 0 6px' }}>⚠ Danger Zone</p>
                 <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.65 }}>
                   Destructive actions for{' '}
                   <strong style={{ color: 'var(--theme-text1)' }}>{client.name}</strong>.{' '}
                   Per-module buttons clear only that module's transactions and keep its setup (items, employees, tables…).
                   "Clear Client Data" wipes all operational data across IMS, HR and POS; the client record, user accounts,
                   feature flags, and settings are kept intact.
-                  <br /><strong style={{ color: 'var(--theme-red)' }}>None of these can be undone.</strong>
+                  <br /><strong style={{ color: 'var(--theme-red-text)' }}>None of these can be undone.</strong>
                 </p>
               </div>
 
               {deleteMsg && (
                 <p role={deleteMsg.startsWith('ok:') ? 'status' : 'alert'}
-                  style={{ fontSize: 12, margin: '0 0 16px', color: deleteMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                  style={{ fontSize: 12, margin: '0 0 16px', color: deleteMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                   {deleteMsg.replace(/^(ok|error):/, '')}
                 </p>
               )}
@@ -1890,18 +1884,22 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     {deletingAction === 'conversions' ? 'Working…' : 'Clear All Conversions'}
                   </button>
                 </Tip>
+                {/* The two whole-client buttons carry the escalated variant and open the
+                    typed-name confirm — five of the six buttons here used to be pixel-identical,
+                    so nothing distinguished "clear one module" from "wipe the entire client"
+                    (phase 7 measured finding, S574). */}
                 <Tip text="Permanently deletes ALL operational data across IMS, HR, and POS — master data and transactions. The client account, users, feature flags, and settings are kept. Cannot be undone.">
                   <button
-                    onClick={handleDeleteClientData}
+                    onClick={() => { setConfirmName(''); setConfirmAction('clientData') }}
                     disabled={deleting}
-                    className="btn btn-danger" style={{ fontSize: 13 }}
+                    className="btn btn-danger btn-danger--strong" style={{ fontSize: 13 }}
                   >
                     {deletingAction === 'clientData' ? 'Working…' : 'Clear Client Data'}
                   </button>
                 </Tip>
                 <Tip text="Permanently deletes everything: all operational data, user accounts, feature flags, settings, and the client record itself. The email is freed for re-registration. Cannot be undone.">
                   <button
-                    onClick={handleDeleteClient}
+                    onClick={() => { setConfirmName(''); setConfirmAction('deleteClient') }}
                     disabled={deleting}
                     className="btn btn-danger btn-danger--strong" style={{ fontSize: 13 }}
                   >
@@ -1913,6 +1911,68 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
           )}
 
       </div>
+
+      {/* Typed-name confirmation for the whole-client actions. Nested Modal is safe: Modal.js
+          keeps a stack so only the topmost responds to Escape/Tab (S574). */}
+      {confirmAction && (() => {
+        const cfg = {
+          archive: {
+            title: 'Archive this client?',
+            verb: 'Archive Client',
+            body: <>A backup is taken first, then all operational data is cleared and the account is locked.
+              Their user accounts, logins, settings and the client record are <strong>kept</strong>, so
+              restoring the backup reverses this. Use this rather than Delete for a client who is leaving.</>,
+            run: handleArchiveClient,
+          },
+          clientData: {
+            title: 'Clear ALL operational data?',
+            verb: 'Clear Client Data',
+            body: <>Removes everything across all modules — IMS (items, vendors, recipes, purchases, stock,
+              sales, payables, periods), HR (employees, attendance, payroll, leave, roster) and POS (tables,
+              orders, shifts, customers). The client record, user accounts, feature flags and settings are
+              kept. <strong>This cannot be undone.</strong></>,
+            run: handleDeleteClientData,
+          },
+          deleteClient: {
+            title: 'Permanently DELETE this client?',
+            verb: 'Delete Client',
+            body: <>Removes <strong>everything</strong>: all operational data, every user account and login,
+              feature flags, settings, and the client record itself. The email is freed for re-registration.
+              <strong> This cannot be undone.</strong></>,
+            run: handleDeleteClient,
+          },
+        }[confirmAction]
+        const nameMatches = confirmName.trim() === client.name.trim()
+        return (
+          <Modal onClose={() => setConfirmAction(null)} title={cfg.title} maxWidth={480}>
+            <div style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.65, marginBottom: 16 }}>
+              {cfg.body}
+            </div>
+            <label htmlFor="danger-confirm-name" style={{ display: 'block', fontSize: 12, color: 'var(--theme-text2)', marginBottom: 6 }}>
+              Type <strong style={{ color: 'var(--theme-text1)' }}>{client.name}</strong> to confirm
+            </label>
+            <input
+              id="danger-confirm-name"
+              type="text"
+              className="form-select"
+              value={confirmName}
+              onChange={e => setConfirmName(e.target.value)}
+              autoComplete="off"
+              style={{ width: '100%', marginBottom: 16 }}
+            />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setConfirmAction(null)}>Cancel</button>
+              <button
+                className="btn btn-danger btn-danger--strong"
+                disabled={!nameMatches || deleting}
+                onClick={() => { setConfirmAction(null); cfg.run() }}
+              >
+                {cfg.verb}
+              </button>
+            </div>
+          </Modal>
+        )
+      })()}
     </Modal>
   )
 }

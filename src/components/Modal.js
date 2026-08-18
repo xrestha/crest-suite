@@ -2,6 +2,13 @@ import { useEffect, useId, useRef } from 'react'
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
+// Stack of currently-open modals, outermost first. Both Escape and the Tab trap listen on
+// `document`, so with two Modals open (e.g. a typed-name confirm inside ClientDrawer) BOTH
+// handlers fired on every keypress — one Escape closed the confirm AND the drawer behind it,
+// and two competing Tab traps fought over focus. Only the modal on top of this stack responds;
+// the ones beneath ignore keys until it closes (S574).
+const modalStack = []
+
 // Centered modal overlay — hosts a create/edit form so it pops up in front of the
 // user instead of rendering at the top of the page (no scrolling to reach it).
 // Backdrop click and the × button both call onClose; the panel itself stops propagation.
@@ -20,7 +27,11 @@ export default function Modal({ onClose, title, headerExtra, children, maxWidth 
     const focusable = panel?.querySelector(FOCUSABLE)
     ;(focusable || panel)?.focus()
 
+    const stackToken = {}
+    modalStack.push(stackToken)
+
     const onKeyDown = e => {
+      if (modalStack[modalStack.length - 1] !== stackToken) return
       if (e.key === 'Escape') { onCloseRef.current(); return }
       // Trap Tab within the panel — without this, keyboard focus can walk out into the
       // page behind the overlay, which is only visually obscured, not actually inert.
@@ -36,6 +47,8 @@ export default function Modal({ onClose, title, headerExtra, children, maxWidth 
     document.addEventListener('keydown', onKeyDown)
     return () => {
       document.removeEventListener('keydown', onKeyDown)
+      const i = modalStack.indexOf(stackToken)
+      if (i !== -1) modalStack.splice(i, 1)
       triggerRef.current?.focus?.()
     }
     // Deliberately mount-only: `onClose` is almost always a fresh inline arrow function from the
