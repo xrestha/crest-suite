@@ -198,7 +198,7 @@ export function AuthProvider({ children }) {
         const [{ data: client }, { data: flags }, { data: siblings }] = await Promise.all([
           supabase
             .from('clients')
-            .select('id, name, location, group_id, is_active, is_premium, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, ims_enabled, hr_enabled, pos_enabled, suite_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
+            .select('id, name, location, group_id, is_active, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, ims_enabled, hr_enabled, pos_enabled, suite_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
             .eq('id', effectiveClientId)
             .single(),
           supabase
@@ -401,22 +401,17 @@ export function AuthProvider({ children }) {
   // live DB — the query errors with 42703). It was always undefined and silently discarded by
   // filter(Boolean), so this changes nothing except removing a phantom.
   //
-  // is_premium stays. It is legacy and never written by this app, but unlike hr_plan/pos_plan it
-  // actually means "this client is premium", so honouring it is deliberate rather than accidental.
-  const PLAN_RANK = { starter: 0, growth: 1, pro: 2 }
-  const plan = isAdmin
-    ? 'pro'
-    : (() => {
-        const c = profile?.clients
-        const candidates = [
-          c?.plan,
-          c?.is_premium ? 'pro' : null,
-        ].filter(Boolean)
-        if (!candidates.length) return 'starter'
-        return candidates.reduce((best, p) =>
-          (PLAN_RANK[p] ?? 0) > (PLAN_RANK[best] ?? 0) ? p : best
-        )
-      })()
+  // is_premium was the last surviving raiser, retired in S574 (phase 7 of the critique campaign).
+  // It had one honest thing going for it — unlike hr_plan/pos_plan it meant what it said — but it
+  // appeared on NO admin screen, in no MRR figure, and in no control: a Starter client with the
+  // flag received every IMS Pro feature while the client list, the drawer, Feature Access and the
+  // invoice all said Starter. That is the S552 rule ("a billed axis must be visible on the screens
+  // that bill it") violated in the worse direction — it changed what the client RECEIVES, not just
+  // what is displayed. Migration 20260818180000 folds it into clients.plan ('pro' wherever the
+  // flag was set) so no entitlement changes; the column is now vestigial like hr_plan/pos_plan —
+  // never read, never written. The migration must be applied before this code deploys, or a
+  // starter+is_premium client loses Pro access for the gap.
+  const plan = isAdmin ? 'pro' : (profile?.clients?.plan || 'starter')
 
   // isPremium = true for Growth and Pro (any paid plan) — keeps existing checks working
   const isPremium = isAdmin || plan === 'growth' || plan === 'pro'
