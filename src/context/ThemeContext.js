@@ -108,7 +108,7 @@ export const PRESETS = {
     accent: '#d7827e', accentHover: '#c66e6a', accentText: '#2e1c1b',
     inputBg: '#fffaf3', tableHover: '#f4ece4', focusRing: 'rgba(215,130,126,0.16)',
     green: '#56949f', red: '#b4637a', amber: '#ea9d34', purple: '#907aa9',
-    greenText: '#417179', redText: '#965266', amberText: '#906020', purpleText: '#746389', accentInk: '#8a5350',
+    greenText: '#417179', redText: '#965266', amberText: '#906020', purpleText: '#746389', accentInk: '#824e4b',
     cardShadow: '0 1px 2px rgba(87,82,121,0.06), 0 10px 24px -8px rgba(87,82,121,0.1)',
   },
   solarized: {

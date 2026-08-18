@@ -1274,7 +1274,9 @@ tr.interactive-row:focus-visible {
 }
 
 .panel-tab--danger.panel-tab--active {
-  color: var(--theme-red);
+  /* red-text for the label (red as text — base red measured 4.04:1 on Rosé Dawn, S574),
+     base red for the underline (red as fill) — same split as .panel-tab--active above. */
+  color: var(--theme-red-text);
   border-bottom-color: var(--theme-red);
 }
 
