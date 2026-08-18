@@ -183,6 +183,12 @@
   --theme-input-bg:     #0f1117;
   --theme-table-hover:  rgba(255,255,255,0.03);
   --theme-focus-ring:   rgba(201,168,76,0.15);
+  /* Solid keyboard-focus indicator. --theme-focus-ring is a low-alpha TINT that doubles as the
+     active-state background for rail buttons / module tabs / sidebar links, so it cannot be
+     brightened for focus without flooding those surfaces — on Rosé Dawn the ring alone measured
+     1.15:1, 2.6× below WCAG 2.2's 3:1 floor. Focus rules pair the soft ring with this solid
+     colour; ThemeContext resolves it per preset (accentInk on light, accent on dark). S574. */
+  --theme-focus-outline: #c9a84c;
   --theme-green:        #34d399;
   --theme-red:          #f87171;
   --theme-amber:        #fbbf24;
@@ -674,7 +680,7 @@
 .sidebar-pin:focus-visible {
   outline: none;
   color: var(--theme-accent);
-  box-shadow: 0 0 0 2px var(--theme-focus-ring);
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 .sidebar-pin--active {
   opacity: 1;
@@ -821,7 +827,7 @@
    focus indicator, matching .ticket-btn's existing focus-visible treatment. */
 .interactive-card:focus-visible,
 tr.interactive-row:focus-visible {
-  outline: 2px solid var(--theme-focus-ring);
+  outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
 }
 
@@ -871,7 +877,7 @@ tr.interactive-row:focus-visible {
 }
 
 .amber-action-btn:focus-visible {
-  outline: 2px solid var(--theme-focus-ring);
+  outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
 }
 
@@ -1029,13 +1035,13 @@ tr.interactive-row:focus-visible {
 .tip-trigger:focus-visible {
   outline: none;
   border-radius: var(--radius-xs);
-  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 
 .btn:focus-visible,
 .tab-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
   border-color: var(--theme-accent);
 }
 
@@ -1233,7 +1239,7 @@ tr.interactive-row:focus-visible {
 
 .panel-tab:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--theme-focus-ring);
+  box-shadow: inset 0 0 0 2px var(--theme-focus-outline);
   color: var(--theme-text1);
 }
 
@@ -1379,7 +1385,7 @@ select:focus-visible,
 textarea:focus-visible {
   outline: none;
   border-color: var(--theme-accent);
-  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 
 .badge {
@@ -1471,6 +1477,12 @@ textarea:focus-visible {
 .form-select:focus {
   border-color: var(--theme-accent);
   box-shadow: 0 0 0 3px var(--theme-focus-ring);
+}
+/* Keyboard focus gets the solid indicator on top of the soft :focus ring above — that rule's
+   specificity (0,2,0) beats the bare select:focus-visible backstop, so without this a keyboard
+   user saw only the 1.15:1 tint on every .form-select (S574). */
+.form-select:focus-visible {
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 
 .form-field input,
@@ -1656,7 +1668,7 @@ textarea:focus-visible {
 }
 
 .ticket-btn:focus-visible {
-  outline: 2px solid var(--theme-focus-ring);
+  outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
 }
 

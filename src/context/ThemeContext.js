@@ -172,6 +172,14 @@ function applyTheme(t) {
   r.style.setProperty('--theme-amber-text', t.amberText || t.amber)
   r.style.setProperty('--theme-purple-text', t.purpleText || t.purple)
   r.style.setProperty('--theme-accent-ink', t.accentInk || t.accent)
+  // Solid keyboard-focus indicator. --theme-focus-ring is a TINT token — it doubles as the
+  // active-state background for rail buttons, module tabs and sidebar links, so its alpha must
+  // stay low (raising it to make focus visible would flood every active surface). Measured on
+  // Rosé Dawn the ring alone composited to 1.15:1 against the card, 2.6× below the WCAG 2.2
+  // 3:1 floor for a focus indicator (S574). Focus rules pair the tint with this solid colour:
+  // accentInk is already the accent darkened to ≥4.5:1 as text on the light presets, and on the
+  // dark presets the accent itself clears the floor against their surfaces.
+  r.style.setProperty('--theme-focus-outline', t.accentInk || t.accent)
   r.style.setProperty('--theme-card-shadow', t.cardShadow)
 }
 
