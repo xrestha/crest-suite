@@ -8,6 +8,7 @@ import { useNavigate, Navigate } from 'react-router-dom'
 import Tip from '../components/Tip'
 import { generateMonthlyReport, saveGeneratedReport } from '../modules/ownerReport/generateMonthlyReport'
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
+import { withTimeout } from '../utils/withTimeout'
 
 const BS_MONTHS = [
   'Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin',
@@ -247,26 +248,41 @@ export default function Periods() {
   // Posts POS bills that closed while no period existed for their date. Idempotent: it only ever
   // reads bills whose ims_posted_at is still NULL, so running it twice cannot double-post.
   async function runPosBackfill(period) {
-    const waiting = await countUnpostedForPeriod({ scopedFrom, period })
-    if (waiting === 0) {
-      window.alert(`No unposted POS bills for ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}.`)
-      return
-    }
-    if (!window.confirm(
-      `Post ${waiting} POS bill${waiting === 1 ? '' : 's'} from ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} into Inventory?\n\n` +
-      'Their revenue and ingredient usage will be added to this period, so Inventory reports and stock levels catch up with what the till already sold.'
-    )) return
-
+    const label = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
+    // try/catch/FINALLY, and every await bounded. Without the finally, a throw anywhere below
+    // left the button stuck on "Posting…" forever with no error shown — and without withTimeout,
+    // a supabase-js call that hangs never settles at all, so even the finally would never run
+    // (see CLAUDE.md: .abortSignal() does not save you, only a wall clock does). Found the hard
+    // way immediately after shipping this button.
     setBackfillBusy(period.id)
-    const { posted, skipped, error } = await backfillPosOrdersToIms({
-      supabase, scopedFrom, scopedInsert, scopedUpdate, period,
-    })
-    setBackfillBusy(null)
-    if (error) { window.alert('Could not post: ' + error); return }
-    window.alert(
-      `Posted ${posted} bill${posted === 1 ? '' : 's'} into ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}.` +
-      (skipped > 0 ? `\n\n${skipped} skipped (nothing to post, or the write failed — check the browser console).` : '')
-    )
+    try {
+      const waiting = await withTimeout(
+        countUnpostedForPeriod({ scopedFrom, period }), 20000, 'Checking for unposted bills')
+      if (waiting === 0) {
+        window.alert(`No unposted POS bills for ${label}.`)
+        return
+      }
+      if (!window.confirm(
+        `Post ${waiting} POS bill${waiting === 1 ? '' : 's'} from ${label} into Inventory?\n\n` +
+        'Their revenue and ingredient usage will be added to this period, so Inventory reports and stock levels catch up with what the till already sold.'
+      )) return
+
+      // Generous: this walks every unposted bill, exploding recipes and writing two tables per
+      // order, so a large backfill is legitimately slow — but it must still end.
+      const { posted, skipped, error } = await withTimeout(
+        backfillPosOrdersToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period }),
+        120000, 'Posting POS bills')
+      if (error) { window.alert('Could not post: ' + error); return }
+      window.alert(
+        `Posted ${posted} bill${posted === 1 ? '' : 's'} into ${label}.` +
+        (skipped > 0 ? `\n\n${skipped} skipped (nothing to post, or the write failed — check the browser console).` : '')
+      )
+    } catch (err) {
+      console.error('POS backfill failed:', err)
+      window.alert(`Could not post POS bills for ${label}: ${err?.message || err}\n\nNothing was left half-written — each bill is posted and stamped one at a time, so re-running picks up wherever it stopped.`)
+    } finally {
+      setBackfillBusy(null)
+    }
   }
 
   async function resyncOpeningStock(period) {
