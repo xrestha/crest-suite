@@ -8,7 +8,11 @@ import SearchableSelect from '../../../components/SearchableSelect'
 
 const PERMISSION_LEVELS = [
   { value: 'staff',      label: 'Staff',      desc: 'Take orders, view floor' },
-  { value: 'supervisor', label: 'Supervisor',  desc: 'Staff + close bills, table setup, void, open/close shift' },
+  // "void" is deliberately NOT listed here: voiding is gated on the per-staff Allow Void checkbox
+  // in this same table (PosOrders.jsx checks profile.pos_allow_void), not on rank. Listing it as a
+  // Supervisor power meant a manager promoted someone to Supervisor to let them void, got a
+  // Supervisor who still couldn't, and had no error explaining why.
+  { value: 'supervisor', label: 'Supervisor',  desc: 'Staff + close bills, table setup, complimentary, open/close shift' },
   { value: 'manager',    label: 'Manager',     desc: 'Supervisor + reports, staff role assignment' },
 ]
 const DEFAULT_ROLES = [
@@ -369,7 +373,12 @@ export default function PosStaff() {
                 <th><Tip text="Maximum discount % this login can apply at billing. Leave blank for unlimited.">Discount %</Tip></th>
                 <th><Tip text="Lets this login void a bill themselves, without needing the Owner/Admin.">Void</Tip></th>
                 <th><Tip text="Last time this user was active in the app">Last Seen</Tip></th>
-                <th style={{ width: 200 }}>Actions</th>
+                {/* Sticky right — the same treatment Stock Count's COGS and Purchases' Total
+                    columns get. This table is 8 columns wide and overflowed its wrap by 30px at
+                    1280 and 270px at 768, so Delete rendered clipped and Reset PIN scrolled off
+                    entirely on a tablet. An opaque background is required or the scrolled-away
+                    columns show through underneath. */}
+                <th style={{ width: 200, position: 'sticky', right: 0, background: 'var(--theme-card)', zIndex: 2 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -460,7 +469,7 @@ export default function PosStaff() {
                         ? new Date(p.last_seen_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
                         : '—'}
                     </td>
-                    <td>
+                    <td style={{ position: 'sticky', right: 0, background: 'var(--theme-card)' }}>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openReset(p)}>
                           Reset PIN

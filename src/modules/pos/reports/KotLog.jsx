@@ -78,9 +78,12 @@ export default function KotLog() {
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
     const [{ data: logs }, { data: profs }] = await Promise.all([
-      scopedFrom('pos_kot_log')
+      // Paged: the Reconciliation and Bill Trail tabs below were already wrapped, and this — the
+      // KOT Register, the one tab whose entire purpose is being a COMPLETE log — was not. A busy
+      // outlet's month silently showed the most recent 1000 tickets as if that were all of them.
+      fetchAllRows(() => scopedFrom('pos_kot_log')
         .gte('sent_at', fromTs).lte('sent_at', toTs)
-        .order('sent_at', { ascending: false }),
+        .order('sent_at', { ascending: false }).order('id')),
       // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin) —
       // resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except

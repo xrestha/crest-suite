@@ -1019,7 +1019,10 @@ export default function PosTableManagement() {
                       <Tip text="Seating capacity — edit the table to change it">👥 {t.capacity} seats</Tip>
                     </div>
                     <Tip text="View / print this table's guest menu QR code">
-                      <button className="btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={e => openQr(t, e)}>▦ QR</button>
+                      {/* `btn btn-ghost`, not `btn-ghost` alone: .btn-ghost is colour-only, and the
+                          coarse-pointer touch-size rule keys on .btn — so this button (measured
+                          25px) sat in no touch rule at all on the tablet this page is used from. */}
+                      <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={e => openQr(t, e)}>▦ QR</button>
                     </Tip>
                   </div>
                 </div>

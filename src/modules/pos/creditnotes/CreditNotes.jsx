@@ -35,15 +35,20 @@ export default function CreditNotes() {
     setCandLoading(true)
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
-    const { data } = await scopedFrom('pos_orders', 'id, table_name, order_no, invoice_no, invoice_fy, close_type, paid_amount, closed_at, buyer_name, buyer_address, buyer_pan, buyer_phone, discount_amount, credit_note_id')
+    // An invoice number is a direct lookup, so it deliberately ignores the date range: both
+    // pickers default to today, and the single most common real trigger — "a customer came back
+    // with a bill from last week" — used to return "No un-credited bills in this range" with
+    // nothing saying the date range was the reason.
+    const searchNo = parseInt(invoiceSearch.trim(), 10)
+    const byInvoiceNo = invoiceSearch.trim() !== '' && !isNaN(searchNo)
+    let q = scopedFrom('pos_orders', 'id, table_name, order_no, invoice_no, invoice_fy, close_type, paid_amount, closed_at, buyer_name, buyer_address, buyer_pan, buyer_phone, discount_amount, credit_note_id')
       .eq('status', 'billed').eq('close_type', 'paid')
       .is('credit_note_id', null)
-      .gte('closed_at', fromTs).lte('closed_at', toTs)
-      .order('closed_at', { ascending: false })
-    let list = data || []
-    const n = parseInt(invoiceSearch.trim(), 10)
-    if (invoiceSearch.trim() && !isNaN(n)) list = list.filter(o => o.invoice_no === n)
-    setCandidates(list)
+    q = byInvoiceNo
+      ? q.eq('invoice_no', searchNo)
+      : q.gte('closed_at', fromTs).lte('closed_at', toTs)
+    const { data } = await q.order('closed_at', { ascending: false })
+    setCandidates(data || [])
     setCandLoading(false)
   }, [clientId, fromIso, toIso, invoiceSearch, scopedFrom])
 

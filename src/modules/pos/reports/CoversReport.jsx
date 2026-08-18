@@ -79,9 +79,12 @@ export default function CoversReport() {
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
     const [{ data: orderData }, { data: settings }, { data: profs }, { data: tbls }] = await Promise.all([
-      scopedFrom('pos_orders', 'id, table_id, table_name, covers, opened_at, closed_at, opened_by, discount_amount, credit_note_id')
+      // Paged: every figure on this page (covers, RevPASH, turnover) divides by a count taken
+      // from this read, so a truncation doesn't just shrink a total — it skews the averages.
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, table_id, table_name, covers, opened_at, closed_at, opened_by, discount_amount, credit_note_id')
         .eq('close_type', 'paid')
-        .gte('closed_at', fromTs).lte('closed_at', toTs),
+        .gte('closed_at', fromTs).lte('closed_at', toTs)
+        .order('id')),
       supabase.from('settings').select('id, is_vat_registered, pos_open_time, pos_close_time').eq('client_id', clientId).maybeSingle(),
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
       scopedFrom('pos_tables', 'id, capacity'),

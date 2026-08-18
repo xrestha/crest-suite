@@ -81,9 +81,13 @@ export default function SalesReport() {
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
     const [{ data: orderData }, { data: settings }, { data: profs }] = await Promise.all([
-      scopedFrom('pos_orders', 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, closed_at, credit_note_id, payment_method, delivery_partner, commission_amount, credit_settled_at, credit_settled_method, paid_amount, bill_remarks, closed_by, table_name')
+      // Paged: the child pos_order_items read below was already wrapped (S529) while this parent
+      // was not, so on a busy month every one of this page's ten tabs silently reported the first
+      // 1000 bills as if they were all of them — a believable total, not an error.
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, closed_at, credit_note_id, payment_method, delivery_partner, commission_amount, credit_settled_at, credit_settled_method, paid_amount, bill_remarks, closed_by, table_name')
         .eq('close_type', 'paid')
-        .gte('closed_at', fromTs).lte('closed_at', toTs),
+        .gte('closed_at', fromTs).lte('closed_at', toTs)
+        .order('id')),
       supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
       // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin)
       // — resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
@@ -320,7 +324,10 @@ export default function SalesReport() {
 
   useEffect(() => {
     if (!clientId) return
-    scopedFrom('pos_orders', 'invoice_fy').not('invoice_fy', 'is', null)
+    // Paged: this builds the fiscal-year dropdown, so a truncated read makes older fiscal years
+    // simply not appear as options — the 1L+ report for a past year then can't be opened at all.
+    // One narrow column, once per page load, so the extra round trips are cheap.
+    fetchAllRows(() => scopedFrom('pos_orders', 'invoice_fy').not('invoice_fy', 'is', null).order('id'))
       .then(({ data }) => {
         const fys = [...new Set((data || []).map(r => r.invoice_fy))].sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
         if (fys.length > 0) {
@@ -335,11 +342,15 @@ export default function SalesReport() {
     if (!clientId) return
     setOneLakhLoading(true)
     const [{ data: fyOrders }, { data: settings }] = await Promise.all([
-      scopedFrom('pos_orders', 'id, buyer_name, buyer_pan, discount_amount')
+      // Paged for the same reason the item read below it already was: this feeds the IRD
+      // Annexure 13 one-lakh threshold over a whole fiscal year, so a truncated read drops a
+      // party below the threshold and understates a statutory disclosure.
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, buyer_name, buyer_pan, discount_amount')
         .eq('status', 'billed').eq('close_type', 'paid').eq('invoice_fy', selectedFy)
         // Credit-noted bills are excluded — a corrected/cancelled invoice must not push a party
         // over the Annexure 13 one-lakh disclosure threshold.
-        .is('credit_note_id', null),
+        .is('credit_note_id', null)
+        .order('id')),
       supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
     ])
     const vr = settings?.is_vat_registered ?? true

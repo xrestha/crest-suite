@@ -10,7 +10,13 @@ import { numberToWordsNpr } from '../../../utils/numberToWords'
 import { scopedUpdate } from '../../../shared/scopedDb'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 
-export const COPY_LABEL = n => n <= 1 ? 'ORIGINAL-COPY' : n === 2 ? 'SECOND-COPY' : n === 3 ? 'THIRD-COPY' : `REPRINT #${n}`
+// Imported (and re-exported for existing callers) rather than defined here. This file used to
+// carry its own ORIGINAL-COPY/SECOND-COPY/THIRD-COPY/REPRINT#n copy — the exact scheme
+// posOrdersConstants deliberately abandoned (it borrows Rule 17(2)'s triplicate wording for
+// sequential reprints, which don't map) — so a bill and its own credit note, printed minutes
+// apart, carried contradictory copy labels. One definition, one convention.
+import { COPY_LABEL } from '../orders/posOrdersConstants'
+export { COPY_LABEL }
 
 export function buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, copyLabel) {
   const vatReg = settings.is_vat_registered

@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 
@@ -79,9 +80,11 @@ export default function PosCustomers() {
 
   async function loadCredit() {
     setCreditLoading(true)
-    const { data } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_method')
+    // Paged: unbounded by date — every Credit bill ever — so this is the read that gets worse
+    // the longer the system is used, and outstandingTotal below is the figure an owner chases.
+    const { data } = await fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, paid_amount, discount_amount, buyer_name, buyer_phone, delivery_partner, commission_amount, closed_at, credit_settled_at, credit_settled_method')
       .eq('payment_method', 'Credit').eq('status', 'billed')
-      .order('closed_at', { ascending: false })
+      .order('closed_at', { ascending: false }).order('id'))
     setCreditBills(data || [])
     setCreditLoading(false)
     setCreditLoaded(true)

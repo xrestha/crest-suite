@@ -2381,14 +2381,14 @@ export default function PosOrders() {
                     padding: '7px 12px', borderRadius: 7, fontSize: 13, cursor: 'pointer',
                     fontWeight: discountMode === 'amount' ? 700 : 400,
                     background: discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
-                    color: discountMode === 'amount' ? '#000' : 'var(--theme-text2)',
+                    color: discountMode === 'amount' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
                     border: `1px solid ${discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
                   }}>₨</button>
                   <button onClick={() => setDiscountMode('percent')} style={{
                     padding: '7px 12px', borderRadius: 7, fontSize: 13, cursor: 'pointer',
                     fontWeight: discountMode === 'percent' ? 700 : 400,
                     background: discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
-                    color: discountMode === 'percent' ? '#000' : 'var(--theme-text2)',
+                    color: discountMode === 'percent' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
                     border: `1px solid ${discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
                   }}>%</button>
                   <input type="number" min="0" step="any" max={discountMode === 'percent' ? 100 : undefined}

@@ -45,10 +45,12 @@ export default function PosExceptionReport() {
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
     const [{ data: orders }, { data: profs }, { data: settings }, { data: itemComps }] = await Promise.all([
-      scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, close_reason, discount_amount, discount_reason, paid_amount, table_name, closed_at, closed_by')
+      // Paged: this is the fraud/exception audit trail, so a truncated read hides exactly the
+      // rows someone would be looking for — and reports a smaller total as if it were complete.
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, close_reason, discount_amount, discount_reason, paid_amount, table_name, closed_at, closed_by')
         .gte('closed_at', fromTs).lte('closed_at', toTs)
         .or('close_type.in.(void,writeoff),discount_amount.gt.0')
-        .order('closed_at', { ascending: false }),
+        .order('closed_at', { ascending: false }).order('id')),
       // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin)
       // — resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except

@@ -2,12 +2,16 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import Tip from '../../../components/Tip'
 import { getBsToday, getBsFiscalYear, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { printCreditNote } from './creditNoteHtml'
 
-const REASON_CHIPS = ['Billing error', 'Price correction', 'Wrong customer', 'Tax correction', 'Duplicate bill']
+// A credit note here always credits the WHOLE bill (decision 2026-08-18 — partial credits are not
+// supported). 'Price correction' and 'Billing error' were removed from these chips because both
+// describe a partial adjustment: offering them invited staff to reach for a credit note to fix one
+// wrong line and silently credit the entire invoice instead. The remaining three are all
+// whole-bill situations by nature.
+const REASON_CHIPS = ['Wrong customer', 'Tax correction', 'Duplicate bill']
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 
@@ -131,7 +135,15 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     const { data: created, error } = await scopedInsert('pos_credit_notes', payload, { single: true })
     if (error) { setMsg('error:' + error.message); setSubmitting(false); return }
 
-    await scopedUpdate('pos_orders', { credit_note_id: created.id }).eq('id', order.id)
+    // This link is what stops the same bill being credited twice — CreditNotes.jsx offers only
+    // orders with `credit_note_id IS NULL`. Its error used to go unchecked, so a failed write left
+    // a real credit note issued against a bill the list still presented as un-credited.
+    const { error: linkErr } = await scopedUpdate('pos_orders', { credit_note_id: created.id }).eq('id', order.id)
+    if (linkErr) {
+      setMsg(`error:Credit note ${created.credit_note_no ?? ''} was created, but linking it to the bill failed (${linkErr.message}). Do NOT issue another one for this bill — contact support to link it, or the same bill can be credited twice.`)
+      setSubmitting(false)
+      return
+    }
 
     // Best-effort revenue correction — mirrors writeSalesEntries' own bail/error-swallow pattern in
     // PosOrders.jsx: post negative sales_entries into TODAY's open period (the period the
@@ -202,13 +214,19 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
 
             {msg && <p role="alert" style={{ color: msg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)', fontSize: 12, marginBottom: 8 }}>{msg.replace('error:', '')}</p>}
 
+            {/* The irreversibility warning was previously only inside a Tip on the button — and
+                this page runs on a tablet, where hover does not exist, so it was invisible at the
+                one moment it mattered. It is body copy now. */}
+            <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '0 0 10px', lineHeight: 1.6 }}>
+              This credits the <strong>whole bill</strong> and cannot be undone. A sequentially-numbered
+              Credit Note is issued and printed, and this month's revenue is reduced by the credited amount.
+            </p>
+
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
-              <Tip text="Issues a sequentially-numbered Credit Note, prints it, and reduces this month's revenue by the credited amount. Cannot be undone.">
-                <button className="btn btn-primary" onClick={handleConfirm} disabled={submitting}>
-                  {submitting ? 'Issuing…' : 'Issue & Print'}
-                </button>
-              </Tip>
+              <button className="btn btn-primary" onClick={handleConfirm} disabled={submitting}>
+                {submitting ? 'Issuing…' : 'Issue & Print'}
+              </button>
             </div>
           </>
         )}
