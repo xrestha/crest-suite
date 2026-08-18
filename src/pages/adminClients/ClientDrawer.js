@@ -576,10 +576,10 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       setLastBackupAt(new Date().toISOString())
       setBackupMsg(`ok:${manifest.totalRows.toLocaleString()} rows written to ${location}${method === 'download' ? ' (downloaded — file it manually)' : ''}`)
       onClientUpdated()
-      return true
+      return { ok: true, method }
     } catch (err) {
       setBackupMsg('error:' + err.message)
-      return false
+      return { ok: false }
     } finally {
       setBackupBusy(false)
       setBackupProgress('')
@@ -595,11 +595,28 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   async function preflightBackup(reason) {
     if (skipBackup) return true
     setDeleteMsg('')
-    const ok = await handleExportNow(reason)
-    if (!ok) {
+    const result = await handleExportNow(reason)
+    if (!result.ok) {
       setDeleteMsg('error:Backup failed, so nothing was deleted. Fix the backup, or tick "I have backed up elsewhere" to proceed anyway.')
+      return false
     }
-    return ok
+    // The download path fires two programmatic downloads and cannot verify either landed — the
+    // browser's multiple-download permission can suppress the second with no detectable signal.
+    // Before deleting anything on the strength of that backup, make the operator look: the .json
+    // (downloaded first) is the only artifact that can restore (S574).
+    if (result.method === 'download') {
+      const confirmed = window.confirm(
+        'The backup was DOWNLOADED (no backup folder is set up in this browser).\n\n' +
+        'Check your Downloads folder now: BOTH files must be there — the .json (which can restore) ' +
+        'and the .xlsx (the readable copy). Some browsers block the second download.\n\n' +
+        'Are both files safely downloaded?',
+      )
+      if (!confirmed) {
+        setDeleteMsg('error:Stopped — nothing was deleted. Set up a backup folder, or retry once both files download.')
+        return false
+      }
+    }
+    return true
   }
 
   async function handleRestoreFile(file) {
@@ -735,7 +752,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setDeleteMsg('')
     try {
       if (!await preflightBackup('archive')) { setDeletingAction(null); return }
-      await adminOp('deleteClientData', { clientId: client.id })
+      // keep_staff_vault: Archive keeps every login, and the PIN vault rows belong to those
+      // logins — deleting them made "fully reversible" false: the Staff PINs tab showed "Not
+      // stored" forever, and the restore's vault-rebuild branch is gated shut whenever logins
+      // exist, which after an Archive they always do (phase 7 P1, S574).
+      await adminOp('deleteClientData', { clientId: client.id, keep_staff_vault: true })
       const { error } = await supabase.from('clients').update({ is_active: false }).eq('id', client.id)
       if (error) throw new Error(error.message)
       setDeleteMsg('ok:Client archived — data cleared, logins kept, account locked. Restore the backup to reverse this.')

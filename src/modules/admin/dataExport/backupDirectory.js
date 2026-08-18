@@ -145,9 +145,17 @@ export async function writeBackup(handle, clientName, reason, { xlsxBlob, jsonBl
 
 // Used where the File System Access API is unavailable. The admin gets the same two artifacts
 // in their Downloads folder and files them by hand.
-export function downloadFallback(clientName, reason, { xlsxBlob, jsonBlob }) {
+//
+// The .json goes FIRST, and the two clicks are separated by a tick: two synchronous programmatic
+// downloads in one task are subject to the browser's multiple-download permission, and if it
+// suppresses the second there is nothing this code can detect — no await, no event, no error.
+// Ordering json-first means the artifact that can actually restore is the one that survives a
+// suppressed second download (the workbook is the human-readable copy; this module's own header
+// warns that the .xlsx alone LOOKS like a backup and cannot restore). The revoke is deferred so
+// a slow download start never races a dead blob URL (S574).
+export async function downloadFallback(clientName, reason, { xlsxBlob, jsonBlob }) {
   const base = `${sanitizeFolderName(clientName)}_${backupStamp()}_${reason}`
-  for (const [suffix, blob] of [['.xlsx', xlsxBlob], ['.json', jsonBlob]]) {
+  for (const [suffix, blob] of [['.json', jsonBlob], ['.xlsx', xlsxBlob]]) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -155,7 +163,8 @@ export function downloadFallback(clientName, reason, { xlsxBlob, jsonBlob }) {
     document.body.appendChild(a)
     a.click()
     a.remove()
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
+    await new Promise(r => setTimeout(r, 500))
   }
   return base
 }

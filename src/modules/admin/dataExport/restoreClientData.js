@@ -90,13 +90,47 @@ function chunk(arr, size) {
 // Clearing first (Danger Zone) is the deliberate, separately-confirmed path to a true replace.
 async function assertEmpty(clientId) {
   const probes = ['items', 'recipes', 'monthly_periods', 'hr_employees', 'pos_orders']
+  const counts = {}
+  let probesRun = 0
   for (const table of probes) {
     const { count, error } = await supabase
       .from(table).select('id', { count: 'exact', head: true }).eq('client_id', clientId)
-    if (error) continue // a probe that cannot run is not evidence of emptiness either way
-    if ((count || 0) > 0) {
+    if (error) continue // one failing probe is not evidence either way — but see the check below
+    probesRun++
+    counts[table] = count || 0
+  }
+  // Fail CLOSED when nothing could be verified. The old `continue` alone meant five failing
+  // probes let the restore proceed into a possibly-live client and duplicate every row —
+  // the guard the rules file states as absolute held only when a probe both ran and hit (S574).
+  if (probesRun === 0) {
+    throw new Error('Could not verify this client is empty (all emptiness checks failed) — not restoring. Check the connection and retry.')
+  }
+
+  // "+ New Client" seeds one open monthly_periods row, so the natural recovery path — deleted by
+  // mistake → recreate → restore — used to dead-end here on "1 rows in monthly_periods", pointing
+  // the operator at a destructive Danger Zone action against a brand-new client. A single period
+  // with nothing in it is indistinguishable from that seed, so it is removed rather than treated
+  // as data; the backup's own periods are inserted in its place (S574).
+  if (counts.monthly_periods === 1 && probes.every(t => t === 'monthly_periods' || counts[t] === 0)) {
+    const { data: seedPeriods } = await supabase
+      .from('monthly_periods').select('id').eq('client_id', clientId)
+    const seedId = seedPeriods?.[0]?.id
+    if (seedId) {
+      const { count: pe } = await supabase
+        .from('purchase_entries').select('id', { count: 'exact', head: true }).eq('period_id', seedId)
+      const { count: se } = await supabase
+        .from('sales_entries').select('id', { count: 'exact', head: true }).eq('period_id', seedId)
+      if ((pe || 0) === 0 && (se || 0) === 0) {
+        const { error: delErr } = await supabase.from('monthly_periods').delete().eq('id', seedId)
+        if (!delErr) counts.monthly_periods = 0
+      }
+    }
+  }
+
+  for (const table of probes) {
+    if ((counts[table] || 0) > 0) {
       throw new Error(
-        `This client already has data (${count} rows in ${table}). Restore only into an empty client — ` +
+        `This client already has data (${counts[table]} rows in ${table}). Restore only into an empty client — ` +
         `clear it from the Danger Zone first if you intend to replace it.`,
       )
     }
@@ -136,13 +170,38 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
         // One unrestorable table must not abandon the other sixty. Report it and continue —
         // a partial restore that names its gaps is far more useful than an aborted one.
         console.error(`restore ${table}:`, error.message)
-        skipped.push(`${table} (${error.message})`)
+        if (table === 'feature_flags' && /duplicate key/i.test(error.message)) {
+          // Expected on every Archive → Restore: the live flags row was deliberately kept and
+          // deliberately wins. The raw constraint name read as a failure at the end of the
+          // product's own recommended recovery path (S574).
+          skipped.push("feature_flags (kept this client's existing feature access)")
+        } else {
+          skipped.push(`${table} (${error.message})`)
+        }
         tableFailed = true
         break
       }
       inserted += payload.length
     }
     if (!tableFailed) tables++
+  }
+
+  // Settings — exported by every backup and, until S574, restored by nothing: a Delete →
+  // recreate → Restore round trip silently came back with default branding, no VAT number, no
+  // invoice prefix (POS invoice numbering keys off it) and no payment QR. Not in RESTORE_ORDER
+  // because it needs update-or-insert against the row createClient seeds, not a bare insert.
+  const settingsRows = (data.settings || []).filter(r => r.client_id)
+  if (settingsRows.length) {
+    const src = settingsRows[0]
+    const { id: _id, client_id: _cid, ...fields } = src
+    const { data: existing } = await supabase
+      .from('settings').select('id').eq('client_id', clientId).limit(1)
+    const op = existing?.length
+      ? supabase.from('settings').update(fields).eq('id', existing[0].id)
+      : supabase.from('settings').insert({ ...fields, client_id: clientId })
+    const { error: setErr } = await op
+    if (setErr) skipped.push(`settings (${setErr.message})`)
+    else { inserted += 1; tables++ }
   }
 
   // Second pass for the circular POS link, now that both sides exist.

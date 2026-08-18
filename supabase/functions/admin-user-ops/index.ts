@@ -1230,7 +1230,11 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'deleteClientData') {
-      const { clientId } = params
+      // keep_staff_vault: passed by Archive. Archive keeps every auth login, and the vault rows
+      // key on those user ids — deleting them made the product's "fully reversible" path
+      // irreversibly lose every staff PIN: the restore's vault-rebuild branch only runs when the
+      // client has NO logins left, which is exactly the state Archive never produces (S574).
+      const { clientId, keep_staff_vault } = params
       if (!clientId) return json({ error: 'clientId is required' }, 400)
 
       async function del(query: Promise<{ error: unknown }>, label: string) {
@@ -1352,7 +1356,9 @@ Deno.serve(async (req) => {
       // table that only ever cleans itself up implicitly is the kind that gets missed when the
       // cascade is later changed. app_secrets is deliberately absent: it is app-wide, not
       // per-client, and must never be touched by a client clear/delete path.
-      await del(admin.from('staff_pin_vault').delete().eq('client_id', clientId), 'staff_pin_vault')
+      if (!keep_staff_vault) {
+        await del(admin.from('staff_pin_vault').delete().eq('client_id', clientId), 'staff_pin_vault')
+      }
 
       return json({ success: true })
     }

@@ -51,7 +51,7 @@ export async function runBackup(clientId, clientName, reason, {
 
   const location = canWriteToFolder
     ? await writeBackup(handle, clientName, reason, { xlsxBlob, jsonBlob, manifest })
-    : downloadFallback(clientName, reason, { xlsxBlob, jsonBlob })
+    : await downloadFallback(clientName, reason, { xlsxBlob, jsonBlob })
 
   // Only now, with the files written. Best-effort: a client row that cannot be stamped (the full
   // delete path removes it moments later anyway) must not turn a successful backup into a failure.
