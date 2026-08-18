@@ -1,0 +1,32 @@
+---
+paths:
+  - "src/modules/admin/dataExport/**"
+  - "src/pages/AdminClients.js"
+  - "src/pages/adminClients/**"
+---
+
+# Client data Export / Import (S545)
+
+> Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
+
+### Client data Export / Import (S545)
+
+`src/modules/admin/dataExport/` — admin-only, reached from Admin → Clients → Manage → **Backup**. Works for any client regardless of subscription state; nothing in the engine reads trial or purge status.
+
+- **`exportClientData.js`** walks ~65 tables and emits **two artifacts, and the pair is the point**: an `.xlsx` (one sheet per table, for a human) and a `.json` (the one that can actually restore). Excel is lossy — `jsonb` such as `monthly_owner_reports.snapshot` collapses to `[object Object]` in a cell, and nulls/dates/numbers do not round-trip faithfully. **Never ship the workbook alone**; it looks like a backup and cannot restore.
+- **Every read raises `fetchAllRows`' `maxRows` to 500k.** The 100k default would silently truncate `pos_order_items` on a busy client — the S528 failure mode, in the one place it is least survivable. The table inventory imports `CLIENT_SCOPED_TABLES` from `scopedDb.js` rather than re-listing it, plus the period-scoped seven and four parent-scoped children lifted from `deleteClientData`'s own sequence.
+- **`staff_pin_vault` IS exported — as ciphertext.** The rows are AES-GCM encrypted under `app_secrets.pin_vault_key`, which stays in the database and never enters the file, so the backup is inert on disk. This is what lets a restore return POS/Self-Service staff their **original PINs**. `client_secrets` and `audit_logs` are excluded outright (the former is stored in the clear, so there is no ciphertext-only variant).
+- **Attribution is resolved at export time.** Every `*_by`/`custodian_user_id` UUID gets a `*_by_name` companion via `get_client_profile_names()` — CLAUDE.md's own S435 rule. On restore the UUIDs are **nulled**, because they reference `profiles` rows a full delete already removed and would raise FK violations across most tables; safe because S543 proved by grep that no `*_by` column is ever filtered on.
+- **`backupDirectory.js`** writes to a real folder (e.g. `C:\CrestBackups\<Client>\`) via the File System Access API, with the handle in its **own** IndexedDB database (`crest-backup`) — deliberately not `crest-offline`, whose version-upgrade path runs on the live POS offline-order route. **Chrome 122+ auto-persists the write permission for an installed PWA** and skips the prompt entirely; in a plain tab expect a prompt per session, and Firefox/Safari fall back to a download.
+- **`runBackup.js` stamps `clients.last_backup_at` only after the bytes are on disk.** That column is what stops the T-72h trigger re-exporting on every page load, and is the gate any future purge must check.
+
+**Archive vs Delete — reach for Archive.** `handleArchiveClient` composes a backup + the existing `deleteClientData` (which already keeps the client row, settings, feature flags, profiles and every auth login) + `is_active = false`, which only became meaningful once S544 made that column lock the app. Archive is therefore **fully reversible including logins**. `handleDeleteClient` deletes the auth users first, so its restore is deliberately partial: PIN accounts come back exactly (the generated `*@pos.internal` email is in the backup and the PIN is in the vault, so the same email + PIN derives the same password — `restore_staff_accounts` in `admin-user-ops`, admin-only), while password accounts (IMS/HR staff, Owner) come back as a **named to-recreate list**, since their login is a real human email the export deliberately does not carry.
+
+**Restore refuses to write into a non-empty client** — these are inserts, not upserts, so restoring over a live client would duplicate every row and double their books. Account re-provisioning likewise only runs when the target has no logins, so restoring an *archived* client never creates a second set.
+
+`trial_purge_at` **still deletes nothing** after all of this. That was the deliberate scope call: build the parachute before the jump.
+
+Two failure modes this feature produced, both worth remembering because neither announces itself:
+
+- **A silent `catch` on a user-initiated action is a bug, even when the swallowed error is usually benign.** `showDirectoryPicker()` throws `AbortError` when the user closes the picker — but Chrome throws the *same* error when the environment refuses the call (`Intercepted by Page.setInterceptFileChooserDialog()` under automation; likewise in some embedded webviews). Treating it purely as a cancel gave a button that did nothing and said nothing. The two cases are indistinguishable, so the handler now reports a message covering both rather than staying quiet.
+- **An overflowing tab bar hides its LAST tab.** `ClientDrawer`'s tab row was a bare `display:flex` with no `flexWrap` and no overflow handling, so adding a seventh tab pushed `⚠ Danger` — the destructive one — clean off the 520px drawer with no scrollbar or ellipsis to hint at it. The drawer is now an 880px centred `Modal` (which also gains Escape-to-close, a Tab focus trap, focus restoration and dialog ARIA that the hand-rolled drawer never had), and the row carries `flexWrap` + `whiteSpace:nowrap` so a future eighth tab wraps visibly instead of vanishing. **Any fixed-width container holding a variable number of controls needs a wrap or scroll strategy, or the newest one disappears.**

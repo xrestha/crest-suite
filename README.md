@@ -158,6 +158,20 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S568 — 2026-08-18 — /doctor pass: CLAUDE.md restructured into lazy-loaded rules files
+
+A Claude Code health check (`/doctor`) found the root `CLAUDE.md` at 180.7k characters — ~45k tokens loaded into **every** session's context, 4.5× the size Claude Code itself warns about. The file is deliberately gotcha-dense (almost nothing in it is derivable from the code, which is the point of it), so the fix wasn't deletion but **scope**: most of the weight was page-specific deep-dives that only matter when those pages are actually being edited.
+
+**Seven sections moved verbatim into new `.claude/rules/*.md` files**, each with `paths` frontmatter so Claude Code loads it only when working on matching files: `dashboards.md` (the Three Dashboards + S556–S558 layout/perf history — the single largest section at ~17.7k chars), `owner-report.md` (Monthly Owner Report snapshot rules), `data-export.md` (S545 backup/restore), `auth-and-pins.md` (password policy, HIBP screening, PIN vault, login-page rules), `hr-payroll.md` (payroll engine + S565 Stale-badge trap), `vendor-payables.md` (billKeyOf/aging + the three phantom-balance layers), and `supabase-sql.md` (RLS policy authoring, index discipline, grant/revoke gotchas, `log_audit()` conventions, the migration workflow — scoped to `supabase/**` plus AuditLog.js). Each original location keeps a pointer stub carrying the headline rules, so a root-file read still surfaces that the guidance exists. Two genuinely derivable blocks were cut outright (the `## Commands` CRA invocations, the Context-providers table — both one tool call away in `package.json`/`src/context/`).
+
+**What deliberately stayed resident:** everything universal — the S531 privilege invariants, scopedDb/multi-tenant rules, staff role systems, BS calendar traps, the design/theme system, the 1000-row cap, the frontend supabase-js hang gotchas, and every "never do X". The staff-isolation new-table rule stayed in the root too, despite being SQL-flavoured, because it's the one that silently reopens a security hole when missed. Net: root CLAUDE.md 180.7k → 102.9k chars (~45k → ~26k est. tokens/session), with the moved content loading on demand instead of never being needed.
+
+**Convention going forward:** a new page-scoped deep-dive belongs in the matching `.claude/rules/` file (or starts a new one), not the root; the root is for invariants that apply regardless of which file is open.
+
+Local-machine housekeeping from the same pass (not in git): the never-used `frontend-design` skill disabled via `skillOverrides` in `.claude/settings.local.json`, and auto mode set as the default permission mode in user-scope settings. Install verified current (VSCode extension 2.1.234 = latest), hooks healthy (impeccable hook ~0.6s median over 694 runs, zero timeouts).
+
+**Files:** `CLAUDE.md`, `.claude/rules/` (7 new files), `README.md`
+
 ### S567 — 2026-08-18 — Stock Count audit before closing Shrawan: four reconciliation bugs
 
 Asked for a functionality + calculation review of Stock Count ahead of a real month close for Casa Acai. Four issues, all of which made two figures on the same screen disagree without saying so.
