@@ -31,10 +31,13 @@ const TABLE_LABELS = {
   feature_flags:          'Feature Flags',
 }
 
+// `color` here is pure badge TEXT (`bg` is its own key), so it takes the -text variants — the
+// base tokens measured 3.04–3.61:1 at 11px/700 on Rosé Dawn (S574). The bg tints stay literal
+// rgba per DESIGN.md's documented pattern (alpha fill + full-opacity signal text).
 const ACTION_STYLE = {
-  INSERT: { label: 'Added',   color: 'var(--theme-green)', bg: 'rgba(52,211,153,0.12)' },
-  UPDATE: { label: 'Updated', color: 'var(--theme-purple)', bg: 'rgba(167,139,250,0.12)' },
-  DELETE: { label: 'Deleted', color: 'var(--theme-red)', bg: 'rgba(248,113,113,0.12)' },
+  INSERT: { label: 'Added',   color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.12)' },
+  UPDATE: { label: 'Updated', color: 'var(--theme-purple-text)', bg: 'rgba(167,139,250,0.12)' },
+  DELETE: { label: 'Deleted', color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.12)' },
 }
 
 // Columns that churn on nearly every write (housekeeping timestamps, PIN-lockout counters
@@ -176,6 +179,7 @@ export default function AuditLog() {
   const [filterArea, setFilterArea]     = useState('all')
   const [filterTime, setFilterTime]     = useState('7d')
   const [filterUser, setFilterUser]     = useState('all')
+  const [clearMsg, setClearMsg]         = useState('')
   const [search, setSearch]             = useState('')
   const [helpOpen, setHelpOpen]         = useState(false)
   const [expandedId, setExpandedId]     = useState(null)
@@ -233,8 +237,16 @@ export default function AuditLog() {
     const clientLabel = filterClient !== 'all'
       ? `for "${clients.find(c => c.id === filterClient)?.name}"`
       : 'for all clients'
+    // The confirm must describe what the RPC actually deletes: time + client + AREA. It used to
+    // omit the Area filter it applied, and said nothing about the User/search narrowing it does
+    // NOT apply — an operator filtered to one user, seeing 12 rows, was deleting the whole
+    // time+client+area window (S574).
+    const areaLabel = filterArea !== 'all' ? `, area "${TABLE_LABELS[filterArea] || filterArea}"` : ', all areas'
+    const ignoredNote = (filterUser !== 'all' || search.trim())
+      ? '\n\n⚠ The User filter and search box do NOT narrow what is deleted — everything in the range above goes.'
+      : ''
     if (!window.confirm(
-      `Delete ${logs.length}${hasMore ? '+' : ''} audit log entries (${timeLabel}, ${clientLabel})?\n\nThis cannot be undone.`
+      `Delete ${logs.length}${hasMore ? '+' : ''} audit log entries (${timeLabel}, ${clientLabel}${areaLabel})?${ignoredNote}\n\nThis cannot be undone.`
     )) return
 
     let cutoff = null
@@ -245,12 +257,16 @@ export default function AuditLog() {
       else if (filterTime === '30d') start.setDate(start.getDate() - 30)
       cutoff = start.toISOString()
     }
-    const { error } = await supabase.rpc('admin_clear_audit_logs', {
+    const { data: deletedCount, error } = await supabase.rpc('admin_clear_audit_logs', {
       p_client_id:  filterClient !== 'all' ? filterClient : null,
       p_table_name: filterArea   !== 'all' ? filterArea   : null,
       p_cutoff:     cutoff,
     })
-    if (error) { alert('Error: ' + error.message); return }
+    // Inline like every other failure on this page — this was the scope's only bare alert().
+    // And the RPC returns how many rows went; discarding it left the operator with no statement
+    // of what a destructive action on the audit trail actually did.
+    if (error) { setClearMsg('error:Clear failed: ' + error.message); return }
+    setClearMsg(`ok:${(deletedCount ?? 0).toLocaleString()} audit log entries deleted (${timeLabel}, ${clientLabel}${areaLabel}).`)
     await fetchLogs(filterClient, filterArea, filterTime)
   }
 
@@ -299,7 +315,7 @@ export default function AuditLog() {
           {logs.length > 0 && (
             <button
               className="btn btn-ghost"
-              style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.3)' }}
+              style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
               onClick={clearLogs}
             >
               ✕ Clear Logs
@@ -308,6 +324,13 @@ export default function AuditLog() {
           <button className="btn btn-ghost" onClick={() => fetchLogs(filterClient, filterArea, filterTime)}>↻ Refresh</button>
         </div>
       </div>
+
+      {clearMsg && (
+        <p role={clearMsg.startsWith('ok:') ? 'status' : 'alert'}
+          style={{ fontSize: 12, margin: '0 0 12px', color: clearMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+          {clearMsg.replace(/^(ok|error):/, '')}
+        </p>
+      )}
 
       {/* Help panel */}
       <div style={{ marginBottom: 20 }}>
@@ -335,7 +358,7 @@ export default function AuditLog() {
                     <td style={{ padding: '9px 14px', color: 'var(--theme-text1)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                       <span style={{ marginRight: 7, color: 'var(--theme-accent)' }}>{h.icon}</span>{h.area}
                     </td>
-                    <td style={{ padding: '9px 14px', color: 'var(--theme-green)', fontFamily: 'monospace', fontSize: 12 }}>{h.ops}</td>
+                    <td style={{ padding: '9px 14px', color: 'var(--theme-green-text)', fontFamily: 'monospace', fontSize: 12 }}>{h.ops}</td>
                     <td style={{ padding: '9px 14px', color: 'var(--theme-text3)' }}>{h.note}</td>
                   </tr>
                 ))}
@@ -351,27 +374,37 @@ export default function AuditLog() {
         )}
       </div>
 
+      {/* .sr-only labels + ids: these five controls had no accessible name at all — a screen
+          reader announced four unlabelled comboboxes whose only "name" was the selected value.
+          The S569 htmlFor sweep matched .form-field files and this page's bare .form-select
+          controls fell outside its shape (S574). Pattern from AdminDashboardOverview.jsx. */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select className="form-select" value={filterClient} onChange={e => applyFilter(e.target.value, filterArea, filterTime)}>
+        <label htmlFor="audit-filter-client" className="sr-only">Filter by client</label>
+        <select id="audit-filter-client" className="form-select" value={filterClient} onChange={e => applyFilter(e.target.value, filterArea, filterTime)}>
           <option value="all">All Clients</option>
           {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select className="form-select" value={filterArea} onChange={e => applyFilter(filterClient, e.target.value, filterTime)}>
+        <label htmlFor="audit-filter-area" className="sr-only">Filter by area</label>
+        <select id="audit-filter-area" className="form-select" value={filterArea} onChange={e => applyFilter(filterClient, e.target.value, filterTime)}>
           <option value="all">All Areas</option>
           {Object.entries(TABLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <select className="form-select" value={filterTime} onChange={e => applyFilter(filterClient, filterArea, e.target.value)}>
+        <label htmlFor="audit-filter-time" className="sr-only">Filter by time range</label>
+        <select id="audit-filter-time" className="form-select" value={filterTime} onChange={e => applyFilter(filterClient, filterArea, e.target.value)}>
           <option value="today">Today</option>
           <option value="7d">Last 7 days</option>
           <option value="30d">Last 30 days</option>
           <option value="all">All time</option>
         </select>
-        <select className="form-select" value={filterUser} onChange={e => setFilterUser(e.target.value)}>
+        <label htmlFor="audit-filter-user" className="sr-only">Filter by user</label>
+        <select id="audit-filter-user" className="form-select" value={filterUser} onChange={e => setFilterUser(e.target.value)}>
           <option value="all">All Users</option>
           {userOptions.map(u => <option key={u} value={u}>{u}</option>)}
         </select>
+        <label htmlFor="audit-search" className="sr-only">Search audit log entries</label>
         <input
-          type="text"
+          id="audit-search"
+          type="search"
           className="form-select"
           placeholder="Search client, user, field, record ID…"
           value={search}
@@ -415,11 +448,11 @@ export default function AuditLog() {
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{log.client_name || '—'}</td>
                       <td style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{log.user_name || '—'}</td>
                       <td style={{ textAlign: 'center' }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: act.color, background: act.bg, padding: '2px 10px', borderRadius: 10, whiteSpace: 'nowrap' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: act.color, background: act.bg, padding: '2px 10px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap' }}>
                           {act.label}
                         </span>
                       </td>
-                      <td style={{ color: 'var(--theme-accent)', fontSize: 13 }}>{TABLE_LABELS[log.table_name] || log.table_name}</td>
+                      <td style={{ color: 'var(--theme-accent-ink)', fontSize: 13 }}>{TABLE_LABELS[log.table_name] || log.table_name}</td>
                       <td
                         style={{ fontSize: 13, color: 'var(--theme-text3)', cursor: fields.length ? 'pointer' : 'default' }}
                         onClick={() => fields.length && setExpandedId(isOpen ? null : log.id)}
@@ -443,8 +476,8 @@ export default function AuditLog() {
                               {fields.map(f => (
                                 <tr key={f.key}>
                                   <td style={{ padding: '4px 10px', color: 'var(--theme-text1)', fontWeight: 600, whiteSpace: 'nowrap' }}>{fieldLabel(f.key)}</td>
-                                  {log.action !== 'INSERT' && <td style={{ padding: '4px 10px', color: 'var(--theme-red)' }}>{formatValue(f.key, f.from)}</td>}
-                                  {log.action !== 'DELETE' && <td style={{ padding: '4px 10px', color: 'var(--theme-green)' }}>{formatValue(f.key, f.to)}</td>}
+                                  {log.action !== 'INSERT' && <td style={{ padding: '4px 10px', color: 'var(--theme-red-text)' }}>{formatValue(f.key, f.from)}</td>}
+                                  {log.action !== 'DELETE' && <td style={{ padding: '4px 10px', color: 'var(--theme-green-text)' }}>{formatValue(f.key, f.to)}</td>}
                                 </tr>
                               ))}
                             </tbody>
