@@ -158,6 +158,18 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S571 — 2026-08-18 — Self-Service login removal, and Employees Delete stops throwing raw SQL errors
+
+Two small gaps, both surfaced by actually using the app during S569's PIN-vault cleanup rather than by review.
+
+**Enable Self-Service was a one-way door.** There was no way to revoke an employee's payslip/leave portal login from the UI — removing Huang's defunct test account meant deleting the auth user by hand with SQL. New `delete_hr_self_service_login` action in `admin-user-ops` (admin-or-Owner gated, matching what creating one requires), plus a **Remove** button beside the ✓ Self-Service badge on Employees. Deleting the auth user cascades the profile and, through it, the `staff_pin_vault` row, so no orphaned PIN ciphertext is left behind; `profiles.hr_employee_id` is `ON DELETE SET NULL` in that direction, so the employee record and all payroll history survive untouched.
+
+This needed a new **`self_service` entry in the Edge Function's `STAFF_MARKER` map** rather than reusing `hr`: Self-Service accounts carry `hr_self_service` with no `hr_role` at all, so S531's `requireStaffTarget` guard would have rejected them — and keeping the axes separate also means this action can never be aimed at an HR *manager* account. **Note there are now two different "remove access" controls on the Employees page and they do different things:** the row-selection **Deactivate** (S563) sets `hr_employees.access_blocked` and suspends login reversibly; **Remove** deletes the login outright. Both leave payroll eligibility alone.
+
+**Employees → Delete threw a raw Postgres error.** Most HR tables cascade from `hr_employees`, but `hr_tada_claims`, `hr_incentives` and `hr_shift_swap_requests` deliberately don't — that history covers money paid and approvals given. So deleting anyone who had any of them surfaced `update or delete on table "hr_employees" violates foreign key constraint "hr_tada_claims_employee_id_fkey"` verbatim in the form: accurate, unreadable, and with no hint that Deactivate was the thing they actually wanted. Delete now **counts those three tables first** and, when any are non-empty, explains the block in plain language with the counts, recommends Deactivate, and names where to clear the entries if the employee genuinely must go. A `23503` backstop catches any future non-cascading FK rather than reverting to raw SQL text — add the table to the pre-check when that happens.
+
+**Files:** `supabase/functions/admin-user-ops/index.ts` (deployed), `src/modules/hr/employees/{EmployeeList.jsx, EmployeeForm.jsx}`, `src/pages/Help.js`, `public/service-worker.js` (v79 → v80), `README.md`
+
 ### S570 — 2026-08-18 — Critique campaign phase 5 (HR): payroll correctness + design-system catch-up
 
 Ran phase 5 of the 8-phase `/impeccable` campaign over `src/modules/hr/` (excluding the dashboard, done in phase 3) with the established two-isolated-agent method — one judging design from source, one measuring the real authenticated app in a browser. **Scored 26/40 (Good).** Snapshot: `.impeccable/critique/2026-08-18T11-54-27Z__src-modules-hr.md`.

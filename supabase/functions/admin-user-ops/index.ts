@@ -245,8 +245,12 @@ Deno.serve(async (req) => {
       pos: t => !!t.pos_email,
       ims: t => !!t.ims_role,
       hr:  t => !!t.hr_role,
+      // Self-Service is its own axis, not an HR rank: these accounts carry hr_self_service with
+      // no hr_role at all, so the `hr` marker above would reject them. Keeping them separate also
+      // means delete_hr_self_service_login can never be aimed at an HR *manager* account.
+      self_service: t => t.hr_self_service === true,
     }
-    const MODULE_LABEL: Record<string, string> = { pos: 'POS', ims: 'IMS', hr: 'HR' }
+    const MODULE_LABEL: Record<string, string> = { pos: 'POS', ims: 'IMS', hr: 'HR', self_service: 'HR Self-Service' }
 
     async function loadTarget(userId: string) {
       const { data } = await admin
@@ -503,6 +507,31 @@ Deno.serve(async (req) => {
       await vaultPin(authData.user.id, targetClientId, 'hr_self_service', pin)
 
       return json({ success: true, userId: authData.user.id })
+    }
+
+    // ── Remove an HR Self-Service login ───────────────────────────────────────
+    // The inverse of create_hr_self_service_login, and it did not exist until S571: Enable was a
+    // one-way door, so revoking a departed employee's payslip/leave portal access meant deleting
+    // the auth user by hand in SQL (found doing exactly that during the S569 PIN-vault cleanup).
+    // Note this is NOT the same as hr_employees.access_blocked (S563), which suspends login while
+    // keeping the account — this deletes the login outright. The employee RECORD is untouched:
+    // profiles.hr_employee_id is ON DELETE SET NULL in that direction, and payroll history hangs
+    // off hr_employees, not off this login. Same admin-or-Owner gate as creating one.
+    if (action === 'delete_hr_self_service_login') {
+      if (!(isCallerAdmin || isCallerOwner)) return json({ error: 'Forbidden' }, 403)
+
+      const { userId } = params
+      if (!userId) return json({ error: 'userId is required' }, 400)
+
+      const ssTarget = await loadTarget(userId)
+      const ssDenied = requireStaffTarget(ssTarget, 'self_service')
+      if (ssDenied) return ssDenied
+
+      // Deleting the auth user cascades profiles (profiles_id_fkey) and, through it, the
+      // staff_pin_vault row — so no orphaned PIN ciphertext is left behind.
+      const { error: delErr } = await admin.auth.admin.deleteUser(userId)
+      if (delErr) return json({ error: delErr.message }, 400)
+      return json({ success: true })
     }
 
     // ── Update a POS staff member's role ─────────────────────────────────────

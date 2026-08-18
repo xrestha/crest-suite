@@ -59,6 +59,10 @@ export default function EmployeeList() {
   const [ssPin, setSsPin] = useState('')
   const [ssBusy, setSsBusy] = useState(false)
   const [ssMsg, setSsMsg] = useState('')
+  // Removing Self-Service happens from a table row, not from the Enable modal, so it needs its
+  // own page-level error surface — ssMsg only renders inside that modal.
+  const [ssRemoving, setSsRemoving] = useState(null) // employee id currently being revoked
+  const [ssRemoveErr, setSsRemoveErr] = useState('')
   const [linkCopied, setLinkCopied] = useState(false)
 
   // Row selection for the bulk Activate/Deactivate action, keyed by employee id. This toggles
@@ -101,6 +105,33 @@ export default function EmployeeList() {
       setSsMsg('Error: ' + detail); setSsBusy(false); return
     }
     setSsTarget(null); setSsBusy(false)
+    fetchSelfServiceStatus()
+  }
+
+  // The inverse of Enable, which was a one-way door until S571 — revoking a departed employee's
+  // portal access previously meant deleting the auth user by hand in SQL. Distinct from the
+  // Deactivate bulk action above: that sets hr_employees.access_blocked and suspends login while
+  // keeping the account; this removes the login entirely. The employee record and their payroll
+  // history are untouched either way.
+  async function removeSelfService(emp) {
+    const userId = selfServiceMap[emp.id]
+    if (!userId) return
+    if (!window.confirm(
+      `Remove Self-Service access for ${emp.full_name}?\n\n` +
+      'Their PIN stops working immediately and they can no longer view payslips, submit leave or see their roster.\n\n' +
+      "The employee record, payslips and leave history are NOT deleted. You can re-enable access later with a new PIN.\n\n" +
+      'To suspend access temporarily instead, use Deactivate on the selection bar.'
+    )) return
+    setSsRemoving(emp.id); setSsRemoveErr('')
+    const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+      body: { action: 'delete_hr_self_service_login', userId },
+    })
+    if (error || data?.error) {
+      let detail = data?.error || error?.message || 'Failed to remove self-service access'
+      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
+      setSsRemoveErr(detail); setSsRemoving(null); return
+    }
+    setSsRemoving(null); setSsRemoveErr('')
     fetchSelfServiceStatus()
   }
 
@@ -192,6 +223,21 @@ export default function EmployeeList() {
           </button>
         </div>
       </div>
+
+      {ssRemoveErr && (
+        <div
+          role="alert"
+          className="card"
+          style={{
+            marginBottom: 12, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+            borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
+            background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+          }}
+        >
+          <span style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>Couldn't remove Self-Service access: {ssRemoveErr}</span>
+          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={() => setSsRemoveErr('')} aria-label="Dismiss">×</button>
+        </div>
+      )}
 
       {/* Stat cards */}
       <div className="stat-grid" style={{ marginBottom: 20 }}>
@@ -401,9 +447,19 @@ export default function EmployeeList() {
                               <span className="badge badge-gray" style={{ fontSize: 10 }}>Self-Service (blocked)</span>
                             </Tip>
                           ) : (
-                            <Tip text="This employee can log in via the Self-Service link to view their own payslip, submit leave, and see their roster.">
-                              <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Self-Service</span>
-                            </Tip>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              <Tip text="This employee can log in via the Self-Service link to view their own payslip, submit leave, and see their roster.">
+                                <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Self-Service</span>
+                              </Tip>
+                              <Tip text="Remove this employee's Self-Service login entirely — their PIN stops working and the account is deleted. Their employee record, payslips and leave history are kept. To suspend access temporarily instead, tick the row and use Deactivate.">
+                                <button
+                                  className="btn btn-ghost"
+                                  style={{ fontSize: 11, padding: '3px 8px', color: 'var(--theme-red-text)' }}
+                                  onClick={() => removeSelfService(e)}
+                                  disabled={ssRemoving === e.id}
+                                >{ssRemoving === e.id ? 'Removing…' : 'Remove'}</button>
+                              </Tip>
+                            </span>
                           )
                         ) : (
                           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEnableSelfService(e)}>

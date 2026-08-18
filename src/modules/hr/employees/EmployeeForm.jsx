@@ -159,11 +159,48 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
     onSave()
   }
 
+  // Most HR tables cascade from hr_employees, but three deliberately do not: hr_tada_claims,
+  // hr_incentives and hr_shift_swap_requests hold financial/approval history that should not
+  // vanish silently with an employee record. Deleting anyone who has any of them therefore hit a
+  // raw Postgres foreign-key error ("violates foreign key constraint ...") shown verbatim in the
+  // form — accurate, unreadable, and with no hint that Deactivate is what the user actually
+  // wanted. Checking first lets the block be explained in the user's own terms.
   async function handleDelete() {
     if (!window.confirm(`Delete ${employee.full_name}? This cannot be undone.`)) return
+    setError('')
+
+    const [{ count: tadaCount }, { count: incentiveCount }, { count: swapReqCount }, { count: swapTgtCount }] = await Promise.all([
+      scopedFrom('hr_tada_claims', 'id', { count: 'exact', head: true }).eq('employee_id', employee.id),
+      scopedFrom('hr_incentives', 'id', { count: 'exact', head: true }).eq('employee_id', employee.id),
+      scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true }).eq('requester_employee_id', employee.id),
+      scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true }).eq('target_employee_id', employee.id),
+    ])
+    const blockers = [
+      tadaCount      ? `${tadaCount} TADA claim${tadaCount === 1 ? '' : 's'}` : '',
+      incentiveCount ? `${incentiveCount} incentive/bonus record${incentiveCount === 1 ? '' : 's'}` : '',
+      (swapReqCount || swapTgtCount) ? `${(swapReqCount || 0) + (swapTgtCount || 0)} shift-swap request${((swapReqCount || 0) + (swapTgtCount || 0)) === 1 ? '' : 's'}` : '',
+    ].filter(Boolean)
+
+    if (blockers.length > 0) {
+      setError(
+        `${employee.full_name} can't be deleted because they still have ${blockers.join(', ')} on record. ` +
+        'That history is kept deliberately, since it covers money paid and approvals given. ' +
+        'Use Deactivate instead — it removes them from payroll pickers, rosters and attendance while keeping the record. ' +
+        'If you genuinely need the employee gone, delete those entries first in TADA Claims, Incentives and Roster → Swap Requests.'
+      )
+      return
+    }
+
     if (!window.confirm(`Are you sure? All data for ${employee.full_name} will be permanently deleted.`)) return
     const { error: err } = await scopedDelete('hr_employees').eq('id', employee.id)
-    if (err) { setError(err.message); return }
+    if (err) {
+      // Backstop: a table added later with a non-cascading FK would land here rather than showing
+      // raw Postgres text. Add it to the pre-check above when that happens.
+      setError(err.code === '23503'
+        ? `${employee.full_name} still has linked records elsewhere in HR and can't be deleted. Use Deactivate instead, or remove those entries first.`
+        : err.message)
+      return
+    }
     onSave()
   }
 
