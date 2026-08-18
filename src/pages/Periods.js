@@ -7,6 +7,7 @@ import { getBsToday } from '../utils/bsCalendar'
 import { useNavigate, Navigate } from 'react-router-dom'
 import Tip from '../components/Tip'
 import { generateMonthlyReport, saveGeneratedReport } from '../modules/ownerReport/generateMonthlyReport'
+import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 
 const BS_MONTHS = [
   'Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin',
@@ -15,9 +16,11 @@ const BS_MONTHS = [
 
 export default function Periods() {
   const { isAdmin, clientId, profile, switchAdminClient, hasImsAccess, clientModules } = useAuth()
+  const posEnabled = !!clientModules?.pos
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
   const [periods, setPeriods] = useState([])
+  const [backfillBusy, setBackfillBusy] = useState(null) // period id currently posting POS bills
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ bs_year: 2082, bs_month: 1 })
@@ -241,6 +244,31 @@ export default function Periods() {
   // monthly_periods_one_open_per_client — admin can already edit a closed period's Closing Stock
   // directly (Stock.js's isLocked is `!isAdmin && closed`), this just re-runs the same carry-
   // forward a normal Close & Start Next would have done, into whichever period comes right after.
+  // Posts POS bills that closed while no period existed for their date. Idempotent: it only ever
+  // reads bills whose ims_posted_at is still NULL, so running it twice cannot double-post.
+  async function runPosBackfill(period) {
+    const waiting = await countUnpostedForPeriod({ scopedFrom, period })
+    if (waiting === 0) {
+      window.alert(`No unposted POS bills for ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}.`)
+      return
+    }
+    if (!window.confirm(
+      `Post ${waiting} POS bill${waiting === 1 ? '' : 's'} from ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} into Inventory?\n\n` +
+      'Their revenue and ingredient usage will be added to this period, so Inventory reports and stock levels catch up with what the till already sold.'
+    )) return
+
+    setBackfillBusy(period.id)
+    const { posted, skipped, error } = await backfillPosOrdersToIms({
+      supabase, scopedFrom, scopedInsert, scopedUpdate, period,
+    })
+    setBackfillBusy(null)
+    if (error) { window.alert('Could not post: ' + error); return }
+    window.alert(
+      `Posted ${posted} bill${posted === 1 ? '' : 's'} into ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}.` +
+      (skipped > 0 ? `\n\n${skipped} skipped (nothing to post, or the write failed — check the browser console).` : '')
+    )
+  }
+
   async function resyncOpeningStock(period) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
@@ -454,7 +482,10 @@ export default function Periods() {
                                     </button>
                                     <button
                                       onClick={() => adminEndPeriod(openPeriod, c.id)}
-                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 5, cursor: 'pointer', background: 'rgba(127,29,29,0.2)', border: '1px solid rgba(185,28,28,0.5)', color: '#b91c1c' }}
+                                      // Was three undocumented reds (rgba(127,29,29), rgba(185,28,28), #b91c1c) — a
+                                      // second red with no home in the palette. Now the documented alpha-tint pattern:
+                                      // tinted fill and border off --theme-red, text on the contrast-safe variant.
+                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 35%, transparent)', color: 'var(--theme-red-text)' }}
                                     >
                                       End Period
                                     </button>
@@ -706,6 +737,22 @@ export default function Periods() {
                                 >
                                   ✏
                                 </button>
+                              )}
+                              {/* Backfills POS bills whose revenue and stock never reached IMS
+                                  because no period was open for their date (S573). Available on
+                                  any period, open or closed — the whole point is that the period
+                                  didn't exist when the bills were rung. */}
+                              {posEnabled && (
+                                <Tip text="Posts POS bills from this month that closed while no Inventory period existed — their revenue and ingredient usage are missing from Inventory reports until this runs. Safe to run more than once; already-posted bills are skipped." width={300}>
+                                  <button
+                                    className="btn btn-ghost"
+                                    style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-amber-text)', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)' }}
+                                    onClick={() => runPosBackfill(p)}
+                                    disabled={backfillBusy === p.id}
+                                  >
+                                    {backfillBusy === p.id ? 'Posting…' : 'Post POS bills to Inventory'}
+                                  </button>
+                                </Tip>
                               )}
                               {/* Close / Reopen / Resync — admin only */}
                               {isAdmin && (p.status === 'open' ? (

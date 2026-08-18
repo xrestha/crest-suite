@@ -202,6 +202,11 @@ export default function PosOrders() {
   const [syncingOffline,  setSyncingOffline]  = useState(false)
   const [conflictOrders,  setConflictOrders]  = useState([]) // queued orders whose server row was no longer 'open' at flush time
   const [floorMsg,        setFloorMsg]        = useState('') // transient floor-view banner (e.g. blocked-table message)
+  // Bills closed this session whose revenue/stock could not reach IMS (no matching open period).
+  // Bumped so the floor banner appears immediately after the close that caused it, rather than
+  // only after the next full refresh of unpostedCount below.
+  const [imsPostWarning,  setImsPostWarning]  = useState(0)
+  const [unpostedCount,   setUnpostedCount]   = useState(0)
   const flushRef = useRef(null)
   // Re-entry guard for closeOrder — a manual Charge tap and the QR auto-confirm poll both call
   // closeOrder('paid') and could otherwise land inside the same order concurrently. A ref (not
@@ -478,12 +483,17 @@ export default function PosOrders() {
     }
 
     loadOpenShift()
-    const [{ data: tbls }, { data: orders }] = await Promise.all([
+    const [{ data: tbls }, { data: orders }, { count: unposted }] = await Promise.all([
       scopedFrom('pos_tables')
         .order('sort_order').order('name'),
       scopedFrom('pos_orders', 'id, table_id, covers, pos_order_items(qty, unit_price, vat_rate, sent_to_kot)')
         .eq('status', 'open'),
+      // head:true — a count, not rows, so the 1000-row cap cannot apply. Backed by the partial
+      // index idx_pos_orders_unposted, so it stays cheap however large the table gets.
+      scopedFrom('pos_orders', 'id', { count: 'exact', head: true })
+        .eq('status', 'billed').is('ims_posted_at', null),
     ])
+    setUnpostedCount(unposted || 0)
     setTables(tbls || [])
     cachePosTables(clientId, tbls || [])
     const map = {}
@@ -1316,13 +1326,19 @@ export default function PosOrders() {
     setTenders(t => t.slice(0, -1))
   }
 
+  // Returns true when the bill's revenue and stock depletion actually reached IMS. The two early
+  // returns below used to be silent: the bill closed, printed and took an invoice number while
+  // Inventory never saw it, so POS Sales Report and IMS MonthlySummary disagreed by an unbounded
+  // amount with nothing on either page saying so. The bill must still close — refusing a sale
+  // mid-service is not acceptable — but the caller now stamps ims_posted_at only on success, and
+  // the floor view surfaces whatever didn't post so it can be backfilled from Periods.
   async function writeSalesEntries(closeType, compQtyMap = compQtyByRecipe) {
     const { data: periods } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
     const open = (periods || []).find(p => p.status === 'open')
-    if (!open) return
+    if (!open) return false
     const today = getBsToday()
-    if (today.year !== open.bs_year || today.month !== open.bs_month) return
+    if (today.year !== open.bs_year || today.month !== open.bs_month) return false
 
     const soldItems = orderItems.filter(i => i.recipe_id)
     // Split each line's qty into its sold and comped portions — a whole-order Complimentary
@@ -1386,6 +1402,7 @@ export default function PosOrders() {
     } catch (err) {
       console.error('stock_movements write failed:', err)
     }
+    return true
   }
 
   async function closeOrder(closeType) {
@@ -1511,7 +1528,15 @@ export default function PosOrders() {
         })))
       }
 
-      if (closeType !== 'void') await writeSalesEntries(closeType)
+      // Stamp only on a confirmed post. A void has nothing to post, so it is marked done rather
+      // than left looking like a failure the floor banner should chase.
+      if (closeType !== 'void') {
+        const posted = await writeSalesEntries(closeType)
+        if (posted) await scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', orderId)
+        else setImsPostWarning(w => w + 1)
+      } else {
+        await scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', orderId)
+      }
 
       // Auto-build the customer book: any bill with buyer Name + Phone (required for discounts and
       // Credit sales) adds/updates a pos_customers row keyed by phone. Non-fatal — never blocks billing.
@@ -2757,6 +2782,27 @@ export default function PosOrders() {
           color: floorMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)',
         }}>
           {floorMsg.replace(/^(error|ok):/, '')}
+        </div>
+      )}
+      {/* Bills whose revenue and stock never reached Inventory, because no BS period was open
+          for their date. The sale itself is fine and the bill is valid — but IMS has no record of
+          it, so MonthlySummary, Variance and stock levels are all short until it is backfilled.
+          Silently correct-looking was the worst available option here. */}
+      {(unpostedCount > 0 || imsPostWarning > 0) && (
+        <div role="alert" style={{
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--theme-amber) 28%, transparent)',
+          borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
+          color: 'var(--theme-text2)',
+        }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>
+            ⚠ {Math.max(unpostedCount, imsPostWarning)} bill{Math.max(unpostedCount, imsPostWarning) === 1 ? '' : 's'} not posted to Inventory
+          </strong>
+          <div style={{ marginTop: 4 }}>
+            These bills closed normally and are valid, but there was no open Inventory period for
+            their date — so their revenue and ingredient usage are missing from Inventory reports.
+            Open the matching period in <strong>Periods</strong>, then use <strong>Post POS bills to Inventory</strong> there to backfill them.
+          </div>
         </div>
       )}
       {conflictOrders.map(c => (
