@@ -367,8 +367,9 @@ export default function Requisitions() {
           <div className="card" style={{ marginBottom: 20 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
               <div className="form-field">
-                <label>Day *</label>
+                <label htmlFor="req-day">Day *</label>
                 <BsCalendarPicker
+                  id="req-day"
                   lockYear={selectedPeriod?.bs_year}
                   lockMonth={selectedPeriod?.bs_month}
                   value={formDay}

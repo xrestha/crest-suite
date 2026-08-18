@@ -24,6 +24,38 @@ import { useFoodBeverageSplit } from '../../modules/dashboard/useFoodBeverageSpl
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
 
+// Roving-tabindex tab row for in-card view switches — completes the tablist contract the bare
+// role="tablist"/"tab" markup used to promise without delivering (aria-controls, roving tabIndex,
+// arrow keys; dashboard critique P2, S569). idBase must be unique per rendered INSTANCE: a
+// ChartCard's compact card and its expanded modal render concurrently, so callers suffix idBase
+// with the render size (`big`/`small`) to keep DOM ids unique.
+function ChartTabs({ idBase, label, tabs, active, onChange }) {
+  const onKeyDown = e => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    e.preventDefault()
+    const idx = tabs.findIndex(t => t.key === active)
+    const next = tabs[(idx + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]
+    onChange(next.key)
+    // Focus follows selection after the re-render flips the roving tabIndex
+    requestAnimationFrame(() => document.getElementById(`${idBase}-tab-${next.key}`)?.focus())
+  }
+  return (
+    <div className="tab-bar" role="tablist" aria-label={label} style={{ marginBottom: 6 }} onKeyDown={onKeyDown}>
+      {tabs.map(t => (
+        <button
+          key={t.key} type="button" role="tab"
+          id={`${idBase}-tab-${t.key}`}
+          aria-selected={active === t.key}
+          aria-controls={`${idBase}-panel`}
+          tabIndex={active === t.key ? 0 : -1}
+          className={`tab-btn${active === t.key ? ' tab-btn--active' : ''}`}
+          onClick={() => onChange(t.key)}
+        >{t.label}</button>
+      ))}
+    </div>
+  )
+}
+
 // Daily Purchases vs Sales — fixed hex for the same reason COST_BREAKDOWN_COLORS is (see the long
 // note at its definition): CSS var() does not resolve in Recharts SVG props, and the semantic
 // token set is five roles rather than five distinguishable hues.
@@ -1069,9 +1101,12 @@ export default function ClientDashboard() {
   // sections (Inventory/Human Resources/Point of Sale) by heading, same as any other landmark.
   // margin/fontWeight explicitly reset since a bare <h2> otherwise renders bold with browser
   // default margins — visual size/weight is unchanged from the div it replaces.
+  // Single-module clients get the same <h2>s visually hidden (.sr-only) rather than nothing —
+  // without them the page jumps h1 → h3 (ChartCard titles) with no level in between, which
+  // breaks heading navigation for screen-reader users (dashboard critique P2, S569).
   const moduleHeader = (text) => showModuleHeaders
     ? <h2 style={{ fontSize: 11, fontWeight: 400, margin: '0 0 10px', color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{text}</h2>
-    : null
+    : <h2 className="sr-only">{text}</h2>
 
   // Equal-width 3-column layout — only kicks in at 2+ modules, matching showModuleHeaders. A
   // 1-module client keeps today's full-width single-column render untouched. Named classes (not
@@ -1451,28 +1486,33 @@ export default function ClientDashboard() {
             // fixed ~24px pill, not something that scales with `big` the way the rest of this
             // chart's chrome does.
             const contentH = h - 26
+            const idBase = `spend-${big ? 'big' : 'small'}`
             const tabs = (
-              <div className="tab-bar" role="tablist" aria-label="Spend breakdown views" style={{ marginBottom: 6 }}>
-                <button type="button" role="tab" aria-selected={spendView === 'category'}
-                  className={`tab-btn${spendView === 'category' ? ' tab-btn--active' : ''}`}
-                  onClick={() => setSpendView('category')}>By Category</button>
-                <button type="button" role="tab" aria-selected={spendView === 'items'}
-                  className={`tab-btn${spendView === 'items' ? ' tab-btn--active' : ''}`}
-                  onClick={() => setSpendView('items')}>Top Items</button>
-              </div>
+              <ChartTabs
+                idBase={idBase} label="Spend breakdown views" active={spendView} onChange={setSpendView}
+                tabs={[{ key: 'category', label: 'By Category' }, { key: 'items', label: 'Top Items' }]}
+              />
+            )
+            // Every branch below returns <>{tabs}{panel(…)}</> so the tablist's aria-controls
+            // always points at a real tabpanel wrapping the active view's content.
+            const panel = kids => (
+              <div role="tabpanel" id={`${idBase}-panel`} aria-labelledby={`${idBase}-tab-${spendView}`}>{kids}</div>
             )
             if (spendView === 'category') {
               if (categorySpend.length === 0) return (
                 <>
                   {tabs}
-                  <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
-                  </div>
+                  {panel(
+                    <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
+                    </div>
+                  )}
                 </>
               )
               return (
                 <>
                   {tabs}
+                  {panel(<>
                   {big && (
                     <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                       <StatPill label="Total spend" value={`NPR ${categorySpendTotal.toLocaleString()}`} />
@@ -1514,6 +1554,7 @@ export default function ClientDashboard() {
                       )
                     })}
                   </div>
+                  </>)}
                 </>
               )
             }
@@ -1522,9 +1563,11 @@ export default function ClientDashboard() {
             if (topItemSpend.length === 0) return (
               <>
                 {tabs}
-                <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
-                </div>
+                {panel(
+                  <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase data</p>
+                  </div>
+                )}
               </>
             )
             const shown = topItemSpend.slice(0, count)
@@ -1533,6 +1576,7 @@ export default function ClientDashboard() {
             return (
               <>
                 {tabs}
+                {panel(<>
                 {big && (
                   <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                     <StatPill label={`Top ${shown.length} total`} value={`NPR ${shownTotal.toLocaleString()}`} color={colors.accent} />
@@ -1556,6 +1600,7 @@ export default function ClientDashboard() {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
+                </>)}
               </>
             )
           }}
@@ -1831,29 +1876,34 @@ export default function ClientDashboard() {
                 const big = h > 200
                 const showTabs = costTabAvailable && mixTabAvailable
                 const contentH = showTabs ? h - 26 : h
+                const idBase = `costmix-${big ? 'big' : 'small'}`
                 const tabs = showTabs && (
-                  <div className="tab-bar" role="tablist" aria-label="Revenue breakdown views" style={{ marginBottom: 6 }}>
-                    <button type="button" role="tab" aria-selected={costCardView === 'cost'}
-                      className={`tab-btn${costCardView === 'cost' ? ' tab-btn--active' : ''}`}
-                      onClick={() => setCostCardView('cost')}>Cost Breakdown</button>
-                    <button type="button" role="tab" aria-selected={costCardView === 'mix'}
-                      className={`tab-btn${costCardView === 'mix' ? ' tab-btn--active' : ''}`}
-                      onClick={() => setCostCardView('mix')}>Sales Mix</button>
-                  </div>
+                  <ChartTabs
+                    idBase={idBase} label="Revenue breakdown views" active={costCardView} onChange={setCostCardView}
+                    tabs={[{ key: 'cost', label: 'Cost Breakdown' }, { key: 'mix', label: 'Sales Mix' }]}
+                  />
                 )
+                // A tabpanel only exists when the tablist does — with one available view there
+                // are no tabs, and the content renders unwrapped.
+                const panel = kids => showTabs
+                  ? <div role="tabpanel" id={`${idBase}-panel`} aria-labelledby={`${idBase}-tab-${costCardView}`}>{kids}</div>
+                  : kids
 
                 if (costCardEffectiveView === 'cost') {
                   if (costBreakdown.length === 0) return (
                     <>
                       {tabs}
-                      <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No cost data</p>
-                      </div>
+                      {panel(
+                        <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No cost data</p>
+                        </div>
+                      )}
                     </>
                   )
                   return (
                     <>
                       {tabs}
+                      {panel(<>
                       {big && (
                         <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                           <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`} />
@@ -1898,6 +1948,7 @@ export default function ClientDashboard() {
                           </div>
                         ))}
                       </div>
+                      </>)}
                     </>
                   )
                 }
@@ -1906,21 +1957,26 @@ export default function ClientDashboard() {
                 if (salesMixLoading) return (
                   <>
                     {tabs}
-                    <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
+                    {panel(
+                      <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
+                    )}
                   </>
                 )
                 if (salesMixTotal <= 0) return (
                   <>
                     {tabs}
-                    <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No sales data</p>
-                    </div>
+                    {panel(
+                      <div style={{ height: contentH, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No sales data</p>
+                      </div>
+                    )}
                   </>
                 )
                 const mixPieData = salesMixCategories.map(c => ({ name: c, value: salesMixBuckets[c] }))
                 return (
                   <>
                     {tabs}
+                    {panel(<>
                     {big && (
                       <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
                         <StatPill label="Total revenue" value={`NPR ${Math.round(salesMixTotal).toLocaleString('en-NP')}`} />
@@ -1964,6 +2020,7 @@ export default function ClientDashboard() {
                         )
                       })}
                     </div>
+                    </>)}
                   </>
                 )
               }}
@@ -2076,7 +2133,10 @@ export default function ClientDashboard() {
           key in loadErrors and clears it on a successful (re)load, so a real fetch failure now
           shows a dismissible, retry-able banner instead of a wrong-looking zero. */}
       {Object.entries(loadErrors).filter(([, msg]) => msg).map(([section, msg]) => (
-        <div key={section} className="card" style={{
+        // role="alert" so a screen-reader user hears the failure when the banner appears —
+        // this page's loading region already announces politely; a fetch failure should not
+        // be the one async state that stays silent (dashboard critique P2, S569).
+        <div key={section} role="alert" className="card" style={{
           marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
           borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
           background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
@@ -2099,7 +2159,7 @@ export default function ClientDashboard() {
         if (!s.label || s.days === null || s.days > 7) return null
         const isExpired = s.days < 0
         return (
-          <div className="card" style={{ marginBottom: 20, borderColor: s.border, background: s.bg }}>
+          <div className="card" role="status" aria-live="polite" style={{ marginBottom: 20, borderColor: s.border, background: s.bg }}>
             <p style={{ color: s.color, margin: 0, fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               <TriangleAlert size={16} aria-hidden="true" />
               {isExpired ? 'Your subscription has expired' : `Your ${s.label.startsWith('Trial') ? 'trial' : 'subscription'} expires in ${s.days} day${s.days !== 1 ? 's' : ''}`}
@@ -2219,16 +2279,16 @@ export default function ClientDashboard() {
            siblings — it's the one figure with its own health-verdict color, so it's the natural
            focal point. Everything else (reference cards, charts, tables) renders full-width
            below the equal-width grid instead, in the imsDetails section further down. */
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+        <div className="stat-grid stat-grid--compact">
           <div style={{ gridColumn: 'span 2' }}>{foodCostCard}</div>
           {netPurchasesCard}{revenueCard}{netMarginCard}{wastageCard}
         </div>
       ) : (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
+          <div className="stat-grid stat-grid--compact" style={{ marginBottom: 14 }}>
             {netPurchasesCard}{revenueCard}{foodCostCard}{fixedCostsCard}{netMarginCard}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
+          <div className="stat-grid stat-grid--compact" style={{ marginBottom: 14 }}>
             {activePeriodCard}{itemsCard}{vendorsCard}{recipesCard}{menuHealthCard}{wastageCard}
           </div>
           {imsChartsAndTables}
@@ -2252,7 +2312,7 @@ export default function ClientDashboard() {
               Pending Approvals is still the section's headline — spans 2 columns for visual
               weight, same instinct as IMS's Food Cost % above — but "headline" means "biggest,"
               not "only thing shown." */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+          <div className="stat-grid stat-grid--compact">
             {showModuleHeaders && <div style={{ gridColumn: 'span 2' }}>{hrHeadlineCard}</div>}
             {hrSecondaryCards}
           </div>
@@ -2268,7 +2328,7 @@ export default function ClientDashboard() {
               Waiting/Avg Prep for a kitchen/bar station) are exactly what a mid-rush glance needs,
               not occasional reference data, so they stay visible. Revenue/Open Tickets is still
               the headline via size + position, not via hiding its siblings. */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+          <div className="stat-grid stat-grid--compact">
             {showModuleHeaders && <div style={{ gridColumn: 'span 2' }}>{posIsStationTeam ? posKitchenHeadlineCard : posFrontHeadlineCard}</div>}
             {posIsStationTeam
               ? <>{!showModuleHeaders && posKitchenHeadlineCard}{posKitchenSecondaryCards}</>
@@ -2295,7 +2355,7 @@ export default function ClientDashboard() {
         <div style={{ marginBottom: 14 }}>
           {detailsToggle('ims', 6, 'ims-details-panel')}
           {openDetails.ims && (
-            <div id="ims-details-panel" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginTop: 10, marginBottom: 14 }}>
+            <div id="ims-details-panel" className="stat-grid stat-grid--compact" style={{ marginTop: 10, marginBottom: 14 }}>
               {activePeriodCard}{itemsCard}{vendorsCard}{recipesCard}{menuHealthCard}{fixedCostsCard}
             </div>
           )}

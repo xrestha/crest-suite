@@ -509,12 +509,13 @@ export default function PurchaseOrders() {
               </select>
             </div>
             <div className="form-field">
-              <label>
+              <label htmlFor="po-expected-date">
                 <Tip width={240} text="Optional. The date you expect the vendor to deliver. Shown on the PO list for follow-up.">
                   Expected Delivery
                 </Tip>
               </label>
               <BsCalendarPicker
+                id="po-expected-date"
                 value={poForm.expected_date}
                 onChange={v => setPoForm(f => ({ ...f, expected_date: v }))}
                 placeholder="Pick delivery date"

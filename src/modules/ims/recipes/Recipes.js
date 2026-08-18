@@ -1086,9 +1086,10 @@ export default function Recipes() {
               ) : (
                 <>
                   <div className="form-field">
-                    <label><Tip text="Enter the menu price. The system strips VAT and stores the ex-VAT price for accurate food cost calculation." width={280}>Menu Price (NPR{liveVat > 0 ? `, incl. ${(liveVat * 100).toFixed(0)}% VAT` : ', no VAT'})</Tip></label>
+                    <label htmlFor="recipe-f9"><Tip text="Enter the menu price. The system strips VAT and stores the ex-VAT price for accurate food cost calculation." width={280}>Menu Price (NPR{liveVat > 0 ? `, incl. ${(liveVat * 100).toFixed(0)}% VAT` : ', no VAT'})</Tip></label>
                     <div style={{ position: 'relative' }}>
                       <input
+                        id="recipe-f9"
                         type="number"
                         key={`${recipeForm.selling_price ? 'has-price' : 'no-price'}-vat${recipeForm.vat_rate}`}
                         defaultValue={recipeForm.selling_price ? (parseFloat(recipeForm.selling_price) * (1 + liveVat)).toFixed(2) : ''}
@@ -1122,7 +1123,7 @@ export default function Recipes() {
                     </select>
                   </div>
                   <div className="form-field">
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <label htmlFor="recipe-f10" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Tip text="Target food cost % for this recipe. Used to compute the suggested menu price. Nepal F&B average: 28–35%." width={260}>Target FC %</Tip>
                       {fcPctSaved !== null && (
                         <span style={{ fontSize: 10, color: recipeForm.target_fc_pct !== fcPctSaved ? 'var(--theme-amber-text)' : 'var(--theme-green-text)', lineHeight: 1 }}>●</span>
@@ -1130,6 +1131,7 @@ export default function Recipes() {
                     </label>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       <input
+                        id="recipe-f10"
                         type="number" min="1" max="100"
                         style={{ flex: 1 }}
                         value={recipeForm.target_fc_pct}

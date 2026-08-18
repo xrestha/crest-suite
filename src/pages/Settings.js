@@ -268,16 +268,18 @@ export default function Settings() {
           </h3>
           <div className="form-grid form-grid-2">
             <div className="form-field">
-              <label>{isAdmin ? 'App Name' : 'Property Name'}</label>
+              <label htmlFor="set-app-name">{isAdmin ? 'App Name' : 'Property Name'}</label>
               <input
+                id="set-app-name"
                 value={form.app_name || ''}
                 onChange={e => update('app_name', e.target.value)}
                 placeholder={isAdmin ? 'Crest Suite' : 'e.g. Casa Acai Cafe'}
               />
             </div>
             <div className="form-field">
-              <label>Tagline</label>
+              <label htmlFor="set-app-tagline">Tagline</label>
               <input
+                id="set-app-tagline"
                 value={form.app_tagline || ''}
                 onChange={e => update('app_tagline', e.target.value)}
                 placeholder={isAdmin ? 'Hospitality cost control, built for Nepal.' : 'e.g. Fresh bowls, made daily.'}
@@ -348,14 +350,14 @@ export default function Settings() {
               { key: 'invoice_prefix', label: 'Invoice Prefix', placeholder: 'e.g. CAC', tip: 'Short client code used in POS invoice numbers, e.g. TI2238-CAC-82/83. Auto-suggested from the property name; edit if you want something different.', upper: true },
             ].map(f => (
               <div key={f.key} className="form-field">
-                <label>{f.tip ? <Tip text={f.tip} width={280}>{f.label}</Tip> : f.label}</label>
-                <input value={form[f.key] || ''} onChange={e => update(f.key, f.upper ? e.target.value.toUpperCase() : e.target.value)} placeholder={f.placeholder} />
+                <label htmlFor={`set-${f.key}`}>{f.tip ? <Tip text={f.tip} width={280}>{f.label}</Tip> : f.label}</label>
+                <input id={`set-${f.key}`} value={form[f.key] || ''} onChange={e => update(f.key, f.upper ? e.target.value.toUpperCase() : e.target.value)} placeholder={f.placeholder} />
               </div>
             ))}
             <div className="form-field">
-              <label><Tip text="On = POS bills print as a Tax Invoice with a VAT breakdown (invoice numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). Matches whether this client is actually VAT-registered with IRD." width={280}>VAT Registered</Tip></label>
+              <label htmlFor="set-is-vat-registered"><Tip text="On = POS bills print as a Tax Invoice with a VAT breakdown (invoice numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). Matches whether this client is actually VAT-registered with IRD." width={280}>VAT Registered</Tip></label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 34 }}>
-                <input type="checkbox" checked={form.is_vat_registered ?? true}
+                <input id="set-is-vat-registered" type="checkbox" checked={form.is_vat_registered ?? true}
                   onChange={e => update('is_vat_registered', e.target.checked)}
                   style={{ width: 16, height: 16, padding: 0, margin: 0, flexShrink: 0, background: 'none', border: 'none', accentColor: 'var(--theme-accent)', cursor: 'pointer' }} />
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{(form.is_vat_registered ?? true) ? 'Yes — issues Tax Invoices' : 'No — PAN Bill only'}</span>
@@ -378,9 +380,9 @@ export default function Settings() {
               { key: 'variance_flag_pct', label: 'Variance Flag threshold', placeholder: '10', suffix: '%', hint: 'Variance report flags items above this %', tip: 'Items with a usage variance above this % are highlighted in the Variance Report. E.g. 10 = flag when actual usage is >10% above theoretical.' },
             ].map(f => (
               <div key={f.key} className="form-field">
-                <label><Tip text={f.tip} width={280}>{f.label}</Tip></label>
+                <label htmlFor={`set-${f.key}`}><Tip text={f.tip} width={280}>{f.label}</Tip></label>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input type="number" value={form[f.key] || ''} onChange={e => update(f.key, e.target.value)} placeholder={f.placeholder} style={{ width: 100 }} />
+                  <input id={`set-${f.key}`} type="number" value={form[f.key] || ''} onChange={e => update(f.key, e.target.value)} placeholder={f.placeholder} style={{ width: 100 }} />
                   <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{f.suffix}</span>
                 </div>
                 <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>{f.hint}</span>
@@ -395,9 +397,9 @@ export default function Settings() {
                 onText: 'Yes — shows a warning', offText: 'No — no warning' },
             ].map(f => (
               <div key={f.key} className="form-field">
-                <label><Tip text={f.tip} width={280}>{f.label}</Tip></label>
+                <label htmlFor={`set-${f.key}`}><Tip text={f.tip} width={280}>{f.label}</Tip></label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 34 }}>
-                  <input type="checkbox" checked={form[f.key] ?? f.def}
+                  <input id={`set-${f.key}`} type="checkbox" checked={form[f.key] ?? f.def}
                     onChange={e => update(f.key, e.target.checked)}
                     style={{ width: 16, height: 16, padding: 0, margin: 0, flexShrink: 0, background: 'none', border: 'none', accentColor: 'var(--theme-accent)', cursor: 'pointer' }} />
                   <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{(form[f.key] ?? f.def) ? f.onText : f.offText}</span>
@@ -417,8 +419,9 @@ export default function Settings() {
           </p>
           <div className="form-grid form-grid-2">
             <div className="form-field">
-              <label><Tip text="Short prefix added before the sequential number on every item code. E.g. 'ITM' → ITM-001. Changing this and regenerating will renumber all items." width={280}>Code Prefix</Tip></label>
+              <label htmlFor="set-item-code-prefix"><Tip text="Short prefix added before the sequential number on every item code. E.g. 'ITM' → ITM-001. Changing this and regenerating will renumber all items." width={280}>Code Prefix</Tip></label>
               <input
+                id="set-item-code-prefix"
                 value={form.item_code_prefix || ''}
                 onChange={e => update('item_code_prefix', e.target.value.toUpperCase())}
                 placeholder="ITM"
@@ -457,8 +460,9 @@ export default function Settings() {
           </p>
           <div className="form-grid form-grid-2">
             <div className="form-field">
-              <label><Tip text="Short prefix added before the sequential number on every vendor code. E.g. 'VND' → VND-001." width={260}>Code Prefix</Tip></label>
+              <label htmlFor="set-vendor-code-prefix"><Tip text="Short prefix added before the sequential number on every vendor code. E.g. 'VND' → VND-001." width={260}>Code Prefix</Tip></label>
               <input
+                id="set-vendor-code-prefix"
                 value={form.vendor_code_prefix || ''}
                 onChange={e => update('vendor_code_prefix', e.target.value.toUpperCase())}
                 placeholder="VND"
@@ -497,8 +501,9 @@ export default function Settings() {
           </p>
           <div className="form-grid form-grid-2">
             <div className="form-field">
-              <label><Tip text="Short prefix for sub-recipe codes. E.g. 'SRC' → SRC-001. Sub-recipes appear as reusable ingredients inside other recipes." width={270}>Code Prefix</Tip></label>
+              <label htmlFor="set-sub-recipe-code-prefix"><Tip text="Short prefix for sub-recipe codes. E.g. 'SRC' → SRC-001. Sub-recipes appear as reusable ingredients inside other recipes." width={270}>Code Prefix</Tip></label>
               <input
+                id="set-sub-recipe-code-prefix"
                 value={form.sub_recipe_code_prefix || ''}
                 onChange={e => update('sub_recipe_code_prefix', e.target.value.toUpperCase())}
                 placeholder="SRC"
@@ -586,18 +591,18 @@ export default function Settings() {
           </p>
           <div className="form-grid form-grid-2">
             <div className="form-field">
-              <label>Phone</label>
-              <input value={form.contact_phone || ''} onChange={e => update('contact_phone', e.target.value)} placeholder="e.g. 9809727572" />
+              <label htmlFor="set-contact-phone">Phone</label>
+              <input id="set-contact-phone" value={form.contact_phone || ''} onChange={e => update('contact_phone', e.target.value)} placeholder="e.g. 9809727572" />
               <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Shown as a clickable call link</span>
             </div>
             <div className="form-field">
-              <label>Email</label>
-              <input type="email" value={form.contact_email || ''} onChange={e => update('contact_email', e.target.value)} placeholder="e.g. info@cresthospitality.com" />
+              <label htmlFor="set-contact-email">Email</label>
+              <input id="set-contact-email" type="email" value={form.contact_email || ''} onChange={e => update('contact_email', e.target.value)} placeholder="e.g. info@cresthospitality.com" />
               <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Shown as a clickable mailto link</span>
             </div>
             <div className="form-field">
-              <label>Website</label>
-              <input value={form.contact_website || ''} onChange={e => update('contact_website', e.target.value)} placeholder="e.g. cresthospitality.com" />
+              <label htmlFor="set-contact-website">Website</label>
+              <input id="set-contact-website" value={form.contact_website || ''} onChange={e => update('contact_website', e.target.value)} placeholder="e.g. cresthospitality.com" />
               <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Shown as a clickable external link</span>
             </div>
           </div>
@@ -663,8 +668,9 @@ export default function Settings() {
               <div className="form-grid form-grid-3">
                 {['starter', 'growth', 'pro'].map(tier => (
                   <div className="form-field" key={tier}>
-                    <label style={{ textTransform: 'capitalize' }}>{tier}</label>
+                    <label htmlFor={`set-ims-price-${tier}`} style={{ textTransform: 'capitalize' }}>{tier}</label>
                     <input
+                      id={`set-ims-price-${tier}`}
                       type="number" min="0" step="100"
                       readOnly={isAnnual}
                       value={isAnnual ? annualOf(imsPrices[tier]) : (imsPrices[tier] ?? '')}
@@ -680,8 +686,9 @@ export default function Settings() {
             <div className="card">
               <h4 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: MODULE_COLORS.hr }}>Crest HR — flat (no tiers)</h4>
               <div className="form-field" style={{ maxWidth: 220 }}>
-                <label>{isAnnual ? 'Annual (equivalent /mo)' : 'Monthly price'}</label>
+                <label htmlFor="set-hr-price">{isAnnual ? 'Annual (equivalent /mo)' : 'Monthly price'}</label>
                 <input
+                  id="set-hr-price"
                   type="number" min="0" step="100"
                   readOnly={isAnnual}
                   value={isAnnual ? annualOf(planPrices.hr) : (planPrices.hr ?? '')}
@@ -695,8 +702,9 @@ export default function Settings() {
             <div className="card">
               <h4 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: MODULE_COLORS.pos }}>Crest POS — flat (no tiers)</h4>
               <div className="form-field" style={{ maxWidth: 220 }}>
-                <label>{isAnnual ? 'Annual (equivalent /mo)' : 'Monthly price'}</label>
+                <label htmlFor="set-pos-price">{isAnnual ? 'Annual (equivalent /mo)' : 'Monthly price'}</label>
                 <input
+                  id="set-pos-price"
                   type="number" min="0" step="100"
                   readOnly={isAnnual}
                   value={isAnnual ? annualOf(planPrices.pos) : (planPrices.pos ?? '')}

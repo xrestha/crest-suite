@@ -202,20 +202,20 @@ export default function AdminClients() {
           <h3 style={{ margin: '0 0 20px', fontSize: 15, color: 'var(--theme-text1)' }}>New Client</h3>
           <div className="form-grid form-grid-2">
             <div className="form-field">
-              <label>Property / Restaurant Name *</label>
-              <input value={newForm.name} onChange={e => setNewForm({ ...newForm, name: e.target.value })} placeholder="e.g. Casa Acai Cafe" autoFocus />
+              <label htmlFor="adm-new-name">Property / Restaurant Name *</label>
+              <input id="adm-new-name" value={newForm.name} onChange={e => setNewForm({ ...newForm, name: e.target.value })} placeholder="e.g. Casa Acai Cafe" autoFocus />
             </div>
             <div className="form-field">
-              <label><Tip text="City or area where this property operates. Shown on reports and helps identify multi-location clients.">Location</Tip></label>
-              <input value={newForm.location} onChange={e => setNewForm({ ...newForm, location: e.target.value })} placeholder="e.g. Jhamsikhel, Kathmandu" />
+              <label htmlFor="adm-new-location"><Tip text="City or area where this property operates. Shown on reports and helps identify multi-location clients.">Location</Tip></label>
+              <input id="adm-new-location" value={newForm.location} onChange={e => setNewForm({ ...newForm, location: e.target.value })} placeholder="e.g. Jhamsikhel, Kathmandu" />
             </div>
             <div className="form-field">
-              <label><Tip text="Primary contact — owner or manager name used for billing and support correspondence.">Contact Person</Tip></label>
-              <input value={newForm.contact_person} onChange={e => setNewForm({ ...newForm, contact_person: e.target.value })} placeholder="Owner / Manager name" />
+              <label htmlFor="adm-new-contact"><Tip text="Primary contact — owner or manager name used for billing and support correspondence.">Contact Person</Tip></label>
+              <input id="adm-new-contact" value={newForm.contact_person} onChange={e => setNewForm({ ...newForm, contact_person: e.target.value })} placeholder="Owner / Manager name" />
             </div>
             <div className="form-field">
-              <label>Phone</label>
-              <input value={newForm.contact_phone} onChange={e => setNewForm({ ...newForm, contact_phone: e.target.value })} placeholder="98XXXXXXXX" />
+              <label htmlFor="adm-new-phone">Phone</label>
+              <input id="adm-new-phone" value={newForm.contact_phone} onChange={e => setNewForm({ ...newForm, contact_phone: e.target.value })} placeholder="98XXXXXXXX" />
             </div>
           </div>
           {formError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{formError}</p>}

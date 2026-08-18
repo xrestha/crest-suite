@@ -48,7 +48,7 @@ export default function NewGatePassModal({ vendors, onClose, onSaved }) {
     <Modal onClose={onClose} title="New Gate Pass" maxWidth={480}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="form-field">
-          <label>
+          <label htmlFor="newgat-f5">
             <Tip text="Link to an existing vendor, or type a company name for a one-off visitor" width={280}>
               Vendor / Company
             </Tip>
@@ -58,9 +58,9 @@ export default function NewGatePassModal({ vendors, onClose, onSaved }) {
             <button type="button" className={`tab-btn${!useExisting ? ' tab-btn--active' : ''}`} onClick={() => setUseExisting(false)}>Other / Company Name</button>
           </div>
           {useExisting ? (
-            <SearchableSelect value={vendorId} onChange={setVendorId} options={vendorOptions} placeholder="— Select vendor —" />
+            <SearchableSelect id="newgat-f5" value={vendorId} onChange={setVendorId} options={vendorOptions} placeholder="— Select vendor —" />
           ) : (
-            <input value={vendorName} onChange={e => setVendorName(e.target.value)} placeholder="e.g. ABC Courier" />
+            <input id="newgat-f5" value={vendorName} onChange={e => setVendorName(e.target.value)} placeholder="e.g. ABC Courier" />
           )}
         </div>
         <div className="form-field">

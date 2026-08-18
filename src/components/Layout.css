@@ -1675,6 +1675,17 @@ textarea:focus-visible {
   margin-bottom: 28px;
 }
 
+/* ClientDashboard's KPI rows — deliberately denser than the default stat-grid (S439's compact
+   money-pill tier). One named variant instead of six silent inline reimplementations (S569, from
+   the dashboard critique): gap steps to 8 (on the 4/8/16/24 scale — the inline copies used an
+   off-scale 10), and margin-bottom resets to 0 since these rows carry their own inline margins
+   where the surrounding layout needs them. */
+.stat-grid--compact {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 0;
+}
+
 /* ClientDashboard.jsx's 3-column layout (IMS/HR/POS) — equal-width columns. IMS's own row here
    is a trimmed top-pill strip (card count matched to HR/POS), not its full card set, so equal
    width doesn't mean equal density — the rest of IMS's content renders full-width below the grid.

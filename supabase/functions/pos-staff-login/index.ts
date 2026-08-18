@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { derivePinPassword, getAppSecrets, encryptPin } from '../_shared/pinPassword.ts'
+import { derivePinPassword, getAppSecrets } from '../_shared/pinPassword.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -100,63 +100,16 @@ Deno.serve(async (req) => {
     // who has the email and guesses the right PIN still cannot construct the string GoTrue expects,
     // so hammering /token directly with the anon key is no longer a route to a session at all.
     // Every path to a POS session now runs through this function, where the lockout is enforced.
-    const { pepper, vaultKey } = await getAppSecrets(admin)
+    const { pepper } = await getAppSecrets(admin)
     const derived = await derivePinPassword(staff.pos_email, pin, pepper)
-    let { data: signInData } = await authClient.auth.signInWithPassword({
+    const { data: signInData } = await authClient.auth.signInWithPassword({
       email: staff.pos_email, password: derived,
     })
+    // The raw-PIN legacy fallback (lazy password upgrade + vault backfill) that used to live here
+    // was removed 2026-08-18 (S569) after a live vault-coverage check showed zero accounts left on
+    // a raw-PIN password — every remaining account signs in with the derived value only, so the
+    // direct-brute-force window that fallback documented is now fully closed.
 
-    // ── Lazy upgrade for accounts created before the derivation change ──────────────────────
-    // Their stored password is still the raw PIN. Migrating them eagerly is impossible: PINs are
-    // not stored anywhere, so there is nothing to re-derive from without the employee present.
-    // Instead the correct PIN, supplied here at login, is the one moment we can compute the new
-    // value — so we verify against the old password, then rewrite it.
-    //
-    // Note this leaves the direct-brute-force window open for any account that has not logged in
-    // since deploy. It narrows on its own as staff sign in, but it does not close by itself:
-    // delete this whole block once POS Staff shows no stale accounts, and force-reset whatever
-    // is left. Until then the window is real, just shrinking.
-    if (!signInData?.session) {
-      const { data: legacyData } = await authClient.auth.signInWithPassword({
-        email: staff.pos_email, password: pin,
-      })
-      if (legacyData?.session) {
-        // This branch is the ONLY place a pre-existing account's plaintext PIN is ever observable
-        // server-side — it was never stored, and nobody but the employee knows it. So it is also
-        // the only chance to backfill the vault (20260812110000) without making someone reset a
-        // PIN that works fine. Best-effort: a vault failure must not cost the employee their
-        // login. Accounts that never sign in and are never reset simply stay unrecoverable, which
-        // rederive_pin_passwords reports rather than hides.
-        try {
-          if (vaultKey) {
-            await admin.from('staff_pin_vault').upsert({
-              user_id: staff_id, client_id, kind: 'pos',
-              pin_cipher: await encryptPin(pin, vaultKey), updated_at: new Date().toISOString(),
-            }, { onConflict: 'user_id' })
-          }
-        } catch (e) {
-          console.error('[pos-staff-login] vault backfill failed:', e instanceof Error ? e.message : e)
-        }
-
-        const { error: upgradeErr } = await admin.auth.admin.updateUserById(staff_id, { password: derived })
-        if (upgradeErr) {
-          console.error('[pos-staff-login] PIN password upgrade FAILED — account still on raw-PIN password:', upgradeErr.message)
-          signInData = legacyData
-        } else {
-          // Re-sign-in rather than reusing legacyData's tokens: a password change can revoke
-          // refresh tokens issued before it, which would hand the device a session that dies at
-          // its first refresh — mid-service, on a till. One extra call, once per account, ever.
-          const { data: freshData } = await authClient.auth.signInWithPassword({
-            email: staff.pos_email, password: derived,
-          })
-          signInData = freshData?.session ? freshData : legacyData
-        }
-      }
-    }
-
-    // One attempt from the lockout's point of view, whichever branch above produced the session —
-    // the fallback must not let a wrong PIN cost two counts, or a fat-fingered employee locks out
-    // in 3 tries instead of 5.
     const succeeded = !!signInData?.session
     const { data: attemptData, error: attemptErr } = await admin.rpc('record_pos_pin_attempt', {
       p_staff_id: staff_id, p_success: succeeded,

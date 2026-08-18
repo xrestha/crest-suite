@@ -181,8 +181,8 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
           </select>
         </div>
         <div className="form-field">
-          <label>Day (BS) *</label>
-          <BsCalendarPicker lockYear={period?.bs_year} lockMonth={period?.bs_month} value={billHeader.bs_day} onChange={handleHeaderDayChange} placeholder="Pick day" />
+          <label htmlFor="pb-day">Day (BS) *</label>
+          <BsCalendarPicker id="pb-day" lockYear={period?.bs_year} lockMonth={period?.bs_month} value={billHeader.bs_day} onChange={handleHeaderDayChange} placeholder="Pick day" />
         </div>
         <div className="form-field">
           <label htmlFor="purcha-f2"><Tip text="Vendor's invoice or bill number. Shared across all items on this bill." width={240}>Invoice Ref</Tip></label>

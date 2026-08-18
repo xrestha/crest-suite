@@ -1,16 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { daysInBsMonth, getBsToday, bsToAd, adToBs, formatAd, BS_MONTHS } from '../utils/bsCalendar'
+import { daysInBsMonth, getBsToday, bsToAd, adToBsSafe, formatAd, BS_MONTHS, BS_YEAR_MIN, BS_YEAR_MAX } from '../utils/bsCalendar'
 import SearchableSelect from './SearchableSelect'
 
 const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
-// Wide enough for any realistic Date of Birth or business date without the list getting
-// unwieldy — this one component is shared by DOB, join/retirement dates, purchase dates,
-// leave requests, etc., so it can't be tuned per-usage. Note: the precise BS day-count table
-// (bsCalendar.js) only covers 2079–2087; years outside that already fall back to a flat
-// 30-day/month approximation — pre-existing, unrelated to this picker, just reachable faster now.
-const YEAR_RANGE = Array.from({ length: 91 }, (_, i) => 2000 + i) // 2000..2090
+// Exactly the verified BS_CALENDAR range (2000–2087 as of S559) — this one component is shared
+// by DOB, join/retirement dates, purchase dates, leave requests, etc., and it both DISPLAYS and
+// WRITES dates, so a year outside the verified table must not be selectable at all: bsToAd on an
+// approximated year would silently store a wrong AD date (the S559 five-days-out DOB bug).
+const YEAR_RANGE = Array.from({ length: BS_YEAR_MAX - BS_YEAR_MIN + 1 }, (_, i) => BS_YEAR_MIN + i)
 const YEAR_OPTIONS = YEAR_RANGE.map(y => ({ value: String(y), label: String(y) }))
 
 /**
@@ -36,10 +35,13 @@ export default function BsCalendarPicker({
   const locked = lockYear != null && lockMonth != null
   const today  = getBsToday()
 
-  // Resolve the currently-selected BS date from value, per mode
+  // Resolve the currently-selected BS date from value, per mode. adToBsSafe (not adToBs): a
+  // stored AD date outside the verified table (pre-1943 / post-2031) converts to a confidently
+  // WRONG BS date under the plain function — better to show the raw AD date (below) and let the
+  // grid open at today than to display and potentially re-save an approximation.
   const selected = locked
     ? (value ? { year: lockYear, month: lockMonth, day: parseInt(value) } : null)
-    : (value ? adToBs(new Date(value.includes('T') ? value : value + 'T00:00:00')) : null)
+    : (value ? adToBsSafe(new Date(value.includes('T') ? value : value + 'T00:00:00')) : null)
 
   const [navYear,  setNavYear]  = useState(selected?.year  || lockYear  || today.year)
   const [navMonth, setNavMonth] = useState(selected?.month || lockMonth || today.month)
@@ -93,13 +95,17 @@ export default function BsCalendarPicker({
 
   function prevMonth() {
     if (locked) return
-    if (navMonth === 1) { setNavYear(y => y - 1); setNavMonth(12) }
-    else setNavMonth(m => m - 1)
+    if (navMonth === 1) {
+      if (navYear <= BS_YEAR_MIN) return // don't walk off the verified table
+      setNavYear(y => y - 1); setNavMonth(12)
+    } else setNavMonth(m => m - 1)
   }
   function nextMonth() {
     if (locked) return
-    if (navMonth === 12) { setNavYear(y => y + 1); setNavMonth(1) }
-    else setNavMonth(m => m + 1)
+    if (navMonth === 12) {
+      if (navYear >= BS_YEAR_MAX) return // don't walk off the verified table
+      setNavYear(y => y + 1); setNavMonth(1)
+    } else setNavMonth(m => m + 1)
   }
 
   function selectDay(day) {
@@ -131,9 +137,11 @@ export default function BsCalendarPicker({
   for (let d = 1; d <= daysCount; d++) cells.push(d)
   while (cells.length % 7 !== 0) cells.push(null)
 
+  // A value whose BS conversion is out of the verified range still displays — as its truthful
+  // AD form — rather than as a silently-approximated BS date or a blank that reads as "unset".
   const displayValue = selected
     ? `${selected.day} ${BS_MONTHS[selected.month - 1]} ${selected.year}`
-    : ''
+    : (!locked && value ? `${value.slice(0, 10)} (AD)` : '')
 
   const navBtn = (enabled) => ({
     background: 'none', border: 'none',

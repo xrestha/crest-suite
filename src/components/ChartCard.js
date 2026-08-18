@@ -105,7 +105,9 @@ export default function ChartCard({
   return (
     <div className="card" style={{ padding: '14px 16px', ...cardStyle }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-        <div style={ts}>{title}</div>
+        {/* A real <h3>, not a styled div, so screen-reader users can jump between charts by
+            heading (dashboard critique P2, S569). margin reset since h3 otherwise adds its own. */}
+        <h3 style={{ margin: 0, ...ts }}>{title}</h3>
         <div style={{ display: 'flex', gap: 14, fontSize: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           {legend}
           {/* aria-label, not title alone: `title` is an unreliable accessible name and is invisible

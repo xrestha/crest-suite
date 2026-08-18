@@ -238,12 +238,12 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
       <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14 }}>
         {NUTRIENTS.map(def => (
           <div className="form-field" key={def.key}>
-            <label htmlFor="nutrit-f3">
+            <label htmlFor={`nutrit-${def.key}`}>
               {def.key === 'sodium_mg'
                 ? <Tip width={220} text="Sodium is in milligrams (mg), not grams. 1 g salt ≈ 388 mg sodium.">{def.label} ({def.unit})</Tip>
                 : `${def.label} (${def.unit})`}
             </label>
-            <input id="nutrit-f3" type="number" min="0" step="any" value={nutriForm[def.key]}
+            <input id={`nutrit-${def.key}`} type="number" min="0" step="any" value={nutriForm[def.key]}
               onChange={e => setNF({ [def.key]: e.target.value })} placeholder="0" />
           </div>
         ))}

@@ -91,8 +91,9 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
           </div>
         </div>
         <div className="form-field">
-          <label>Vehicle Number *</label>
+          <label htmlFor="park-vehicle-number">Vehicle Number *</label>
           <input
+            id="park-vehicle-number"
             value={vehicleNumber}
             onChange={e => setVehicleNumber(e.target.value)}
             placeholder="e.g. BA 2 KHA 1234"
@@ -115,16 +116,18 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
           </div>
         </div>
         <div className="form-field">
-          <label>Customer Name</label>
+          <label htmlFor="park-customer-name">Customer Name</label>
           <input
+            id="park-customer-name"
             value={customerName}
             onChange={e => setCustomerName(e.target.value)}
             placeholder="Optional"
           />
         </div>
         <div className="form-field">
-          <label><Tip text="Link this slip to a bill already issued today — e.g. to honor a 'free parking with purchase' policy. Only today's bills are listed." width={280}>Bill Number</Tip></label>
+          <label htmlFor="park-bill-number"><Tip text="Link this slip to a bill already issued today — e.g. to honor a 'free parking with purchase' policy. Only today's bills are listed." width={280}>Bill Number</Tip></label>
           <SearchableSelect
+            id="park-bill-number"
             value={billOrderId}
             onChange={setBillOrderId}
             options={billOptions}
@@ -132,8 +135,9 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
           />
         </div>
         <div className="form-field">
-          <label>Notes</label>
+          <label htmlFor="park-notes">Notes</label>
           <textarea
+            id="park-notes"
             value={notes}
             onChange={e => setNotes(e.target.value)}
             placeholder="Optional"

@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { derivePinPassword, getAppSecrets, encryptPin } from '../_shared/pinPassword.ts'
+import { derivePinPassword, getAppSecrets } from '../_shared/pinPassword.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -121,52 +121,16 @@ Deno.serve(async (req) => {
     // always skip it by pointing signInWithPassword straight at GoTrue, needing just an email and
     // 10,000 guesses. With a peppered derivation that route stops working entirely, because the
     // password can no longer be computed from the PIN off-server.
-    const { pepper, vaultKey } = await getAppSecrets(admin)
+    const { pepper } = await getAppSecrets(admin)
     const derived = await derivePinPassword(profile.hr_self_service_email, pin, pepper)
-    let { data: signInData } = await authClient.auth.signInWithPassword({
+    const { data: signInData } = await authClient.auth.signInWithPassword({
       email: profile.hr_self_service_email, password: derived,
     })
+    // The raw-PIN legacy fallback (lazy password upgrade + vault backfill) that used to live here
+    // was removed 2026-08-18 (S569) after a live vault-coverage check showed zero accounts left on
+    // a raw-PIN password — every remaining account signs in with the derived value only, so the
+    // direct-brute-force route this file's header describes is now closed for every account.
 
-    // Lazy upgrade for accounts enrolled before the change — identical in shape and rationale to
-    // pos-staff-login's, including the caveat: the direct-brute-force window stays open for any
-    // employee who has not signed in since deploy, and only a later force-reset closes it fully.
-    // There is no reset_hr_pin action, so "force-reset" here means re-enrolling the employee via
-    // create_hr_self_service_login — worth knowing before planning that cleanup.
-    if (!signInData?.session) {
-      const { data: legacyData } = await authClient.auth.signInWithPassword({
-        email: profile.hr_self_service_email, password: pin,
-      })
-      if (legacyData?.session) {
-        // Same reasoning as pos-staff-login: this is the only point at which a pre-existing
-        // account's plaintext PIN is observable, so it is the only chance to backfill the vault
-        // without forcing a reset. Best-effort — never cost an employee their login over it.
-        try {
-          if (vaultKey) {
-            await admin.from('staff_pin_vault').upsert({
-              user_id: staff_id, client_id: profile.client_id, kind: 'hr_self_service',
-              pin_cipher: await encryptPin(pin, vaultKey), updated_at: new Date().toISOString(),
-            }, { onConflict: 'user_id' })
-          }
-        } catch (e) {
-          console.error('[hr-selfservice-login] vault backfill failed:', e instanceof Error ? e.message : e)
-        }
-
-        const { error: upgradeErr } = await admin.auth.admin.updateUserById(staff_id, { password: derived })
-        if (upgradeErr) {
-          console.error('[hr-selfservice-login] PIN password upgrade FAILED — account still on raw-PIN password:', upgradeErr.message)
-          signInData = legacyData
-        } else {
-          // Re-sign-in so the returned tokens postdate the password change; a refresh token
-          // issued before it can be revoked by it.
-          const { data: freshData } = await authClient.auth.signInWithPassword({
-            email: profile.hr_self_service_email, password: derived,
-          })
-          signInData = freshData?.session ? freshData : legacyData
-        }
-      }
-    }
-
-    // Still exactly one attempt against the lockout regardless of which branch ran.
     const succeeded = !!signInData?.session
     const { data: attemptData, error: attemptErr } = await admin.rpc('record_hr_pin_attempt', {
       p_staff_id: staff_id, p_success: succeeded,

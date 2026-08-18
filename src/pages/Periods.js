@@ -510,8 +510,9 @@ export default function Periods() {
           <h3 style={{ margin: '0 0 20px', fontSize: 15, color: 'var(--theme-text1)' }}>Create Period</h3>
           <div className="form-grid form-grid-2" style={{ maxWidth: 400 }}>
             <div className="form-field">
-              <label><Tip text="Bikram Sambat year. Nepal fiscal year runs Shrawan (month 4) to Ashadh (month 3) of the following BS year." width={270}>BS Year</Tip></label>
+              <label htmlFor="per-bs-year"><Tip text="Bikram Sambat year. Nepal fiscal year runs Shrawan (month 4) to Ashadh (month 3) of the following BS year." width={270}>BS Year</Tip></label>
               <input
+                id="per-bs-year"
                 type="number"
                 value={form.bs_year}
                 onChange={e => setForm({ ...form, bs_year: e.target.value })}
@@ -519,8 +520,8 @@ export default function Periods() {
               />
             </div>
             <div className="form-field">
-              <label><Tip text="Bikram Sambat month (1 = Baisakh … 12 = Chaitra). One period per month — purchases, stock, and sales are all scoped to this period." width={280}>BS Month</Tip></label>
-              <select value={form.bs_month} onChange={e => setForm({ ...form, bs_month: e.target.value })}>
+              <label htmlFor="per-bs-month"><Tip text="Bikram Sambat month (1 = Baisakh … 12 = Chaitra). One period per month — purchases, stock, and sales are all scoped to this period." width={280}>BS Month</Tip></label>
+              <select id="per-bs-month" value={form.bs_month} onChange={e => setForm({ ...form, bs_month: e.target.value })}>
                 {BS_MONTHS.map((m, i) => (
                   <option key={i} value={i + 1}>{i + 1} — {m}</option>
                 ))}
