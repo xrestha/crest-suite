@@ -8,6 +8,22 @@ import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange } from './leaveConstants'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
+
+// A leave type's colour is a CATEGORICAL palette (seeded in leaveConstants.js, editable per
+// client), so it is only trustworthy as a FILL. Two things it got wrong as written:
+//   • the seeds mix literal hexes with `var(--theme-green)`/`var(--theme-text3)`, and the tint was
+//     built by string concatenation (`${t.color}1a`) — which yields `var(--theme-green)1a`, invalid
+//     CSS, so those types silently rendered no tint or border at all;
+//   • several seeds are light pastels (#60a5fa, #a78bfa, #f472b6, #22d3ee) set as 11px/700 TEXT,
+//     which fails contrast on the light presets.
+// typeTint() does the alpha through color-mix (works for a hex and a var() alike) and typeText()
+// mixes the hue toward the page's own text colour, so the type stays distinguishable while staying
+// legible on every theme — the same fill-vs-text split StatPill/Overheads use. The seed values
+// themselves are deliberately untouched.
+const typeFill = c => c || 'var(--theme-text2)'
+const typeTint = (c, pct) => `color-mix(in srgb, ${typeFill(c)} ${pct}%, transparent)`
+const typeText = c => `color-mix(in srgb, ${typeFill(c)} 45%, var(--theme-text1))`
+
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6,
   padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', fontFamily: 'inherit',
@@ -219,8 +235,8 @@ export default function LeaveManagement() {
           <p className="page-subtitle">Leave entitlements, requests, and balances — BS {bsYear}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)', maxWidth: 360 }}>{msg.split(':').slice(1).join(':')}</span>}
-          <select className="form-select" value={bsYear} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
+          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', maxWidth: 360 }}>{msg.split(':').slice(1).join(':')}</span>}
+          <select className="form-select" aria-label="BS year" value={bsYear} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
             {years.map(y => <option key={y} value={y}>BS {y}</option>)}
           </select>
         </div>
@@ -243,38 +259,38 @@ export default function LeaveManagement() {
             <div style={{ fontSize: 12, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>New Request</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'start' }}>
               <div>
-                <label style={lbl}>Employee</label>
-                <select style={{ ...inp, width: '100%' }} value={fEmp} onChange={e => setFEmp(e.target.value)}>
+                <label style={lbl} htmlFor="leave-employee">Employee</label>
+                <select id="leave-employee" style={{ ...inp, width: '100%' }} value={fEmp} onChange={e => setFEmp(e.target.value)}>
                   <option value="">— Select —</option>
                   {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
                 </select>
               </div>
               <div>
-                <label style={lbl}>Leave Type</label>
-                <select style={{ ...inp, width: '100%' }} value={fType} onChange={e => setFType(e.target.value)}>
+                <label style={lbl} htmlFor="leave-type">Leave Type</label>
+                <select id="leave-type" style={{ ...inp, width: '100%' }} value={fType} onChange={e => setFType(e.target.value)}>
                   <option value="">— Select —</option>
                   {activeTypes.map(t => <option key={t.id} value={t.id}>{t.name}{t.paid ? '' : ' (unpaid)'}</option>)}
                 </select>
               </div>
               <div>
-                <label style={lbl}>Start Date</label>
-                <BsCalendarPicker value={fStart} onChange={setFStart} placeholder="Pick start date" />
+                <label style={lbl} htmlFor="leave-start-date">Start Date</label>
+                <BsCalendarPicker id="leave-start-date" value={fStart} onChange={setFStart} placeholder="Pick start date" />
               </div>
               <div>
-                <label style={lbl}>End Date</label>
-                <BsCalendarPicker value={fEnd} onChange={setFEnd} placeholder="Pick end date" />
+                <label style={lbl} htmlFor="leave-end-date">End Date</label>
+                <BsCalendarPicker id="leave-end-date" value={fEnd} onChange={setFEnd} placeholder="Pick end date" />
               </div>
               <div>
-                <label style={lbl}>
+                <label style={lbl} htmlFor="leave-day-type">
                   <Tip text="Only applies to a single-day request — pick the same Start and End date." width={240}>Day Type</Tip>
                 </label>
-                <select style={{ ...inp, width: '100%' }} value={fDayType} disabled={!isSingleDay} onChange={e => setFDayType(e.target.value)}>
+                <select id="leave-day-type" style={{ ...inp, width: '100%' }} value={fDayType} disabled={!isSingleDay} onChange={e => setFDayType(e.target.value)}>
                   {DAY_TYPES.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
                 </select>
               </div>
               <div>
-                <label style={lbl}>Reason</label>
-                <input style={{ ...inp, width: '100%' }} value={fReason} onChange={e => setFReason(e.target.value)} placeholder="Optional" />
+                <label style={lbl} htmlFor="leave-reason">Reason</label>
+                <input id="leave-reason" style={{ ...inp, width: '100%' }} value={fReason} onChange={e => setFReason(e.target.value)} placeholder="Optional" />
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, flexWrap: 'wrap', gap: 8 }}>
@@ -322,7 +338,7 @@ export default function LeaveManagement() {
                           {e.employee_code && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{e.employee_code}</div>}
                         </td>
                         <td>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: t?.color || 'var(--theme-text3)', background: `${t?.color || '#9ca3af'}1a`, border: `1px solid ${t?.color || '#9ca3af'}33`, borderRadius: 8, padding: '2px 8px' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: typeText(t?.color), background: typeTint(t?.color, 10), border: `1px solid ${typeTint(t?.color, 20)}`, borderRadius: 8, padding: '2px 8px' }}>
                             {t?.name || 'Unknown'}{t && !t.paid ? ' · unpaid' : ''}
                           </span>
                         </td>
@@ -333,15 +349,15 @@ export default function LeaveManagement() {
                           {req.reason || '—'}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(req.days)}</td>
-                        <td style={{ textAlign: 'right', color: remaining == null ? 'var(--theme-text2)' : remaining < 0 ? 'var(--theme-red)' : 'var(--theme-text3)' }}>
+                        <td style={{ textAlign: 'right', color: remaining == null ? 'var(--theme-text2)' : remaining < 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>
                           {remaining == null ? '—' : `${fmt(remaining)} / ${fmt(quota)}`}
                         </td>
                         <td><span style={{ fontSize: 11, fontWeight: 700, color: sc.color }}>{sc.label}</span></td>
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                           {req.status === 'pending' && (
                             <>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green)' }} onClick={() => approveRequest(req)} disabled={busy}>Approve</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }} onClick={() => decideRequest(req, 'rejected')} disabled={busy}>Reject</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green-text)' }} onClick={() => approveRequest(req)} disabled={busy}>Approve</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={() => decideRequest(req, 'rejected')} disabled={busy}>Reject</button>
                             </>
                           )}
                           {(req.status === 'pending' || req.status === 'approved') && (
@@ -373,7 +389,7 @@ export default function LeaveManagement() {
                   <tr>
                     <th style={{ position: 'sticky', left: 0, background: 'var(--theme-card)', zIndex: 1 }}>Employee</th>
                     {activeTypes.map(t => (
-                      <th key={t.id} style={{ textAlign: 'right', color: t.color }}>
+                      <th key={t.id} style={{ textAlign: 'right', color: typeText(t.color) }}>
                         <Tip text={`${t.name}: ${t.annual_quota > 0 ? t.annual_quota + ' days/year' : 'uncapped'}${t.paid ? '' : ', unpaid'}. Shows used / quota.`} width={240}>{t.name}</Tip>
                       </th>
                     ))}
@@ -388,7 +404,7 @@ export default function LeaveManagement() {
                         const remaining = t.annual_quota - used
                         const over = t.annual_quota > 0 && remaining < 0
                         return (
-                          <td key={t.id} style={{ textAlign: 'right', color: over ? 'var(--theme-red)' : used > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
+                          <td key={t.id} style={{ textAlign: 'right', color: over ? 'var(--theme-red-text)' : used > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                             {t.annual_quota > 0
                               ? <span><b>{fmt(used)}</b> <span style={{ color: 'var(--theme-text2)' }}>/ {fmt(t.annual_quota)}</span></span>
                               : (used > 0 ? <b>{fmt(used)}</b> : '—')}
@@ -435,22 +451,22 @@ export default function LeaveManagement() {
                   {types.map(t => (
                     <tr key={t.id}>
                       <td>
-                        <input defaultValue={t.name} onBlur={e => updateType(t.id, { name: e.target.value })}
-                          style={{ ...inp, width: '100%', color: t.color, fontWeight: 600 }} />
+                        <input aria-label={`Name — ${t.name}`} defaultValue={t.name} onBlur={e => updateType(t.id, { name: e.target.value })}
+                          style={{ ...inp, width: '100%', color: typeText(t.color), fontWeight: 600 }} />
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <input type="checkbox" checked={t.paid} onChange={e => updateType(t.id, { paid: e.target.checked })} />
+                        <input aria-label={`Paid — ${t.name}`} type="checkbox" checked={t.paid} onChange={e => updateType(t.id, { paid: e.target.checked })} />
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        <input type="number" min="0" step="0.5" defaultValue={t.annual_quota}
+                        <input aria-label={`Annual quota — ${t.name}`} type="number" min="0" step="0.5" defaultValue={t.annual_quota}
                           onBlur={e => updateType(t.id, { annual_quota: parseFloat(e.target.value) || 0 })}
                           style={{ ...inp, width: 90, textAlign: 'right' }} />
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <input type="checkbox" checked={t.carry_forward} onChange={e => updateType(t.id, { carry_forward: e.target.checked })} />
+                        <input aria-label={`Carry forward — ${t.name}`} type="checkbox" checked={t.carry_forward} onChange={e => updateType(t.id, { carry_forward: e.target.checked })} />
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <input type="checkbox" checked={t.active} onChange={e => updateType(t.id, { active: e.target.checked })} />
+                        <input aria-label={`Active — ${t.name}`} type="checkbox" checked={t.active} onChange={e => updateType(t.id, { active: e.target.checked })} />
                       </td>
                     </tr>
                   ))}

@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import Modal from '../../../components/Modal'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { computePayslip } from './payrollCompute'
 import { computeMonthlyTds } from './tds'
@@ -430,7 +431,7 @@ export default function PayrollRun() {
             <h1 className="page-title">Payroll</h1>
             <p className="page-subtitle">
               Monthly payroll run — {periodLabel}
-              {run && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green)' : 'var(--theme-accent)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
+              {run && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -500,9 +501,9 @@ export default function PayrollRun() {
             {/* Stat cards */}
             <div className="stat-grid">
               {[
-                { label: 'Total Gross',  value: totals.gross, color: 'var(--theme-accent)', tip: 'Sum of gross earnings (basic + allowances, or earned wage) across all payslips.' },
-                { label: 'Deductions',   value: totals.ded + totals.ssfEmp + totals.advDed, color: 'var(--theme-red)', tip: 'SSF employee + absence deductions + other deductions + advance recovery + TDS.' },
-                { label: 'Net Payable',  value: totals.net, color: 'var(--theme-green)', tip: 'Total take-home pay to disburse this period.' },
+                { label: 'Total Gross',  value: totals.gross, color: 'var(--theme-accent-ink)', tip: 'Sum of gross earnings (basic + allowances, or earned wage) across all payslips.' },
+                { label: 'Deductions',   value: totals.ded + totals.ssfEmp + totals.advDed, color: 'var(--theme-red-text)', tip: 'SSF employee + absence deductions + other deductions + advance recovery + TDS.' },
+                { label: 'Net Payable',  value: totals.net, color: 'var(--theme-green-text)', tip: 'Total take-home pay to disburse this period.' },
                 { label: 'Employer SSF', value: totals.ssfEmpr, color: 'var(--theme-text2)', tip: '20% SSF the company pays on top — not part of net payable.' },
               ].map(s => (
                 <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
@@ -530,7 +531,7 @@ export default function PayrollRun() {
                       <th style={{ textAlign: 'right' }}><Tip text="Advance or loan installment auto-recovered this period from active advances in the Advances & Loans ledger. Repayment rows are written on Finalize." width={290}>Advance</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Income tax, computed automatically from FY tax slabs using year-to-date projection. Editable while draft if you need to override." width={270}>TDS</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Travel/Daily Allowance reimbursement — a non-taxable amount added after TDS, not part of the taxable gross. Editable while draft." width={290}>TADA</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>Net Pay</th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>Net Pay</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -568,14 +569,14 @@ export default function PayrollRun() {
                             </div>
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(s.gross)}</td>
-                          <td style={{ textAlign: 'right', color: s.ot_amount > 0 ? 'var(--theme-green)' : 'var(--theme-text2)' }}>{s.ot_amount > 0 ? `+${fmt(s.ot_amount)}` : '—'}</td>
-                          <td style={{ textAlign: 'right', color: s.absence_deduction > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>{s.absence_deduction > 0 ? `−${fmt(s.absence_deduction)}` : '—'}</td>
-                          <td style={{ textAlign: 'right', color: s.ssf_employee > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>{s.ssf_employee > 0 ? `−${fmt(s.ssf_employee)}` : '—'}</td>
-                          <td style={{ textAlign: 'right', color: s.other_deductions > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>{s.other_deductions > 0 ? `−${fmt(s.other_deductions)}` : '—'}</td>
-                          <td style={{ textAlign: 'right', color: advDed > 0 ? 'var(--theme-purple)' : 'var(--theme-text2)' }}>{advDed > 0 ? `−${fmt(advDed)}` : '—'}</td>
+                          <td style={{ textAlign: 'right', color: s.ot_amount > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{s.ot_amount > 0 ? `+${fmt(s.ot_amount)}` : '—'}</td>
+                          <td style={{ textAlign: 'right', color: s.absence_deduction > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.absence_deduction > 0 ? `−${fmt(s.absence_deduction)}` : '—'}</td>
+                          <td style={{ textAlign: 'right', color: s.ssf_employee > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.ssf_employee > 0 ? `−${fmt(s.ssf_employee)}` : '—'}</td>
+                          <td style={{ textAlign: 'right', color: s.other_deductions > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.other_deductions > 0 ? `−${fmt(s.other_deductions)}` : '—'}</td>
+                          <td style={{ textAlign: 'right', color: advDed > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>{advDed > 0 ? `−${fmt(advDed)}` : '—'}</td>
                           <td style={{ textAlign: 'right' }}>
                             {finalized
-                              ? <span style={{ color: s.tds > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>{s.tds > 0 ? `−${fmt(s.tds)}` : '—'}</span>
+                              ? <span style={{ color: s.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.tds > 0 ? `−${fmt(s.tds)}` : '—'}</span>
                               : <input type="number" min="0" defaultValue={s.tds || ''} onBlur={e => updateTds(s, e.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
                           </td>
                           <td style={{ textAlign: 'right' }}>
@@ -588,11 +589,11 @@ export default function PayrollRun() {
                                 </Tip>
                               )}
                               {finalized
-                                ? <span style={{ color: (s.tada_amount || 0) > 0 ? 'var(--theme-green)' : 'var(--theme-text2)' }}>{(s.tada_amount || 0) > 0 ? `+${fmt(s.tada_amount)}` : '—'}</span>
+                                ? <span style={{ color: (s.tada_amount || 0) > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{(s.tada_amount || 0) > 0 ? `+${fmt(s.tada_amount)}` : '—'}</span>
                                 : <input type="number" min="0" defaultValue={s.tada_amount || ''} onBlur={e => updateTada(s, e.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
                             </div>
                           </td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 700, fontSize: 14 }}>{fmt(s.net_pay)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 700, fontSize: 14 }}>{fmt(s.net_pay)}</td>
                           <td style={{ textAlign: 'right' }}>
                             <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setViewSlip({ slip: s, emp })}>Payslip</button>
                           </td>
@@ -604,13 +605,13 @@ export default function PayrollRun() {
                     <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>Total — {payslips.length}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totals.gross)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-green)' }}>{totals.ot > 0 ? `+${fmt(totals.ot)}` : '—'}</td>
-                      <td colSpan={4} style={{ textAlign: 'right', color: 'var(--theme-red)' }}>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{totals.ot > 0 ? `+${fmt(totals.ot)}` : '—'}</td>
+                      <td colSpan={4} style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
                         {(totals.ded + totals.ssfEmp + totals.advDed) > 0 ? `−${fmt(totals.ded + totals.ssfEmp + totals.advDed)}` : '—'}
                       </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{totals.tds > 0 ? `−${fmt(totals.tds)}` : '—'}</td>
-                      <td style={{ textAlign: 'right', color: totals.tada > 0 ? 'var(--theme-green)' : 'var(--theme-text2)' }}>{totals.tada > 0 ? `+${fmt(totals.tada)}` : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontSize: 15 }}>{fmt(totals.net)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{totals.tds > 0 ? `−${fmt(totals.tds)}` : '—'}</td>
+                      <td style={{ textAlign: 'right', color: totals.tada > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{totals.tada > 0 ? `+${fmt(totals.tada)}` : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(totals.net)}</td>
                       <td></td>
                     </tr>
                   </tfoot>
@@ -647,20 +648,16 @@ export default function PayrollRun() {
 function PayslipModal({ data, periodLabel, bizInfo, onClose, onPrint }) {
   const { slip, emp } = data
   return (
-    <div className="no-print" style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '40px 16px' }}>
-      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }} onClick={onClose} />
-      <div style={{ position: 'relative', width: 460, maxWidth: '100%', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12, padding: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h2 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>Payslip</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 18, cursor: 'pointer' }}>✕</button>
-        </div>
-        <PayslipBody slip={slip} emp={emp} periodLabel={periodLabel} bizInfo={bizInfo} />
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
-          <button className="btn btn-ghost" onClick={onClose}>Close</button>
-          <button className="btn btn-primary" onClick={onPrint}>🖨 Print</button>
-        </div>
+    // The shared Modal, not a hand-rolled overlay: this dialog shows an employee's pay document,
+    // so it needs the focus trap and Escape that Modal provides. Printing is a separate path
+    // (the `printSlip` render below), which is why Modal's own `no-print` overlay is fine here.
+    <Modal onClose={onClose} title="Payslip" maxWidth={460}>
+      <PayslipBody slip={slip} emp={emp} periodLabel={periodLabel} bizInfo={bizInfo} />
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
+        <button className="btn btn-ghost" onClick={onClose}>Close</button>
+        <button className="btn btn-primary" onClick={onPrint}>🖨 Print</button>
       </div>
-    </div>
+    </Modal>
   )
 }
 

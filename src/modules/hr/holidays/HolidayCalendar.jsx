@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth } from '../../../utils/bsCalendar'
 import { fiscalYearOf } from '../payroll/tds'
 
@@ -154,6 +155,7 @@ export default function HolidayCalendar() {
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
           <select
             className="form-select"
+            aria-label="Fiscal year"
             value={fyYear}
             onChange={e => { setFyYear(parseInt(e.target.value, 10)); setMsg('') }}
           >
@@ -169,7 +171,7 @@ export default function HolidayCalendar() {
               + Add Holiday
             </button>
           </div>
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
+          {msg && <span role="status" style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
       </div>
 
@@ -181,7 +183,7 @@ export default function HolidayCalendar() {
               Public Holidays
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-accent)' }}>{publicCount}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>{publicCount}</div>
           <div className="stat-sub">{fyLabel(fyYear)}</div>
         </div>
         <div className="stat-card">
@@ -190,7 +192,7 @@ export default function HolidayCalendar() {
               Optional Holidays
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-purple)' }}>{optionalCount}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-purple-text)' }}>{optionalCount}</div>
           <div className="stat-sub">{fyLabel(fyYear)}</div>
         </div>
         <div className="stat-card">
@@ -258,7 +260,7 @@ export default function HolidayCalendar() {
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEdit(h)}>Edit</button>
-                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red)' }} onClick={() => del(h.id)}>Delete</button>
+                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red-text)' }} onClick={() => del(h.id)}>Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -276,118 +278,117 @@ export default function HolidayCalendar() {
 
       {/* Add / Edit Modal */}
       {form.open && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '40px 16px' }}>
-          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }} onClick={closeForm} />
-          <div style={{ position: 'relative', width: 460, maxWidth: '100%', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12, padding: 24 }}>
-            <h2 style={{ margin: '0 0 18px', fontSize: 15, color: 'var(--theme-text1)' }}>
-              {form.editing ? 'Edit Holiday' : `Add Holiday — ${fyLabel(fyYear)}`}
-            </h2>
+        <Modal onClose={closeForm} title={form.editing ? 'Edit Holiday' : `Add Holiday — ${fyLabel(fyYear)}`} maxWidth={460}>
+          {/* Name */}
+          <label style={lbl} htmlFor="hol-name">Holiday Name *</label>
+          <input
+            id="hol-name"
+            style={inp}
+            value={form.name}
+            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+            placeholder="e.g. Vijaya Dashami"
+            autoFocus
+            onKeyDown={e => e.key === 'Enter' && saveForm()}
+          />
 
-            {/* Name */}
-            <label style={lbl}>Holiday Name *</label>
-            <input
-              style={inp}
-              value={form.name}
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              placeholder="e.g. Vijaya Dashami"
-              autoFocus
-              onKeyDown={e => e.key === 'Enter' && saveForm()}
-            />
-
-            {/* Month + Day */}
-            <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
-              <div style={{ flex: 2 }}>
-                <label style={lbl}>
-                  <Tip text="Select the BS month. FY months 4–12 are Shrawan–Chaitra of the FY start year; months 1–3 are Baishakh–Ashadh of the following BS year." width={300}>
-                    BS Month *
-                  </Tip>
-                </label>
-                <select
-                  className="form-select"
-                  style={{ width: '100%' }}
-                  value={form.bs_month}
-                  onChange={e => setForm(f => ({ ...f, bs_month: parseInt(e.target.value, 10), bs_day: 1 }))}
-                >
-                  {BS_MONTHS.map((name, i) => (
-                    <option key={i + 1} value={i + 1}>{i + 1} — {name}</option>
-                  ))}
-                </select>
-                <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 4 }}>
-                  stored as BS year {bs_year_form}
-                </div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={lbl}>Day *</label>
-                <input
-                  type="number"
-                  style={{ ...inp, textAlign: 'center' }}
-                  value={form.bs_day}
-                  min={1}
-                  max={maxDay}
-                  onChange={e => setForm(f => ({ ...f, bs_day: e.target.value }))}
-                />
-                <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 4, textAlign: 'center' }}>
-                  max {maxDay}
-                </div>
-              </div>
-            </div>
-
-            {/* Type */}
-            <div style={{ marginTop: 14 }}>
-              <label style={lbl}>
-                <Tip text="Public = gazetted by Nepal government (all staff entitled to day off; 2× OT rate if worked). Optional = employer-discretion floating holiday." width={300}>
-                  Holiday Type *
+          {/* Month + Day */}
+          <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
+            <div style={{ flex: 2 }}>
+              <label style={lbl} htmlFor="hol-bs-month">
+                <Tip text="Select the BS month. FY months 4–12 are Shrawan–Chaitra of the FY start year; months 1–3 are Baishakh–Ashadh of the following BS year." width={300}>
+                  BS Month *
                 </Tip>
               </label>
-              <div style={{ display: 'flex', gap: 20, marginTop: 6 }}>
-                {[{ key: 'public', label: 'Public (Gazetted)' }, { key: 'optional', label: 'Optional / Floating' }].map(t => (
-                  <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', color: 'var(--theme-text1)' }}>
-                    <input
-                      type="radio"
-                      name="htype"
-                      value={t.key}
-                      checked={form.holiday_type === t.key}
-                      onChange={() => setForm(f => ({ ...f, holiday_type: t.key }))}
-                    />
-                    {t.label}
-                  </label>
+              <select
+                id="hol-bs-month"
+                className="form-select"
+                style={{ width: '100%' }}
+                value={form.bs_month}
+                onChange={e => setForm(f => ({ ...f, bs_month: parseInt(e.target.value, 10), bs_day: 1 }))}
+              >
+                {BS_MONTHS.map((name, i) => (
+                  <option key={i + 1} value={i + 1}>{i + 1} — {name}</option>
                 ))}
-              </div>
-            </div>
-
-            {/* Demand Multiplier */}
-            <div style={{ marginTop: 14 }}>
-              <label style={lbl}>
-                <Tip text="Scales this day's Demand Forecast (covers, revenue, and item quantities) by this factor — e.g. 0.3 if you close/run quiet on this day, 1.5 if it's your busiest day of the year. Leave blank for no adjustment; the day still shows a holiday flag either way." width={320}>
-                  Demand Multiplier (optional)
-                </Tip>
-              </label>
-              <input
-                type="number" min="0" step="0.1"
-                style={{ ...inp, width: 120 }}
-                value={form.demand_multiplier}
-                onChange={e => setForm(f => ({ ...f, demand_multiplier: e.target.value }))}
-                placeholder="e.g. 1.5"
-              />
+              </select>
               <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 4 }}>
-                Feeds Demand Forecast and Roster's Labor Forecast tab. Blank = forecast unaffected.
+                stored as BS year {bs_year_form}
               </div>
             </div>
-
-            {msg && (
-              <div style={{ marginTop: 12, fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
-                {msg.split(':').slice(1).join(':')}
+            <div style={{ flex: 1 }}>
+              <label style={lbl} htmlFor="hol-bs-day">Day *</label>
+              <input
+                id="hol-bs-day"
+                type="number"
+                style={{ ...inp, textAlign: 'center' }}
+                value={form.bs_day}
+                min={1}
+                max={maxDay}
+                onChange={e => setForm(f => ({ ...f, bs_day: e.target.value }))}
+              />
+              <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 4, textAlign: 'center' }}>
+                max {maxDay}
               </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 20 }}>
-              <button className="btn btn-ghost" onClick={closeForm}>Cancel</button>
-              <button className="btn btn-primary" onClick={saveForm} disabled={busy}>
-                {busy ? 'Saving…' : 'Save Holiday'}
-              </button>
             </div>
           </div>
-        </div>
+
+          {/* Type — a radio group has no single control to point a htmlFor at, so the
+              group gets a real <fieldset>/<legend> instead; each option's own label wraps
+              its input and is therefore already associated. */}
+          <fieldset style={{ border: 'none', padding: 0, margin: '14px 0 0', minWidth: 0 }}>
+            <legend style={{ ...lbl, padding: 0 }}>
+              <Tip text="Public = gazetted by Nepal government (all staff entitled to day off; 2× OT rate if worked). Optional = employer-discretion floating holiday." width={300}>
+                Holiday Type *
+              </Tip>
+            </legend>
+            <div style={{ display: 'flex', gap: 20, marginTop: 6 }}>
+              {[{ key: 'public', label: 'Public (Gazetted)' }, { key: 'optional', label: 'Optional / Floating' }].map(t => (
+                <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', color: 'var(--theme-text1)' }}>
+                  <input
+                    type="radio"
+                    name="htype"
+                    value={t.key}
+                    checked={form.holiday_type === t.key}
+                    onChange={() => setForm(f => ({ ...f, holiday_type: t.key }))}
+                  />
+                  {t.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          {/* Demand Multiplier */}
+          <div style={{ marginTop: 14 }}>
+            <label style={lbl} htmlFor="hol-demand-multiplier">
+              <Tip text="Scales this day's Demand Forecast (covers, revenue, and item quantities) by this factor — e.g. 0.3 if you close/run quiet on this day, 1.5 if it's your busiest day of the year. Leave blank for no adjustment; the day still shows a holiday flag either way." width={320}>
+                Demand Multiplier (optional)
+              </Tip>
+            </label>
+            <input
+              id="hol-demand-multiplier"
+              type="number" min="0" step="0.1"
+              style={{ ...inp, width: 120 }}
+              value={form.demand_multiplier}
+              onChange={e => setForm(f => ({ ...f, demand_multiplier: e.target.value }))}
+              placeholder="e.g. 1.5"
+            />
+            <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 4 }}>
+              Feeds Demand Forecast and Roster's Labor Forecast tab. Blank = forecast unaffected.
+            </div>
+          </div>
+
+          {msg && (
+            <div role="alert" style={{ marginTop: 12, fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+              {msg.split(':').slice(1).join(':')}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 20 }}>
+            <button className="btn btn-ghost" onClick={closeForm}>Cancel</button>
+            <button className="btn btn-primary" onClick={saveForm} disabled={busy}>
+              {busy ? 'Saving…' : 'Save Holiday'}
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   )

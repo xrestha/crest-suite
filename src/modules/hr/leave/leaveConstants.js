@@ -23,10 +23,13 @@ export const DAY_TYPES = [
   { value: 'second_half', label: 'Second Half' },
 ]
 
+// Status ladder, not a categorical palette — and its only consumer (LeaveManagement's Status
+// column) renders `color` as TEXT, never as a fill, so these carry the contrast-safe `*-text`
+// variants. Unlike DEFAULT_LEAVE_TYPES above, nothing here is written to the DB.
 export const LEAVE_STATUSES = {
-  pending:   { label: 'Pending',   color: 'var(--theme-accent)' },
-  approved:  { label: 'Approved',  color: 'var(--theme-green)' },
-  rejected:  { label: 'Rejected',  color: 'var(--theme-red)' },
+  pending:   { label: 'Pending',   color: 'var(--theme-accent-ink)' },
+  approved:  { label: 'Approved',  color: 'var(--theme-green-text)' },
+  rejected:  { label: 'Rejected',  color: 'var(--theme-red-text)' },
   cancelled: { label: 'Cancelled', color: 'var(--theme-text2)' },
 }
 

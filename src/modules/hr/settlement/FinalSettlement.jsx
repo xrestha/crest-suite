@@ -31,7 +31,7 @@ const BS_MONTH_NAMES = [
   'Kartik', 'Mangsir', 'Poush', 'Magh', 'Falgun', 'Chaitra'
 ]
 
-function BsDateSelect({ label, year, month, day, onChange, tip }) {
+function BsDateSelect({ id, label, year, month, day, onChange, tip }) {
   const daysInMonth = daysInBsMonth(year, month)
   const yearRange = []
   for (let y = 2075; y <= 2090; y++) yearRange.push(y)
@@ -40,17 +40,19 @@ function BsDateSelect({ label, year, month, day, onChange, tip }) {
 
   return (
     <div>
-      <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }}>
+      {/* One <label> can only name one control, so it names the year select and the month/day
+          selects carry their own aria-label rather than being announced unnamed. */}
+      <label htmlFor={`${id}-year`} style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }}>
         {tip ? <Tip text={tip} width={260}>{label}</Tip> : label}
       </label>
       <div style={{ display: 'flex', gap: 6 }}>
-        <select className="form-select" value={year}  onChange={e => set({ year: +e.target.value })}>
+        <select id={`${id}-year`} className="form-select" value={year}  onChange={e => set({ year: +e.target.value })}>
           {yearRange.map(y => <option key={y} value={y}>{y}</option>)}
         </select>
-        <select className="form-select" value={month} onChange={e => set({ month: +e.target.value })}>
+        <select id={`${id}-month`} aria-label={`${label} — month`} className="form-select" value={month} onChange={e => set({ month: +e.target.value })}>
           {BS_MONTH_NAMES.map((n, i) => <option key={i+1} value={i+1}>{n}</option>)}
         </select>
-        <select className="form-select" value={Math.min(day, daysInMonth)} onChange={e => set({ day: +e.target.value })}>
+        <select id={`${id}-day`} aria-label={`${label} — day`} className="form-select" value={Math.min(day, daysInMonth)} onChange={e => set({ day: +e.target.value })}>
           {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
         </select>
       </div>
@@ -212,8 +214,8 @@ export default function FinalSettlement() {
 
           {/* Reason */}
           <div>
-            <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }}>Separation Reason</label>
-            <select className="form-select" value={reason} onChange={e => setReason(e.target.value)}>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-reason">Separation Reason</label>
+            <select id="settle-reason" className="form-select" value={reason} onChange={e => setReason(e.target.value)}>
               <option value="resignation">Resignation</option>
               <option value="termination">Termination</option>
               <option value="retirement">Retirement</option>
@@ -224,6 +226,7 @@ export default function FinalSettlement() {
           {/* Last working date */}
           <div style={{ gridColumn: 'span 2' }}>
             <BsDateSelect
+              id="settle-last-date"
               label="Last Working Date (BS)"
               tip="The last day the employee worked. Used to calculate partial-month salary and total service months."
               year={lastDate.year} month={lastDate.month} day={lastDate.day}
@@ -233,18 +236,18 @@ export default function FinalSettlement() {
 
           {/* Unused leave days */}
           <div>
-            <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }}>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-leave-days">
               <Tip text="Number of unused annual leave days to encash. Nepal Labour Act rate: basic ÷ 26 per day." width={260}>Unused Leave Days</Tip>
             </label>
-            <input type="number" className="form-select" min={0} max={365} value={leaveDays} onChange={e => setLeaveDays(e.target.value)} />
+            <input id="settle-leave-days" type="number" className="form-select" min={0} max={365} value={leaveDays} onChange={e => setLeaveDays(e.target.value)} />
           </div>
 
           {/* Notice period */}
           <div>
-            <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }}>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-notice-days">
               <Tip text="Required notice period per employment contract (in calendar days). If notice was not served, this amount is deducted from final pay." width={280}>Notice Period (days)</Tip>
             </label>
-            <input type="number" className="form-select" min={0} max={90} value={noticeDays} onChange={e => setNoticeDays(e.target.value)} />
+            <input id="settle-notice-days" type="number" className="form-select" min={0} max={90} value={noticeDays} onChange={e => setNoticeDays(e.target.value)} />
           </div>
 
           {/* Checkboxes */}
@@ -368,7 +371,7 @@ export default function FinalSettlement() {
                   <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                     <td>Gross Payout</td>
                     <td></td>
-                    <td style={{ textAlign: 'right', fontSize: 15, color: 'var(--theme-green)' }}>{fmt(result.grossPayout)}</td>
+                    <td style={{ textAlign: 'right', fontSize: 15, color: 'var(--theme-green-text)' }}>{fmt(result.grossPayout)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -402,7 +405,7 @@ export default function FinalSettlement() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
                           {fmt(result.basic)} ÷ 26 × {noticeDays}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red)' }}>{fmt(result.noticeDeduction)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red-text)' }}>{fmt(result.noticeDeduction)}</td>
                       </tr>
                     )}
                     {result.lumpTds > 0 && (
@@ -411,7 +414,7 @@ export default function FinalSettlement() {
                           <Tip text="TDS on lump-sum components (gratuity + leave encashment + festival pro-ration) computed at the marginal income tax rate using the incremental method." width={300}>TDS on Lump Sum</Tip>
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>Marginal rate on NPR {fmt(result.lumpSum)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red)' }}>{fmt(result.lumpTds)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red-text)' }}>{fmt(result.lumpTds)}</td>
                       </tr>
                     )}
                     {advances.map(adv => (
@@ -422,7 +425,7 @@ export default function FinalSettlement() {
                           </Tip>
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>{fmt(adv.amount)} − repaid</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red)' }}>{fmt(adv.outstanding)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red-text)' }}>{fmt(adv.outstanding)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -430,7 +433,7 @@ export default function FinalSettlement() {
                     <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                       <td>Total Deductions</td>
                       <td></td>
-                      <td style={{ textAlign: 'right', fontSize: 15, color: 'var(--theme-red)' }}>{fmt(result.totalDeductions)}</td>
+                      <td style={{ textAlign: 'right', fontSize: 15, color: 'var(--theme-red-text)' }}>{fmt(result.totalDeductions)}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -444,9 +447,9 @@ export default function FinalSettlement() {
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4 }}>NET SETTLEMENT AMOUNT</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>Gross NPR {fmt(result.grossPayout)} − Deductions NPR {fmt(result.totalDeductions)}</div>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: result.netPayout >= 0 ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: result.netPayout >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
               NPR {fmt(Math.abs(result.netPayout))}
-              {result.netPayout < 0 && <span style={{ fontSize: 13, marginLeft: 8, color: 'var(--theme-red)' }}>(recoverable)</span>}
+              {result.netPayout < 0 && <span style={{ fontSize: 13, marginLeft: 8, color: 'var(--theme-red-text)' }}>(recoverable)</span>}
             </div>
           </div>
 

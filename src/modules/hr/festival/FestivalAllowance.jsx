@@ -211,18 +211,18 @@ export default function FestivalAllowance() {
           <p className="page-subtitle">
             Annual festival bonus (Dashain / पर्व खर्च) — {festival} {bsYear}
             {rows.length > 0 && (
-              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green)' : 'var(--theme-accent)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>
+              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>
                 {finalized ? 'Finalized' : 'Draft'}
               </span>
             )}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }} className="no-print">
-          <input style={{ ...inp, width: 130 }} value={festival} onChange={e => setFestival(e.target.value)} placeholder="Festival name" />
-          <select className="form-select" value={bsYear} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
+          <input aria-label="Festival name" style={{ ...inp, width: 130 }} value={festival} onChange={e => setFestival(e.target.value)} placeholder="Festival name" />
+          <select className="form-select" aria-label="BS year" value={bsYear} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
             {years.map(y => <option key={y} value={y}>BS {y}</option>)}
           </select>
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
+          {msg && <span role="status" style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
       </div>
 
@@ -242,9 +242,9 @@ export default function FestivalAllowance() {
           {/* KPI cards */}
           <div className="stat-grid">
             {[
-              { label: 'Gross Payout',  value: fmt(total),                              color: 'var(--theme-accent)', tip: 'Total gross festival bonus before TDS withholding.' },
-              { label: 'TDS Withheld',  value: fmt(totalTds),                            color: 'var(--theme-red)', ytd: true, tip: hasYtd ? 'Income tax (TDS) withheld from festival bonuses. Computed at each employee\'s marginal rate using actual YTD payroll data from this fiscal year.' : 'Income tax (TDS) withheld. Based on projected annual salary — finalize earlier payroll months for YTD-accurate figures.' },
-              { label: 'Net Payout',    value: fmt(total - totalTds),                   color: 'var(--theme-green)', tip: 'Amount to disburse to employees after TDS deduction.' },
+              { label: 'Gross Payout',  value: fmt(total),                              color: 'var(--theme-accent-ink)', tip: 'Total gross festival bonus before TDS withholding.' },
+              { label: 'TDS Withheld',  value: fmt(totalTds),                            color: 'var(--theme-red-text)', ytd: true, tip: hasYtd ? 'Income tax (TDS) withheld from festival bonuses. Computed at each employee\'s marginal rate using actual YTD payroll data from this fiscal year.' : 'Income tax (TDS) withheld. Based on projected annual salary — finalize earlier payroll months for YTD-accurate figures.' },
+              { label: 'Net Payout',    value: fmt(total - totalTds),                   color: 'var(--theme-green-text)', tip: 'Amount to disburse to employees after TDS deduction.' },
               { label: 'Employees',     value: rows.length,                             color: 'var(--theme-text1)', tip: 'Active and probation employees included in this festival run.' },
               { label: 'Average Gross', value: fmt(rows.length ? total / rows.length : 0), color: 'var(--theme-text3)', tip: 'Average gross bonus per employee (total ÷ headcount).' },
             ].map(s => (
@@ -256,7 +256,7 @@ export default function FestivalAllowance() {
                   {s.label === 'Employees' ? s.value : `NPR ${s.value}`}
                 </div>
                 {s.ytd && hasYtd && (
-                  <div style={{ fontSize: 10, color: 'var(--theme-green)', marginTop: 2 }}>YTD-based</div>
+                  <div style={{ fontSize: 10, color: 'var(--theme-green-text)', marginTop: 2 }}>YTD-based</div>
                 )}
               </div>
             ))}
@@ -285,15 +285,15 @@ export default function FestivalAllowance() {
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Full months worked toward this festival (capped at 12). Allowance = basic × months ÷ 12 for monthly staff." width={280}>Months</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
                       <Tip text="Festival bonus. Editable while draft; daily/hourly default to 0 — enter manually." width={250}>Gross</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
                       <Tip text={hasYtd ? 'TDS to withhold from this bonus. Computed at the employee\'s marginal income tax rate using actual YTD payroll data from this fiscal year. Editable while draft.' : 'TDS to withhold from this bonus. Computed at the marginal rate based on projected annual salary. Finalize earlier payroll months for YTD-accurate figures. Editable while draft.'} width={300}>
-                        TDS {hasYtd && <span style={{ fontSize: 9, color: 'var(--theme-green)', fontWeight: 400, marginLeft: 3 }}>YTD</span>}
+                        TDS {hasYtd && <span style={{ fontSize: 9, color: 'var(--theme-green-text)', fontWeight: 400, marginLeft: 3 }}>YTD</span>}
                       </Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-green)' }}>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>
                       <Tip text="Net amount to disburse (gross − TDS). This is the bank transfer amount." width={240}>Net</Tip>
                     </th>
                     <th>Note</th>
@@ -312,28 +312,28 @@ export default function FestivalAllowance() {
                           <div style={{ display: 'flex', gap: 6, marginTop: 2, alignItems: 'center' }}>
                             {e.employee_code && <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{e.employee_code}</span>}
                             {!isMonthly && <span className="badge badge-gray" style={{ fontSize: 10, fontWeight: 700 }}>{r.pay_basis}</span>}
-                            {missingBank && <span style={{ fontSize: 10, color: 'var(--theme-accent)' }}>⚠ no bank</span>}
+                            {missingBank && <span style={{ fontSize: 10, color: 'var(--theme-amber-text)' }}>⚠ no bank</span>}
                           </div>
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(r.basic)}</td>
-                        <td style={{ textAlign: 'right', color: r.months_worked < 12 ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>{r.months_worked}</td>
+                        <td style={{ textAlign: 'right', color: r.months_worked < 12 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>{r.months_worked}</td>
                         <td style={{ textAlign: 'right' }}>
                           {finalized
-                            ? <span style={{ color: 'var(--theme-accent)', fontWeight: 700 }}>{fmt(r.amount)}</span>
-                            : <input type="number" min="0" defaultValue={r.amount || ''} onBlur={ev => updateAmount(r, ev.target.value)} placeholder="0" style={{ ...inp, width: 110, textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }} />}
+                            ? <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{fmt(r.amount)}</span>
+                            : <input aria-label={`Gross festival allowance for ${e.full_name || 'employee'}`} type="number" min="0" defaultValue={r.amount || ''} onBlur={ev => updateAmount(r, ev.target.value)} placeholder="0" style={{ ...inp, width: 110, textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }} />}
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {finalized
-                            ? <span style={{ color: r.tds > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>{r.tds > 0 ? fmt(r.tds) : '—'}</span>
-                            : <input key={r.tds} type="number" min="0" defaultValue={r.tds || ''} onBlur={ev => updateTds(r, ev.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
+                            ? <span style={{ color: r.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{r.tds > 0 ? fmt(r.tds) : '—'}</span>
+                            : <input aria-label={`TDS for ${e.full_name || 'employee'}`} key={r.tds} type="number" min="0" defaultValue={r.tds || ''} onBlur={ev => updateTds(r, ev.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
                         </td>
-                        <td style={{ textAlign: 'right', color: net > 0 ? 'var(--theme-green)' : 'var(--theme-text3)', fontWeight: 600 }}>
+                        <td style={{ textAlign: 'right', color: net > 0 ? 'var(--theme-green-text)' : 'var(--theme-text3)', fontWeight: 600 }}>
                           {net > 0 ? fmt(net) : '—'}
                         </td>
                         <td>
                           {finalized
                             ? <span style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{r.note || '—'}</span>
-                            : <input defaultValue={r.note || ''} onBlur={ev => updateNote(r, ev.target.value)} placeholder="—" style={{ ...inp, width: '100%' }} />}
+                            : <input aria-label={`Note for ${e.full_name || 'employee'}`} defaultValue={r.note || ''} onBlur={ev => updateNote(r, ev.target.value)} placeholder="—" style={{ ...inp, width: '100%' }} />}
                         </td>
                       </tr>
                     )
@@ -342,9 +342,9 @@ export default function FestivalAllowance() {
                 <tfoot>
                   <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                     <td colSpan={3} style={{ color: 'var(--theme-text2)' }}>Total — {rows.length}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontSize: 15 }}>{fmt(total)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontSize: 15 }}>{totalTds > 0 ? fmt(totalTds) : '—'}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-green)', fontSize: 15 }}>{fmt(total - totalTds)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(total)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontSize: 15 }}>{totalTds > 0 ? fmt(totalTds) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontSize: 15 }}>{fmt(total - totalTds)}</td>
                     <td></td>
                   </tr>
                 </tfoot>

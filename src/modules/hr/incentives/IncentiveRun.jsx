@@ -206,7 +206,7 @@ export default function IncentiveRun() {
           <p className="page-subtitle">
             One-off bonus runs — {runLabel || 'unnamed run'} {bsYear}
             {rows.length > 0 && (
-              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green)' : 'var(--theme-accent)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>
+              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>
                 {finalized ? 'Finalized' : 'Draft'}
               </span>
             )}
@@ -214,7 +214,7 @@ export default function IncentiveRun() {
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }} className="no-print">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <select className="form-select" value={configId} onChange={e => {
+            <select className="form-select" aria-label="Incentive type" value={configId} onChange={e => {
               setConfigId(e.target.value)
               const cfg = configs.find(c => c.id === e.target.value)
               if (cfg && !runLabel) setRunLabel(cfg.name)
@@ -222,13 +222,13 @@ export default function IncentiveRun() {
               <option value="">— Ad-hoc (manual) —</option>
               {activeConfigs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <input style={{ ...inp, width: 150 }} value={runLabel} onChange={e => setRunLabel(e.target.value)} placeholder="Run label, e.g. Q1 Sales Bonus" />
-            <select className="form-select" value={bsYear} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
+            <input aria-label="Run label" style={{ ...inp, width: 150 }} value={runLabel} onChange={e => setRunLabel(e.target.value)} placeholder="Run label, e.g. Q1 Sales Bonus" />
+            <select className="form-select" aria-label="BS year" value={bsYear} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
               {years.map(y => <option key={y} value={y}>BS {y}</option>)}
             </select>
           </div>
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowConfigs(true)}>⚙ Manage Types</button>
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
+          {msg && <span role="status" style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
       </div>
 
@@ -255,9 +255,9 @@ export default function IncentiveRun() {
         <>
           <div className="stat-grid stat-grid--compact" style={{ marginBottom: 20 }}>
             {[
-              { label: 'Gross Payout', value: fmt(total), color: 'var(--theme-accent)', tip: 'Total gross incentive before TDS withholding.' },
-              { label: 'TDS Withheld', value: fmt(totalTds), color: 'var(--theme-red)', tip: 'Income tax withheld from this incentive, at each employee\'s marginal rate.' },
-              { label: 'Net Payout', value: fmt(total - totalTds), color: 'var(--theme-green)', tip: 'Amount to disburse after TDS deduction.' },
+              { label: 'Gross Payout', value: fmt(total), color: 'var(--theme-accent-ink)', tip: 'Total gross incentive before TDS withholding.' },
+              { label: 'TDS Withheld', value: fmt(totalTds), color: 'var(--theme-red-text)', tip: 'Income tax withheld from this incentive, at each employee\'s marginal rate.' },
+              { label: 'Net Payout', value: fmt(total - totalTds), color: 'var(--theme-green-text)', tip: 'Amount to disburse after TDS deduction.' },
               { label: 'Employees', value: rows.length, color: 'var(--theme-text1)', tip: 'Active and probation employees included in this run.' },
               { label: 'Average Gross', value: fmt(rows.length ? total / rows.length : 0), color: 'var(--theme-text2)', tip: 'Average gross incentive per employee.' },
             ].map(s => (
@@ -285,15 +285,15 @@ export default function IncentiveRun() {
                 <thead>
                   <tr>
                     <th>Employee</th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
                       <Tip text="Incentive amount. Editable while draft." width={220}>Gross</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
                       <Tip text={hasYtd ? 'TDS at marginal rate using YTD payroll data. Editable while draft.' : 'TDS based on projected annual salary (no finalized payroll yet this FY). Editable while draft.'} width={280}>
-                        TDS {hasYtd && <span style={{ fontSize: 9, color: 'var(--theme-green)', fontWeight: 400, marginLeft: 3 }}>YTD</span>}
+                        TDS {hasYtd && <span style={{ fontSize: 9, color: 'var(--theme-green-text)', fontWeight: 400, marginLeft: 3 }}>YTD</span>}
                       </Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-green)' }}>Net</th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>Net</th>
                     <th>Note</th>
                   </tr>
                 </thead>
@@ -308,24 +308,24 @@ export default function IncentiveRun() {
                           <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{e.full_name || '—'}</div>
                           <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
                             {e.employee_code && <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{e.employee_code}</span>}
-                            {missingBank && <span style={{ fontSize: 10, color: 'var(--theme-accent)' }}>⚠ no bank</span>}
+                            {missingBank && <span style={{ fontSize: 10, color: 'var(--theme-amber-text)' }}>⚠ no bank</span>}
                           </div>
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {finalized
-                            ? <span style={{ color: 'var(--theme-accent)', fontWeight: 700 }}>{fmt(r.amount)}</span>
-                            : <input type="number" min="0" defaultValue={r.amount || ''} onBlur={ev => updateAmount(r, ev.target.value)} placeholder="0" style={{ ...inp, width: 110, textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }} />}
+                            ? <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{fmt(r.amount)}</span>
+                            : <input aria-label={`Gross incentive for ${e.full_name || 'employee'}`} type="number" min="0" defaultValue={r.amount || ''} onBlur={ev => updateAmount(r, ev.target.value)} placeholder="0" style={{ ...inp, width: 110, textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }} />}
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {finalized
-                            ? <span style={{ color: r.tds > 0 ? 'var(--theme-red)' : 'var(--theme-text3)' }}>{r.tds > 0 ? fmt(r.tds) : '—'}</span>
-                            : <input key={r.tds} type="number" min="0" defaultValue={r.tds || ''} onBlur={ev => updateTds(r, ev.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
+                            ? <span style={{ color: r.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>{r.tds > 0 ? fmt(r.tds) : '—'}</span>
+                            : <input aria-label={`TDS for ${e.full_name || 'employee'}`} key={r.tds} type="number" min="0" defaultValue={r.tds || ''} onBlur={ev => updateTds(r, ev.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
                         </td>
-                        <td style={{ textAlign: 'right', color: net > 0 ? 'var(--theme-green)' : 'var(--theme-text2)', fontWeight: 600 }}>{net > 0 ? fmt(net) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: net > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)', fontWeight: 600 }}>{net > 0 ? fmt(net) : '—'}</td>
                         <td>
                           {finalized
                             ? <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>{r.note || '—'}</span>
-                            : <input defaultValue={r.note || ''} onBlur={ev => updateNote(r, ev.target.value)} placeholder="—" style={{ ...inp, width: '100%' }} />}
+                            : <input aria-label={`Note for ${e.full_name || 'employee'}`} defaultValue={r.note || ''} onBlur={ev => updateNote(r, ev.target.value)} placeholder="—" style={{ ...inp, width: '100%' }} />}
                         </td>
                       </tr>
                     )
@@ -334,9 +334,9 @@ export default function IncentiveRun() {
                 <tfoot>
                   <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                     <td style={{ color: 'var(--theme-text3)' }}>Total — {rows.length}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontSize: 15 }}>{fmt(total)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontSize: 15 }}>{totalTds > 0 ? fmt(totalTds) : '—'}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-green)', fontSize: 15 }}>{fmt(total - totalTds)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(total)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontSize: 15 }}>{totalTds > 0 ? fmt(totalTds) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontSize: 15 }}>{fmt(total - totalTds)}</td>
                     <td></td>
                   </tr>
                 </tfoot>

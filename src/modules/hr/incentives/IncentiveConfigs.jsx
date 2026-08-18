@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import Modal from '../../../components/Modal'
 
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
@@ -46,14 +47,8 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="card" style={{ width: 520, maxHeight: '85vh', overflowY: 'auto', padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>Manage Incentive Types</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', fontSize: 18, cursor: 'pointer' }}>✕</button>
-        </div>
-
+    <Modal onClose={onClose} title="Manage Incentive Types" maxWidth={520}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {configs.length === 0 && <p style={{ fontSize: 13, color: 'var(--theme-text3)' }}>No incentive types yet — add one below.</p>}
           {configs.map(cfg => (
@@ -67,32 +62,33 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => toggleActive(cfg)}>
                 {cfg.active ? 'Deactivate' : 'Activate'}
               </button>
-              <button style={{ background: 'none', border: 'none', color: 'var(--theme-red)', cursor: 'pointer', fontSize: 12 }} onClick={() => handleDelete(cfg)}>Delete</button>
+              <button style={{ background: 'none', border: 'none', color: 'var(--theme-red-text)', cursor: 'pointer', fontSize: 12 }} onClick={() => handleDelete(cfg)}>Delete</button>
             </div>
           ))}
         </div>
 
         <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <label style={lbl}>New Incentive Type</label>
-          <input style={inp} placeholder="e.g. Sales Bonus" value={form.name} onChange={e => set('name', e.target.value)} />
+          <label style={lbl} htmlFor="inccfg-name">New Incentive Type</label>
+          <input id="inccfg-name" style={inp} placeholder="e.g. Sales Bonus" value={form.name} onChange={e => set('name', e.target.value)} />
           <div style={{ display: 'flex', gap: 10 }}>
-            <select className="form-select" style={{ flex: 1 }} value={form.calc_type} onChange={e => set('calc_type', e.target.value)}>
+            <select aria-label="How this incentive is calculated" className="form-select" style={{ flex: 1 }} value={form.calc_type} onChange={e => set('calc_type', e.target.value)}>
               <option value="manual">Manual entry each run</option>
               <option value="fixed">Fixed amount</option>
               <option value="percent_of_basic">% of basic</option>
             </select>
             {form.calc_type !== 'manual' && (
               <input style={{ ...inp, width: 120 }} type="number" min="0"
+                aria-label={form.calc_type === 'percent_of_basic' ? 'Default percent of basic' : 'Default amount in NPR'}
                 placeholder={form.calc_type === 'percent_of_basic' ? '%' : 'NPR'}
                 value={form.default_value} onChange={e => set('default_value', e.target.value)} />
             )}
           </div>
-          {error && <div style={{ fontSize: 12, color: 'var(--theme-red)' }}>{error}</div>}
+          {error && <div role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{error}</div>}
           <button className="btn btn-primary" style={{ alignSelf: 'flex-end' }} onClick={handleAdd} disabled={saving}>
             {saving ? 'Adding…' : '+ Add Type'}
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }

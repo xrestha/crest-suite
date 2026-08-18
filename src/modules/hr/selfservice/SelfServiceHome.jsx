@@ -378,7 +378,7 @@ export default function SelfServiceHome() {
         {pushMsg && (
           <p style={{
             fontSize: 11, margin: '-14px 0 14px', textAlign: 'right', lineHeight: 1.5,
-            color: pushMsg.startsWith('info:') ? 'var(--theme-amber)' : 'var(--theme-red)',
+            color: pushMsg.startsWith('info:') ? 'var(--theme-amber-text)' : 'var(--theme-red-text)',
           }}>
             {pushMsg.replace(/^(info|error):/, '')}
           </p>
@@ -392,7 +392,7 @@ export default function SelfServiceHome() {
             style={{
               marginBottom: 16, padding: '10px 12px', borderRadius: 8, fontSize: 12, lineHeight: 1.5,
               background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.35)',
-              color: 'var(--theme-red)',
+              color: 'var(--theme-red-text)',
             }}
           >
             {dataError}
@@ -437,7 +437,7 @@ export default function SelfServiceHome() {
                     <span style={{ fontWeight: 700, color: 'var(--theme-text1)' }}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year}</span>
                     <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Tap to view full payslip</span>
                   </span>
-                  <span style={{ fontWeight: 700, color: 'var(--theme-green)', whiteSpace: 'nowrap' }}>NPR {fmt(p.net_pay)}</span>
+                  <span style={{ fontWeight: 700, color: 'var(--theme-green-text)', whiteSpace: 'nowrap' }}>NPR {fmt(p.net_pay)}</span>
                 </button>
               ))}
             </div>
@@ -478,7 +478,7 @@ export default function SelfServiceHome() {
                   <label style={lbl} htmlFor="ss-leave-reason">Reason</label>
                   <textarea id="ss-leave-reason" style={{ ...inp, height: 60, resize: 'vertical' }} value={reason} onChange={e => setReason(e.target.value)} />
                 </div>
-                {msg && <div style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{msg.replace(/^(ok|error):/, '')}</div>}
+                {msg && <div style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.replace(/^(ok|error):/, '')}</div>}
                 <button className="btn btn-primary" onClick={submitLeave} disabled={submitting} style={{ alignSelf: 'flex-end' }}>
                   {submitting ? 'Submitting…' : 'Submit Request'}
                 </button>
@@ -602,7 +602,7 @@ export default function SelfServiceHome() {
                             </select>
                             <input aria-label="Distance in kilometers" style={{ ...inp, width: 90, flexShrink: 0 }} type="number" min="0" step="0.1" placeholder="Distance (km)" value={it.distanceKm} onChange={e => setTadaItemDistance(idx, e.target.value)} />
                             {tadaVehicleRates[it.vehicle] == null ? (
-                              <span style={{ fontSize: 11, color: 'var(--theme-amber)' }}>No rate set. Enter amount manually</span>
+                              <span style={{ fontSize: 11, color: 'var(--theme-amber-text)' }}>No rate set. Enter amount manually</span>
                             ) : (
                               <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>× NPR {tadaVehicleRates[it.vehicle]}/km</span>
                             )}
@@ -611,7 +611,7 @@ export default function SelfServiceHome() {
                       </div>
                     ))}
                   </div>
-                  <div style={{ textAlign: 'right', marginTop: 8, fontSize: 13, fontWeight: 700, color: 'var(--theme-accent)' }}>
+                  <div style={{ textAlign: 'right', marginTop: 8, fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                     Total: NPR {fmt(tadaTotal)}
                   </div>
                 </div>
@@ -629,7 +629,7 @@ export default function SelfServiceHome() {
                 padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 6,
                 background: 'var(--theme-card)', borderTop: '1px solid var(--theme-border)',
               }}>
-                {tadaMsg && <div style={{ fontSize: 12, color: tadaMsg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{tadaMsg.replace(/^(ok|error):/, '')}</div>}
+                {tadaMsg && <div style={{ fontSize: 12, color: tadaMsg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{tadaMsg.replace(/^(ok|error):/, '')}</div>}
                 <button className="btn btn-primary" onClick={submitTada} disabled={tadaSubmitting} style={{ width: '100%' }}>
                   {tadaSubmitting ? 'Submitting…' : 'Submit Claim'}
                 </button>
@@ -720,7 +720,7 @@ export default function SelfServiceHome() {
                             </select>
                           )}
                           <textarea aria-label="Note for the swap request" placeholder="Note (optional)" style={{ ...inp, height: 44, resize: 'vertical' }} value={swapNote} onChange={e => setSwapNote(e.target.value)} />
-                          {swapMsg && <div style={{ fontSize: 11, color: 'var(--theme-red)' }}>{swapMsg}</div>}
+                          {swapMsg && <div style={{ fontSize: 11, color: 'var(--theme-red-text)' }}>{swapMsg}</div>}
                           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setSwapDay(null)}>Cancel</button>
                             <button className="btn btn-primary" style={{ fontSize: 12 }} disabled={swapSubmitting} onClick={submitSwapRequest}>

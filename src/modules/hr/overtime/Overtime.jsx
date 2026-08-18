@@ -4,13 +4,18 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
+import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth } from '../../../utils/bsCalendar'
 import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STATUS_TINT } from '../payrollConstants'
 
+// STATUS_TINT's `color` is the base signal token — right for the 10%/20% fill and border it also
+// carries, but this badge prints the status as 11px/700 TEXT on that tint, so the label takes the
+// contrast-safe `*-text` variant instead (S549's fill-vs-text split). Overridden here rather than
+// in payrollConstants so the shared tint keeps working as a fill everywhere else it's used.
 const STATUS_COLORS = {
-  pending:  STATUS_TINT.accent,
-  approved: STATUS_TINT.green,
-  rejected: STATUS_TINT.red,
+  pending:  { ...STATUS_TINT.accent, color: 'var(--theme-accent-ink)' },
+  approved: { ...STATUS_TINT.green,  color: 'var(--theme-green-text)' },
+  rejected: { ...STATUS_TINT.red,    color: 'var(--theme-red-text)' },
 }
 
 const lbl = {
@@ -206,8 +211,8 @@ export default function Overtime() {
           <p className="page-subtitle">Log, approve, and track employee OT — feeds into payroll at 1.5× weekday / 2× public holiday</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{msg.split(':').slice(1).join(':')}</span>}
-          <select className="form-select" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
+          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
+          <select className="form-select" aria-label="Period" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
         </div>
@@ -221,7 +226,7 @@ export default function Overtime() {
               Pending Approval
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: pendingCount > 0 ? 'var(--theme-accent)' : 'var(--theme-green)' }}>{pendingCount}</div>
+          <div className="stat-value" style={{ color: pendingCount > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)' }}>{pendingCount}</div>
           <div className="stat-sub">{periodLabel}</div>
         </div>
         <div className="stat-card">
@@ -230,7 +235,7 @@ export default function Overtime() {
               Approved
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: 'var(--theme-green)' }}>{approvedCount}</div>
+          <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{approvedCount}</div>
           <div className="stat-sub">{approvedHrs > 0 ? `${approvedHrs}h total` : 'no hours'}</div>
         </div>
         <div className="stat-card">
@@ -248,7 +253,7 @@ export default function Overtime() {
               Est. OT Cost
             </Tip>
           </div>
-          <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-accent)' }}>
+          <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>
             {approvedAmt > 0 ? `NPR ${approvedAmt.toLocaleString('en-NP')}` : '—'}
           </div>
           <div className="stat-sub">approved entries</div>
@@ -318,10 +323,10 @@ export default function Overtime() {
                       <td style={{ textAlign: 'center', color: 'var(--theme-text2)', fontSize: 12 }}>
                         {BS_MONTHS[e.bs_month - 1]} {e.bs_day}, {e.bs_year}
                       </td>
-                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-green)' }}>
+                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-green-text)' }}>
                         {otLabel(e.ot_type, e.ot_hours)}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent)', fontSize: 13 }}>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)', fontSize: 13 }}>
                         {(() => { const a = otAmt(e, emp); return a !== null ? `NPR ${a.toLocaleString('en-NP')}` : <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>—</span> })()}
                       </td>
                       <td>
@@ -341,15 +346,15 @@ export default function Overtime() {
                         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                           {e.status === 'pending' && (
                             <>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-green)' }} onClick={() => setStatus(e.id, 'approved')}>Approve</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red)' }} onClick={() => setStatus(e.id, 'rejected')}>Reject</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-green-text)' }} onClick={() => setStatus(e.id, 'approved')}>Approve</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red-text)' }} onClick={() => setStatus(e.id, 'rejected')}>Reject</button>
                             </>
                           )}
                           {e.status !== 'pending' && (
                             <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setStatus(e.id, 'pending')}>Undo</button>
                           )}
                           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEdit(e)}>Edit</button>
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red)' }} onClick={() => del(e.id)}>Del</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red-text)' }} onClick={() => del(e.id)}>Del</button>
                         </div>
                       </td>
                     </tr>
@@ -370,102 +375,101 @@ export default function Overtime() {
 
       {/* Add / Edit drawer */}
       {drawerOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', padding: '40px 16px' }}>
-          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }} onClick={closeDrawer} />
-          <div style={{ position: 'relative', width: 480, maxWidth: '100%', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12, padding: 24 }}>
-            <h2 style={{ margin: '0 0 18px', fontSize: 15, color: 'var(--theme-text1)' }}>
-              {form.editing ? 'Edit OT Entry' : 'Log Overtime'}
-            </h2>
+        <Modal onClose={closeDrawer} title={form.editing ? 'Edit OT Entry' : 'Log Overtime'} maxWidth={480}>
+          {/* Employee */}
+          <label style={lbl} htmlFor="ot-employee">Employee *</label>
+          <select
+            id="ot-employee"
+            className="form-select"
+            style={{ width: '100%', marginBottom: 14 }}
+            value={form.employee_id}
+            onChange={e => setForm(f => ({ ...f, employee_id: e.target.value }))}
+          >
+            <option value="">— select employee —</option>
+            {employees.map(e => (
+              <option key={e.id} value={e.id}>{e.full_name}{e.employee_code ? ` (${e.employee_code})` : ''}</option>
+            ))}
+          </select>
 
-            {/* Employee */}
-            <label style={lbl}>Employee *</label>
-            <select
-              className="form-select"
-              style={{ width: '100%', marginBottom: 14 }}
-              value={form.employee_id}
-              onChange={e => setForm(f => ({ ...f, employee_id: e.target.value }))}
-            >
-              <option value="">— select employee —</option>
-              {employees.map(e => (
-                <option key={e.id} value={e.id}>{e.full_name}{e.employee_code ? ` (${e.employee_code})` : ''}</option>
-              ))}
+          {/* Date */}
+          <label style={lbl} htmlFor="ot-bs-year">
+            <Tip text="BS date the overtime was worked. Date automatically detects if it falls on a public holiday from your Holiday Calendar." width={300}>
+              Date (BS) *
+            </Tip>
+          </label>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            {/* One label can only name one control, so it names the year and the other two
+                carry their own aria-label rather than being announced unnamed. */}
+            <select id="ot-bs-year" className="form-select" style={{ flex: 2 }} value={form.bs_year} onChange={e => onDateChange('bs_year', e.target.value)}>
+              {[form.bs_year - 1, form.bs_year, form.bs_year + 1].filter(Boolean).map(y => <option key={y} value={y}>{y}</option>)}
             </select>
+            <select aria-label="BS month" className="form-select" style={{ flex: 3 }} value={form.bs_month} onChange={e => onDateChange('bs_month', e.target.value)}>
+              {BS_MONTHS.map((name, i) => <option key={i + 1} value={i + 1}>{i + 1} — {name}</option>)}
+            </select>
+            <input
+              aria-label="BS day"
+              type="number" min={1} max={maxDay}
+              style={{ ...inp, flex: 1, textAlign: 'center' }}
+              value={form.bs_day}
+              onChange={e => onDateChange('bs_day', e.target.value)}
+              placeholder="Day"
+            />
+          </div>
 
-            {/* Date */}
+          {/* Hours */}
+          <label style={lbl} htmlFor="ot-hours">OT Hours *</label>
+          <input
+            id="ot-hours"
+            type="number" min="0.5" step="0.5"
+            style={{ ...inp, marginBottom: 14 }}
+            value={form.ot_hours}
+            onChange={e => setForm(f => ({ ...f, ot_hours: e.target.value }))}
+            placeholder="e.g. 2.5"
+          />
+
+          {/* OT Type */}
+          <div style={{ marginBottom: 14 }}>
             <label style={lbl}>
-              <Tip text="BS date the overtime was worked. Date automatically detects if it falls on a public holiday from your Holiday Calendar." width={300}>
-                Date (BS) *
+              <Tip text="Auto-detected from the date: if the date matches a gazetted public holiday in your Holiday Calendar, Holiday (2×) is selected. You can override manually." width={300}>
+                OT Type *
               </Tip>
             </label>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-              <select className="form-select" style={{ flex: 2 }} value={form.bs_year} onChange={e => onDateChange('bs_year', e.target.value)}>
-                {[form.bs_year - 1, form.bs_year, form.bs_year + 1].filter(Boolean).map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-              <select className="form-select" style={{ flex: 3 }} value={form.bs_month} onChange={e => onDateChange('bs_month', e.target.value)}>
-                {BS_MONTHS.map((name, i) => <option key={i + 1} value={i + 1}>{i + 1} — {name}</option>)}
-              </select>
-              <input
-                type="number" min={1} max={maxDay}
-                style={{ ...inp, flex: 1, textAlign: 'center' }}
-                value={form.bs_day}
-                onChange={e => onDateChange('bs_day', e.target.value)}
-                placeholder="Day"
-              />
+            <div style={{ display: 'flex', gap: 20, marginTop: 6 }}>
+              {[
+                { key: 'weekday', label: 'Weekday (1.5×)' },
+                { key: 'holiday', label: 'Public Holiday (2×)' },
+              ].map(t => (
+                <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', color: 'var(--theme-text1)' }}>
+                  <input type="radio" name="ot_type" value={t.key} checked={form.ot_type === t.key} onChange={() => setForm(f => ({ ...f, ot_type: t.key }))} />
+                  {t.label}
+                </label>
+              ))}
             </div>
-
-            {/* Hours */}
-            <label style={lbl}>OT Hours *</label>
-            <input
-              type="number" min="0.5" step="0.5"
-              style={{ ...inp, marginBottom: 14 }}
-              value={form.ot_hours}
-              onChange={e => setForm(f => ({ ...f, ot_hours: e.target.value }))}
-              placeholder="e.g. 2.5"
-            />
-
-            {/* OT Type */}
-            <div style={{ marginBottom: 14 }}>
-              <label style={lbl}>
-                <Tip text="Auto-detected from the date: if the date matches a gazetted public holiday in your Holiday Calendar, Holiday (2×) is selected. You can override manually." width={300}>
-                  OT Type *
-                </Tip>
-              </label>
-              <div style={{ display: 'flex', gap: 20, marginTop: 6 }}>
-                {[
-                  { key: 'weekday', label: 'Weekday (1.5×)' },
-                  { key: 'holiday', label: 'Public Holiday (2×)' },
-                ].map(t => (
-                  <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', color: 'var(--theme-text1)' }}>
-                    <input type="radio" name="ot_type" value={t.key} checked={form.ot_type === t.key} onChange={() => setForm(f => ({ ...f, ot_type: t.key }))} />
-                    {t.label}
-                  </label>
-                ))}
+            {form.ot_type === 'holiday' && isHoliday(form.bs_year, form.bs_month, form.bs_day) && (
+              <div style={{ fontSize: 11, color: 'var(--theme-accent-ink)', marginTop: 6 }}>
+                ✓ {holidays.find(h => h.bs_year === form.bs_year && h.bs_month === form.bs_month && h.bs_day === form.bs_day)?.name}
               </div>
-              {form.ot_type === 'holiday' && isHoliday(form.bs_year, form.bs_month, form.bs_day) && (
-                <div style={{ fontSize: 11, color: 'var(--theme-accent)', marginTop: 6 }}>
-                  ✓ {holidays.find(h => h.bs_year === form.bs_year && h.bs_month === form.bs_month && h.bs_day === form.bs_day)?.name}
-                </div>
-              )}
-            </div>
-
-            {/* Reason */}
-            <label style={lbl}>Reason / Notes</label>
-            <textarea
-              rows={2}
-              style={{ ...inp, resize: 'vertical', marginBottom: 14 }}
-              value={form.reason}
-              onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
-              placeholder="e.g. Event setup, Kitchen cover, Inventory count…"
-            />
-
-            {msg && <div style={{ marginBottom: 12, fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>{msg.split(':').slice(1).join(':')}</div>}
-
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost" onClick={closeDrawer}>Cancel</button>
-              <button className="btn btn-primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save OT Entry'}</button>
-            </div>
+            )}
           </div>
-        </div>
+
+          {/* Reason */}
+          <label style={lbl} htmlFor="ot-reason">Reason / Notes</label>
+          <textarea
+            id="ot-reason"
+            rows={2}
+            style={{ ...inp, resize: 'vertical', marginBottom: 14 }}
+            value={form.reason}
+            onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
+            placeholder="e.g. Event setup, Kitchen cover, Inventory count…"
+          />
+
+          {msg && <div style={{ marginBottom: 12, fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</div>}
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost" onClick={closeDrawer}>Cancel</button>
+            <button className="btn btn-primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save OT Entry'}</button>
+          </div>
+        </Modal>
       )}
 
       <Fab onClick={openAdd} label="+ Log OT" show={!drawerOpen} />

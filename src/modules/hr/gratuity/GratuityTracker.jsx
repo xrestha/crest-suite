@@ -191,7 +191,7 @@ export default function GratuityTracker() {
               ))}
             </div>
             {depts.length > 0 && (
-              <select className="form-select" style={{ fontSize: 12 }} value={dept} onChange={e => setDept(e.target.value)}>
+              <select aria-label="Filter by department" className="form-select" style={{ fontSize: 12 }} value={dept} onChange={e => setDept(e.target.value)}>
                 <option value="all">All Departments</option>
                 {depts.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
@@ -221,7 +221,7 @@ export default function GratuityTracker() {
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Estimated amount already funded via the SSF employer gratuity sub-fund (3.33% of capped basic per month × months). Only for SSF-enrolled employees." width={300}>SSF Covered</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
                       <Tip text="Estimated additional cash liability beyond the SSF fund. Labour Act Total − SSF Covered. This is what you may need to pay in addition to SSF on departure." width={300}>Net Liability</Tip>
                     </th>
                   </tr>
@@ -242,10 +242,10 @@ export default function GratuityTracker() {
                       </td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(r.g.monthlyAccrual)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(r.g.totalAccrued)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-purple)' }}>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>
                         {r.ssf_enrolled ? fmt(r.g.ssfCovered) : <span style={{ color: 'var(--theme-text2)', fontSize: 11 }}>Not enrolled</span>}
                       </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontWeight: 700 }}>{fmt(r.g.netLiability)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 700 }}>{fmt(r.g.netLiability)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -254,8 +254,8 @@ export default function GratuityTracker() {
                     <td colSpan={4} style={{ color: 'var(--theme-text2)' }}>Total — {rows.length} employees</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(totalMonthly)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totalAccrued)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-purple)' }}>{fmt(totalSsf)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontSize: 15 }}>{fmt(totalNet)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>{fmt(totalSsf)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontSize: 15 }}>{fmt(totalNet)}</td>
                   </tr>
                 </tfoot>
               </table>

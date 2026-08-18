@@ -159,7 +159,7 @@ export default function SelfServiceLogin() {
             <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
           ) : loadError ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
-              <p role="alert" style={{ color: 'var(--theme-red)', textAlign: 'center', maxWidth: 300, margin: 0 }}>{loadError}</p>
+              <p role="alert" style={{ color: 'var(--theme-red-text)', textAlign: 'center', maxWidth: 300, margin: 0 }}>{loadError}</p>
               <button className="btn btn-ghost" onClick={loadStaff}>Retry</button>
             </div>
           ) : staff.length === 0 ? (
@@ -227,7 +227,7 @@ export default function SelfServiceLogin() {
             ))}
           </div>
 
-          {error && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 13, textAlign: 'center', margin: 0 }}>{error}</p>}
+          {error && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13, textAlign: 'center', margin: 0 }}>{error}</p>}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
             <button onClick={back} style={{

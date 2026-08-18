@@ -430,7 +430,7 @@ export default function HrStaff() {
               Define custom role names for your team. Each maps to a permission level.
             </p>
 
-            {rolesError && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 12, margin: '-8px 0 12px' }}>{rolesError}</p>}
+            {rolesError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: '-8px 0 12px' }}>{rolesError}</p>}
 
             {customRoles.length === 0 ? (
               <p style={{ fontSize: 13, color: 'var(--theme-text3)', fontStyle: 'italic', marginBottom: 16 }}>
@@ -442,6 +442,7 @@ export default function HrStaff() {
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
                     <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>{r.label}</span>
                     <select
+                      aria-label={`Permission level for ${r.label}`}
                       className="form-select"
                       style={{ width: 120, fontSize: 12 }}
                       value={r.level}
@@ -454,7 +455,7 @@ export default function HrStaff() {
                     </select>
                     <button
                       className="btn btn-ghost"
-                      style={{ fontSize: 12, padding: '3px 8px', color: 'var(--theme-red)', borderColor: 'var(--theme-red)' }}
+                      style={{ fontSize: 12, padding: '3px 8px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
                       onClick={() => deleteCustomRole(i)}
                       disabled={rolesSaving}
                     >
@@ -468,8 +469,9 @@ export default function HrStaff() {
             {/* Add new role */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 20 }}>
               <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Role Name</label>
+                <label style={labelStyle} htmlFor="hrstaff-role-name">Role Name</label>
                 <input
+                  id="hrstaff-role-name"
                   style={inputStyle}
                   placeholder="e.g. Payroll Officer, HR Coordinator…"
                   value={newRole.label}
@@ -478,8 +480,9 @@ export default function HrStaff() {
                 />
               </div>
               <div style={{ width: 140 }}>
-                <label style={labelStyle}>Permission Level</label>
+                <label style={labelStyle} htmlFor="hrstaff-role-level">Permission Level</label>
                 <select
+                  id="hrstaff-role-level"
                   className="form-select"
                   style={{ width: '100%' }}
                   value={newRole.level}
@@ -538,7 +541,7 @@ export default function HrStaff() {
 
             {addMode === 'hr' && (
               <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>
+                <label style={labelStyle} htmlFor="hrstaff-add-employee">
                   <Tip text="Links this HR staff login to an existing HR employee record — their name stays in sync with HR.">HR Employee</Tip>
                 </label>
                 {unlinkedEmployees.length === 0 ? (
@@ -547,6 +550,7 @@ export default function HrStaff() {
                   </p>
                 ) : (
                   <SearchableSelect
+                    id="hrstaff-add-employee"
                     options={unlinkedEmployees.map(e => ({ value: e.id, label: `${e.full_name}${e.employee_code ? ` (${e.employee_code})` : ''}` }))}
                     value={addForm.employee_id} onChange={v => setAddForm(f => ({ ...f, employee_id: v }))}
                     placeholder="Select employee…"
@@ -557,7 +561,7 @@ export default function HrStaff() {
 
             {addMode === 'existing' && (
               <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>
+                <label style={labelStyle} htmlFor="hrstaff-add-existing-user">
                   <Tip text="Assigns an HR role to a login that already exists for this client (e.g. one created from Admin → Clients → Manage → Users) instead of creating a new one. Only accounts with no POS/HR/IMS role already set are shown.">Existing User</Tip>
                 </label>
                 {eligibleUsers.length === 0 ? (
@@ -566,6 +570,7 @@ export default function HrStaff() {
                   </p>
                 ) : (
                   <SearchableSelect
+                    id="hrstaff-add-existing-user"
                     options={eligibleUsers.map(u => ({ value: u.id, label: `${u.full_name || '—'} (${u.email})` }))}
                     value={addForm.existing_user_id} onChange={v => setAddForm(f => ({ ...f, existing_user_id: v }))}
                     placeholder="Select user…"
@@ -576,8 +581,9 @@ export default function HrStaff() {
 
             {addMode === 'manual' && (
               <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>Full Name</label>
+                <label style={labelStyle} htmlFor="hrstaff-add-full-name">Full Name</label>
                 <input
+                  id="hrstaff-add-full-name"
                   style={inputStyle}
                   placeholder="e.g. Sita Sharma"
                   value={addForm.full_name}
@@ -590,10 +596,11 @@ export default function HrStaff() {
             {addMode !== 'existing' && (
               <>
                 <div style={{ marginBottom: 14 }}>
-                  <label style={labelStyle}>
+                  <label style={labelStyle} htmlFor="hrstaff-add-email">
                     <Tip text="Staff log in with this email and password — same login mechanism as your own account.">Email</Tip>
                   </label>
                   <input
+                    id="hrstaff-add-email"
                     style={inputStyle}
                     type="email"
                     autoComplete="new-password"
@@ -604,8 +611,9 @@ export default function HrStaff() {
                 </div>
 
                 <div style={{ marginBottom: 14 }}>
-                  <label style={labelStyle}>Initial Password (8+ characters)</label>
+                  <label style={labelStyle} htmlFor="hrstaff-add-password">Initial Password (8+ characters)</label>
                   <input
+                    id="hrstaff-add-password"
                     style={inputStyle}
                     type="password"
                     autoComplete="new-password"
@@ -618,10 +626,11 @@ export default function HrStaff() {
             )}
 
             <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}>
+              <label style={labelStyle} htmlFor="hrstaff-add-role">
                 <Tip text="The role shown for this staff member. Permission level is shown in brackets.">Role</Tip>
               </label>
               <select
+                id="hrstaff-add-role"
                 className="form-select"
                 style={{ width: '100%' }}
                 value={addForm.job_title}
@@ -635,7 +644,7 @@ export default function HrStaff() {
               </select>
             </div>
 
-            {addMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red)', marginBottom: 12 }}>{addMsg}</p>}
+            {addMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginBottom: 12 }}>{addMsg}</p>}
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setAddModal(false)} disabled={adding}>Cancel</button>

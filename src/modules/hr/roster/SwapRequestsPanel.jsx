@@ -152,7 +152,7 @@ export default function SwapRequestsPanel({ employees, shiftMap }) {
           </button>
           {open && (
             <div style={{ borderTop: '1px solid var(--theme-border-lt)', padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {msg && <div style={{ fontSize: 12, color: 'var(--theme-red)' }}>{msg}</div>}
+              {msg && <div style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{msg}</div>}
               {requests.map(r => (
                 <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 12 }}>
                   <div style={{ color: 'var(--theme-text2)' }}>

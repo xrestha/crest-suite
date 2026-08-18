@@ -410,46 +410,44 @@ export default function Advances() {
 
       {/* Record Repayment modal */}
       {showRepay && selectedAdv && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 400, padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>Record Repayment</h3>
+        <Modal onClose={() => { setShowRepay(false); setError('') }} title="Record Repayment" maxWidth={400}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ fontSize: 13, color: 'var(--theme-text3)' }}>
               {empMap[selectedAdv.employee_id]?.full_name} · Outstanding: NPR {fmt(selectedOutstanding)}
             </div>
 
             <div>
-              <label style={lbl}>Repayment Date (BS)</label>
-              <BsCalendarPicker value={repayForm.repaid_date} onChange={v => setRepay('repaid_date', v)} placeholder="Select date" clearable />
+              <label style={lbl} htmlFor="adv-repay-date">Repayment Date (BS)</label>
+              <BsCalendarPicker id="adv-repay-date" value={repayForm.repaid_date} onChange={v => setRepay('repaid_date', v)} placeholder="Select date" clearable />
             </div>
 
             <div>
-              <label style={lbl}>Amount (NPR)</label>
-              <input style={inp} type="number" min="1" placeholder={selectedAdv.installment_amount ? `Installment: ${fmt(selectedAdv.installment_amount)}` : 'Amount'} value={repayForm.amount} onChange={e => setRepay('amount', e.target.value)} />
+              <label style={lbl} htmlFor="adv-repay-amount">Amount (NPR)</label>
+              <input id="adv-repay-amount" style={inp} type="number" min="1" placeholder={selectedAdv.installment_amount ? `Installment: ${fmt(selectedAdv.installment_amount)}` : 'Amount'} value={repayForm.amount} onChange={e => setRepay('amount', e.target.value)} />
             </div>
 
             <div>
-              <label style={lbl}>Notes</label>
-              <input style={inp} placeholder="e.g. Deducted from Shrawan payslip" value={repayForm.notes} onChange={e => setRepay('notes', e.target.value)} />
+              <label style={lbl} htmlFor="adv-repay-notes">Notes</label>
+              <input id="adv-repay-notes" style={inp} placeholder="e.g. Deducted from Shrawan payslip" value={repayForm.notes} onChange={e => setRepay('notes', e.target.value)} />
             </div>
 
-            {error && <div style={{ fontSize: 12, color: 'var(--theme-red)' }}>{error}</div>}
+            {error && <div role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => { setShowRepay(false); setError('') }}>Cancel</button>
               <button className="btn btn-primary" onClick={handleRepay} disabled={saving}>{saving ? 'Saving…' : 'Record'}</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Settle confirmation */}
       {settleTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 360, padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>Settle {settleTarget.type === 'loan' ? 'Loan' : 'Advance'}?</h3>
+        <Modal onClose={() => setSettleTarget(null)} title={`Settle ${settleTarget.type === 'loan' ? 'Loan' : 'Advance'}?`} maxWidth={360}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {(() => {
               const outstanding = Math.max(0, parseFloat(settleTarget.amount) - (repayMap[settleTarget.id]?.total || 0))
               return outstanding > 0
-                ? <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-red)' }}>NPR {fmt(outstanding)} is still outstanding. Mark as settled anyway?</p>
+                ? <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-red-text)' }}>NPR {fmt(outstanding)} is still outstanding. Mark as settled anyway?</p>
                 : <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>Fully repaid. Mark as settled?</p>
             })()}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -457,7 +455,7 @@ export default function Advances() {
               <button className="btn btn-primary" onClick={() => handleSettle(settleTarget.id)}>Settle</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

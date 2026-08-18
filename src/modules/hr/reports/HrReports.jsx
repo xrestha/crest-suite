@@ -19,8 +19,8 @@ function retireInfo(dateStr) {
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const d = new Date(dateStr); d.setHours(0, 0, 0, 0)
   const days = Math.round((d - today) / 86400000)
-  if (days < 0)               return { retired: true, label: 'Retired',       color: 'var(--theme-red)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' }
-  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-accent)', bg: 'rgba(201,168,76,0.1)', border: 'rgba(201,168,76,0.2)' }
+  if (days < 0)               return { retired: true, label: 'Retired',       color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' }
+  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-accent-ink)', bg: 'rgba(201,168,76,0.1)', border: 'rgba(201,168,76,0.2)' }
   return null
 }
 
@@ -222,7 +222,7 @@ export default function HrReports() {
           <h1 className="page-title">HR Reports</h1>
           <p className="page-subtitle">
             Payroll filing & disbursement — {periodLabel}
-            {run && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green)' : 'var(--theme-accent)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
+            {run && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
           </p>
         </div>
         <select className="form-select no-print" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
@@ -287,7 +287,7 @@ export default function HrReports() {
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>Employee Directory</span>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                     {employees.length} employee{employees.length !== 1 ? 's' : ''}
-                    {retiringCount > 0 && <span> · <span style={{ color: 'var(--theme-accent)' }}>{retiringCount} retiring within 180 days</span></span>}
+                    {retiringCount > 0 && <span> · <span style={{ color: 'var(--theme-accent-ink)' }}>{retiringCount} retiring within 180 days</span></span>}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} className="no-print">
@@ -311,7 +311,7 @@ export default function HrReports() {
                         const r = retireInfo(e.retirement_date)
                         return (
                           <tr key={e.id}>
-                            <td style={{ color: 'var(--theme-accent)', fontWeight: 700, fontSize: 12 }}>{e.employee_code || '—'}</td>
+                            <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, fontSize: 12 }}>{e.employee_code || '—'}</td>
                             <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{e.full_name}</td>
                             <td style={{ color: 'var(--theme-text3)' }}>{e.department || '—'}</td>
                             <td style={{ color: 'var(--theme-text3)' }}>{e.designation || '—'}</td>
@@ -345,7 +345,7 @@ export default function HrReports() {
           ) : (
             <>
               {!finalized && (
-                <div className="no-print" style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 8, fontSize: 12, color: 'var(--theme-accent)' }}>
+                <div className="no-print" style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 8, fontSize: 12, color: 'var(--theme-accent-ink)' }}>
                   ⚠ This payroll is still a draft — figures may change. Finalize it in Payroll before filing or paying.
                 </div>
               )}
@@ -355,9 +355,9 @@ export default function HrReports() {
             <div>
               <div className="stat-grid stat-grid--compact" style={{ marginBottom: 20 }}>
                 {[
-                  { label: 'Total Gross',    value: tot.gross,   color: 'var(--theme-accent)', tip: 'Gross earnings + overtime across all payslips.' },
-                  { label: 'Total Deductions', value: tot.ded,   color: 'var(--theme-red)', tip: 'Absence + SSF employee + other deductions + TDS.' },
-                  { label: 'Net Payable',    value: tot.net,     color: 'var(--theme-green)', tip: 'Total take-home pay to disburse.' },
+                  { label: 'Total Gross',    value: tot.gross,   color: 'var(--theme-accent-ink)', tip: 'Gross earnings + overtime across all payslips.' },
+                  { label: 'Total Deductions', value: tot.ded,   color: 'var(--theme-red-text)', tip: 'Absence + SSF employee + other deductions + TDS.' },
+                  { label: 'Net Payable',    value: tot.net,     color: 'var(--theme-green-text)', tip: 'Total take-home pay to disburse.' },
                   { label: 'Employer Cost',  value: tot.empCost, color: 'var(--theme-text3)', tip: 'What the business spends: gross + overtime + employer SSF (20%).' },
                 ].map(s => (
                   <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
@@ -378,15 +378,15 @@ export default function HrReports() {
                 </div>
                 <div className="table-wrap">
                   <table className="data-table">
-                    <thead><tr><th>Department</th><th style={{ textAlign: 'right' }}>Headcount</th><th style={{ textAlign: 'right' }}>Gross</th><th style={{ textAlign: 'right' }}>Deductions</th><th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>Net</th></tr></thead>
+                    <thead><tr><th>Department</th><th style={{ textAlign: 'right' }}>Headcount</th><th style={{ textAlign: 'right' }}>Gross</th><th style={{ textAlign: 'right' }}>Deductions</th><th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>Net</th></tr></thead>
                     <tbody>
                       {depts.map(d => (
                         <tr key={d.dept}>
                           <td style={{ color: 'var(--theme-text1)' }}>{d.dept}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{d.count}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(d.gross)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>−{fmt(d.ded)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{fmt(d.net)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmt(d.ded)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmt(d.net)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -394,8 +394,8 @@ export default function HrReports() {
                       <td style={{ color: 'var(--theme-text2)' }}>Total</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{rows.length}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(tot.gross)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>−{fmt(tot.ded)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{fmt(tot.net)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmt(tot.ded)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(tot.net)}</td>
                     </tr></tfoot>
                   </table>
                 </div>
@@ -410,7 +410,7 @@ export default function HrReports() {
                 <div>
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>SSF Challan — {periodLabel}</span>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
-                    Total to deposit: <strong style={{ color: 'var(--theme-accent)' }}>NPR {fmt(ssfTotals.total)}</strong>
+                    Total to deposit: <strong style={{ color: 'var(--theme-accent-ink)' }}>NPR {fmt(ssfTotals.total)}</strong>
                     {noSsfCount > 0 && <span> · {noSsfCount} employee{noSsfCount > 1 ? 's' : ''} without an SSF number excluded</span>}
                   </div>
                 </div>
@@ -426,7 +426,7 @@ export default function HrReports() {
               ) : (
                 <div className="table-wrap">
                   <table className="data-table">
-                    <thead><tr><th>SSF No</th><th>Employee</th><th style={{ textAlign: 'right' }}><Tip text="Basic salary capped at NPR 100,000 — the SSF contribution base." width={240}>SSF Basic</Tip></th><th style={{ textAlign: 'right' }}><Tip text="SSF deducted from employee's pay = 11% of basic (capped at NPR 100,000 basic)." width={250}>Employee 11%</Tip></th><th style={{ textAlign: 'right' }}><Tip text="SSF paid by the company on top of salary = 20% of basic (capped at NPR 100,000 basic)." width={260}>Employer 20%</Tip></th><th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}><Tip text="Total SSF deposit to submit = Employee 11% + Employer 20%." width={240}>Total 31%</Tip></th></tr></thead>
+                    <thead><tr><th>SSF No</th><th>Employee</th><th style={{ textAlign: 'right' }}><Tip text="Basic salary capped at NPR 100,000 — the SSF contribution base." width={240}>SSF Basic</Tip></th><th style={{ textAlign: 'right' }}><Tip text="SSF deducted from employee's pay = 11% of basic (capped at NPR 100,000 basic)." width={250}>Employee 11%</Tip></th><th style={{ textAlign: 'right' }}><Tip text="SSF paid by the company on top of salary = 20% of basic (capped at NPR 100,000 basic)." width={260}>Employer 20%</Tip></th><th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Total SSF deposit to submit = Employee 11% + Employer 20%." width={240}>Total 31%</Tip></th></tr></thead>
                     <tbody>
                       {ssfRows.map(({ s, emp }) => (
                         <tr key={s.id}>
@@ -435,7 +435,7 @@ export default function HrReports() {
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(Math.min(s.basic, SSF_CAP))}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(s.ssf_employee)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(s.ssf_employer)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{fmt(s.ssf_employee + s.ssf_employer)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmt(s.ssf_employee + s.ssf_employer)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -444,7 +444,7 @@ export default function HrReports() {
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(ssfTotals.base)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(ssfTotals.emp)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(ssfTotals.empr)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>{fmt(ssfTotals.total)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(ssfTotals.total)}</td>
                     </tr></tfoot>
                   </table>
                 </div>
@@ -458,7 +458,7 @@ export default function HrReports() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--theme-border)' }}>
                 <div>
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>Salary Disbursement — {periodLabel}</span>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Total: <strong style={{ color: 'var(--theme-green)' }}>NPR {fmt(tot.net)}</strong></div>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Total: <strong style={{ color: 'var(--theme-green-text)' }}>NPR {fmt(tot.net)}</strong></div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }} className="no-print">
                   <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => downloadSheet(bankData(), 'Bank Transfer')}>⬇ Excel</button>
@@ -467,7 +467,7 @@ export default function HrReports() {
               </div>
               <div className="table-wrap">
                 <table className="data-table">
-                  <thead><tr><th>Employee</th><th>Bank</th><th>Account No</th><th style={{ textAlign: 'right', color: 'var(--theme-green)' }}>Net Pay</th></tr></thead>
+                  <thead><tr><th>Employee</th><th>Bank</th><th>Account No</th><th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>Net Pay</th></tr></thead>
                   <tbody>
                     {rows.map(({ s, emp }) => {
                       const missing = !emp.bank_name || !emp.bank_account_no
@@ -476,14 +476,14 @@ export default function HrReports() {
                           <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{emp.full_name}</td>
                           <td style={{ color: missing ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>{emp.bank_name || '⚠ missing'}</td>
                           <td style={{ color: missing ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>{emp.bank_account_no || '⚠ missing'}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-green)', fontWeight: 600 }}>{fmt(s.net_pay)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontWeight: 600 }}>{fmt(s.net_pay)}</td>
                         </tr>
                       )
                     })}
                   </tbody>
                   <tfoot><tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                     <td colSpan={3} style={{ color: 'var(--theme-text2)' }}>Total — {rows.length}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-green)' }}>{fmt(tot.net)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{fmt(tot.net)}</td>
                   </tr></tfoot>
                 </table>
               </div>
@@ -508,14 +508,14 @@ export default function HrReports() {
                         <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{emp.full_name}</td>
                         <td style={{ color: 'var(--theme-text3)', fontSize: 12 }}>{emp.pan_no || '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(s.gross + s.ot_amount - s.ssf_employee)}</td>
-                        <td style={{ textAlign: 'right', color: s.tds > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>{s.tds > 0 ? fmt(s.tds) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: s.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.tds > 0 ? fmt(s.tds) : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(ytdTds[s.employee_id] || s.tds)}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot><tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                     <td colSpan={3} style={{ color: 'var(--theme-text2)' }}>Total — {rows.length}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{fmt(rows.reduce((a, { s }) => a + s.tds, 0))}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(rows.reduce((a, { s }) => a + s.tds, 0))}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(rows.reduce((a, { s }) => a + (ytdTds[s.employee_id] || s.tds), 0))}</td>
                   </tr></tfoot>
                 </table>
@@ -593,7 +593,7 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
                 <th style={{ textAlign: 'right' }}>Gross Income</th>
                 <th style={{ textAlign: 'right' }}>SSF Deducted</th>
                 <th style={{ textAlign: 'right' }}>Other Deductions</th>
-                <th style={{ textAlign: 'right', color: 'var(--theme-red)' }}>TDS Withheld</th>
+                <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>TDS Withheld</th>
               </tr>
             </thead>
             <tbody>
@@ -605,7 +605,7 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
                     <td style={{ textAlign: 'right' }}>{fmtN((s.gross || 0) + (s.ot_amount || 0))}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{s.ssf_employee > 0 ? fmtN(s.ssf_employee) : '—'}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{(s.absence_deduction + s.other_deductions) > 0 ? fmtN(s.absence_deduction + s.other_deductions) : '—'}</td>
-                    <td style={{ textAlign: 'right', color: s.tds > 0 ? 'var(--theme-red)' : 'var(--theme-text2)' }}>{s.tds > 0 ? fmtN(s.tds) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: s.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.tds > 0 ? fmtN(s.tds) : '—'}</td>
                   </tr>
                 )
               })}
@@ -616,7 +616,7 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
                 <td style={{ textAlign: 'right' }}>{fmtN(totals.gross)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtN(totals.ssf)}</td>
                 <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>—</td>
-                <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{fmtN(totals.tds)}</td>
+                <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmtN(totals.tds)}</td>
               </tr>
             </tfoot>
           </table>
@@ -638,14 +638,14 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
                 {r.label}
                 {r.sub && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{r.sub}</div>}
               </span>
-              <span style={{ fontSize: 12, color: r.neg ? 'var(--theme-red)' : 'var(--theme-text1)', whiteSpace: 'nowrap', paddingLeft: 12 }}>
+              <span style={{ fontSize: 12, color: r.neg ? 'var(--theme-red-text)' : 'var(--theme-text1)', whiteSpace: 'nowrap', paddingLeft: 12 }}>
                 {r.neg ? '− ' : ''}NPR {fmtN(r.value)}
               </span>
             </div>
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, marginTop: 4 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>Annual Taxable Income</span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-accent)' }}>NPR {fmtN(taxable)}</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {fmtN(taxable)}</span>
           </div>
         </div>
 
@@ -663,7 +663,7 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTop: '2px solid var(--theme-border)' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>Total TDS Withheld</span>
-            <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-red)' }}>NPR {fmtN(totals.tds)}</span>
+            <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {fmtN(totals.tds)}</span>
           </div>
           <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 6, lineHeight: 1.5 }}>
             Deposited by employer with the Inland Revenue Department, Nepal.

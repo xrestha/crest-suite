@@ -158,6 +158,20 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S572 — 2026-08-18 — HR phase-5 leftovers cleared: modals, colour sweep, labels — and two more silent CSS bugs
+
+Finished the work S570's fix pass left behind when four of its five agents were killed mid-edit. Three file-disjoint agents plus my own set covered every remaining HR page. Applying the S570 lesson, the tree was built and grepped for evidence afterwards rather than trusted from the agents' reports.
+
+**Modals.** Every hand-rolled `position:fixed` overlay in HR is now the shared `Modal` — Advances (2), HolidayCalendar, IncentiveConfigs, Overtime, and Payroll's own Payslip dialog. That's the focus trap, Escape, focus restore and dialog semantics S521 built once, finally reaching the module. **Exactly one is deliberately left:** `EmployeeJoiningForm.jsx`, whose overlay is a print-only A4 form — its print CSS promotes the paper div to full bleed, and Modal's card chrome would land *inside* the print region and break the layout.
+
+**Colour sweep, finished.** Every signal colour used as TEXT now takes the `*-text` contrast variant (accent-as-text takes `accent-ink`), while fills — `color-mix()` tints, borders, progress bars, dots, status-pill backgrounds — correctly keep the base token. Roughly 100 sites across the module. Two things worth recording: the `⚠ no bank` warnings on Festival Allowance and Incentive Run were **accent-coloured**, which renders *blue* on some presets and read as a link rather than a caution — now amber; and `Line`/`StatPill`-style `color=` JSX **props** are invisible to a `color:` grep but are applied as text, so they needed their own pass.
+
+**Two more instances of the same silent CSS bug.** After S570 found the Attendance legend building tints as `` `${s.color}22` `` — string-concatenated alpha, which yields invalid CSS when the value is a `var()` — two agents independently hit it again: Leave Management's type badges (`` `${t.color}1a` ``) meant **Home/Annual and Unpaid leave rendered with no tint and no border at all**, and the same shape sat in Overtime's status pills. All now use `color-mix()`. A full-module grep confirms the pattern is gone. **This is the third distinct place one bug class has hidden in this module** — worth grepping for on any page that stores a colour in a constant.
+
+**Labels.** Every remaining unwired `<label>` now carries `id`/`htmlFor`, and controls with no visible label at all (top-right period/year filters, per-row inputs in Incentive Run, Festival Allowance and the Leave Types table) got `aria-label`s naming the row's employee or leave type — a bare "Gross" repeated per row names nothing useful. Holiday Calendar's Holiday Type, a heading-only label over a radio group, became a real `<fieldset>`/`<legend>`. The `<label>`-vs-`htmlFor` counts that remain are all the wrapping-checkbox pattern, which is already associated.
+
+**Files:** ~20 files across `src/modules/hr/` (advances, attendance, employees, festival, gratuity, holidays, incentives, leave, overtime, payroll, reports, roster, selfservice, settlement, staff, tada), `public/service-worker.js` (v80 → v81), `README.md`
+
 ### S571 — 2026-08-18 — Self-Service login removal, and Employees Delete stops throwing raw SQL errors
 
 Two small gaps, both surfaced by actually using the app during S569's PIN-vault cleanup rather than by review.
