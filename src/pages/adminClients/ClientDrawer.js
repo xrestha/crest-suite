@@ -12,7 +12,7 @@ import Tip from '../../components/Tip'
 import Modal from '../../components/Modal'
 import { MIN_PASSWORD_LENGTH } from '../../utils/weakPasswords'
 import { adminOp } from './adminOp'
-import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../../data/pricingPlans'
+import { MODULE_COLORS, MODULE_INK, moduleTint, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../../data/pricingPlans'
 import { runBackup } from '../../modules/admin/dataExport/runBackup'
 import { restoreClientData } from '../../modules/admin/dataExport/restoreClientData'
 import {
@@ -154,6 +154,15 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // client's name (phase 7, S574).
   const [confirmAction, setConfirmAction] = useState(null)  // 'archive' | 'clientData' | 'deleteClient'
   const [confirmName, setConfirmName] = useState('')
+  // Admin password reset for a client login — most importantly the OWNER's. The Edge Function's
+  // requireStaffTarget deliberately exempts admin callers for exactly this support case (owner
+  // locked out, email on file wrong or inbox gone), but nothing in the product ever called it
+  // with an Owner target: reset_ims_password's only other callers are the client-facing staff
+  // pages, whose lists an Owner can never appear in. The only admin "fix" was delete-and-recreate
+  // the login, losing profiles.id and every *_by attribution pointing at it (phase 7 P1, S574).
+  const [resetUser, setResetUser] = useState(null)
+  const [resetPw, setResetPw] = useState('')
+  const [resettingPw, setResettingPw] = useState(false)
   const deleting = !!deletingAction
   const [deleteMsg, setDeleteMsg] = useState('')
 
@@ -960,7 +969,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 </div>
                 {clientMsg && (
                   <p role={clientMsg.startsWith('ok:') ? 'status' : 'alert'}
-                    style={{ fontSize: 12, margin: '0 0 8px', color: clientMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                    style={{ fontSize: 12, margin: '0 0 8px', color: clientMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     {clientMsg.replace(/^(ok|error):/, '')}
                   </p>
                 )}
@@ -1013,8 +1022,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     />
                   </div>
                 </div>
-                {userError   && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 12, margin: '0 0 8px' }}>{userError}</p>}
-                {userSuccess && <p role="status" style={{ color: 'var(--theme-green)', fontSize: 12, margin: '0 0 8px' }}>{userSuccess}</p>}
+                {userError   && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: '0 0 8px' }}>{userError}</p>}
+                {userSuccess && <p role="status" style={{ color: 'var(--theme-green-text)', fontSize: 12, margin: '0 0 8px' }}>{userSuccess}</p>}
                 <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={createUser} disabled={savingUser}>
                   {savingUser ? 'Creating…' : '+ Create User'}
                 </button>
@@ -1036,16 +1045,24 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     <div>
                       <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600 }}>{u.full_name || '—'}</span>
                       <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 8 }}>{u.email}</span>
-                      <span style={{ fontSize: 11, color: 'var(--theme-accent)', marginLeft: 8, background: 'rgba(201,168,76,0.1)', padding: '2px 8px', borderRadius: 'var(--radius-sm)' }}>
+                      <span style={{ fontSize: 11, color: 'var(--theme-accent-ink)', marginLeft: 8, background: 'var(--theme-focus-ring)', padding: '2px 8px', borderRadius: 'var(--radius-sm)' }}>
                         {u.role}
                       </span>
                     </div>
-                    <button
-                      className="btn btn-danger btn-sm"
-                      style={{ fontSize: 11, padding: '6px 12px' }}
-                      onClick={() => deleteUser(u)}
-                      aria-label={`Delete ${u.full_name || u.email}`}
-                    >Delete</button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 11, padding: '6px 12px' }}
+                        onClick={() => { setResetPw(''); setUserError(''); setResetUser(u) }}
+                        aria-label={`Reset password for ${u.full_name || u.email}`}
+                      >Reset password</button>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        style={{ fontSize: 11, padding: '6px 12px' }}
+                        onClick={() => deleteUser(u)}
+                        aria-label={`Delete ${u.full_name || u.email}`}
+                      >Delete</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1066,7 +1083,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               </p>
 
               {pinErr && (
-                <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red)', margin: '0 0 12px' }}>{pinErr}</p>
+                <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', margin: '0 0 12px' }}>{pinErr}</p>
               )}
 
               {loadingPins ? (
@@ -1123,6 +1140,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
           {activeTab === 'billing' && (() => {
             return (
               <div>
+                {/* Save-scope line: this tab holds four different save semantics at once (module
+                    toggles and outlet group save instantly; plan, dates, billing cycle and Suite
+                    wait for Save Subscription) and nothing on screen said which was which —
+                    only two source comments did (phase 7 IA finding, S574). */}
+                <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 16px' }}>
+                  Module and outlet-group changes save immediately. Plan, dates, billing cycle and Suite save with the “Save Subscription” button at the bottom.
+                </p>
                 {/* ── Modules ── */}
                 <div style={{ marginBottom: 24 }}>
                   <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
@@ -1190,8 +1214,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       <button key={String(opt.on)} type="button" aria-pressed={active} onClick={() => handleSuiteToggle(opt.on)} style={{
                         padding: '8px 14px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
                         border: active ? '1px solid var(--theme-accent)' : '1px solid var(--theme-border)',
-                        background: active ? 'rgba(201,168,76,0.1)' : 'none',
-                        color: active ? 'var(--theme-accent)' : 'var(--theme-text3)',
+                        background: active ? 'var(--theme-focus-ring)' : 'none',
+                        color: active ? 'var(--theme-accent-ink)' : 'var(--theme-text3)',
                       }}>
                         <div>{opt.label}</div>
                         {opt.on && (
@@ -1258,7 +1282,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   return (
                     <div style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Crest Suite Pro</p>
+                        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-accent-ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Crest Suite Pro</p>
                         {s.label && (
                           <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
                             {s.label}
@@ -1276,7 +1300,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                           <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(setSuiteEndsAt, days)}>{label}</button>
                         ))}
                         {suiteEndsAt && (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} onClick={() => setSuiteEndsAt('')}>Clear</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} onClick={() => setSuiteEndsAt('')}>Clear</button>
                         )}
                       </div>
                     </div>
@@ -1301,7 +1325,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         padding: '6px 16px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 12, fontWeight: 600,
                         border: `1px solid ${on ? 'var(--theme-accent)' : 'transparent'}`,
                         background: on ? 'var(--theme-focus-ring)' : 'transparent',
-                        color: on ? 'var(--theme-accent)' : 'var(--theme-text3)',
+                        color: on ? 'var(--theme-accent-ink)' : 'var(--theme-text3)',
                         transition: 'background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard)',
                       }}>{opt.label}</button>
                     )
@@ -1319,7 +1343,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   if (!mod.enabled) return null
                   const s = getDateStatus(mod.endsAt)
                   const flatPricing = mod.key === 'hr' ? HR_PRICING : mod.key === 'pos' ? POS_PRICING : null
-                  const accentBase = MODULE_COLORS[mod.key]
+                  const accentInk  = MODULE_INK[mod.key]
                   // These sections used to be disabled whenever a Suite Bundle was selected,
                   // because the bundle replaced per-module pricing and dates entirely in
                   // clientMRR. Crest Suite Pro is additive now — the module prices and end dates
@@ -1328,7 +1352,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     <div key={mod.key} style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)' }}>
                       {/* Header */}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: accentBase, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{mod.label}</p>
+                        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: accentInk, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{mod.label}</p>
                         {s.label && (
                           <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', color: s.color, background: s.bg, border: `1px solid ${s.border}` }}>
                             {s.label}
@@ -1340,8 +1364,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                            the hr_plan/pos_plan columns are vestigial and no longer read or
                            written anywhere (they used to gate the POS suggestion engine and to
                            silently raise the IMS tier). */
-                        <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', border: `1px solid ${accentBase}40`, background: `${accentBase}12`, marginBottom: 12 }}>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: accentBase }}>
+                        <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', border: `1px solid ${moduleTint(mod.key, 25)}`, background: moduleTint(mod.key, 7), marginBottom: 12 }}>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: accentInk }}>
                             NPR {(billingCycle === 'annual' ? flatPricing.annual : flatPricing.monthly).toLocaleString('en-NP')}/mo
                           </div>
                           {billingCycle === 'annual' && (
@@ -1357,13 +1381,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                             {IMS_TIERS.map(p => {
                               const price = billingCycle === 'annual' ? p.annual : p.monthly
                               const active = mod.plan === p.key
-                              const accentColor = MODULE_COLORS.ims
                               return (
                                 <button key={p.key} type="button" aria-pressed={active} onClick={() => mod.setPlan(p.key)} style={{
                                   flex: '1 1 120px', padding: '8px 6px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1.4,
-                                  border: active ? `1px solid ${accentColor}` : '1px solid var(--theme-border)',
-                                  background: active ? `${accentColor}1a` : 'none',
-                                  color: active ? accentColor : 'var(--theme-text3)',
+                                  border: active ? `1px solid ${MODULE_COLORS.ims}` : '1px solid var(--theme-border)',
+                                  background: active ? moduleTint('ims', 10) : 'none',
+                                  color: active ? MODULE_INK.ims : 'var(--theme-text3)',
                                 }}>
                                   <div>{p.label}</div>
                                   <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>NPR {price.toLocaleString('en-NP')}/mo</div>
@@ -1393,7 +1416,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                           <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(mod.setEndsAt, days)}>{label}</button>
                         ))}
                         {mod.endsAt && (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} onClick={() => mod.setEndsAt('')}>Clear</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} onClick={() => mod.setEndsAt('')}>Clear</button>
                         )}
                       </div>
                     </div>
@@ -1402,7 +1425,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
                 {subMsg && (
                   <p role={subMsg.startsWith('ok:') ? 'status' : 'alert'}
-                    style={{ fontSize: 12, margin: '0 0 12px', color: subMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                    style={{ fontSize: 12, margin: '0 0 12px', color: subMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     {subMsg.replace(/^(ok|error):/, '')}
                   </p>
                 )}
@@ -1465,7 +1488,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                           </button>
                         )}
                       </div>
-                      {logoMsg && <p role={logoMsg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 11, margin: '6px 0 0', color: logoMsg.startsWith('error') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{logoMsg.replace(/^(ok|error):/, '')}</p>}
+                      {logoMsg && <p role={logoMsg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 11, margin: '6px 0 0', color: logoMsg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{logoMsg.replace(/^(ok|error):/, '')}</p>}
                     </div>
                   </div>
 
@@ -1535,7 +1558,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
                   {settingsMsg && (
                     <p role={settingsMsg.startsWith('ok:') ? 'status' : 'alert'}
-                      style={{ fontSize: 12, margin: '0 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                      style={{ fontSize: 12, margin: '0 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                       {settingsMsg.replace(/^(ok|error):/, '')}
                     </p>
                   )}
@@ -1590,7 +1613,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
                   {settingsMsg && (
                     <p role={settingsMsg.startsWith('ok:') ? 'status' : 'alert'}
-                      style={{ fontSize: 12, margin: '0 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                      style={{ fontSize: 12, margin: '0 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                       {settingsMsg.replace(/^(ok|error):/, '')}
                     </p>
                   )}
@@ -1631,7 +1654,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginTop: 10 }}>
                         {qrPreview && <img src={qrPreview} alt={`Payment QR code for ${qrCheck.merchantName || client.name} — scan to verify`} style={{ width: 120, height: 120, /* literal white, not a token: a QR needs a light quiet zone to scan */ borderRadius: 'var(--radius-md)', background: '#fff', padding: 4 }} />}
                         <div>
-                          <p id={fid('qr-status')} role="status" style={{ fontSize: 12, color: 'var(--theme-green)', margin: '0 0 4px', fontWeight: 600 }}>✓ Valid payment QR — merchant: {qrCheck.merchantName}</p>
+                          <p id={fid('qr-status')} role="status" style={{ fontSize: 12, color: 'var(--theme-green-text)', margin: '0 0 4px', fontWeight: 600 }}>✓ Valid payment QR — merchant: {qrCheck.merchantName}</p>
                           <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0, maxWidth: 420, lineHeight: 1.6 }}>
                             Scan this preview with a banking app to test it before saving. Once saved, every POS bill shows a dynamic
                             version of this QR with that bill's exact amount pre-filled.
@@ -1639,7 +1662,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         </div>
                       </div>
                     ) : (
-                      <p id={fid('qr-status')} role="alert" style={{ fontSize: 12, color: 'var(--theme-red)', margin: '8px 0 0' }}>✗ {qrCheck.error}</p>
+                      <p id={fid('qr-status')} role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', margin: '8px 0 0' }}>✗ {qrCheck.error}</p>
                     )
                   )}
 
@@ -1679,7 +1702,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
                   {settingsMsg && (
                     <p role={settingsMsg.startsWith('ok:') ? 'status' : 'alert'}
-                      style={{ fontSize: 12, margin: '16px 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                      style={{ fontSize: 12, margin: '16px 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                       {settingsMsg.replace(/^(ok|error):/, '')}
                     </p>
                   )}
@@ -1736,7 +1759,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               </div>
               {backupMsg && (
                 <p role={backupMsg.startsWith('ok:') ? 'status' : 'alert'}
-                  style={{ fontSize: 12, margin: '8px 0 0', color: backupMsg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+                  style={{ fontSize: 12, margin: '8px 0 0', color: backupMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                   {backupMsg.replace(/^(ok|error):/, '')}
                 </p>
               )}
@@ -1792,7 +1815,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               }}>
                 <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
                   {skipBackup
-                    ? <>⚠ <strong style={{ color: 'var(--theme-red)' }}>Backups are off.</strong> The actions below will run with no safety copy.</>
+                    ? <>⚠ <strong style={{ color: 'var(--theme-red-text)' }}>Backups are off.</strong> The actions below will run with no safety copy.</>
                     : <>🛡 A full backup is written <strong style={{ color: 'var(--theme-text1)' }}>before</strong> any action below runs. If it fails, nothing is deleted.</>}
                 </div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9, fontSize: 12, color: 'var(--theme-text2)', cursor: 'pointer', minHeight: 24 }}>
@@ -1911,6 +1934,51 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
           )}
 
       </div>
+
+      {/* Admin password reset — reaches any client login including the Owner (the Edge Function
+          exempts admin callers from the staff-marker check for exactly this support case). */}
+      {resetUser && (
+        <Modal onClose={() => setResetUser(null)} title={`Reset password — ${resetUser.full_name || resetUser.email}`} maxWidth={440}>
+          <p style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6, margin: '0 0 12px' }}>
+            Sets a new password for <strong style={{ color: 'var(--theme-text1)' }}>{resetUser.email}</strong> immediately.
+            Read it out to the client and have them change it after signing in.
+          </p>
+          <label htmlFor="admin-reset-pw" style={{ display: 'block', fontSize: 12, color: 'var(--theme-text2)', marginBottom: 6 }}>New password</label>
+          {/* Visible text on purpose — the admin reads this out to the client, it is not their own
+              secret. autoComplete="new-password" so Chrome never offers a saved login here. */}
+          <input
+            id="admin-reset-pw"
+            type="text"
+            autoComplete="new-password"
+            className="form-select"
+            value={resetPw}
+            onChange={e => setResetPw(e.target.value)}
+            placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`}
+            style={{ width: '100%', marginBottom: 16 }}
+          />
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost" onClick={() => setResetUser(null)}>Cancel</button>
+            <button
+              className="btn btn-primary"
+              disabled={resetPw.length < MIN_PASSWORD_LENGTH || resettingPw}
+              onClick={async () => {
+                setResettingPw(true)
+                try {
+                  await adminOp('reset_ims_password', { userId: resetUser.id, password: resetPw })
+                  setUserSuccess(`Password reset for ${resetUser.email}.`)
+                  setResetUser(null)
+                } catch (err) {
+                  setUserError('Password reset failed: ' + err.message)
+                  setResetUser(null)
+                }
+                setResettingPw(false)
+              }}
+            >
+              {resettingPw ? 'Resetting…' : 'Reset Password'}
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {/* Typed-name confirmation for the whole-client actions. Nested Modal is safe: Modal.js
           keeps a stack so only the topmost responds to Escape/Tab (S574). */}
