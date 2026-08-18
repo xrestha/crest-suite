@@ -1,5 +1,4 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import QRCode from 'qrcode'
 import { supabase } from '../../supabaseClient'
 import { scopedFrom, scopedUpdate, scopedDelete } from '../../shared/scopedDb'
 import { useAuth } from '../../context/AuthContext'
@@ -108,8 +107,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   useEffect(() => {
     if (!qrCheck.ok) { setQrPreview(''); return }
     // Debounced: a paste settles in one encode, and typing does not queue one per character.
+    // qrcode is a dynamic import — as a top-level import it rode along as a parallel chunk on
+    // EVERY visit to /admin/clients (8.9 kB gz, 20.7% of the route's JS, confirmed in the built
+    // main.js), despite only ever being needed when a valid payment QR is actually previewed.
+    // Same rule as S522's xlsx-in-the-click-handler (S574).
     const t = setTimeout(() => {
-      QRCode.toDataURL(qrPayload.trim(), { margin: 1, width: 180 })
+      import('qrcode')
+        .then(({ default: QRCode }) => QRCode.toDataURL(qrPayload.trim(), { margin: 1, width: 180 }))
         .then(setQrPreview).catch(() => setQrPreview(''))
     }, 250)
     return () => clearTimeout(t)

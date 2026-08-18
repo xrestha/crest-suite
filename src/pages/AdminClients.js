@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient'
 import { scopedInsert } from '../shared/scopedDb'
 import { getBsToday } from '../utils/bsCalendar'
 import { getSubStatus, GRACE_DAYS } from '../utils/subscription'
+import { fetchAllRows } from '../shared/fetchAllRows'
 import { useAutoPurgeBackup, refreshBackupPermission } from '../modules/admin/dataExport/useAutoPurgeBackup'
 import Tip from '../components/Tip'
 import ClientDrawer from './adminClients/ClientDrawer'
@@ -61,7 +62,15 @@ export default function AdminClients() {
   useEffect(() => { loadClients(); loadLastSeen() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadLastSeen() {
-    const { data } = await supabase.from('profiles').select('client_id, last_seen_at, full_name').not('client_id', 'is', null).not('last_seen_at', 'is', null)
+    // fetchAllRows: this reads every profile across every tenant, and a bare .select() truncates
+    // silently at PostgREST's 1000-row cap (the S528 shape). At ~20 accounts/client that is ~50
+    // clients, after which whole clients silently drop out of timeMap and their rows show a
+    // plausible but wrong "last seen" (S574). Ordered with a unique tiebreaker per the
+    // fetchAllRows contract.
+    const { data } = await fetchAllRows(() =>
+      supabase.from('profiles').select('id, client_id, last_seen_at, full_name')
+        .not('client_id', 'is', null).not('last_seen_at', 'is', null)
+        .order('id'))
     const timeMap = {}
     const userMap = {}
     for (const row of (data || [])) {
