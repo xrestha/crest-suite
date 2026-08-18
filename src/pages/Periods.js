@@ -257,7 +257,7 @@ export default function Periods() {
     setBackfillBusy(period.id)
     try {
       const waiting = await withTimeout(
-        countUnpostedForPeriod({ scopedFrom, period }), 20000, 'Checking for unposted bills')
+        countUnpostedForPeriod({ supabase, scopedFrom, period }), 20000, 'Checking for unposted bills')
       if (waiting === 0) {
         window.alert(`No unposted POS bills for ${label}.`)
         return

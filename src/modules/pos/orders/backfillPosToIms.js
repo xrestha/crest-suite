@@ -51,16 +51,23 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
   let list = orders || []
   if (list.length === 0) return { posted: 0, skipped: 0 }
 
-  // ims_posted_at IS NULL means "not posted" only for bills closed AFTER the column existed. On
-  // older rows it means "unknown" — and treating unknown as unposted double-posted a bill that
-  // had in fact posted normally back in July, duplicating both its revenue and its stock
-  // depletion (caught on test data, 2026-08-18). stock_movements.ref_id is the durable evidence
-  // that a bill already reached IMS, so anything with movements is stamped and skipped rather
-  // than posted again. Not perfect — a recipe with no linked ingredients leaves no movements even
-  // when it posted — but it removes every case we can actually detect, in the safe direction.
-  const { data: already } = await scopedFrom('stock_movements', 'ref_id')
-    .in('ref_id', list.map(o => o.id))
-  const alreadyPosted = new Set((already || []).map(m => m.ref_id).filter(Boolean))
+  // ims_posted_at IS NULL means "not posted" only for bills closed AFTER that column existed. On
+  // older rows it means "unknown", and treating unknown as unposted double-posted three bills on
+  // test data (2026-08-18), duplicating their revenue.
+  //
+  // The guard asks the only question that matters — does revenue already exist for this bill —
+  // against sales_entries.pos_order_id. An earlier version inferred it from stock_movements
+  // instead and was WRONG for exactly the case that bit us: writeSalesEntries writes revenue
+  // first and depletion second inside a try/catch that swallows failures, so a bill can have
+  // revenue and no movements. Two of the three double-posted bills were that shape.
+  //
+  // Rows written before migration 20260818170000 have a NULL pos_order_id and are invisible to
+  // this check, so a bill posted before then can still double-post. That is why the SQL cleanup
+  // in the S573 notes stays worth running once per client before the first backfill.
+  const { data: already } = await supabase
+    .from('sales_entries').select('pos_order_id')
+    .in('pos_order_id', list.map(o => o.id))
+  const alreadyPosted = new Set((already || []).map(r => r.pos_order_id).filter(Boolean))
   let preStamped = 0
   if (alreadyPosted.size > 0) {
     for (const id of alreadyPosted) {
@@ -110,6 +117,7 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
         source: isComp ? 'pos_comp' : 'pos',
         unit_price: isComp ? i.unit_price : i.unit_price * discRatio,
         vat_rate: i.vat_rate ?? 0,
+        pos_order_id: o.id,
       }
     })
 
@@ -148,17 +156,18 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
 }
 
 // Exported for the caller's confirm dialog — how many bills are waiting for this period.
-export async function countUnpostedForPeriod({ scopedFrom, period }) {
+export async function countUnpostedForPeriod({ supabase, scopedFrom, period }) {
   if (!period?.id) return 0
   const { fromIso, toIso } = bsMonthRangeIso(period.bs_year, period.bs_month)
-  // Counts candidates, then subtracts those that already have stock movements — so the number in
+  // Counts candidates, then subtracts those that already have revenue rows — so the number in
   // the confirm dialog matches what will actually be posted rather than over-promising.
   const { data: candidates } = await scopedFrom('pos_orders', 'id')
     .eq('status', 'billed').is('ims_posted_at', null)
     .gte('closed_at', fromIso).lte('closed_at', toIso)
   const ids = (candidates || []).map(o => o.id)
   if (ids.length === 0) return 0
-  const { data: already } = await scopedFrom('stock_movements', 'ref_id').in('ref_id', ids)
-  const posted = new Set((already || []).map(m => m.ref_id).filter(Boolean))
+  const { data: already } = await supabase
+    .from('sales_entries').select('pos_order_id').in('pos_order_id', ids)
+  const posted = new Set((already || []).map(r => r.pos_order_id).filter(Boolean))
   return ids.filter(id => !posted.has(id)).length
 }

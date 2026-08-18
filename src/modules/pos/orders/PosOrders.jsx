@@ -1367,8 +1367,10 @@ export default function PosOrders() {
     const saleDiscRatio = closeType === 'paid' ? discRatio : 0
     const rows = []
     qtySplit.forEach(({ recipe_id, saleQty, compQty, unit_price, vat_rate }) => {
-      if (saleQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: saleQty, source: 'pos', unit_price: unit_price * (1 - saleDiscRatio), vat_rate })
-      if (compQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: compQty, source: 'pos_comp', unit_price, vat_rate })
+      // pos_order_id mirrors stock_movements.ref_id: without it, "has this bill's revenue already
+      // posted?" is unanswerable, and a bad post can't be undone by order (S573).
+      if (saleQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: saleQty, source: 'pos', unit_price: unit_price * (1 - saleDiscRatio), vat_rate, pos_order_id: orderId })
+      if (compQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: compQty, source: 'pos_comp', unit_price, vat_rate, pos_order_id: orderId })
     })
     if (rows.length > 0) await supabase.from('sales_entries').insert(rows)
 
