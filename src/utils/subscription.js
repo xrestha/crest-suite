@@ -87,12 +87,19 @@ export function getSubStatus(client) {
     const days   = Math.ceil((latest - now) / 86400000)
     return statusFromDays(days)
   }
-  if (client?.trial_ends_at) {
-    const days = Math.ceil((new Date(client.trial_ends_at) - now) / 86400000)
+  // Trials read the canonical pair register_trial writes (is_trial + trial_expires_at) —
+  // trial_ends_at was a second, legacy trial column that only the admin "+ New Client" form
+  // wrote and only this fallback read, so an admin-created client and a self-service trial were
+  // invisible to each other's screens (S574; migration 20260818190000 folded it in).
+  if (client?.is_trial && client?.trial_expires_at) {
+    const days = Math.ceil((new Date(client.trial_expires_at) - now) / 86400000)
     if (days < 0) return { label: 'Trial expired', days, color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.25)' }
     const m = Math.floor(days / 30)
     const trialLabel = days >= 30 ? `Trial · ${m}mo` : `Trial · ${days}d`
     return { label: trialLabel, days, color: 'var(--theme-accent-ink)', bg: 'rgba(201,168,76,0.10)', border: 'rgba(201,168,76,0.25)' }
   }
-  return { label: null, days: null, color: 'var(--theme-text3)', bg: 'transparent', border: 'transparent' }
+  // Explicit, not a silent "—": a client with no dates at all fails OPEN in getAccessState
+  // (unlimited access) and is skipped by the auto-deactivation sweep, so this is the one state
+  // an operator must notice and price — a converted trial lands here until dates are set (S574).
+  return { label: 'No end date', days: null, color: 'var(--theme-text2)', bg: 'rgba(138,146,163,0.12)', border: 'rgba(138,146,163,0.3)' }
 }

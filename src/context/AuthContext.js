@@ -416,8 +416,10 @@ export function AuthProvider({ children }) {
   // isPremium = true for Growth and Pro (any paid plan) — keeps existing checks working
   const isPremium = isAdmin || plan === 'growth' || plan === 'pro'
 
-  const trialEndsAt = profile?.clients?.trial_ends_at || null
-  const isTrialing  = plan === 'starter' && !!trialEndsAt && new Date(trialEndsAt) > new Date()
+  // trialEndsAt/isTrialing (read from the legacy trial_ends_at column) were exported here and
+  // consumed by exactly nothing — removed in S574 when the trial columns were canonicalised on
+  // the register_trial set (is_trial + trial_expires_at); migration 20260818190000 folds the
+  // legacy column's values in.
 
   // Self-service 7-day free trial fields
   const _now              = new Date()
@@ -468,7 +470,7 @@ export function AuthProvider({ children }) {
       session, profile, loading, ready,
       signIn, signOut,
       clientId, isAdmin, isPremium,
-      plan, isTrialing, trialEndsAt,
+      plan,
       isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
       accessLocked, accessReason, graceDaysLeft,
       featureFlags, hasFeature,

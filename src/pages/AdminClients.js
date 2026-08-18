@@ -93,7 +93,11 @@ export default function AdminClients() {
         return moduleDates.every(d => d < cutoff)
       }
       if (c.subscription_ends_at) return c.subscription_ends_at < cutoff
-      return !!(c.trial_ends_at && c.trial_ends_at < cutoff)
+      // No trial clause on purpose: getAccessState — the single source of truth behind the
+      // app-wide lock — never reads a trial date here (expired trials lock via their own
+      // is_trial/trial_expires_at branch without needing is_active), so sweeping on one meant
+      // merely opening this page could hard-lock a client the runtime model let through (S574).
+      return false
     })
     if (expired.length > 0) {
       await Promise.all(expired.map(c =>
@@ -110,14 +114,24 @@ export default function AdminClients() {
   async function createClient() {
     if (!newForm.name.trim()) { setFormError('Client name is required.'); return }
     setSaving(true); setFormError('')
-    const trialEnd = new Date()
-    trialEnd.setDate(trialEnd.getDate() + 30)
+    // Canonical trial columns — the same set register_trial writes (is_trial,
+    // trial_start_date, trial_expires_at, trial_purge_at). This form used to write only the
+    // legacy trial_ends_at, which no trial screen reads: an admin-created client never appeared
+    // in the Trial Accounts panel, its +7 Days wrote a column nothing showed, and after
+    // Convert to Paid it vanished from every status entirely (S574). Admin-created clients get
+    // 30 days (a hand-onboarded client, not the self-service 7-day tyre-kick).
+    const now = new Date()
+    const trialEnd = new Date(now.getTime() + 30 * 86400000)
+    const trialPurge = new Date(trialEnd.getTime() + 15 * 86400000)
     const { data: clientData, error } = await supabase.from('clients').insert({
       name: newForm.name.trim(),
       location: newForm.location.trim(),
       contact_person: newForm.contact_person.trim(),
       contact_phone: newForm.contact_phone.trim(),
-      trial_ends_at: trialEnd.toISOString()
+      is_trial: true,
+      trial_start_date: now.toISOString(),
+      trial_expires_at: trialEnd.toISOString(),
+      trial_purge_at: trialPurge.toISOString(),
     }).select('id').single()
     if (error) { setFormError(error.message); setSaving(false); return }
 
@@ -272,12 +286,12 @@ export default function AdminClients() {
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-red)', letterSpacing: 0.3 }}>
                   Trial Accounts
-                  <span style={{ marginLeft: 8, background: 'rgba(248,113,113,0.18)', color: 'var(--theme-red)', borderRadius: 12, padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
+                  <span style={{ marginLeft: 8, background: 'rgba(248,113,113,0.18)', color: 'var(--theme-red-text)', borderRadius: 'var(--radius-md)', padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                   {trialClients.filter(c => c.subscribe_requested).length > 0
                     ? `${trialClients.filter(c => c.subscribe_requested).length} requesting to subscribe`
-                    : 'Free trial users — 7 days · Starter plan'}
+                    : 'Free trials — self-service signups get 7 days, admin-created clients 30 · Starter plan'}
                 </div>
               </div>
             </div>
