@@ -93,7 +93,11 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
       }
     })
 
-    const { error: sErr } = await scopedInsert('sales_entries', salesRows)
+    // Plain supabase.from, not scopedInsert: sales_entries is scoped by period_id, not client_id,
+    // so it is deliberately excluded from CLIENT_SCOPED_TABLES and scopedDb throws for it. The
+    // period we were handed is already client-scoped, which is what makes this safe — and it's
+    // exactly what PosOrders' own writeSalesEntries does.
+    const { error: sErr } = await supabase.from('sales_entries').insert(salesRows)
     if (sErr) { skipped++; continue }
 
     // Ingredient depletion, split by the same sale/comp buckets.
