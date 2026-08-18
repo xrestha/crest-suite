@@ -68,7 +68,16 @@ export default function AdminDashboardOverview() {
   // which is why it was missing from this strip and from the row pills below entirely, while
   // clientMRR() was quietly billing NPR 2,000/outlet for it. Revenue you cannot see on the
   // screen that reports revenue.
-  const suiteCount = active.filter(c => c.suite_plan).length
+  // Same date resolution as clientMRR's suiteActive (suite_ends_at, falling back to the IMS
+  // window) — presence-only counting included lapsed Suites the MRR beside it excludes, so the
+  // pill and the money could disagree on the same screen (S574).
+  const suiteCount = active.filter(c => {
+    if (!c.suite_plan) return false
+    const imsEnd = c.ims_ends_at || c.subscription_ends_at
+    const imsOk  = c.ims_enabled !== false && imsEnd && new Date(imsEnd) > new Date()
+    const suiteEnd = c.suite_ends_at || (imsOk ? imsEnd : null)
+    return suiteEnd && new Date(suiteEnd) > new Date()
+  }).length
 
   // Subscription health buckets
   const expiring30  = active.filter(c => { const s = getSubStatus(c); return s.days !== null && s.days >= 0 && s.days <= 30 })
@@ -341,7 +350,14 @@ export default function AdminDashboardOverview() {
                 </thead>
                 <tbody>
                   {visibleSorted.length === 0 && (
-                    <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>No properties match "{search}".</td></tr>
+                    // Three distinct empty states — this used to render `No properties match ""`
+                    // on a brand-new platform and after a KPI-card filter, telling the operator
+                    // their search failed when they never searched (S574).
+                    <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>
+                      {searchQ ? <>No properties match “{search.trim()}”.</>
+                        : activeFilter ? <>No properties in “{activeFilter.label}”.</>
+                        : <>No properties yet — clients appear here once created in Admin → Clients.</>}
+                    </td></tr>
                   )}
                   {visibleSorted.map((c, idx) => {
                     // The rows are ALREADY sorted needs-attention → healthy → inactive, and that
@@ -463,13 +479,16 @@ export default function AdminDashboardOverview() {
                           </span>
                         </td>
 
-                        {/* Monthly Value (IMS + HR + POS) */}
-                        <td style={{ textAlign: 'right', fontWeight: mrr > 0 ? 700 : 400, color: mrr > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
+                        {/* Monthly Value (IMS + HR + POS). Greyed + annotated on inactive rows:
+                            clientMRR never reads is_active, so an archived, locked-out client
+                            used to show a live "NPR 5,000 · Monthly" in a column whose total
+                            excluded it (S574). */}
+                        <td style={{ textAlign: 'right', fontWeight: mrr > 0 && c.is_active ? 700 : 400, color: mrr > 0 && c.is_active ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
                           {mrr > 0 ? (
                             <>
                               NPR {mrr.toLocaleString('en-NP')}
                               <span style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--theme-text3)', marginTop: 2 }}>
-                                {c.billing_cycle === 'annual' ? 'Annual' : 'Monthly'}
+                                {c.is_active ? (c.billing_cycle === 'annual' ? 'Annual' : 'Monthly') : 'inactive — not billed'}
                               </span>
                             </>
                           ) : '—'}
@@ -545,15 +564,28 @@ export default function AdminDashboardOverview() {
                   })}
                 </tbody>
                 <tfoot>
-                  <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                    <td colSpan={3} style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--theme-text2)', fontSize: 12 }}>
-                      Total — {payingCount} paying · {active.length - payingCount} non-paying
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 15 }}>
-                      NPR {estMRR.toLocaleString('en-NP')}
-                    </td>
-                    <td colSpan={5} />
-                  </tr>
+                  {/* The footer totals the rows ABOVE it. It used to print platform-wide
+                      estMRR/payingCount over a body narrowed by KPI filter and search — a total
+                      row that was not the total of its own table, on the screen whose whole job
+                      is stating what the platform earns (S574). When narrowed, it says "Shown". */}
+                  {(() => {
+                    const shownActive = visibleSorted.filter(c => c.is_active)
+                    const shownMRR = shownActive.reduce((sum, c) => sum + clientMRR(c), 0)
+                    const shownPaying = shownActive.filter(c => clientMRR(c) > 0).length
+                    const narrowed = !!(activeFilter || searchQ)
+                    return (
+                      <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
+                        <td colSpan={3} style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--theme-text2)', fontSize: 12 }}>
+                          {narrowed ? 'Shown' : 'Total'} — {shownPaying} paying · {shownActive.length - shownPaying} non-paying
+                          {narrowed && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · platform NPR {estMRR.toLocaleString('en-NP')}</span>}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 15 }}>
+                          NPR {shownMRR.toLocaleString('en-NP')}
+                        </td>
+                        <td colSpan={5} />
+                      </tr>
+                    )
+                  })()}
                 </tfoot>
               </table>
             </div>
