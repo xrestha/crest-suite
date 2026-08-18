@@ -58,7 +58,6 @@ const FEATURE_GROUPS = [
     { key: 'non_vat_report',  label: 'Non-VAT Report' },
     { key: 'vendor_balance_confirmation', label: 'Vendor Balance Confirmation' },
     { key: 'wastage_report',  label: 'Wastage Report' },
-    { key: 'stock_report',    label: 'Stock Report' },
     { key: 'settings',        label: 'Settings' },
     { key: 'staff_meals',     label: 'Staff Meals' },
   ]},
@@ -72,6 +71,11 @@ const FEATURE_GROUPS = [
     { key: 'variance_report',      label: 'Variance Report' },
     { key: 'reorder_report',       label: 'Reorder Report' },
     { key: 'stock_movement_log',   label: 'Stock Movements' },
+    // stock_report moved Starter→Growth in the S551 retier (its On-hand figure subtracts a
+    // recipe-explosion usage term, meaningless on Starter). AuthContext/App/Layout all moved
+    // then; this grid lagged a session behind, which made the feature ungrantable to Starter
+    // clients — the row rendered locked + pre-checked in the wrong column (phase 7, S574).
+    { key: 'stock_report',         label: 'Stock Report' },
     { key: 'overheads',            label: 'Overheads' },
     { key: 'budget_vs_actual',     label: 'Budget vs Actual' },
     { key: 'best_sellers',         label: 'Best & Worst Sellers' },
