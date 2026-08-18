@@ -48,14 +48,34 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
     .order('closed_at')
 
   if (oErr) return { posted: 0, skipped: 0, error: oErr.message }
-  const list = orders || []
+  let list = orders || []
   if (list.length === 0) return { posted: 0, skipped: 0 }
+
+  // ims_posted_at IS NULL means "not posted" only for bills closed AFTER the column existed. On
+  // older rows it means "unknown" — and treating unknown as unposted double-posted a bill that
+  // had in fact posted normally back in July, duplicating both its revenue and its stock
+  // depletion (caught on test data, 2026-08-18). stock_movements.ref_id is the durable evidence
+  // that a bill already reached IMS, so anything with movements is stamped and skipped rather
+  // than posted again. Not perfect — a recipe with no linked ingredients leaves no movements even
+  // when it posted — but it removes every case we can actually detect, in the safe direction.
+  const { data: already } = await scopedFrom('stock_movements', 'ref_id')
+    .in('ref_id', list.map(o => o.id))
+  const alreadyPosted = new Set((already || []).map(m => m.ref_id).filter(Boolean))
+  let preStamped = 0
+  if (alreadyPosted.size > 0) {
+    for (const id of alreadyPosted) {
+      await scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', id)
+      preStamped++
+    }
+    list = list.filter(o => !alreadyPosted.has(o.id))
+  }
+  if (list.length === 0) return { posted: 0, skipped: preStamped }
 
   // One explosion for every recipe across every order, rather than per order.
   const recipeIds = [...new Set(list.flatMap(o => (o.pos_order_items || []).map(i => i.recipe_id).filter(Boolean)))]
   const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
 
-  let posted = 0, skipped = 0
+  let posted = 0, skipped = preStamped
   for (const o of list) {
     const items = (o.pos_order_items || []).filter(i => i.recipe_id)
     if (items.length === 0) {
@@ -131,8 +151,14 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
 export async function countUnpostedForPeriod({ scopedFrom, period }) {
   if (!period?.id) return 0
   const { fromIso, toIso } = bsMonthRangeIso(period.bs_year, period.bs_month)
-  const { count } = await scopedFrom('pos_orders', 'id', { count: 'exact', head: true })
+  // Counts candidates, then subtracts those that already have stock movements — so the number in
+  // the confirm dialog matches what will actually be posted rather than over-promising.
+  const { data: candidates } = await scopedFrom('pos_orders', 'id')
     .eq('status', 'billed').is('ims_posted_at', null)
     .gte('closed_at', fromIso).lte('closed_at', toIso)
-  return count || 0
+  const ids = (candidates || []).map(o => o.id)
+  if (ids.length === 0) return 0
+  const { data: already } = await scopedFrom('stock_movements', 'ref_id').in('ref_id', ids)
+  const posted = new Set((already || []).map(m => m.ref_id).filter(Boolean))
+  return ids.filter(id => !posted.has(id)).length
 }
