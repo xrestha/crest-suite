@@ -158,6 +158,29 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S566 — 2026-08-18 — Item Master's "Total (NPR)" field divided the rate twice, silently
+
+A CUP HOLDER row on Stock Count valued 880 PCS at **NPR 12**. Stock Count was right — `Math.round(qty × per_uom_rate)` — but the item's per-unit rate was ~NPR 0.014 instead of ~14.
+
+`items.per_uom_rate` is a generated column, `rate / NULLIF(purchase_qty, 0)`, so **`rate` is the price of the whole Purchase Qty**, not the price of one unit. The Add/Edit Item form's fourth box disagreed: labelled "Total (NPR)", it back-calculated `rate = amount ÷ purchase_qty`, which the generated column then divided by `purchase_qty` a *second* time. Every item entered through that box got a per-unit rate `purchase_qty`× too small — and because the form printed `form.rate` directly as "Per UOM rate" whenever that box was in use, it displayed the **correct** figure on screen while saving the wrong one. Its own placeholder (`rate × purchase_qty`) and tooltip ("Rate will be back-calculated as Total ÷ Purchase Qty") were consistent with each other and wrong against the schema.
+
+Relabelled to **"Price per unit (NPR)"** and inverted the arithmetic — `rate = perUnit × purchase_qty` — which is also the number people actually read off an invoice line, so it now prevents the mis-entry rather than causing it. Changing Purchase Qty afterwards re-scales `rate` from the entered per-unit price instead of leaving a stale `rate` behind (same bug class, one step later). The "Per UOM rate:" hint lost its special-case branch and always derives from `perUom(purchase_qty, rate)`, so the screen can no longer disagree with what gets written.
+
+Two supporting fixes in the same file: **`Rate (NPR)` had no `Tip`** — every neighbouring field has one, and it's precisely the field whose meaning (pack price vs unit price) is ambiguous enough to have produced this; it now spells out "price for the WHOLE Purchase Qty" and points at the per-unit field. And Item Master's Per-UOM Rate column rendered `.toFixed(2)`, so a legitimately sub-paisa rate (a PCS item bought by the 1000) displayed as a flat `0.00` — hiding exactly the mis-entry the column exists to reveal. Both the column and the form hint now share one `fmtPerUom()` helper that falls back to 6 decimals below 0.01.
+
+**Existing data is not touched.** Any item entered through the old box still carries the wrong rate; find them with:
+
+```sql
+select name, uom, purchase_qty, rate, per_uom_rate
+from items
+where is_active and per_uom_rate < 0.10
+order by per_uom_rate;
+```
+
+Correct each in Item Master — one edit fixes Stock, Variance, COGS and Reorder together, since all four read that one generated column.
+
+**Files:** `src/modules/ims/items/Items.js`, `public/service-worker.js` (v75 → v76), `CLAUDE.md`, `README.md`
+
 ### S565 — 2026-08-16 — Payroll Calculation flagged finalized TADA rows "Stale" that weren't
 
 Finalizing a payroll run flips the TADA claims it paid from `status='approved'` to `'paid'` (so the same trip can't be reimbursed twice). But `fetchApprovedTadaMap()` — the shared helper both Payroll Run and the read-only Payroll Calculation page use — only ever matched `status='approved'`. So on the Calculation page, re-fetching TADA for an already-finalized period found nothing for those employees, computed a live net pay short by exactly their TADA amount, and flagged them "Stale" against the correctly-higher stored payslip — a false alarm, not a real drift.

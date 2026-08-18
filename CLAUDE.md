@@ -505,6 +505,20 @@ Three things worth knowing before touching it:
 
 All downstream calculations (Stock, Variance, FIFO, Reorder) read these base-unit values directly.
 
+### `items.rate` is a PACK price, and every valuation in IMS hangs off that (S566)
+
+`items.per_uom_rate` is a **generated column** — `rate / NULLIF(purchase_qty, 0)` — so `rate` means "the price of the whole `purchase_qty`", never the price of one base unit. A 1 KG bag counted as 1000 GM and costing NPR 500 is `purchase_qty 1000, rate 500`, giving `per_uom_rate 0.50`. Stock Count, Variance, COGS, Reorder and the Monthly Owner Report all value stock straight off `per_uom_rate`, so a wrong pair here misprices the item everywhere at once, with nothing anywhere to flag it.
+
+The Add/Edit Item form contradicted this for a long time: a fourth box labelled "Total (NPR)" did `rate = amount ÷ purchase_qty`, which the generated column then divided by `purchase_qty` **again** — so any item entered through it carried a per-unit rate `purchase_qty`× too small. Found live via a CUP HOLDER valuing 880 PCS at NPR 12 (per-unit NPR 0.014 instead of ~14). The box is now **"Price per unit (NPR)"** and multiplies instead (`rate = perUnit × purchase_qty`), and changing Purchase Qty afterwards re-scales `rate` from that entered per-unit price rather than leaving a stale one behind.
+
+Three things worth keeping in mind before touching this form again:
+
+- **The screen agreed with the user and disagreed with the database.** The "Per UOM rate:" hint special-cased the draft box and printed `form.rate` directly, so it showed the *correct* per-unit figure while saving the wrong one — the one shape of bug a careful user cannot catch by reading the form. That branch is gone; the hint now always derives from `perUom(purchase_qty, rate)`, which is the same arithmetic the DB does.
+- **A sub-paisa `per_uom_rate` is legitimate** (a PCS item bought by the 1000), so the Item Master column's `.toFixed(2)` rendered exactly the mis-entries it existed to reveal as a flat `0.00`. Both the column and the form hint share `fmtPerUom()` now, which falls back to 6 decimals below 0.01.
+- **`Rate (NPR)` had no `Tip`** while every field around it did — and it is the one field whose meaning is genuinely ambiguous. Any new field in this form needs one from the start, per the tooltip rule below.
+
+This is distinct from the `purchase_entries` convention above: that one is about a *conversion factor* between purchase and base units on a transaction row, this one is about pack size on the item master. Both end in base units, but they are different columns with different arithmetic.
+
 ### `billKeyOf`/`aging` are centralized in `purchasesHelpers.js` — but not everywhere
 
 Added S501 for **Vendor Balance Confirmation** (`/vendor-balance-confirmation`, Pro, Reports → Menu & Vendors — a printable per-vendor/per-BS-fiscal-year balance letter + running-balance schedule for Nepal IRD Annexure 13 reconciliation). `billKeyOf(e, period)` (bill grouping key, `purchase_group_id`-first with a vendor+invoice+date fallback) and `aging(days)` used to be duplicated across `VendorReport.js` and `OutstandingPayables.js` with two genuinely different shapes — `OutstandingPayables.js` now imports the centralized version from `purchasesHelpers.js` (safe, its old shape was byte-compatible once made `purchase_group_id`-aware). **`VendorReport.js` and the owner-report's `computeVendorPurchasingSection.js` were deliberately left on their own local copies** — theirs are single-period-scoped by construction (no year/month in the fallback key), and reusing the centralized cross-period-safe version there would silently misgroup bills across period boundaries, not simplify anything. Don't "finish the cleanup" by pointing those two at the shared helper without re-deriving their period-scoping first.

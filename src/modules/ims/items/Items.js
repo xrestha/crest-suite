@@ -47,7 +47,7 @@ export default function Items() {
   const [initingCats, setInitingCats] = useState(false)
   const [usageMap, setUsageMap] = useState({})
   const [filterUsage, setFilterUsage] = useState('all')
-  const [amtDraft, setAmtDraft] = useState('')
+  const [perUnitDraft, setPerUnitDraft] = useState('')
 
   useEffect(() => {
     if (!clientId) return
@@ -196,25 +196,35 @@ export default function Items() {
     setInitingCats(false)
   }
 
-  function setTotalAmount(val) {
-    setAmtDraft(val)
+  // `items.rate` is the price of the WHOLE `purchase_qty` — the DB derives
+  // `per_uom_rate = rate / purchase_qty` as a generated column. So a per-unit price typed off an
+  // invoice line has to be scaled UP by the pack size to become `rate`, never divided.
+  //
+  // This field used to be labelled "Total (NPR)" and did `rate = amount / qty`, which the generated
+  // column then divided by `qty` a SECOND time — so every item entered through it ended up with a
+  // per-unit rate `qty`× too small, and the form displayed the *correct* figure on screen while
+  // saving the wrong one. Found live (S566) via a CUP HOLDER valuing 880 PCS at NPR 12.
+  const scaleToRate = (perUnit, qty) => String(parseFloat((perUnit * qty).toFixed(4)))
+
+  function setPerUnitPrice(val) {
+    setPerUnitDraft(val)
     const qty = parseFloat(form.purchase_qty)
-    const amt = parseFloat(val)
-    if (qty > 0 && amt > 0) setForm(prev => ({ ...prev, rate: (amt / qty).toFixed(2) }))
+    const per = parseFloat(val)
+    if (qty > 0 && per > 0) setForm(prev => ({ ...prev, rate: scaleToRate(per, qty) }))
   }
 
   function openNew() {
     setEditing(null)
     setForm({ ...EMPTY_FORM, category_id: categories[0]?.id || '' })
     setActiveTab('details')
-    setAmtDraft('')
+    setPerUnitDraft('')
     setError('')
     setShowForm(true)
   }
 
   function openEdit(item) {
     setEditing(item.id)
-    setAmtDraft('')
+    setPerUnitDraft('')
     setForm({
       name: item.name,
       category_id: item.category_id || '',
@@ -314,11 +324,18 @@ export default function Items() {
     loadItems()
   }
 
+  // A sub-paisa unit rate is legitimate (a PCS item bought by the 1000), so `toFixed(2)` alone
+  // flattens it to "0.00" — which hides exactly the mis-entry this figure exists to reveal.
+  const fmtPerUom = v => {
+    const n = parseFloat(v)
+    if (!isFinite(n)) return '—'
+    if (n > 0 && n < 0.01) return parseFloat(n.toFixed(6)).toString()
+    return n.toFixed(2)
+  }
+
   const perUom = (qty, rate) => {
     if (!qty || !rate) return '—'
-    const v = rate / qty
-    if (v < 0.01) return parseFloat(v.toFixed(6)).toString()
-    return v.toFixed(2)
+    return fmtPerUom(rate / qty)
   }
 
   // Conversion preview string
@@ -464,7 +481,17 @@ export default function Items() {
                   <input id="items-f5"
                     type="number"
                     value={form.conversion_factor ? form.conversion_factor : form.purchase_qty}
-                    onChange={e => { if (!form.conversion_factor) { setAmtDraft(''); setForm(f({ purchase_qty: e.target.value })) } }}
+                    onChange={e => {
+                      if (form.conversion_factor) return
+                      const qty = e.target.value
+                      const per = parseFloat(perUnitDraft)
+                      // An entered per-unit price stays authoritative when the pack size changes —
+                      // otherwise `rate` keeps its old value and the per-unit price it was derived
+                      // from silently becomes something else.
+                      setForm(f(per > 0 && parseFloat(qty) > 0
+                        ? { purchase_qty: qty, rate: scaleToRate(per, parseFloat(qty)) }
+                        : { purchase_qty: qty }))
+                    }}
                     placeholder="1000"
                     readOnly={!!form.conversion_factor}
                     style={form.conversion_factor ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
@@ -476,33 +503,35 @@ export default function Items() {
                   )}
                 </div>
                 <div className="form-field">
-                  <label htmlFor="items-f6">Rate (NPR)</label>
+                  <label htmlFor="items-f6">
+                    <Tip text={`Price for the WHOLE Purchase Qty above — not per ${form.uom}. e.g. a 1 KG bag counted as 1000 GM and costing NPR 500 → enter 500. If your invoice only shows the per-unit price, leave this and use "Price per unit" instead.`} width={280}>
+                      Rate (NPR)
+                    </Tip>
+                  </label>
                   <input id="items-f6"
                     type="number"
                     value={form.rate}
-                    onChange={e => { setAmtDraft(''); setForm(f({ rate: e.target.value })) }}
+                    onChange={e => { setPerUnitDraft(''); setForm(f({ rate: e.target.value })) }}
                     placeholder="500"
                   />
                 </div>
                 <div className="form-field">
                   <label htmlFor="items-f7">
-                    <Tip text="Enter the total amount paid. Rate will be back-calculated as Total ÷ Purchase Qty." width={220}>Total (NPR)</Tip>
+                    <Tip text={`The price of ONE ${form.uom} — the unit price on your invoice line. Rate above is filled in for you as this × Purchase Qty.`} width={260}>
+                      Price per unit (NPR)
+                    </Tip>
                   </label>
                   <input id="items-f7"
                     type="number" min="0" step="any"
-                    value={amtDraft}
-                    placeholder={
-                      parseFloat(form.rate) > 0 && parseFloat(form.purchase_qty) > 0
-                        ? (parseFloat(form.rate) * parseFloat(form.purchase_qty)).toFixed(2)
-                        : ''
-                    }
-                    onChange={e => setTotalAmount(e.target.value)}
+                    value={perUnitDraft}
+                    placeholder={perUom(form.purchase_qty, form.rate) === '—' ? '' : perUom(form.purchase_qty, form.rate)}
+                    onChange={e => setPerUnitPrice(e.target.value)}
                   />
                 </div>
               </div>
               {form.purchase_qty && form.rate && (
                 <p style={{ fontSize: 12, color: 'var(--theme-accent-ink)', margin: '10px 0 0' }}>
-                  Per {form.uom} rate: NPR {amtDraft ? form.rate : perUom(form.purchase_qty, form.rate)}
+                  Per {form.uom} rate: NPR {perUom(form.purchase_qty, form.rate)}
                 </p>
               )}
             </>
@@ -756,7 +785,7 @@ export default function Items() {
                       <td style={{ textAlign: 'right' }}>{Number(item.purchase_qty).toLocaleString()}</td>
                       <td style={{ textAlign: 'right' }}>{Number(item.rate).toLocaleString()}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
-                        {Number(item.per_uom_rate).toFixed(2)}
+                        {fmtPerUom(item.per_uom_rate)}
                       </td>
                       <td style={{ textAlign: 'right', color: parseFloat(item.yield_pct) < 100 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
                         {parseFloat(item.yield_pct || 100).toFixed(0)}%
