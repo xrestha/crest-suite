@@ -182,12 +182,15 @@ export default function AdminClients() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      {/* flexWrap: at 390px the search + "+ New Client" cluster used to overflow past the
+          viewport and get clipped by .main-content's overflow-x:hidden — the button rendered
+          as "N Cli" with no way to scroll to the rest (phase 7 measured finding, S574). */}
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 className="page-title">Clients</h1>
           <p className="page-subtitle">{clients.length} propert{clients.length !== 1 ? 'ies' : 'y'} on the platform</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search clients…" className="form-select" style={{ maxWidth: 220 }}
@@ -414,7 +417,10 @@ export default function AdminClients() {
                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8,
                   overflow: 'hidden', cursor: 'pointer', transition: 'border-color 0.15s',
                 }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = '#3a3f4d'}
+                // Hover border steps to the accent-alpha token, not a hardcoded dark slate —
+                // #3a3f4d was the Dark preset's border baked in, which painted a near-black
+                // edge on the five light presets (phase 7, S574).
+                onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--theme-focus-ring)'}
                 onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--theme-border)'}
               >
                 {/* One row, not two. The old secondary bar held Features and Deactivate at
@@ -430,7 +436,7 @@ export default function AdminClients() {
                       <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{c.name}</span>
                       <span className={`badge ${c.is_active ? 'badge-green' : 'badge-gray'}`}>{c.is_active ? 'Active' : 'Inactive'}</span>
                       {rel && (
-                        <span style={{ fontSize: 12, color: isRecent ? 'var(--theme-green)' : 'var(--theme-text3)', fontWeight: isRecent ? 600 : 400 }}>
+                        <span style={{ fontSize: 12, color: isRecent ? 'var(--theme-green-text)' : 'var(--theme-text3)', fontWeight: isRecent ? 600 : 400 }}>
                           {rel}{lastUser && <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}> · {lastUser}</span>}
                         </span>
                       )}
@@ -440,8 +446,12 @@ export default function AdminClients() {
                     </div>
                   </div>
 
-                  {/* Module pills */}
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                  {/* Module pills. flexWrap (here and on the action cluster below): these two
+                      clusters were flexShrink:0 with no wrap of their own, so at 390px the row
+                      overflowed .main-content's overflow-x:hidden and "Manage →" sat 75px past
+                      the viewport edge, unreachable — no scroll path existed at any level
+                      (phase 7 measured finding, S574). */}
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }} onClick={e => e.stopPropagation()}>
                     {[
                       // Only IMS carries a tier. HR and POS are yes/no modules, so their pills
                       // read "HR · on"/"POS · off" instead of a plan name neither module sells —
@@ -486,7 +496,7 @@ export default function AdminClients() {
                   </div>
 
                   {/* Subscription + actions */}
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }} onClick={e => e.stopPropagation()}>
                     {c.billing_cycle === 'annual' && (c.ims_ends_at || c.subscription_ends_at) && (
                       <span style={{ fontSize: 12, fontWeight: 700, padding: '5px 10px', borderRadius: 'var(--radius-sm)', color: 'var(--theme-accent-text)', background: 'var(--theme-accent)' }}>Annual</span>
                     )}
@@ -507,7 +517,11 @@ export default function AdminClients() {
                     </button>
                     <button
                       className="btn btn-ghost"
-                      style={{ fontSize: 12.5, padding: '7px 15px', fontWeight: 600, color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.35)' }}
+                      // accent-ink (accent used AS text) + the accent-alpha border token — the
+                      // base accent measured 2.74:1 on Rosé Dawn, and the old border was Dark's
+                      // gold rgba(201,168,76,…) hardcoded beside rose/purple/blue accents on the
+                      // light presets (phase 7 measured findings, S574).
+                      style={{ fontSize: 12.5, padding: '7px 15px', fontWeight: 600, color: 'var(--theme-accent-ink)', borderColor: 'var(--theme-focus-ring)' }}
                       onClick={e => { e.stopPropagation(); setActiveDrawer(c) }}
                     >
                       Manage →
