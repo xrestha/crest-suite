@@ -158,6 +158,24 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S567 — 2026-08-18 — Stock Count audit before closing Shrawan: four reconciliation bugs
+
+Asked for a functionality + calculation review of Stock Count ahead of a real month close for Casa Acai. Four issues, all of which made two figures on the same screen disagree without saying so.
+
+**Daily Wastage was missing from the item-level Summary row.** `getUsed()`, `getSummary()`'s category rollup and the Excel export all compute period wastage as catch-all + daily. The item table alone printed the catch-all only — in both the Wastage qty and Wastage Value columns — so for any item with Daily Wastage entries the row visibly failed to add up (Opening + Purchased − Returned − Wastage − Staff Meals − Closing ≠ Used), and the spreadsheet disagreed with the screen it was exported from. This is the one that would have moved the closing numbers.
+
+**Uncategorised items fell out of the category rollup.** It loops over `categories`, so an item with `category_id = NULL` (Item Master writes null when the field is left blank) or one pointing at a deleted category was claimed by no row — while the item table below it iterates `items` and counted them. The **Totals** row, which is what a month gets closed on, was understated by exactly those items. Added an `Uncategorised` row, rendered only when non-empty, tooltipped to say the items are in the Totals and should be filed in Item Master.
+
+**An item carrying only wastage or staff meals rendered Used/COGS as "—".** `hasData` tested opening/closing/purchases only, so waste-with-no-stock — precisely the shape that produces negative usage — was blanked in the item table while the rollup still added its negative COGS. The same test gated `saveAll`'s negative-usage guard, so that check skipped those items too. Both now include wastage and staff meals.
+
+**`staff_meals` read both types, wrote only one.** `staff_meals.type` is `'staff' | 'comp'`; `persistValueDirect` deletes and reinserts only `type='staff'`, but the read summed every type. Nothing writes `'comp'` today so nothing was wrong live, but a single such row would have shown a figure this tab cannot edit and doubled it on the next save. Read is now `.eq('type','staff')`, matching the write.
+
+**Also paged every period-scoped read on the page** — `opening_stock`, `closing_stock`, `wastages`, `staff_meals`, `vendor_returns`, `requisition_lines` (only `purchase_entries` was wrapped by the S529 sweep). The 1000-row cap is worst here of anywhere: a truncated read yields a *plausible* COGS rather than an error, and this is the page a month is closed from. `wastages` is the one that realistically crosses it, being one row per item per day.
+
+**Flagged, not changed:** `MonthlySummary.js` filters `.eq('is_sub_recipe', false)` while Stock Count deliberately includes sub-recipes (per CLAUDE.md — Stock Count physically counts prep). So the two pages' COGS totals differ by the sub-recipe amount for the same month, by construction. Left alone pending a decision, since changing either is a cross-page call, not a bug fix.
+
+**Files:** `src/modules/ims/stockcount/Stock.js`, `public/service-worker.js` (v76 → v77), `CLAUDE.md`, `README.md`
+
 ### S566 — 2026-08-18 — Item Master's "Total (NPR)" field divided the rate twice, silently
 
 A CUP HOLDER row on Stock Count valued 880 PCS at **NPR 12**. Stock Count was right — `Math.round(qty × per_uom_rate)` — but the item's per-unit rate was ~NPR 0.014 instead of ~14.

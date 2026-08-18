@@ -144,13 +144,22 @@ export default function Stock() {
   }
 
   async function loadStockData(periodId, itemList) {
+    // Every one of these is paged. PostgREST's silent 1000-row cap (S528/S529) is worst here of
+    // anywhere: a truncated read produces a *plausible* COGS rather than an error, and this is the
+    // page a month is closed from. `wastages` is the one that realistically crosses it — daily
+    // entries are one row per item per day — but opening/closing are one row per item, so a client
+    // past 1000 items would silently lose stock too. Each needs a unique tiebreaker in its sort or
+    // paging can repeat a row on one page and skip it on the next.
     const [{ data: opening }, { data: closing }, { data: wastages }, { data: staffMealsData }, { data: purch }, { data: rets }] = await Promise.all([
-      supabase.from('opening_stock').select('*').eq('period_id', periodId),
-      supabase.from('closing_stock').select('*').eq('period_id', periodId),
-      supabase.from('wastages').select('id, item_id, qty, bs_day, reason, items(name, uom, per_uom_rate)').eq('period_id', periodId),
-      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('opening_stock').select('*').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('*').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('wastages').select('id, item_id, qty, bs_day, reason, items(name, uom, per_uom_rate)').eq('period_id', periodId).order('id')),
+      // Read and write must agree on `type`: persistValueDirect deletes and reinserts ONLY
+      // type='staff', so counting a 'comp' row here would show a figure this tab cannot edit and
+      // would double it on the next save. Nothing writes 'comp' today; this keeps it that way.
+      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).eq('type', 'staff').order('id')),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
-      scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId)
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
     ])
 
     const data = {}
@@ -200,11 +209,12 @@ export default function Stock() {
     // Requisitioned map — qty issued via store requisitions
     let reqMap = {}
     try {
-      const { data: reqLines } = await supabase
+      const { data: reqLines } = await fetchAllRows(() => supabase
         .from('requisition_lines')
         .select('item_id, qty_issued, requisitions!inner(client_id, period_id, status)')
         .eq('requisitions.period_id', periodId)
         .eq('requisitions.status', 'issued')
+        .order('id'))
       ;(reqLines || []).forEach(r => { reqMap[r.item_id] = (reqMap[r.item_id] || 0) + parseFloat(r.qty_issued || 0) })
       setRequisitioned(reqMap)
     } catch (_) {
@@ -326,7 +336,11 @@ export default function Stock() {
     if (settings.block_negative_stock) {
       const negativeItems = visibleItems.filter(item => {
         const row = stockData[item.id] || {}
+        // Same "has activity" test the Summary row uses — wastage/staff meals included, since an
+        // item carrying only waste is exactly the shape that goes negative.
+        const wast = (parseFloat(row.wastage) || 0) + (parseFloat(dailyWastage[item.id]) || 0)
         const hasData = row.opening !== '' || row.closing !== '' || purchases[item.id]
+          || wast > 0 || (parseFloat(row.staff_meal) || 0) > 0
         return hasData && getUsed(item.id) < 0
       })
       if (negativeItems.length > 0) {
@@ -480,10 +494,21 @@ export default function Stock() {
     return flagged
   }
 
+  // Key used for items whose `category_id` is NULL (Items.js writes null when the field is left
+  // blank) or points at a category this client no longer has. Both used to fall out of the rollup
+  // entirely — it loops over `categories`, so nothing claimed them — while the item-level table
+  // below it iterates `items` and counted them. The Totals row a month is closed on was therefore
+  // understated by exactly those items, silently, with no row to hint at the gap.
+  const UNCATEGORISED = 'Uncategorised'
+
   function getSummary() {
     const byCategory = {}
-    categories.forEach(c => {
-      const catItems = items.filter(i => i.category_id === c.id)
+    const knownCatIds = new Set(categories.map(c => c.id))
+    const groups = [
+      ...categories.map(c => ({ name: c.name, catItems: items.filter(i => i.category_id === c.id) })),
+      { name: UNCATEGORISED, catItems: items.filter(i => !i.category_id || !knownCatIds.has(i.category_id)) },
+    ]
+    groups.forEach(({ name, catItems }) => {
       const openingVal   = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.opening) || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const closingVal   = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.closing) || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const purchasesVal = catItems.reduce((sum, i) => sum + (parseFloat(purchases[i.id]) || 0) * parseFloat(i.per_uom_rate || 0), 0)
@@ -493,7 +518,7 @@ export default function Stock() {
       const wastageVal    = catItems.reduce((sum, i) => sum + ((parseFloat(stockData[i.id]?.wastage) || 0) + (parseFloat(dailyWastage[i.id]) || 0)) * parseFloat(i.per_uom_rate || 0), 0)
       const staffMealsVal = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.staff_meal) || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const cogsVal       = catItems.reduce((sum, i) => sum + getUsed(i.id) * parseFloat(i.per_uom_rate || 0), 0)
-      byCategory[c.name] = { opening: openingVal, closing: closingVal, purchases: purchasesVal, returns: returnsVal, wastage: wastageVal, staffMeals: staffMealsVal, cogs: cogsVal }
+      byCategory[name] = { opening: openingVal, closing: closingVal, purchases: purchasesVal, returns: returnsVal, wastage: wastageVal, staffMeals: staffMealsVal, cogs: cogsVal }
     })
     return byCategory
   }
@@ -611,7 +636,17 @@ export default function Stock() {
         <div>
           {(() => {
               const summary = getSummary()
-              const rows = categories.map(c => summary[c.name] || { opening: 0, purchases: 0, returns: 0, closing: 0, wastage: 0, staffMeals: 0, cogs: 0 })
+              const EMPTY_ROW = { opening: 0, purchases: 0, returns: 0, closing: 0, wastage: 0, staffMeals: 0, cogs: 0 }
+              // The Uncategorised group is rendered only when it actually holds something, so a
+              // tidy client never sees an all-dashes row — but when it does hold something, both
+              // the row and the Totals below include it.
+              const uncat = summary[UNCATEGORISED] || EMPTY_ROW
+              const hasUncat = Object.values(uncat).some(v => Math.abs(v) > 0.005)
+              const summaryRows = [
+                ...categories.map(c => ({ key: c.id, name: c.name, s: summary[c.name] || EMPTY_ROW })),
+                ...(hasUncat ? [{ key: '__uncat__', name: UNCATEGORISED, s: uncat, muted: true }] : []),
+              ]
+              const rows = summaryRows.map(r => r.s)
               const totals = {
                 opening:    rows.reduce((s, r) => s + r.opening,            0),
                 purchases:  rows.reduce((s, r) => s + r.purchases,          0),
@@ -642,12 +677,15 @@ export default function Stock() {
                         </tr>
                       </thead>
                       <tbody>
-                        {categories.map((c, idx) => {
-                          const s = summary[c.name] || { opening: 0, purchases: 0, returns: 0, closing: 0, wastage: 0, staffMeals: 0, cogs: 0 }
+                        {summaryRows.map(({ key, name, s, muted }, idx) => {
                           return (
-                            <tr key={c.id}>
-                              <td style={{ textAlign: 'center', color: 'var(--theme-text2)' }}>{idx + 1}</td>
-                              <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{c.name}</td>
+                            <tr key={key}>
+                              <td style={{ textAlign: 'center', color: 'var(--theme-text2)' }}>{muted ? '—' : idx + 1}</td>
+                              <td style={{ fontWeight: 600, color: muted ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+                                {muted
+                                  ? <Tip text="Items with no category set, or pointing at a category that no longer exists. They are included in the Totals below and in the item table — assign them a category in Item Master to file them properly." width={280}>{name}</Tip>
+                                  : name}
+                              </td>
                               <td style={tdStyle('var(--theme-text3)')}>{s.opening > 0 ? fmt(s.opening) : '—'}</td>
                               <td style={tdStyle('var(--theme-accent)')}>{s.purchases > 0 ? fmt(s.purchases) : '—'}</td>
                               <td style={tdStyle('var(--theme-red)')}>{(s.returns || 0) > 0 ? fmt(s.returns) : '—'}</td>
@@ -720,13 +758,21 @@ export default function Stock() {
                     const row      = stockData[item.id] || {}
                     const used     = getUsed(item.id)
                     const returned = returns[item.id] || 0
-                    const hasData  = row.opening !== '' || row.closing !== '' || purchases[item.id]
                     const rate     = parseFloat(item.per_uom_rate || 0)
                     const openQty  = parseFloat(row.opening     || 0)
                     const purchQty = parseFloat(purchases[item.id] || 0)
-                    const wastQty  = parseFloat(row.wastage     || 0)
+                    // Period wastage is catch-all + daily, exactly as getUsed(), getSummary() and
+                    // the Excel export all compute it. This row alone used to print the catch-all
+                    // only, so on any item with Daily Wastage the Wastage column contradicted the
+                    // Used and COGS columns beside it, the category rollup above it and the
+                    // spreadsheet — the row simply did not add up.
+                    const wastQty  = parseFloat(row.wastage || 0) + (parseFloat(dailyWastage[item.id]) || 0)
                     const staffQty = parseFloat(row.staff_meal  || 0)
                     const closeQty = parseFloat(row.closing     || 0)
+                    // Wastage and staff meals count as "this item has activity" too. Without them an
+                    // item carrying only waste (no opening, no purchase, no count) rendered Used and
+                    // COGS as "—" while the rollup above still added its negative COGS in.
+                    const hasData  = row.opening !== '' || row.closing !== '' || purchases[item.id] || wastQty > 0 || staffQty > 0
                     const fmtVal   = (qty) => rate > 0 && qty !== 0
                       ? `NPR ${Math.round(qty * rate).toLocaleString('en-NP')}`
                       : '—'
@@ -744,7 +790,7 @@ export default function Stock() {
                         <td style={{ textAlign: 'right' }}>{row.opening !== '' ? Number(row.opening).toLocaleString() : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{purchQty > 0 ? dispPurch(purchQty, item) : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{returned > 0 ? `−${Number(returned).toLocaleString()}` : '—'}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{row.wastage ? Number(row.wastage).toLocaleString() : '—'}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{wastQty > 0 ? Number(wastQty).toLocaleString() : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>{staffQty > 0 ? Number(staffQty).toLocaleString() : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{row.closing !== '' ? Number(row.closing).toLocaleString() : '—'}</td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: used < 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
