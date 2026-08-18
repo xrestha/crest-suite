@@ -630,19 +630,41 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   // ── Danger Zone ──
   async function handleClearConversions() {
-    const { data: withConv } = await scopedFrom('items', client.id, 'id').not('purchase_unit', 'is', null)
+    const { data: withConv } = await scopedFrom('items', client.id, 'id, purchase_qty, rate').not('purchase_unit', 'is', null)
     const count = withConv?.length || 0
     if (count === 0) { setDeleteMsg('ok:No items have a conversion set.'); return }
     if (!window.confirm(
       `Clear unit conversions on ${count} item${count !== 1 ? 's' : ''} for "${client.name}"?\n\n` +
-      `Purchase Unit, Base Unit, Conversion Factor and Purchase Qty will be reset to 1 for each affected item.\n\n` +
+      `Purchase Unit, Base Unit, Conversion Factor and Purchase Qty will be reset to 1 for each affected item. ` +
+      `Each item's pack price is rescaled to its price per 1 unit, so per-unit rates — and every stock valuation built on them — are unchanged.\n\n` +
       `This cannot be undone.`
     )) return
     setDeletingAction('conversions'); setDeleteMsg('')
-    const { error } = await scopedUpdate('items', client.id, { purchase_unit: null, base_unit: null, conversion_factor: 1, purchase_qty: 1 })
-      .not('purchase_unit', 'is', null)
+    if (!await preflightBackup('predelete')) { setDeletingAction(null); return }
+
+    // items.per_uom_rate is a GENERATED column = rate / purchase_qty. Resetting purchase_qty to 1
+    // while leaving rate untouched multiplies per_uom_rate by the old pack size — a 1 KG bag stored
+    // as (purchase_qty 1000, rate 500, per_uom 0.50) would jump to per_uom 500, silently mispricing
+    // Stock Count, Variance, COGS, Reorder and the Owner Report at once (phase 7 P0, S574). So rate
+    // must be rescaled per item to its old per-unit price in the same write, which forces a per-row
+    // update rather than one bulk UPDATE. Chunked to keep a large item master from firing hundreds
+    // of parallel requests.
+    let failed = 0
+    const CHUNK = 10
+    for (let i = 0; i < withConv.length; i += CHUNK) {
+      const results = await Promise.all(withConv.slice(i, i + CHUNK).map(item => {
+        const qty = Number(item.purchase_qty)
+        const newRate = (item.rate != null && qty > 0) ? Number(item.rate) / qty : item.rate
+        return scopedUpdate('items', client.id, {
+          purchase_unit: null, base_unit: null, conversion_factor: 1, purchase_qty: 1, rate: newRate,
+        }).eq('id', item.id)
+      }))
+      failed += results.filter(r => r.error).length
+    }
     setDeletingAction(null)
-    setDeleteMsg(error ? 'error:' + error.message : `ok:Conversions cleared on ${count} item${count !== 1 ? 's' : ''}.`)
+    setDeleteMsg(failed
+      ? `error:${failed} of ${count} items could not be updated — their conversions are unchanged. Retry to finish.`
+      : `ok:Conversions cleared on ${count} item${count !== 1 ? 's' : ''}. Per-unit rates preserved.`)
   }
 
   async function handleClearModule(module) {
@@ -1826,7 +1848,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 Full client reset
               </p>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <Tip text="Removes purchase unit conversions from all items (e.g. carton → pcs). Items and stock data are kept. Use this to reset unit setup without losing any transactions.">
+                <Tip text="Removes purchase unit conversions from all items (e.g. carton → pcs). Items and stock data are kept, and each item's pack price is rescaled so per-unit rates and stock valuations don't move. A backup is taken first, like the other actions here.">
                   <button
                     onClick={handleClearConversions}
                     disabled={deleting}
