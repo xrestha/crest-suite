@@ -1138,6 +1138,21 @@ tr.interactive-row:focus-visible {
   .btn {
     min-height: 44px;
   }
+  /* Shell controls a tablet finger actually hits all day. Measured on a real viewport (S574):
+     rail buttons 40×40, sidebar search 27×25, the client/outlet switcher — the control that
+     re-scopes the whole tenant session — 95×20. The coarse-pointer strategy covered only .btn
+     and .panel-tab before this, so every inline-or-custom shell control escaped it. */
+  .rail-btn,
+  .sidebar-search-btn,
+  .mobile-hamburger {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .sidebar-dropdown-trigger,
+  .sidebar-dropdown-item,
+  .sidebar-link {
+    min-height: 40px;
+  }
   .btn-sm,
   table.data-table .btn {
     min-height: 32px;
