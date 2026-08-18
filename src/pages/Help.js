@@ -33,7 +33,7 @@ const IMS_FEATURE_TIERS = [
       {
         icon: '◷', name: 'Periods',
         guide: 'Create one period per BS month. A period must be open before you can enter purchases, stock, or sales. Close a period at month end to lock the data. Closing stock auto-carries to next month opening. Periods older than 12 months are archived by default.',
-        tips: ['Always create a new period before the month starts', 'Close the period only after entering closing stock', 'Use "Show Archived" in Periods to access old months']
+        tips: ['Always create a new period before the month starts — if a POS bill is rung when no period exists for that BS month, its revenue and ingredient usage cannot reach Inventory at the time; the bill still closes and prints normally, and POS shows a banner counting them', 'If that happens, create the missing period and use "Post POS bills to Inventory" on it — this backfills those bills so Inventory reports and stock levels catch up. Safe to run more than once; already-posted bills are skipped', 'Close the period only after entering closing stock', 'Use "Show Archived" in Periods to access old months']
       },
       {
         icon: '≡', name: 'Item Master',
@@ -631,7 +631,10 @@ const POS_FEATURES = [
                   tips: [
                     'Open Shift and Close Shift both count each note/coin (₨1000 down to ₨1) rather than a single total — more accurate, and matches how cash is actually counted',
                     'Current Shift is the X-report — a live, repeatable snapshot. Nothing about it is final; check it anytime during the shift without affecting anything',
-                    'Close Shift produces the Z-report — a one-time, final reconciliation. Expected Cash = opening count + cash sales during the shift; Variance = what was actually counted minus that expectation',
+                    'Close Shift produces the Z-report — a one-time, final reconciliation. Expected Cash = opening count + cash sales + cash in − cash out; Variance = what was actually counted minus that expectation. The figures are re-read the moment you close and then frozen onto the shift, so reprinting the Z-report later always shows exactly what was signed',
+                    'Use ± Cash In / Out for money that moves without being a sale — paying a supplier from the till, a staff advance, or dropping a float to the safe. A reason is required, since this is a cash record. Without it the drawer and Expected Cash drift apart and the shift reports a variance it created itself',
+                    'When a customer settles an older Credit bill in cash, that money is added to the open shift automatically (it shows as Cash In). Before, the bill stayed marked "Credit" forever and the cash appeared as an unexplained "over" on the drawer',
+                    'The variance is shown live as you count the denominations, not just after closing — and closing more than NPR 100 out asks you to confirm the exact amount, so you can recount while the drawer is still open',
                     'A Balanced badge means the drawer matched exactly; red means short, amber means over — chase down shortages the same day while it\'s easy to remember why',
                     'You can run several shifts in a day (e.g. a morning cashier closes with a Z-report, an evening cashier opens a new one) — only one shift can be open at a time',
                     'Orders closed while no shift is open still bill normally — a missing shift never blocks Charge, it just means that order won\'t show up in any shift\'s totals',

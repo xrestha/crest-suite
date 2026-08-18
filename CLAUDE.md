@@ -411,6 +411,15 @@ const recipeIds = recipes.map(r => r.id)
 supabase.from('recipe_ingredients').select('*').in('recipe_id', recipeIds)
 ```
 
+### POS billing, shifts and the IMS handoff
+
+See `.claude/rules/pos-billing.md` (auto-loads when editing `src/modules/pos/`). Headline rules: a
+closed bill that can't reach IMS is stamped `ims_posted_at IS NULL` and surfaced, never silent;
+`sales_entries` and `stock_movements` can diverge, so neither proves the other posted (both now
+carry a link to the order); `sales_entries` is period-scoped so `scopedDb` rejects it; the Z-report
+is captured at close and frozen; order lines are replaced through `save_pos_order_items`, never
+delete-then-insert.
+
 ### Sub-recipe mirror items
 
 Recipes with `type = 'sub_recipe'` auto-create a mirror row in `items` with `is_sub_recipe = true`. Filter these out of Item Master, Purchases, POs, Requisitions, Reorder Report, and Supplier Price Tracker:
@@ -459,6 +468,17 @@ Recipes with `type = 'sub_recipe'` auto-create a mirror row in `items` with `is_
 - The offline stock count (and POS order-taking) uses IndexedDB (`src/utils/offlineQueue.js`, DB name `crest-offline`) with 10 object stores. Sync flushes automatically on reconnect. **Any read-modify-write on an offline store must happen inside a single `readwrite` transaction** (get + merge + put together), never a readonly get followed by a separate readwrite put — IndexedDB only serialises *overlapping readwrite* transactions on a store, so the two-transaction shape lets concurrent callers read the same pre-image and clobber each other's write. This was a real bug (S440): `saveOrder` fires `logKotSend('KOT')` + `logKotSend('BOT')` un-awaited, both routing through `enqueuePosOrder`, which silently dropped one station's queued KOT send offline until the merge was made atomic. POS billing is hard-gated offline (`payDisabled` includes `!isOnline`), so the offline surface is order-taking only — no money path is ever reachable without a live server.
 - `settings` was, until S290 (`20260707150000_settings_rls_same_client_write.sql`), the one client-scoped table whose INSERT/UPDATE RLS policies were **admin-only** with no same-client allowance — every settings-writing tab in `PosTableManagement.jsx` (Discounts, Quick Notes, Ticket Routing, Delivery Partners) had been silently no-op'ing for any real (non-admin) client login, since an RLS-blocked write returns zero rows changed with no error rather than throwing. Now follows the standard `is_admin() OR client_id = my_client_id()` pattern like every other table; the `client_id IS NULL` global-defaults row (`app_name`, `app_tagline`, etc.) stays admin-only automatically since a real client's `client_id` can never equal `NULL`. Still stays on raw `supabase.from()` rather than `scopedDb` (see the `scopedDb` note above) — that's about the nullable `client_id`, unrelated to this RLS fix.
 - **`monthly_periods` allows at most one `open` period per client** (`monthly_periods_one_open_per_client`, a partial unique index `WHERE status='open'`, added 2026-07-13) — virtually every IMS/HR/Owner Dashboard page assumes this via a plain `.eq('status','open').limit(1).single()` read. Practical consequence: `Periods.js`'s "Reopen" action on a *past* closed period will always fail once a more recent period is open — which is the only realistic time anyone reopens a past period, so always check the update's `error` before treating a reopen as successful (S432, 2026-07-21, found an unhandled case that silently did nothing and gave no indication why). Separately, **admin doesn't need to reopen a period to edit it** — `Stock.js`'s `isLocked = !isAdmin && status==='closed'` (mirrored on every other period-scoped entry page) exempts admin from the read-only lock entirely regardless of status. Reopening only matters for handing edit access back to the *client's own* login; if admin is making the correction personally, editing in place and then re-propagating forward (`Periods.js`'s `carryForwardOpeningStock`, safe to call standalone — it's an idempotent upsert, exposed via the "Resync Opening Stock" action) is the simpler, unblocked path.
+
+### Two writes in one function can diverge, so one is never evidence of the other
+
+A pattern worth recognising beyond POS. `writeSalesEntries` writes revenue to `sales_entries` and
+then depletion to `stock_movements` inside a try/catch that swallows failures — deliberately, so a
+depletion problem never blocks a bill closing. The consequence is that **a bill can have revenue
+and no movements**, and a later guard that inferred "has this already posted?" from
+`stock_movements` was therefore *wrong* rather than merely incomplete: it re-posted two bills'
+revenue on real data (S573). Whenever a best-effort second write follows a primary one, the second
+one's absence proves nothing — give each table its own link back to the source row and ask the
+table you actually mean.
 
 ### A bare `.select()` silently truncates at 1000 rows
 

@@ -158,6 +158,90 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S573 — 2026-08-18 — Critique campaign phase 6 (POS): five money-path defects, fixed in steps
+
+Ran phase 6 over `src/modules/pos/` with the two-isolated-agent method, then fixed in small
+committed steps rather than one sweep — a direct response to phase 5, where four parallel fix
+agents were killed mid-edit and left the tree unbuildable.
+
+**The critique found five P0s, all on paths that move money or feed a filing.** Three were verified
+against the code by hand before any fix was written.
+
+**Step 1 — silent truncation on statutory reports.** Six `pos_orders` reads had no `fetchAllRows`
+and capped at 1000 rows, reporting a believable total instead of an error. The worst feeds the
+**IRD Annexure 13** one-lakh disclosure, and the giveaway was that its *child* item read was
+already paged — with a comment saying "a truncated read could drop a customer below one lakh
+incorrectly" — while the parent order read right above it was not. Also fixed the whole Sales
+Report range, the fiscal-year dropdown (older years silently vanished as options), Covers
+(truncation skews *averages*, not just totals), Exceptions, the KOT Register, and Customers'
+unbounded outstanding-credit read. Same commit closed a credit-note double-issue window (a failed
+`credit_note_id` link left a note issued against a bill the list still offered), removed the two
+reason chips implying a partial credit the code can't express, and moved "cannot be undone" out of
+a hover tooltip into body copy — this runs on a tablet, where hover doesn't exist.
+
+**Step 2 — shift reconciliation.** The Z-report a supervisor signs was computed when the page
+*loaded*: opening at 8pm and closing at 11pm omitted three hours of takings from Expected Cash and
+the Variance, and because Shift History recomputed live, a **reprinted Z-report could show
+different numbers from the signed one**. It is now re-read when the close modal opens *and* again
+immediately before the write (the drawer count itself takes minutes), then frozen onto
+`pos_shifts.closing_report`. Separately, Expected Cash was structurally wrong — `opening + cash
+sales` cannot account for cash that moves without being a sale, most importantly a customer
+settling an older **Credit** bill in cash, whose order stays `payment_method='Credit'` forever, so
+the drawer read as "over" by the settled amount with nobody able to explain it. New
+`pos_cash_movements` ledger, a Cash In/Out action, and credit settlements post to it
+automatically. Also: the printed slip called `salesTotal` "Total Collection" while the screen
+honestly called it "Total Sales" (it includes Credit bills); the variance now shows live as
+denominations are counted; and closing more than NPR 100 out takes an explicit confirmation naming
+the amount, while the drawer is still open to recount.
+
+**Step 3 — atomic order-line save.** Replacing an order's lines was `DELETE` then a separate
+`INSERT` with no transaction, so a stall between them left a live bill with **zero lines** on the
+server. New `save_pos_order_items` RPC, `SECURITY INVOKER` so all three RESTRICTIVE staff families
+stay enforced, deriving `client_id` from the order rather than taking it as a parameter.
+
+**Step 4 — POS revenue silently never reaching Inventory.** `writeSalesEntries` bailed with no
+message when no BS period matched the bill's date; the bill still closed, printed and took an
+invoice number while IMS never saw it. Now `pos_orders.ims_posted_at` is stamped only on a
+confirmed post, the POS floor carries a standing count of unposted bills, and Periods gains **Post
+POS bills to Inventory**.
+
+**This found a real production case immediately.** BHATTI CHOILA had **15 bills / NPR 18,900**
+stranded — because Ashadh 2083 was left open past its end and Shrawan was never created, so every
+bill rung after the BS rollover bailed. Backfilled successfully once Shrawan existed (12 + 3).
+
+**Three defects I introduced and fixed in the same session, all caught by testing on a dummy
+client and inspecting the result rather than trusting the success dialog:**
+
+1. **The backfill button wedged on "Posting…"** — no `try/catch/finally`, so a throw never cleared
+   the busy flag, and no `withTimeout`, so a hung supabase-js call would never settle at all
+   (CLAUDE.md's S449–S454 lesson, repeated).
+2. **It wrote `sales_entries` through `scopedDb`**, which rejects that table by design — it is
+   period-scoped, not client-scoped. Only visible because fix (1) had just made errors surface.
+3. **It double-posted three bills' revenue.** `ims_posted_at IS NULL` means "unknown" on rows
+   predating the column, not "unposted". The first guard inferred prior posting from
+   `stock_movements` and was **wrong, not merely partial**: `writeSalesEntries` writes revenue
+   first and depletion second inside a swallowing try/catch, so a bill can have revenue and no
+   movements — which two of the three re-posted bills did. Fixed properly by giving
+   `sales_entries` a `pos_order_id` mirroring `stock_movements.ref_id`, so the guard asks the
+   question instead of inferring it, and a bad post is reversible *by order* instead of by
+   `created_at` archaeology (which is what untangling this actually took).
+
+**Migrations (all applied):** `20260818140000` pos_cash_movements + pos_shifts.closing_report ·
+`20260818150000` save_pos_order_items · `20260818160000` pos_orders.ims_posted_at ·
+`20260818170000` sales_entries.pos_order_id.
+
+**Still open from this phase**, recorded in `.claude/rules/pos-billing.md`: discount cap / void /
+comp are enforced only in the browser; no idle lock on a shared till (hook written, not wired); a
+short cash tender is accepted as full payment; a fired item can be removed by any Staff account;
+Sales Exceptions sums three incompatible units into one ranked "Total". Plus the mechanical sweep
+(52 bare labels, 9 hand-rolled modals, colour variants).
+
+**Files:** `src/modules/pos/**` (reports, shifts, customers, creditnotes, orders, tables, staff),
+`src/modules/pos/orders/backfillPosToIms.js` and `usePosIdleLock.js` (new), `src/pages/Periods.js`,
+`src/shared/scopedDb.js`, `src/modules/admin/dataExport/restoreClientData.js`,
+`supabase/functions/admin-user-ops/index.ts` (deployed), four migrations,
+`public/service-worker.js` (v81 → v89), `CLAUDE.md`, `.claude/rules/pos-billing.md` (new), `README.md`
+
 ### S572 — 2026-08-18 — HR phase-5 leftovers cleared: modals, colour sweep, labels — and two more silent CSS bugs
 
 Finished the work S570's fix pass left behind when four of its five agents were killed mid-edit. Three file-disjoint agents plus my own set covered every remaining HR page. Applying the S570 lesson, the tree was built and grepped for evidence afterwards rather than trusted from the agents' reports.
