@@ -33,9 +33,11 @@ const RESTORE_ORDER = [
   'hr_overtime_entries', 'hr_leave_requests', 'hr_attendance',
   'hr_payroll_runs', 'hr_payslips',
   // POS — tables/customers before orders; credit notes after orders (circular FK, see below)
+  // pos_cash_movements after pos_shifts and pos_orders — it holds an FK to both.
   'pos_tables', 'pos_customers', 'pos_shifts', 'pos_parking_slips',
   'pos_orders', 'pos_order_items', 'pos_order_payments', 'pos_kot_log',
   'pos_guest_order_requests', 'pos_payment_confirmations',
+  'pos_cash_movements',
   'pos_credit_notes',
   'stock_movements',
   // Config last — harmless either way, and keeps the noisy tables at the end of the log

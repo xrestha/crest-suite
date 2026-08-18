@@ -25,7 +25,7 @@ function daysAgo(iso) {
 
 export default function PosCustomers() {
   const { clientId, profile, hasPosAccess } = useAuth()
-  const { scopedFrom, scopedUpdate } = useScopedDb()
+  const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
 
   const [mainTab, setMainTab] = useState('customers') // 'customers' | 'credit'
 
@@ -143,7 +143,32 @@ export default function PosCustomers() {
     const { error } = await scopedUpdate('pos_orders', patch).eq('id', order.id)
     setSettleBusy(false)
     if (error) { setSettleMsg('error:' + error.message); return }
-    setSettleMsg(`ok:${fmtNpr(order.paid_amount)} collected from ${order.buyer_name || 'customer'} via ${method}.`)
+
+    // A CASH settlement puts real money in the drawer, but the order's payment_method stays
+    // 'Credit' forever — so the shift's cash bucket never saw it and the drawer read as "over"
+    // by the settled amount, with no way for the supervisor to explain it (S573). Post it to the
+    // open shift's cash ledger. Best-effort: a failed ledger write must not undo a settlement the
+    // customer has already paid for, so it warns rather than rolling back.
+    let ledgerWarning = ''
+    if (method === 'Cash') {
+      const { data: openShift } = await scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle()
+      if (!openShift) {
+        ledgerWarning = ' No shift is open, so this cash is not on any drawer reconciliation — record it as a Cash In when you open the next shift.'
+      } else {
+        const { error: mErr } = await scopedInsert('pos_cash_movements', {
+          shift_id: openShift.id,
+          direction: 'in',
+          kind: 'credit_settlement',
+          amount: order.paid_amount,
+          reason: `Credit bill settled — ${order.buyer_name || 'customer'}`,
+          order_id: order.id,
+          created_by: profile?.id || null,
+        })
+        if (mErr) ledgerWarning = ` Warning: it could not be added to the open shift's cash count (${mErr.message}).`
+      }
+    }
+
+    setSettleMsg(`ok:${fmtNpr(order.paid_amount)} collected from ${order.buyer_name || 'customer'} via ${method}.${ledgerWarning}`)
     setSettlingId(null)
     await loadCredit()
   }

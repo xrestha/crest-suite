@@ -1216,6 +1216,9 @@ Deno.serve(async (req) => {
         if (periodIds.length > 0) {
           await del(admin.from('sales_entries').delete().in('period_id', periodIds).in('source', ['pos', 'pos_comp', 'pos_credit']), 'pos sales_entries')
         }
+        // Before orders/shifts: its FKs to both are ON DELETE SET NULL, so leaving it until
+        // after would orphan the rows rather than remove them.
+        await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
         await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
         await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
         await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')
@@ -1289,6 +1292,8 @@ Deno.serve(async (req) => {
         await del(admin.from('pos_order_items').delete().in('order_id', orderIds), 'pos_order_items')
       }
       await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
+      // Before orders/shifts — its FKs to both are ON DELETE SET NULL.
+      await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
       await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
       await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
       await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')

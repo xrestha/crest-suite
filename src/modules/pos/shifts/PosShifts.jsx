@@ -110,7 +110,9 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
   ${mode === 'close' ? `<div class="row"><span>Closed By:</span><span>${esc(closedByName || '')}</span></div>` : ''}
   ${mode === 'close' && report ? `
   <hr>
-  <div class="row tot"><span>Total Collection:</span><span>NPR ${report.salesTotal.toFixed(2)}</span></div>
+  <!-- "Total Sales", not "Total Collection": salesTotal includes Credit bills, which are billed
+       but not collected. The screen already labelled this honestly; the signed paper slip did not. -->
+  <div class="row tot"><span>Total Sales:</span><span>NPR ${report.salesTotal.toFixed(2)}</span></div>
   ${PAY_METHODS.filter(m => report.byMethod[m]).map(m => `<div class="row ind"><span>${m}</span><span>${report.byMethod[m].toFixed(2)}</span></div>`).join('')}
   <hr>
   <div class="row"><span>Bills (Paid):</span><span>${report.paidCount}</span></div>
@@ -119,7 +121,9 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
   <hr>
   <div class="row"><span>Opening Cash:</span><span>${opening.toFixed(2)}</span></div>
   <div class="row"><span>Cash Sales:</span><span>${report.cashSales.toFixed(2)}</span></div>
-  <div class="row tot"><span>Expected Cash:</span><span>${(opening + report.cashSales).toFixed(2)}</span></div>
+  ${report.cashIn  ? `<div class="row"><span>Cash In${report.creditSettlementsCash ? ` (incl. ${report.creditSettlementsCash.toFixed(2)} credit settled)` : ''}:</span><span>+${report.cashIn.toFixed(2)}</span></div>` : ''}
+  ${report.cashOut ? `<div class="row"><span>Cash Out:</span><span>-${report.cashOut.toFixed(2)}</span></div>` : ''}
+  <div class="row tot"><span>Expected Cash:</span><span>${(opening + report.cashSales + (report.cashIn || 0) - (report.cashOut || 0)).toFixed(2)}</span></div>
   <div class="row"><span>Counted Cash:</span><span>${closing.toFixed(2)}</span></div>
   <div class="row tot"><span>Variance:</span><span>${varianceLabel}</span></div>
   ` : ''}
@@ -151,6 +155,18 @@ async function loadShiftReport(clientId, shiftId) {
   const { data: orders } = await scopedFromRaw('pos_orders', clientId, 'id, close_type, payment_method, paid_amount, discount_amount, closed_at')
     .eq('shift_id', shiftId)
   const list = orders || []
+
+  // Cash that moved without being a sale: supplier payments, staff advances, float drops, and
+  // customers settling an older Credit bill in cash. Expected Cash used to be `opening + cash
+  // sales`, which meant a credit settlement put real money in the drawer that the reconciliation
+  // did not know about — the shift then reported an unexplainable "over" (S573).
+  const { data: movements } = await scopedFromRaw('pos_cash_movements', clientId, 'id, direction, kind, amount, reason, created_at, created_by')
+    .eq('shift_id', shiftId).order('created_at')
+  const moveList = movements || []
+  const cashIn  = moveList.filter(m => m.direction === 'in').reduce((s, m) => s + (Number(m.amount) || 0), 0)
+  const cashOut = moveList.filter(m => m.direction === 'out').reduce((s, m) => s + (Number(m.amount) || 0), 0)
+  const creditSettlementsCash = moveList
+    .filter(m => m.kind === 'credit_settlement').reduce((s, m) => s + (Number(m.amount) || 0), 0)
 
   // Split-payment orders (multiple tenders against one bill) don't carry a single payment_method
   // — their real per-method breakdown lives in pos_order_payments instead. Fetched up front so the
@@ -202,7 +218,18 @@ async function loadShiftReport(clientId, shiftId) {
   }
 
   const cashSales = byMethod.Cash || 0
-  return { orderCount, paidCount, voidCount, compCount, byMethod, discountTotal, voidTotal, compTotal, salesTotal, cashSales }
+  return {
+    orderCount, paidCount, voidCount, compCount, byMethod,
+    discountTotal, voidTotal, compTotal, salesTotal, cashSales,
+    movements: moveList, cashIn, cashOut, creditSettlementsCash,
+  }
+}
+
+// The one definition of what should be in the drawer. Opening float, plus cash taken over the
+// counter, plus every non-sale cash-in (credit settlements included), minus every cash-out.
+function expectedCashOf(shift, report) {
+  if (!shift || !report) return 0
+  return (Number(shift.opening_cash) || 0) + (report.cashSales || 0) + (report.cashIn || 0) - (report.cashOut || 0)
 }
 
 function ReportBody({ report, opening, closing, variance }) {
@@ -245,7 +272,23 @@ function ReportBody({ report, opening, closing, variance }) {
           <tbody>
             <tr><td>Opening Cash</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(opening)}</td></tr>
             <tr><td>Cash Sales</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(report.cashSales)}</td></tr>
-            <tr><td style={{ fontWeight: 700 }}>Expected Cash</td><td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(opening + report.cashSales)}</td></tr>
+            {(report.cashIn || 0) > 0 && (
+              <tr>
+                <td>
+                  <Tip text="Cash that entered the drawer without being a sale — a pay-in, or a customer settling an older Credit bill in cash. Credit settlements used to be invisible here, so the drawer read as 'over' by the settled amount.">
+                    Cash In{report.creditSettlementsCash > 0 ? ` (incl. ${fmtNpr(report.creditSettlementsCash)} credit settled)` : ''}
+                  </Tip>
+                </td>
+                <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-green-text)' }}>+{fmtNpr(report.cashIn)}</td>
+              </tr>
+            )}
+            {(report.cashOut || 0) > 0 && (
+              <tr>
+                <td><Tip text="Cash taken out of the drawer during the shift — paying a supplier, a staff advance, or a float drop to the safe.">Cash Out</Tip></td>
+                <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red-text)' }}>−{fmtNpr(report.cashOut)}</td>
+              </tr>
+            )}
+            <tr><td style={{ fontWeight: 700 }}>Expected Cash</td><td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(opening + report.cashSales + (report.cashIn || 0) - (report.cashOut || 0))}</td></tr>
             {closing != null && (
               <>
                 <tr><td>Counted Cash</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(closing)}</td></tr>
@@ -273,6 +316,13 @@ export default function PosShifts() {
   const [openShift,   setOpenShift]   = useState(undefined) // undefined = loading, null = none open
   const [currentReport, setCurrentReport] = useState(null)
   const [reportLoading, setReportLoading] = useState(false)
+  // Pay In / Pay Out — cash that moves without being a sale (S573).
+  const [cashMoveOpen,   setCashMoveOpen]   = useState(false)
+  const [cashMoveDir,    setCashMoveDir]    = useState('out')
+  const [cashMoveAmount, setCashMoveAmount] = useState('')
+  const [cashMoveReason, setCashMoveReason] = useState('')
+  const [cashMoveSaving, setCashMoveSaving] = useState(false)
+  const [cashMoveMsg,    setCashMoveMsg]    = useState('')
 
   const [modal, setModal] = useState(null) // 'open' | 'close' | null
   const [denomCounts, setDenomCounts] = useState(EMPTY_COUNTS)
@@ -373,7 +423,10 @@ export default function PosShifts() {
     if (expandedId === shift.id) { setExpandedId(null); return }
     setExpandedId(shift.id)
     if (reportsMap[shift.id]) return
-    const report = await loadShiftReport(clientId, shift.id)
+    // Prefer the snapshot frozen at close — recomputing live is what let a reprinted Z-report
+    // disagree with the signed one. Only shifts closed before S573 have no snapshot and fall
+    // back to a live recompute.
+    const report = shift.closing_report || await loadShiftReport(clientId, shift.id)
     setReportsMap(m => ({ ...m, [shift.id]: report }))
   }
 
@@ -382,6 +435,33 @@ export default function PosShifts() {
     setLabel(type === 'open' ? suggestShiftLabel() : '')
     setMsg('')
     setModal(type)
+    // Re-read the money before showing Expected Cash. This page loads its report once, on mount,
+    // so a shift opened at 8pm and closed at 11pm was being reconciled against 8pm's figures —
+    // the cashier was told they were short by three hours of takings (S573).
+    if (type === 'close') loadOpenShift()
+  }
+
+  // Records cash that moved without being a sale, against the open shift. Without this the
+  // drawer's real contents and Expected Cash diverge every time a supplier is paid or a float is
+  // dropped, and the supervisor is left explaining a variance the system created.
+  async function submitCashMovement() {
+    if (!openShift) return
+    const amt = parseFloat(cashMoveAmount)
+    if (!amt || amt <= 0) { setCashMoveMsg('Enter an amount greater than zero.'); return }
+    if (!cashMoveReason.trim()) { setCashMoveMsg('A reason is required — this is a cash record.'); return }
+    setCashMoveSaving(true); setCashMoveMsg('')
+    const { error } = await scopedInsert('pos_cash_movements', {
+      shift_id: openShift.id,
+      direction: cashMoveDir,
+      kind: cashMoveDir === 'in' ? 'pay_in' : 'pay_out',
+      amount: amt,
+      reason: cashMoveReason.trim(),
+      created_by: profile?.id || null,
+    })
+    setCashMoveSaving(false)
+    if (error) { setCashMoveMsg('Error: ' + error.message); return }
+    setCashMoveAmount(''); setCashMoveReason(''); setCashMoveOpen(false)
+    await loadOpenShift()
   }
 
   async function submitOpen() {
@@ -422,8 +502,27 @@ export default function PosShifts() {
       return
     }
 
+    // Re-read once more immediately before writing. The modal refresh above can be minutes old by
+    // the time the drawer has actually been counted, and a bill closed during the count belongs in
+    // this shift's figures. This is the snapshot that gets frozen and signed.
+    const freshReport = await loadShiftReport(clientId, openShift.id)
     const closing_cash = sumDenoms(denomCounts)
     const closedAt = new Date()
+    const expected = expectedCashOf(openShift, freshReport)
+
+    // A material discrepancy gets an explicit confirmation naming the amount. Closing NPR 5,000
+    // short should not be the same single tap as closing balanced — and the recount has to be
+    // offered while the drawer is still open, not after the slip prints.
+    const diff = closing_cash - expected
+    if (Math.abs(diff) >= 100) {
+      const ok = window.confirm(
+        `The drawer is ${diff > 0 ? 'OVER' : 'SHORT'} by ${fmtNpr(Math.abs(diff))}.\n\n` +
+        `Expected ${fmtNpr(expected)} · Counted ${fmtNpr(closing_cash)}\n\n` +
+        'Recount before closing if that looks wrong — this figure is printed on the Z-report and kept as the shift record.\n\n' +
+        `Close the shift ${diff > 0 ? 'over' : 'short'} by ${fmtNpr(Math.abs(diff))}?`
+      )
+      if (!ok) { setSaving(false); return }
+    }
     // .eq('status', 'open') + .select() together detect a double-close: the DB's only relevant
     // constraint (pos_shifts_one_open_per_client) guards concurrent opens, not closes, so without
     // this a second supervisor closing the same shift on another terminal would silently overwrite
@@ -433,6 +532,17 @@ export default function PosShifts() {
       status: 'closed', closed_at: closedAt.toISOString(), closed_by: profile?.id || null,
       closing_cash,
       closing_denominations: Object.fromEntries(DENOMINATIONS.map(d => [d, parseInt(denomCounts[d]) || 0])),
+      // Frozen at close, never recomputed — the same capture-once principle the Monthly Owner
+      // Report uses. Shift History used to recompute these live, so a REPRINTED Z-report could
+      // show different numbers from the one that was signed, with nothing saying which was right.
+      closing_report: {
+        ...freshReport,
+        openingCash: Number(openShift.opening_cash) || 0,
+        closingCash: closing_cash,
+        expectedCash: expected,
+        variance: closing_cash - expected,
+        capturedAt: closedAt.toISOString(),
+      },
     }).eq('id', openShift.id).eq('status', 'open').select()
     setSaving(false)
     if (error) { setMsg('error:' + error.message); return }
@@ -447,14 +557,14 @@ export default function PosShifts() {
       label: openShift.label || 'Shift',
       openedByName: staffNames[openShift.opened_by], closedByName: profile?.full_name,
       openedAt: openShift.opened_at, closedAt,
-      denomCounts, opening: openShift.opening_cash, closing: closing_cash, report: currentReport,
+      denomCounts, opening: openShift.opening_cash, closing: closing_cash, report: freshReport,
     }))
     setModal(null)
     setHistoryLoaded(false) // force a refetch next time History is opened
     await loadOpenShift()
   }
 
-  const expectedCash = openShift ? openShift.opening_cash + (currentReport?.cashSales || 0) : 0
+  const expectedCash = expectedCashOf(openShift, currentReport)
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
@@ -493,9 +603,63 @@ export default function PosShifts() {
                     Opened by {staffNames[openShift.opened_by] || '—'} · {fmtSpan(openShift.opened_at)} ago
                   </span>
                 </div>
-                <button className="btn btn-danger"
-                  onClick={() => openModal('close')}>Close Shift (Z-Report)</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-ghost" onClick={() => { setCashMoveOpen(o => !o); setCashMoveMsg('') }}>
+                    ± Cash In / Out
+                  </button>
+                  <button className="btn btn-danger"
+                    onClick={() => openModal('close')}>Close Shift (Z-Report)</button>
+                </div>
               </div>
+
+              {cashMoveOpen && (
+                <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
+                  <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--theme-text2)' }}>
+                    Record cash that moved without being a sale — paying a supplier, a staff advance, a float
+                    drop to the safe, or money added to the drawer. This keeps Expected Cash matching what is
+                    physically there, so the shift doesn't report a variance it created itself.
+                  </p>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <div>
+                      <label htmlFor="cashmove-dir" style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }}>Direction</label>
+                      <select id="cashmove-dir" className="form-select" value={cashMoveDir} onChange={e => setCashMoveDir(e.target.value)} style={{ width: 130 }}>
+                        <option value="out">Cash Out</option>
+                        <option value="in">Cash In</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="cashmove-amount" style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }}>Amount (NPR)</label>
+                      <input id="cashmove-amount" className="form-select" type="number" min="0" step="1" style={{ width: 130 }}
+                        value={cashMoveAmount} onChange={e => setCashMoveAmount(e.target.value)} placeholder="0" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <label htmlFor="cashmove-reason" style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }}>Reason *</label>
+                      <input id="cashmove-reason" className="form-select" style={{ width: '100%' }}
+                        value={cashMoveReason} onChange={e => setCashMoveReason(e.target.value)}
+                        placeholder="e.g. Paid vegetable supplier" />
+                    </div>
+                    <button className="btn btn-primary" onClick={submitCashMovement} disabled={cashMoveSaving}>
+                      {cashMoveSaving ? 'Saving…' : 'Record'}
+                    </button>
+                  </div>
+                  {cashMoveMsg && <p role="alert" style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--theme-red-text)' }}>{cashMoveMsg}</p>}
+                  {(currentReport?.movements || []).length > 0 && (
+                    <div style={{ marginTop: 12, borderTop: '1px solid var(--theme-border)', paddingTop: 10 }}>
+                      {currentReport.movements.map(m => (
+                        <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0', color: 'var(--theme-text2)' }}>
+                          <span>
+                            {m.kind === 'credit_settlement' ? 'Credit settled' : m.direction === 'in' ? 'Cash in' : 'Cash out'}
+                            {m.reason ? ` — ${m.reason}` : ''}
+                          </span>
+                          <strong style={{ color: m.direction === 'in' ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                            {m.direction === 'in' ? '+' : '−'}{fmtNpr(Number(m.amount) || 0)}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {reportLoading || !currentReport ? (
                 <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading live totals…</p>
@@ -599,11 +763,41 @@ export default function PosShifts() {
 
             {modal === 'close' && currentReport && (
               <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--theme-text2)' }}>
-                Expected cash: <strong>{fmtNpr(expectedCash)}</strong> (opening {fmtNpr(openShift.opening_cash)} + cash sales {fmtNpr(currentReport.cashSales)})
+                Expected cash: <strong>{fmtNpr(expectedCash)}</strong> (opening {fmtNpr(openShift.opening_cash)} + cash sales {fmtNpr(currentReport.cashSales)}
+                {currentReport.cashIn  > 0 && <> + cash in {fmtNpr(currentReport.cashIn)}</>}
+                {currentReport.cashOut > 0 && <> − cash out {fmtNpr(currentReport.cashOut)}</>})
               </p>
             )}
 
             <DenomGrid counts={denomCounts} onChange={setDenomCounts} />
+
+            {/* Live variance as the drawer is counted. Closing NPR 5,000 short used to take
+                exactly the same single tap as closing balanced — the figure only appeared after
+                the shift was closed and the slip printed, which is too late to recount. */}
+            {modal === 'close' && currentReport && (() => {
+              const counted = sumDenoms(denomCounts)
+              const diff = counted - expectedCash
+              const over = diff > 0
+              const material = Math.abs(diff) >= 100
+              return (
+                <div style={{
+                  marginTop: 14, padding: '10px 14px', borderRadius: 10,
+                  border: `1px solid color-mix(in srgb, ${material ? 'var(--theme-red)' : 'var(--theme-green)'} 30%, transparent)`,
+                  background: `color-mix(in srgb, ${material ? 'var(--theme-red)' : 'var(--theme-green)'} 8%, transparent)`,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                    <span style={{ color: 'var(--theme-text2)' }}>Counted</span>
+                    <strong style={{ color: 'var(--theme-text1)' }}>{fmtNpr(counted)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginTop: 4 }}>
+                    <span style={{ color: 'var(--theme-text2)' }}>{diff === 0 ? 'Balanced' : over ? 'Over by' : 'Short by'}</span>
+                    <strong style={{ color: material ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
+                      {diff === 0 ? '—' : fmtNpr(Math.abs(diff))}
+                    </strong>
+                  </div>
+                </div>
+              )
+            })()}
 
             {msg && <p role="alert" style={{ margin: '14px 0 0', fontSize: 12, color: msg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{msg.replace(/^(error|ok):/, '')}</p>}
 
