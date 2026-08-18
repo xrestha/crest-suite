@@ -158,6 +158,102 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S574 — 2026-08-18 — Critique campaign phase 7 (Admin): entitlement, data-loss and recovery defects
+
+Ran phase 7 over the admin surfaces (AdminClients, ClientDrawer, FeatureAccessModal, AuditLog,
+AdminGuestMenu, AdminDashboardOverview, dataExport, the admin-user-ops Danger Zone actions) with
+the two-isolated-agent method — A read source, B drove the real authenticated app with Playwright
+on Rosé Dawn — then fixed everything in seventeen small committed steps, each built before commit.
+Both agents were killed once mid-run by API errors; both resumed cleanly because findings were
+checkpointed to disk as they were made, a new addition to the method.
+
+**Seven P0s, all verified before fixing:**
+
+- **`is_premium` was a live, invisible plan-raiser** — the last survivor of the S548 retier. A
+  Starter client carrying the flag received every IMS Pro feature while the client list, drawer,
+  Feature Access grid and MRR all said (and billed) Starter, with no control anywhere to see or
+  clear it. Retired: migration `20260818180000` folds it into `clients.plan`, then the raiser is
+  deleted. **Apply the migration before deploying**, or a starter+is_premium client loses Pro
+  access for the gap.
+- **"Clear All Conversions" repriced the client's whole inventory.** It reset `purchase_qty` to 1
+  without rescaling `rate`, and `per_uom_rate` is generated as `rate ÷ purchase_qty` — a 1000 GM
+  pack's per-unit rate inflated 1000× across Stock Count, Variance, COGS, Reorder and the Owner
+  Report. It was also the only Danger Zone action with no pre-flight backup, under the banner
+  promising one. Now rescales per item, backs up first, and says what happens to pricing.
+- **Feature Access showed `stock_report` in the Starter column** while every gate held it at
+  Growth (the S551 retier reached three of the four mechanisms) — the modal claimed Starter
+  clients had it and refused to grant it. Moved to the Growth group.
+- **Delete Client could strand a half-deleted client**: the auth-user loop threw on the first
+  failure with users 1..k-1 already gone and everything else intact, reporting a raw upstream
+  string. Now collects per-user failures, stops before touching data ("N of M logins removed, NO
+  data deleted — retrying is safe"), and names how far the staged data steps got.
+- **At 390px every client row's "Manage →" was unreachable** — clipped by `.main-content`'s
+  `overflow-x:hidden` with no scroll path at any level (measured: the button ended 75px past the
+  viewport; `+ New Client` rendered as "N Cli"). The pill/action clusters and header now wrap.
+- **Five of six Danger Zone buttons were pixel-identical** and every action confirmed with one
+  `window.confirm` — "Clear Client Data" looked exactly like "Clear IMS Transactions". Archive /
+  Clear Client Data / Delete Client now require typing the client's name in a proper Modal, and
+  the whole-client buttons carry the escalated variant. Modal.js gained a stack so nested modals
+  work (only the topmost answers Escape/Tab).
+- **The keyboard focus ring measured 1.15:1** (WCAG 2.2 floor: 3:1) product-wide — the ring token
+  is also the active-state background tint, so it could never be brightened. New
+  `--theme-focus-outline` (accentInk on light presets, accent on dark) now pairs a 2px solid ring
+  with the soft tint on every `:focus-visible` rule.
+
+**The recovery family had four quiet defects:** Archive — the "fully reversible" path —
+permanently destroyed the staff PIN vault (`deleteClientData` now takes `keep_staff_vault`, which
+Archive passes; **needs `supabase functions deploy admin-user-ops`**); `settings` was in every
+backup and restored by nothing (branding, VAT number, invoice prefix and payment QR silently lost
+on a Delete → Restore round trip — now update-or-inserted); `assertEmpty` failed *open* when its
+probes errored, and refused the natural recreate-then-restore path because "+ New Client" seeds a
+period (a single transaction-free period is now recognised as the seed and removed); and the
+download fallback fired two same-task `a.click()`s that the browser's multiple-download permission
+could silently halve — the restorable `.json` now downloads first and the pre-delete gate makes
+the operator confirm both files landed.
+
+**Trial state canonicalised on one column set** (`is_trial`/`trial_expires_at`/`trial_purge_at`,
+the set `register_trial` writes; migration `20260818190000` folds the legacy `trial_ends_at` in).
+Admin-created clients now appear in the Trial panel, the auto-deactivation sweep no longer locks
+on a column `getAccessState` ignores (opening Admin → Clients could hard-lock a client the runtime
+let through), and a client with no dates shows an explicit "No end date" chip instead of "—" —
+that state means unlimited free access and must be noticed. The Users tab also gained **Reset
+password** — the Edge Function always permitted an admin resetting a locked-out Owner, but
+nothing ever called it; the only path was delete-and-recreate, which orphans every `*_by`
+attribution.
+
+**FeatureAccessModal was the one file no sweep had ever reached** — 20 invalid `var()`+hex tint
+concatenations (the selected plan card and the plan/override chips painted fully transparent, so
+the two states the modal exists to distinguish looked identical), ~46 grant toggles as
+`<div onClick>` with no keyboard path or ARIA, a hand-rolled overlay, `#000` checkmarks, 14
+off-scale radii, and a subheader promising "uncheck to revoke" — which the data model cannot do.
+Rebuilt on the shared `Modal` with one accessible `FeatureRow` (`role="checkbox"`), a generic
+`colorTint()` helper (now exported from `pricingPlans.js`; `moduleTint` delegates), and the
+`color`+`textColor` split per group. ClientDrawer's Billing tab had the same broken tints on the
+price boxes and the *selected* tier card, plus the worst contrast measured all phase (billing
+toggle at 2.27:1) — all moved to `moduleTint`/`MODULE_INK`, and a save-scope line now states the
+tab's split save semantics.
+
+**Audit Log**: the Clear Logs confirm omitted the Area filter it applies and ignored the
+User/search narrowing it does NOT apply (filter to one user, see 12 rows, delete the whole
+window); it now names the area, warns about client-side filters, and surfaces the RPC's
+`deleted_count` inline. The Entity column was 2.74:1 across 500 rows; the action badges, diff
+cells and five unlabelled filter controls are fixed. **Perf**: `qrcode` moved from a top-level
+import (20.7% of the route's JS on every visit) to a dynamic import at preview time — verified in
+the built chunk graph; the cross-tenant last-seen read is `fetchAllRows`-paged (it silently
+truncated around 50 clients). The admin dashboard's footer now totals its own table (it printed
+platform MRR under a filtered body), the ★ SUITE count applies the same expiry test as the money,
+inactive rows say "inactive — not billed", and ~40 more contrast/label/radius/empty-state fixes
+landed across the six files.
+
+**Deliberately not done, for the record:** the drawer's 8-tab IA regroup (a real finding — three
+tabs are one settings object with three Save buttons — but an operator-facing reorganisation
+worth its own decision), and a global error-message mapping layer (the worst raw-string sites
+were fixed individually).
+
+**Pending manual steps:** run migrations `20260818180000` (is_premium fold — BEFORE deploying)
+and `20260818190000` (trial fold) in the SQL Editor; `supabase functions deploy admin-user-ops`
+(keep_staff_vault); bump the service-worker `CACHE_NAME` on deploy.
+
 ### S573 — 2026-08-18 — Critique campaign phase 6 (POS): five money-path defects, fixed in steps
 
 Ran phase 6 over `src/modules/pos/` with the two-isolated-agent method, then fixed in small
