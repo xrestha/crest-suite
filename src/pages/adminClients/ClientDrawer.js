@@ -754,16 +754,49 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       // Must run before the auth users go — the backup's account roster is read from `profiles`,
       // and this sequence deletes those first.
       if (!await preflightBackup('predelete')) { setDeletingAction(null); return }
-      // Delete all user auth accounts for this client
-      const { data: profiles } = await supabase.from('profiles').select('id').eq('client_id', client.id)
+
+      // Delete all user auth accounts for this client — collecting failures instead of aborting
+      // on the first. Deleted auth users are gone for good, so a mid-loop throw used to leave a
+      // half-deleted client (some logins gone, all data intact, raw upstream error, no statement
+      // of what did or didn't happen). Now every user is attempted, and on any failure we stop
+      // BEFORE touching data, so the client is still whole and the retry is safe (phase 7 P0, S574).
+      const { data: profiles } = await supabase.from('profiles').select('id, full_name').eq('client_id', client.id)
+      const userFailures = []
       for (const p of (profiles || [])) {
-        await adminOp('deleteUser', { userId: p.id })
+        try {
+          await adminOp('deleteUser', { userId: p.id })
+        } catch (err) {
+          userFailures.push(`${p.full_name || p.id}: ${err.message}`)
+        }
       }
-      // Delete operational data, settings, feature flags, then the client record
-      await adminOp('deleteClientData', { clientId: client.id })
-      await supabase.from('settings').delete().eq('client_id', client.id)
-      await scopedDelete('feature_flags', client.id)
-      await supabase.from('clients').delete().eq('id', client.id)
+      if (userFailures.length) {
+        const done = (profiles?.length || 0) - userFailures.length
+        setDeleteMsg(`error:${done} of ${profiles.length} logins removed, then stopped — NO data was deleted, so retrying is safe. Failed: ${userFailures.join('; ')}`)
+        setDeletingAction(null)
+        return
+      }
+
+      // Delete operational data, settings, feature flags, then the client record — each step
+      // named, so a failure states exactly how far the sequence got instead of surfacing a bare
+      // upstream string against an unknown amount of damage.
+      let stage = 'operational data'
+      try {
+        await adminOp('deleteClientData', { clientId: client.id })
+        stage = 'settings'
+        const { error: setErr } = await supabase.from('settings').delete().eq('client_id', client.id)
+        if (setErr) throw setErr
+        stage = 'feature flags'
+        const { error: ffErr } = await scopedDelete('feature_flags', client.id)
+        if (ffErr) throw ffErr
+        stage = 'the client record'
+        const { error: cliErr } = await supabase.from('clients').delete().eq('id', client.id)
+        if (cliErr) throw cliErr
+      } catch (err) {
+        setDeleteMsg(`error:All logins were removed, but deleting ${stage} failed: ${err.message} — the client row still exists. Run Delete Client again to finish.`)
+        setDeletingAction(null)
+        onClientUpdated()
+        return
+      }
       onClientUpdated()
       onClose()
     } catch (err) {
