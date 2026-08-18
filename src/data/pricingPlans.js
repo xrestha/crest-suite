@@ -37,9 +37,12 @@ export const MODULE_INK = {
 }
 
 // These are `var()` now, so the old `${MODULE_COLORS.ims}22` hex-alpha concatenation no longer
-// produces a valid colour. Use this instead — it is the one place the alpha maths lives.
+// produces a valid colour. Use these instead — this is the one place the alpha maths lives.
+// colorTint takes any colour value (a var() token included); moduleTint keys off MODULE_COLORS.
+export const colorTint = (color, pct) =>
+  `color-mix(in srgb, ${color} ${pct}%, transparent)`
 export const moduleTint = (key, pct) =>
-  `color-mix(in srgb, ${MODULE_COLORS[key] || MODULE_COLORS.ims} ${pct}%, transparent)`
+  colorTint(MODULE_COLORS[key] || MODULE_COLORS.ims, pct)
 
 // Each tier sells one job. Starter records and complies, Growth controls cost, Pro decides
 // strategy — see the same rule expressed as key sets in AuthContext.js. Keep these lists in step
