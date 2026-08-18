@@ -25,6 +25,18 @@ import {
   btnSm, billInput,
 } from './posOrdersConstants'
 
+// True only when the save_pos_order_items function isn't in the schema cache yet — i.e. deployed
+// code is running ahead of migration 20260818150000, which is reachable here because migrations
+// are applied by hand. Anything else is a real failure and must NOT fall back, or a partially
+// applied save could be written twice. Mirrors persistSalesDay's isMissingFunctionError.
+function isMissingPosSaveFn(error) {
+  if (!error) return false
+  const code = error.code || ''
+  if (code === 'PGRST202' || code === '42883') return true
+  const msg = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`
+  return /could not find the function|function .*save_pos_order_items.* does not exist/i.test(msg)
+}
+
 export default function PosOrders() {
   const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
@@ -1062,12 +1074,27 @@ export default function PosOrders() {
       await scopedUpdate('pos_orders', { covers }).eq('id', oid)
     }
 
-    // Delete + re-insert preserving sent_to_kot and category from local state
-    await scopedDelete('pos_order_items').eq('order_id', oid)
-    const { error: iErr } = await scopedInsert('pos_order_items',
-      itemsPayload.map(i => ({ order_id: oid, ...i }))
-    )
-    if (iErr) return null
+    // Replace this order's lines atomically. This used to be a DELETE followed by a separate
+    // INSERT: two HTTP requests with no transaction, so a failure or stall between them left the
+    // live order with ZERO lines on the server — floor tile at NPR 0, and only this browser's
+    // in-memory state able to recover it. Same shape that cost Sales Entry real data (S456).
+    //
+    // The legacy path below exists only because migrations are applied by hand in this project,
+    // so deployed code can briefly predate the function. It is NOT a retry-on-failure path: any
+    // other error is returned as a failure so nothing gets written twice. Delete it, and
+    // isMissingFunctionError, once 20260818150000 is applied everywhere.
+    const { error: rpcErr } = await supabase.rpc('save_pos_order_items', {
+      p_order_id: oid,
+      p_rows: itemsPayload,
+    })
+    if (rpcErr) {
+      if (!isMissingPosSaveFn(rpcErr)) return null
+      await scopedDelete('pos_order_items').eq('order_id', oid)
+      const { error: iErr } = await scopedInsert('pos_order_items',
+        itemsPayload.map(i => ({ order_id: oid, ...i }))
+      )
+      if (iErr) return null
+    }
     if (activeTable?.id) cachePosOrderForTable(activeTable.id, { orderId: oid, orderNo: oNo, covers, items: orderItems })
 
     // Only now — the merged items are actually persisted — mark any Accepted-locally guest
