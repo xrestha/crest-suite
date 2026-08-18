@@ -158,6 +158,20 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S565 — 2026-08-16 — Payroll Calculation flagged finalized TADA rows "Stale" that weren't
+
+Finalizing a payroll run flips the TADA claims it paid from `status='approved'` to `'paid'` (so the same trip can't be reimbursed twice). But `fetchApprovedTadaMap()` — the shared helper both Payroll Run and the read-only Payroll Calculation page use — only ever matched `status='approved'`. So on the Calculation page, re-fetching TADA for an already-finalized period found nothing for those employees, computed a live net pay short by exactly their TADA amount, and flagged them "Stale" against the correctly-higher stored payslip — a false alarm, not a real drift.
+
+Widened the filter to also match claims already `status='paid'` with `paid_method='Payroll'` (the marker Finalize itself writes) for the same period — a claim paid by hand (cash/bank via TADA Claims' own "Mark Paid") stays excluded, since that was never part of payroll. Generate/Regenerate on `PayrollRun.jsx` are unaffected: they only run against a draft, before any claim has been marked paid.
+
+**Files:** `src/modules/hr/payroll/payrollData.js`, `CLAUDE.md`, `README.md`
+
+### S564 — 2026-08-16 — TADA Claims: month filter
+
+`hr_tada_claims` is a standalone ledger with plain AD `start_date`/`end_date` and no `bs_year`/`bs_month` of its own, so the page always showed every claim ever submitted, mixed across months. Added a month dropdown (defaults to the currently open period, `BS_MONTHS` labels, `(open)` suffix) alongside the existing status tabs; it buckets claims client-side by converting `start_date` to BS via `adToBs` and comparing `${year}-${month}`. "All Months" reproduces the old unfiltered behavior. The three summary cards (Pending/Approved-Unpaid/Paid) now total only the selected month, with tooltips updated to say so.
+
+**Files:** `src/modules/hr/tada/TadaClaims.jsx`, `CLAUDE.md`, `README.md`
+
 ### S563 — 2026-08-15 — Self-Service Activate/Deactivate, decoupled from `status` for real
 
 Built the fix S561 drafted but didn't wire up: a checkbox column on Employees (header select-all + per-row) and a bulk action bar (Deactivate = block login, Activate = restore it) that appears once anything is selected. Both buttons call `scopedUpdate('hr_employees', { access_blocked })` on the selected ids — nothing else. `hr-selfservice-login` now embeds `hr_employees(access_blocked)` via `profiles.hr_employee_id` and refuses login when it's true, with the same generic "Invalid credentials" every other rejection path already returns. `status` is untouched by any of this, so Payroll Run/Calculation/Final Settlement (all three filtered on `status` alone) can never again lose an employee because someone blocked their login. The Self-Service badge now reads off `access_blocked` instead of `status`.

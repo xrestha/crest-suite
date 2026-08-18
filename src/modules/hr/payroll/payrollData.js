@@ -35,7 +35,7 @@ export async function fetchYtdMap(scopedFrom, period) {
 // claim's status 'paid' the moment it locks in — an 'approved'-only filter would make this map go
 // empty for an already-finalized period, understating live TADA by the paid amount on both the
 // draft auto-fill (harmless, run's locked) and the Calculation page's live-vs-stored comparison
-// (not harmless — it manufactured a false "Stale" flag on every employee with paid TADA, S564).
+// (not harmless — it manufactured a false "Stale" flag on every employee with paid TADA, S565).
 // A claim marked paid by some OTHER method (cash, bank — TadaClaims.jsx's manual "mark paid") is
 // deliberately excluded even if its trip date falls in this window; it was never part of payroll.
 export async function fetchApprovedTadaMap(scopedFrom, period) {
