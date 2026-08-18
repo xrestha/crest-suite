@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import Modal from '../../../components/Modal'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 
 const EMPTY = {
@@ -167,23 +168,15 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)' }} onClick={onClose} />
-      <div style={{
-        position: 'relative', width: 560, maxWidth: '100%', maxHeight: '90vh',
-        background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12,
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
-      }}>
+    <Modal
+      onClose={onClose}
+      maxWidth={560}
+      title={isEdit ? `Edit — ${employee.full_name}` : 'Add Employee'}
+    >
+      <div>
 
         {/* Header */}
-        <div style={{ padding: '20px 24px 0', borderBottom: '1px solid var(--theme-border)', flexShrink: 0 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>
-              {isEdit ? `Edit — ${employee.full_name}` : 'Add Employee'}
-            </h2>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 18, cursor: 'pointer' }}>✕</button>
-          </div>
+        <div style={{ borderBottom: '1px solid var(--theme-border)', marginBottom: 20 }}>
           <div className="tab-bar" style={{ marginBottom: 0 }}>
             {TABS.map(t => (
               <button key={t.key} className={`tab-btn${tab === t.key ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.key)}>
@@ -194,24 +187,24 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
         </div>
 
         {/* Body */}
-        <div style={{ flex: 1, padding: 24, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
           {/* ── PERSONAL ── */}
           {tab === 'personal' && <>
             <div style={col}>
-              <label style={lbl}>
+              <label style={lbl} htmlFor="emp-code">
                 <Tip text="Auto-generated if left blank (e.g. EMP-001). You can set a custom code." width={240}>Employee Code</Tip>
               </label>
-              <input style={inp} placeholder="EMP-001 (optional)" value={form.employee_code} onChange={e => set('employee_code', e.target.value)} />
+              <input id="emp-code" style={inp} placeholder="EMP-001 (optional)" value={form.employee_code} onChange={e => set('employee_code', e.target.value)} />
             </div>
             <div style={col}>
-              <label style={lbl}>Full Name <span style={{ color: 'var(--theme-red)' }}>*</span></label>
-              <input style={inp} placeholder="As per citizenship / PAN" value={form.full_name} onChange={e => set('full_name', e.target.value)} />
+              <label style={lbl} htmlFor="emp-full-name">Full Name <span style={{ color: 'var(--theme-red-text)' }}>*</span></label>
+              <input id="emp-full-name" style={inp} placeholder="As per citizenship / PAN" value={form.full_name} onChange={e => set('full_name', e.target.value)} />
             </div>
             <div style={row}>
               <div style={col}>
-                <label style={lbl}>Gender</label>
-                <select style={inp} value={form.gender} onChange={e => set('gender', e.target.value)}>
+                <label style={lbl} htmlFor="emp-gender">Gender</label>
+                <select id="emp-gender" style={inp} value={form.gender} onChange={e => set('gender', e.target.value)}>
                   <option value="">Select</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
@@ -219,40 +212,40 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
                 </select>
               </div>
               <div style={col}>
-                <label style={lbl}>
+                <label style={lbl} htmlFor="emp-dob">
                   <Tip text="Date of birth in BS. Used for age and retirement calculations." width={220}>Date of Birth</Tip>
                 </label>
-                <BsCalendarPicker value={form.date_of_birth} onChange={v => set('date_of_birth', v)} placeholder="Pick DOB" clearable />
+                <BsCalendarPicker id="emp-dob" value={form.date_of_birth} onChange={v => set('date_of_birth', v)} placeholder="Pick DOB" clearable />
               </div>
             </div>
             <div style={row}>
               <div style={col}>
-                <label style={lbl}>
+                <label style={lbl} htmlFor="emp-pan">
                   <Tip text="PAN number from IRD. Required for TDS computation." width={220}>PAN No.</Tip>
                 </label>
-                <input style={inp} placeholder="9-digit PAN" value={form.pan_no} onChange={e => set('pan_no', e.target.value)} />
+                <input id="emp-pan" style={inp} placeholder="9-digit PAN" value={form.pan_no} onChange={e => set('pan_no', e.target.value)} />
               </div>
               <div style={col}>
-                <label style={lbl}>National Identity No.</label>
-                <input style={inp} placeholder="NID / Citizenship No." value={form.citizenship_no} onChange={e => set('citizenship_no', e.target.value)} />
+                <label style={lbl} htmlFor="emp-nid">National Identity No.</label>
+                <input id="emp-nid" style={inp} placeholder="NID / Citizenship No." value={form.citizenship_no} onChange={e => set('citizenship_no', e.target.value)} />
               </div>
             </div>
             <div style={col}>
-              <label style={lbl}>Phone</label>
-              <input style={inp} placeholder="98XXXXXXXX" value={form.phone} onChange={e => set('phone', e.target.value)} />
+              <label style={lbl} htmlFor="emp-phone">Phone</label>
+              <input id="emp-phone" style={inp} placeholder="98XXXXXXXX" value={form.phone} onChange={e => set('phone', e.target.value)} />
             </div>
             <div style={col}>
-              <label style={lbl}>Email</label>
-              <input type="email" style={inp} placeholder="employee@email.com" value={form.email} onChange={e => set('email', e.target.value)} />
+              <label style={lbl} htmlFor="emp-email">Email</label>
+              <input id="emp-email" type="email" style={inp} placeholder="employee@email.com" value={form.email} onChange={e => set('email', e.target.value)} />
             </div>
             <div style={row}>
               <div style={col}>
-                <label style={lbl}>Emergency Contact Name</label>
-                <input style={inp} placeholder="Name" value={form.emergency_contact_name} onChange={e => set('emergency_contact_name', e.target.value)} />
+                <label style={lbl} htmlFor="emp-emergency-name">Emergency Contact Name</label>
+                <input id="emp-emergency-name" style={inp} placeholder="Name" value={form.emergency_contact_name} onChange={e => set('emergency_contact_name', e.target.value)} />
               </div>
               <div style={col}>
-                <label style={lbl}>Emergency Contact Phone</label>
-                <input style={inp} placeholder="98XXXXXXXX" value={form.emergency_contact_phone} onChange={e => set('emergency_contact_phone', e.target.value)} />
+                <label style={lbl} htmlFor="emp-emergency-phone">Emergency Contact Phone</label>
+                <input id="emp-emergency-phone" style={inp} placeholder="98XXXXXXXX" value={form.emergency_contact_phone} onChange={e => set('emergency_contact_phone', e.target.value)} />
               </div>
             </div>
           </>}
@@ -261,19 +254,19 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
           {tab === 'employment' && <>
             <div style={row}>
               <div style={col}>
-                <label style={lbl}>Designation</label>
-                <input style={inp} placeholder="e.g. Head Chef, Cashier" value={form.designation} onChange={e => set('designation', e.target.value)} />
+                <label style={lbl} htmlFor="emp-designation">Designation</label>
+                <input id="emp-designation" style={inp} placeholder="e.g. Head Chef, Cashier" value={form.designation} onChange={e => set('designation', e.target.value)} />
               </div>
               <div style={col}>
-                <label style={lbl}>Department</label>
-                <input style={inp} placeholder="e.g. Kitchen, FOH, Admin" value={form.department} onChange={e => set('department', e.target.value)} />
+                <label style={lbl} htmlFor="emp-department">Department</label>
+                <input id="emp-department" style={inp} placeholder="e.g. Kitchen, FOH, Admin" value={form.department} onChange={e => set('department', e.target.value)} />
               </div>
             </div>
             <div style={col}>
-              <label style={lbl}>
+              <label style={lbl} htmlFor="emp-employment-type">
                 <Tip text="Permanent — no end date. Probation — first 3–6 months. Contract — defined end date. Part-time — paid per day/hour." width={280}>Employment Type</Tip>
               </label>
-              <select style={inp} value={form.employment_type} onChange={e => set('employment_type', e.target.value)}>
+              <select id="emp-employment-type" style={inp} value={form.employment_type} onChange={e => set('employment_type', e.target.value)}>
                 <option value="permanent">Permanent</option>
                 <option value="probation">Probation</option>
                 <option value="contract">Contract</option>
@@ -282,19 +275,19 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
             </div>
             <div style={row}>
               <div style={col}>
-                <label style={lbl}>Join Date <span style={{ color: 'var(--theme-red)' }}>*</span></label>
-                <BsCalendarPicker value={form.join_date} onChange={v => set('join_date', v)} placeholder="Pick join date" />
+                <label style={lbl} htmlFor="emp-join-date">Join Date <span style={{ color: 'var(--theme-red-text)' }}>*</span></label>
+                <BsCalendarPicker id="emp-join-date" value={form.join_date} onChange={v => set('join_date', v)} placeholder="Pick join date" />
               </div>
               {(form.employment_type === 'contract' || form.employment_type === 'part_time') && (
                 <div style={col}>
-                  <label style={lbl}>Contract End Date</label>
-                  <BsCalendarPicker value={form.end_date} onChange={v => set('end_date', v)} placeholder="Pick end date" clearable />
+                  <label style={lbl} htmlFor="emp-end-date">Contract End Date</label>
+                  <BsCalendarPicker id="emp-end-date" value={form.end_date} onChange={v => set('end_date', v)} placeholder="Pick end date" clearable />
                 </div>
               )}
             </div>
             <div style={col}>
-              <label style={lbl}>Status</label>
-              <select style={inp} value={form.status} onChange={e => set('status', e.target.value)}>
+              <label style={lbl} htmlFor="emp-status">Status</label>
+              <select id="emp-status" style={inp} value={form.status} onChange={e => set('status', e.target.value)}>
                 <option value="active">Active</option>
                 <option value="probation">Probation</option>
                 <option value="inactive">Inactive</option>
@@ -303,10 +296,10 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
               </select>
             </div>
             <div style={col}>
-              <label style={lbl}>
+              <label style={lbl} htmlFor="emp-supervisor">
                 <Tip text="The person this employee reports to. Only active employees are listed." width={260}>Reporting Supervisor</Tip>
               </label>
-              <select style={inp} value={form.supervisor_id || ''} onChange={e => set('supervisor_id', e.target.value)}>
+              <select id="emp-supervisor" style={inp} value={form.supervisor_id || ''} onChange={e => set('supervisor_id', e.target.value)}>
                 <option value="">— None —</option>
                 {supervisors.map(s => (
                   <option key={s.id} value={s.id}>{s.full_name}{s.designation ? ` — ${s.designation}` : ''}</option>
@@ -314,12 +307,12 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
               </select>
             </div>
             <div style={col}>
-              <label style={lbl}>
+              <label style={lbl} htmlFor="emp-retirement-date">
                 <Tip text="Expected retirement date. SSF pension age in Nepal is 60 — use ↻ to set DOB + 60 years." width={280}>Retirement Date</Tip>
               </label>
               <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
                 <div style={{ flex: 1 }}>
-                  <BsCalendarPicker value={form.retirement_date || ''} onChange={v => set('retirement_date', v)} placeholder="Pick retirement date" clearable />
+                  <BsCalendarPicker id="emp-retirement-date" value={form.retirement_date || ''} onChange={v => set('retirement_date', v)} placeholder="Pick retirement date" clearable />
                 </div>
                 <button
                   type="button"
@@ -332,8 +325,9 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
               </div>
             </div>
             <div style={col}>
-              <label style={lbl}>Notes</label>
+              <label style={lbl} htmlFor="emp-notes">Notes</label>
               <textarea
+                id="emp-notes"
                 rows={3}
                 style={{ ...inp, resize: 'vertical' }}
                 placeholder="Any notes about this employee's employment…"
@@ -353,30 +347,30 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
             <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '4px 0 0' }}>Permanent Address</p>
             <div style={row}>
               <div style={col}>
-                <label style={lbl}>Province</label>
-                <select style={inp} value={form.perm_province} onChange={e => set('perm_province', e.target.value)}>
+                <label style={lbl} htmlFor="emp-perm-province">Province</label>
+                <select id="emp-perm-province" style={inp} value={form.perm_province} onChange={e => set('perm_province', e.target.value)}>
                   <option value="">Select</option>
                   {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div style={col}>
-                <label style={lbl}>District</label>
-                <input style={inp} placeholder="e.g. Kathmandu" value={form.perm_district} onChange={e => set('perm_district', e.target.value)} />
+                <label style={lbl} htmlFor="emp-perm-district">District</label>
+                <input id="emp-perm-district" style={inp} placeholder="e.g. Kathmandu" value={form.perm_district} onChange={e => set('perm_district', e.target.value)} />
               </div>
             </div>
             <div style={row}>
               <div style={{ ...col, flex: 2 }}>
-                <label style={lbl}>Municipality / VDC</label>
-                <input style={inp} placeholder="e.g. Lalitpur Metropolitan City" value={form.perm_municipality} onChange={e => set('perm_municipality', e.target.value)} />
+                <label style={lbl} htmlFor="emp-perm-municipality">Municipality / VDC</label>
+                <input id="emp-perm-municipality" style={inp} placeholder="e.g. Lalitpur Metropolitan City" value={form.perm_municipality} onChange={e => set('perm_municipality', e.target.value)} />
               </div>
               <div style={col}>
-                <label style={lbl}>Ward No.</label>
-                <input style={inp} placeholder="e.g. 5" value={form.perm_ward} onChange={e => set('perm_ward', e.target.value)} />
+                <label style={lbl} htmlFor="emp-perm-ward">Ward No.</label>
+                <input id="emp-perm-ward" style={inp} placeholder="e.g. 5" value={form.perm_ward} onChange={e => set('perm_ward', e.target.value)} />
               </div>
             </div>
             <div style={col}>
-              <label style={lbl}>Tole / Street</label>
-              <input style={inp} placeholder="e.g. Jhamsikhel" value={form.perm_tole} onChange={e => set('perm_tole', e.target.value)} />
+              <label style={lbl} htmlFor="emp-perm-tole">Tole / Street</label>
+              <input id="emp-perm-tole" style={inp} placeholder="e.g. Jhamsikhel" value={form.perm_tole} onChange={e => set('perm_tole', e.target.value)} />
             </div>
 
             <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 8 }}>
@@ -388,30 +382,30 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
               <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '8px 0 0' }}>Current Address</p>
               <div style={row}>
                 <div style={col}>
-                  <label style={lbl}>Province</label>
-                  <select style={inp} value={form.temp_province} onChange={e => set('temp_province', e.target.value)}>
+                  <label style={lbl} htmlFor="emp-temp-province">Province</label>
+                  <select id="emp-temp-province" style={inp} value={form.temp_province} onChange={e => set('temp_province', e.target.value)}>
                     <option value="">Select</option>
                     {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
                 <div style={col}>
-                  <label style={lbl}>District</label>
-                  <input style={inp} placeholder="e.g. Kathmandu" value={form.temp_district} onChange={e => set('temp_district', e.target.value)} />
+                  <label style={lbl} htmlFor="emp-temp-district">District</label>
+                  <input id="emp-temp-district" style={inp} placeholder="e.g. Kathmandu" value={form.temp_district} onChange={e => set('temp_district', e.target.value)} />
                 </div>
               </div>
               <div style={row}>
                 <div style={{ ...col, flex: 2 }}>
-                  <label style={lbl}>Municipality / VDC</label>
-                  <input style={inp} placeholder="e.g. Kathmandu Metropolitan City" value={form.temp_municipality} onChange={e => set('temp_municipality', e.target.value)} />
+                  <label style={lbl} htmlFor="emp-temp-municipality">Municipality / VDC</label>
+                  <input id="emp-temp-municipality" style={inp} placeholder="e.g. Kathmandu Metropolitan City" value={form.temp_municipality} onChange={e => set('temp_municipality', e.target.value)} />
                 </div>
                 <div style={col}>
-                  <label style={lbl}>Ward No.</label>
-                  <input style={inp} placeholder="e.g. 10" value={form.temp_ward} onChange={e => set('temp_ward', e.target.value)} />
+                  <label style={lbl} htmlFor="emp-temp-ward">Ward No.</label>
+                  <input id="emp-temp-ward" style={inp} placeholder="e.g. 10" value={form.temp_ward} onChange={e => set('temp_ward', e.target.value)} />
                 </div>
               </div>
               <div style={col}>
-                <label style={lbl}>Tole / Street</label>
-                <input style={inp} placeholder="e.g. Baluwatar" value={form.temp_tole} onChange={e => set('temp_tole', e.target.value)} />
+                <label style={lbl} htmlFor="emp-temp-tole">Tole / Street</label>
+                <input id="emp-temp-tole" style={inp} placeholder="e.g. Baluwatar" value={form.temp_tole} onChange={e => set('temp_tole', e.target.value)} />
               </div>
             </>}
           </>}
@@ -420,59 +414,59 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
           {tab === 'family' && <>
             <div style={row}>
               <div style={col}>
-                <label style={lbl}>Marital Status</label>
-                <select style={inp} value={form.marital_status} onChange={e => set('marital_status', e.target.value)}>
+                <label style={lbl} htmlFor="emp-marital-status">Marital Status</label>
+                <select id="emp-marital-status" style={inp} value={form.marital_status} onChange={e => set('marital_status', e.target.value)}>
                   <option value="">Select</option>
                   {MARITAL.map(m => <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
                 </select>
               </div>
               <div style={col}>
-                <label style={lbl}>No. of Children</label>
-                <input type="number" min="0" style={inp} placeholder="0" value={form.children_count} onChange={e => set('children_count', e.target.value)} />
+                <label style={lbl} htmlFor="emp-children-count">No. of Children</label>
+                <input id="emp-children-count" type="number" min="0" style={inp} placeholder="0" value={form.children_count} onChange={e => set('children_count', e.target.value)} />
               </div>
             </div>
             {form.marital_status === 'married' && (
               <div style={col}>
-                <label style={lbl}>Spouse Name</label>
-                <input style={inp} placeholder="Spouse full name" value={form.spouse_name} onChange={e => set('spouse_name', e.target.value)} />
+                <label style={lbl} htmlFor="emp-spouse-name">Spouse Name</label>
+                <input id="emp-spouse-name" style={inp} placeholder="Spouse full name" value={form.spouse_name} onChange={e => set('spouse_name', e.target.value)} />
               </div>
             )}
             <div style={row}>
               <div style={col}>
-                <label style={lbl}>Father's Name</label>
-                <input style={inp} placeholder="Father's full name" value={form.father_name} onChange={e => set('father_name', e.target.value)} />
+                <label style={lbl} htmlFor="emp-father-name">Father's Name</label>
+                <input id="emp-father-name" style={inp} placeholder="Father's full name" value={form.father_name} onChange={e => set('father_name', e.target.value)} />
               </div>
               <div style={col}>
-                <label style={lbl}>Mother's Name</label>
-                <input style={inp} placeholder="Mother's full name" value={form.mother_name} onChange={e => set('mother_name', e.target.value)} />
+                <label style={lbl} htmlFor="emp-mother-name">Mother's Name</label>
+                <input id="emp-mother-name" style={inp} placeholder="Mother's full name" value={form.mother_name} onChange={e => set('mother_name', e.target.value)} />
               </div>
             </div>
             <div style={col}>
-              <label style={lbl}>
+              <label style={lbl} htmlFor="emp-grandfather-name">
                 <Tip text="Required on Nepal employment/PAN forms — grandfather's name establishes lineage." width={260}>Grandfather's Name</Tip>
               </label>
-              <input style={inp} placeholder="Grandfather's full name" value={form.grandfather_name} onChange={e => set('grandfather_name', e.target.value)} />
+              <input id="emp-grandfather-name" style={inp} placeholder="Grandfather's full name" value={form.grandfather_name} onChange={e => set('grandfather_name', e.target.value)} />
             </div>
 
             <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 14, marginTop: 6 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 10px' }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 10px' }}>
                 <Tip text="The person who receives this employee's SSF / gratuity / final settlement in the event of death. Keep this current." width={300}>Nominee</Tip>
               </p>
               <div style={col}>
-                <label style={lbl}>Nominee Name</label>
-                <input style={inp} placeholder="Full name" value={form.nominee_name} onChange={e => set('nominee_name', e.target.value)} />
+                <label style={lbl} htmlFor="emp-nominee-name">Nominee Name</label>
+                <input id="emp-nominee-name" style={inp} placeholder="Full name" value={form.nominee_name} onChange={e => set('nominee_name', e.target.value)} />
               </div>
               <div style={row}>
                 <div style={col}>
-                  <label style={lbl}>Relationship</label>
-                  <select style={inp} value={form.nominee_relationship} onChange={e => set('nominee_relationship', e.target.value)}>
+                  <label style={lbl} htmlFor="emp-nominee-relationship">Relationship</label>
+                  <select id="emp-nominee-relationship" style={inp} value={form.nominee_relationship} onChange={e => set('nominee_relationship', e.target.value)}>
                     <option value="">Select</option>
                     {NOMINEE_RELATIONS.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
                 <div style={col}>
-                  <label style={lbl}>Contact</label>
-                  <input style={inp} placeholder="98XXXXXXXX" value={form.nominee_contact} onChange={e => set('nominee_contact', e.target.value)} />
+                  <label style={lbl} htmlFor="emp-nominee-contact">Contact</label>
+                  <input id="emp-nominee-contact" style={inp} placeholder="98XXXXXXXX" value={form.nominee_contact} onChange={e => set('nominee_contact', e.target.value)} />
                 </div>
               </div>
             </div>
@@ -481,26 +475,26 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '16px 24px', borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             {isEdit && employee.status === 'active' && (
-              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleDeactivate}>
+              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleDeactivate}>
                 Deactivate
               </button>
             )}
             {isEdit && employee.status === 'inactive' && (
-              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-green)' }} onClick={handleActivate}>
+              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-green-text)' }} onClick={handleActivate}>
                 Activate
               </button>
             )}
             {isEdit && (
-              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleDelete}>
+              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleDelete}>
                 Delete
               </button>
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {error && <span style={{ fontSize: 12, color: 'var(--theme-red)' }}>{error}</span>}
+            {error && <span role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{error}</span>}
             <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
             <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
               {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Employee'}
@@ -509,6 +503,6 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
         </div>
 
       </div>
-    </div>
+    </Modal>
   )
 }

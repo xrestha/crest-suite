@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
+import Modal from '../../../components/Modal'
 
 // Mirrors src/modules/ims/staff/ImsStaff.jsx structurally — same role model, same custom-role
 // mapping, same Edge Function call pattern — adapted for HR staff (S430). Distinct from HR
@@ -21,7 +22,12 @@ const DEFAULT_ROLES = [
   { label: 'Supervisor', level: 'supervisor' },
   { label: 'Manager',    level: 'manager' },
 ]
-const LEVEL_BADGE = { staff: 'badge-green', supervisor: 'badge-amber', manager: 'badge-yellow' }
+// Access level is a CATEGORICAL axis, not a status one — a Supervisor is not a "warning" and a
+// Staff account is not "healthy". All three therefore use badge-yellow, the accent-tinted
+// categorical tag (same treatment the Department tag on Employees uses); the rank itself is
+// carried by the label text, which is what a reader actually needs. Signal green/amber stay
+// reserved for real status.
+const LEVEL_BADGE = { staff: 'badge-yellow', supervisor: 'badge-yellow', manager: 'badge-yellow' }
 const EMPTY_ADD   = { full_name: '', email: '', password: '', job_title: '', employee_id: '', existing_user_id: '' }
 const EMPTY_ROLE  = { label: '', level: 'staff' }
 
@@ -65,18 +71,8 @@ export default function HrStaff() {
 
   useEffect(() => { if (clientId) init() }, [clientId]) // eslint-disable-line
 
-  // Escape-to-close — none of this file's 3 hand-rolled overlays use the shared Modal.js
-  // component, so each needs its own listener; only one is ever open at a time in practice.
-  useEffect(() => {
-    function onKeyDown(e) {
-      if (e.key !== 'Escape') return
-      if (rolesModal) setRolesModal(false)
-      else if (addModal && !adding) setAddModal(false)
-      else if (pwTarget && !resetting) setPwTarget(null)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [rolesModal, addModal, adding, pwTarget, resetting])
+  // Escape-to-close, focus trapping and backdrop dismissal all come from the shared Modal.js
+  // component now — this file used to hand-roll all three for its own overlays.
 
   async function init() {
     setLoading(true)
@@ -292,19 +288,20 @@ export default function HrStaff() {
   const labelStyle = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block' }
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 940 }}>
+    <div>
 
       {/* Header */}
-      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
-          <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>HR Staff</h2>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+          <h1 className="page-title">HR Staff</h1>
+          <p className="page-subtitle">
             Assign roles to your HR administrators. Staff log in with their email and password, same as you do.
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexShrink: 0, flexWrap: 'wrap' }}>
           <input
             type="text" value={search} onChange={e => setSearch(e.target.value)}
+            aria-label="Search staff by name or email"
             placeholder="Search staff…" className="form-select" style={{ maxWidth: 180 }}
           />
           <div style={{ display: 'flex', gap: 8 }}>
@@ -328,7 +325,7 @@ export default function HrStaff() {
         ))}
       </div>
 
-      {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red)', marginBottom: 16 }}>{msg}</p>}
+      {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red-text)', marginBottom: 16 }}>{msg}</p>}
 
       {loading ? (
         <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
@@ -377,6 +374,7 @@ export default function HrStaff() {
                         <select
                           className="form-select"
                           style={{ minWidth: 160 }}
+                          aria-label={`Role for ${p.full_name || p.email || 'this staff member'}`}
                           value={displayTitle || ''}
                           disabled={saving[p.id]}
                           onChange={e => updateRole(p.id, e.target.value)}
@@ -409,7 +407,7 @@ export default function HrStaff() {
                         </button>
                         <button
                           className="btn btn-ghost"
-                          style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red)', borderColor: 'var(--theme-red)' }}
+                          style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
                           onClick={() => deleteStaff(p)}
                         >
                           Delete
@@ -426,10 +424,8 @@ export default function HrStaff() {
 
       {/* ── Manage Roles modal ───────────────────────────────────────────────── */}
       {rolesModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-          onClick={e => { if (e.target === e.currentTarget) setRolesModal(false) }}>
-          <div className="card" style={{ width: 480, padding: 28, maxHeight: '80vh', overflowY: 'auto' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--theme-text1)' }}>Manage HR Roles</h3>
+        <Modal onClose={() => setRolesModal(false)} title="Manage HR Roles" maxWidth={480}>
+          <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)' }}>
               Define custom role names for your team. Each maps to a permission level.
             </p>
@@ -520,15 +516,13 @@ export default function HrStaff() {
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* ── Add Staff modal ──────────────────────────────────────────────────── */}
       {addModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-          onClick={e => { if (e.target === e.currentTarget && !adding) setAddModal(false) }}>
-          <div className="card" style={{ width: 380, padding: 28 }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--theme-text1)' }}>Add Staff Member</h3>
+        <Modal onClose={() => { if (!adding) setAddModal(false) }} title="Add Staff Member" maxWidth={380}>
+          <div>
 
             {(unlinkedEmployees.length > 0 || eligibleUsers.length > 0) && (
               <div className="tab-bar" style={{ marginBottom: 16 }}>
@@ -650,21 +644,20 @@ export default function HrStaff() {
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* ── Reset Password modal ─────────────────────────────────────────────── */}
       {pwTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-          onClick={e => { if (e.target === e.currentTarget && !resetting) setPwTarget(null) }}>
-          <div className="card" style={{ width: 340, padding: 28 }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--theme-text1)' }}>Reset Password</h3>
+        <Modal onClose={() => { if (!resetting) setPwTarget(null) }} title="Reset Password" maxWidth={340}>
+          <div>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)' }}>
               New password for <strong style={{ color: 'var(--theme-text1)' }}>{pwTarget.full_name}</strong>
             </p>
             <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}>New Password (8+ characters)</label>
+              <label style={labelStyle} htmlFor="hrstaff-new-password">New Password (8+ characters)</label>
               <input
+                id="hrstaff-new-password"
                 style={inputStyle}
                 type="password"
                 autoComplete="new-password"
@@ -674,7 +667,7 @@ export default function HrStaff() {
                 onChange={e => setNewPassword(e.target.value)}
               />
             </div>
-            {pwMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red)', marginBottom: 12 }}>{pwMsg}</p>}
+            {pwMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginBottom: 12 }}>{pwMsg}</p>}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setPwTarget(null)} disabled={resetting}>Cancel</button>
               <button className="btn btn-primary" onClick={resetPassword} disabled={resetting}>
@@ -682,7 +675,7 @@ export default function HrStaff() {
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

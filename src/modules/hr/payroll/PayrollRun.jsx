@@ -35,6 +35,11 @@ export default function PayrollRun() {
   const [loading,    setLoading]    = useState(true)
   const [busy,       setBusy]       = useState(false)
   const [msg,        setMsg]        = useState('')
+  // Loaded on every page load, not just inside generate()/regenerate(), so the draft on screen can
+  // be compared against a live recomputation. Without them this page could only ever show what was
+  // stored at Generate time and had no way to know it had since gone stale.
+  const [ytdMap,     setYtdMap]     = useState({})
+  const [tadaMap,    setTadaMap]    = useState({})
   const [viewSlip,   setViewSlip]   = useState(null)
   const [printSlip,  setPrintSlip]  = useState(null)
   // Company letterhead for the payslip — a payslip with no employer identity on it at all is
@@ -84,7 +89,9 @@ export default function PayrollRun() {
       // with no absence deduction. The old query had no ORDER BY either, so which employees got
       // cut was arbitrary and could differ between two runs of the same period (S529).
       fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', periodId).order('id')),
-      scopedFrom('hr_overtime_entries', 'employee_id, ot_hours, ot_type')
+      // bs_day is load-bearing, not display data: computePayslip uses it to suppress
+      // attendance-sheet OT on days an approved entry already covers (approved supersedes).
+      scopedFrom('hr_overtime_entries', 'employee_id, bs_day, ot_hours, ot_type')
         .eq('bs_year', bsYear).eq('bs_month', bsMonth).eq('status', 'approved'),
       scopedFrom('hr_advances').order('issued_date'),
       scopedFrom('hr_advance_repayments'),
@@ -99,8 +106,17 @@ export default function PayrollRun() {
     if (runRow) {
       const { data: slips } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
       setPayslips(slips || [])
+      // Only a saved run needs the freshness comparison; with no run there is nothing to be
+      // stale against, and these two are the page's only extra round trips.
+      const periodObj = { id: periodId, bs_year: bsYear, bs_month: bsMonth }
+      const [ytd, tada] = await Promise.all([
+        fetchYtdMap(scopedFrom, periodObj),
+        fetchApprovedTadaMap(scopedFrom, periodObj),
+      ])
+      setYtdMap(ytd); setTadaMap(tada)
     } else {
       setPayslips([])
+      setYtdMap({}); setTadaMap({})
     }
   }
 
@@ -119,7 +135,10 @@ export default function PayrollRun() {
       const advDed       = Math.round(advMap[emp.id] || 0)
       // `breakdown` is Calculation-page-only (not a hr_payslips column) — dropped before insert.
       const { breakdown, ...slip } = computePayslip(emp, comps, att, period, 0, empOtEntries, advDed)
-      const isSsf    = !!(emp.ssf_enrolled)
+      // Same gate computePayslip applies: no registration number means no SSF contribution, so
+      // this employee is not an SSF contributor for tax purposes either and the 1% first-slab
+      // waiver must not apply. Letting the two disagree would tax against a deduction never made.
+      const isSsf    = !!(emp.ssf_enrolled && String(emp.ssf_no || '').trim())
       const isMarried = emp.marital_status === 'married'
       const ytd   = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0, count: 0 }
       const tds   = computeMonthlyTds({
@@ -148,6 +167,30 @@ export default function PayrollRun() {
       return { run_id: runId, employee_id: emp.id, ...slip, tds, tada_amount: tadaAmount, tada_claim_ids: tada.ids, net_pay: net }
     })
   }
+
+  // Live-vs-stored freshness check. The draft on this page is a snapshot taken at Generate time,
+  // so approving overtime, editing attendance or approving a TADA claim afterwards leaves it
+  // quietly wrong — and Finalize locks whatever is on screen. `/hr/calculation` has always
+  // detected this; the detection just lived on a page nobody has to visit before finalizing.
+  // Deliberately reuses buildRows (the same function Generate persists from) rather than
+  // reimplementing the arithmetic — a second copy could drift and report false confidence.
+  const freshness = (() => {
+    if (!run || run.status === 'finalized' || employees.length === 0 || payslips.length === 0) {
+      return { stale: [], missing: [], ok: true }
+    }
+    let live
+    try { live = buildRows(run.id, ytdMap, tadaMap) } catch { return { stale: [], missing: [], ok: true } }
+    const storedByEmp = Object.fromEntries(payslips.map(s => [s.employee_id, s]))
+    const stale = [], missing = []
+    live.forEach(row => {
+      const stored = storedByEmp[row.employee_id]
+      if (!stored) { missing.push(row.employee_id); return }
+      if (Math.round(stored.net_pay) !== Math.round(row.net_pay)) stale.push(row.employee_id)
+    })
+    return { stale, missing, ok: stale.length === 0 && missing.length === 0 }
+  })()
+
+  const nameOf = id => empMap[id]?.full_name || 'Unknown'
 
   async function generate() {
     if (!period || employees.length === 0) return
@@ -195,7 +238,43 @@ export default function PayrollRun() {
 
   async function finalize() {
     if (!run) return
-    if (!window.confirm('Finalize this payroll? Payslips will be locked as a permanent record.')) return
+
+    // Refuse outright while the draft disagrees with a live recomputation. This is the one
+    // irreversible action in the module (Reopen exists, but payslips have been issued by then),
+    // and the failure it prevents is silent: the numbers look complete and are simply out of date.
+    // Regenerate is one click away and non-destructive, so there is no reason to allow the
+    // override that a "proceed anyway" branch would offer.
+    if (!freshness.ok) {
+      const staleNames   = freshness.stale.map(nameOf)
+      const missingNames = freshness.missing.map(nameOf)
+      const lines = [
+        'This payroll cannot be finalized yet — it no longer matches the current attendance, overtime and TADA data.',
+        '',
+        staleNames.length   ? `Figures changed since Generate (${staleNames.length}): ${staleNames.slice(0, 8).join(', ')}${staleNames.length > 8 ? `, +${staleNames.length - 8} more` : ''}` : '',
+        missingNames.length ? `Employees with no payslip in this run (${missingNames.length}): ${missingNames.slice(0, 8).join(', ')}${missingNames.length > 8 ? `, +${missingNames.length - 8} more` : ''}` : '',
+        '',
+        'Click Regenerate to rebuild the draft from current data, then finalize.',
+      ].filter(Boolean)
+      window.alert(lines.join('\n'))
+      return
+    }
+
+    // A summary of what finalizing actually does, rather than "are you sure?" — the advance
+    // repayments and TADA claim closures below are real writes to other ledgers, and until now
+    // nothing named them before they happened.
+    const netTotal   = payslips.reduce((s, p) => s + (p.net_pay || 0), 0)
+    const tadaCount  = payslips.reduce((n, p) => n + ((p.tada_amount || 0) > 0 && Array.isArray(p.tada_claim_ids) ? p.tada_claim_ids.length : 0), 0)
+    const advCount   = payslips.filter(p => (p.advance_deduction || 0) > 0).length
+    const summary = [
+      `Finalize ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} payroll?`,
+      '',
+      `• ${payslips.length} payslip${payslips.length === 1 ? '' : 's'}, NPR ${fmt(netTotal)} total net pay`,
+      advCount  ? `• ${advCount} advance/loan recover${advCount === 1 ? 'y' : 'ies'} will be recorded in Advances & Loans` : '',
+      tadaCount ? `• ${tadaCount} TADA claim${tadaCount === 1 ? '' : 's'} will be marked Paid` : '',
+      '',
+      'Payslips are locked as a permanent record. This can be undone with Reopen.',
+    ].filter(Boolean).join('\n')
+    if (!window.confirm(summary)) return
     setBusy(true)
 
     // Build per-advance repaid totals, excluding any prior auto-entries for this run
@@ -366,9 +445,44 @@ export default function PayrollRun() {
                 {finalized && isAdmin && <button className="btn btn-ghost" onClick={reopen} disabled={busy} style={{ fontSize: 12 }}>Reopen</button>}
               </div>
             )}
-            {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
+            {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
           </div>
         </div>
+
+        {/* Stale-draft warning. Finalize refuses while this is showing, but the refusal alone
+            would only be discovered at the moment of committing — this states the problem, names
+            who it affects and points at the one-click fix beforehand. */}
+        {!loading && !freshness.ok && (
+          <div
+            role="alert"
+            className="card"
+            style={{
+              marginBottom: 12, padding: '12px 16px',
+              borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+              background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
+              ⚠ This draft is out of date — Regenerate before finalizing
+            </p>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+              {freshness.stale.length > 0 && (
+                <>Attendance, overtime or TADA changed since this run was generated, so{' '}
+                  <strong style={{ color: 'var(--theme-text1)' }}>{freshness.stale.length}</strong>{' '}
+                  employee{freshness.stale.length === 1 ? "'s figures no longer match" : "s' figures no longer match"}
+                  {' '}({freshness.stale.slice(0, 4).map(nameOf).join(', ')}{freshness.stale.length > 4 ? `, +${freshness.stale.length - 4} more` : ''}).{' '}
+                </>
+              )}
+              {freshness.missing.length > 0 && (
+                <><strong style={{ color: 'var(--theme-text1)' }}>{freshness.missing.length}</strong>{' '}
+                  employee{freshness.missing.length === 1 ? ' was' : 's were'} added after this run and {freshness.missing.length === 1 ? 'has' : 'have'} no payslip in it
+                  {' '}({freshness.missing.slice(0, 4).map(nameOf).join(', ')}{freshness.missing.length > 4 ? `, +${freshness.missing.length - 4} more` : ''}).{' '}
+                </>
+              )}
+              Regenerate rebuilds the draft from current data; manual TDS and TADA edits are reset.
+            </p>
+          </div>
+        )}
 
         {loading ? (
           <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
@@ -438,9 +552,17 @@ export default function PayrollRun() {
                               {emp.employee_code && <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{emp.employee_code}</span>}
                               {!isMonthly && <span className="badge badge-gray" style={{ fontSize: 10, fontWeight: 700 }}>{s.pay_basis}</span>}
                               {!emp.ssf_enrolled && <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>no SSF</span>}
+                              {/* Enrolled but no registration number: SSF is deliberately NOT deducted
+                                  (it would never reach the challan), and this is the only place that
+                                  otherwise looks identical to a correctly-contributing employee. */}
+                              {emp.ssf_enrolled && !String(emp.ssf_no || '').trim() && (
+                                <Tip text="This employee is marked SSF-enrolled but has no SSF registration number, so no 11% contribution is being deducted — a contribution with no number can't be filed on the SSF challan. Add the number in Pay Setup, then Regenerate." width={290}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>⚠ SSF no. missing</span>
+                                </Tip>
+                              )}
                               {otBothSources && (
-                                <Tip text={`OT recorded in TWO places for this employee — ${attOtHrs.toFixed(1)} hr in the attendance sheet's OT column AND approved Overtime entries. Both are paid, so the same hours may be paid twice. Zero out one source and Regenerate.`} width={290}>
-                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-amber)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>⚠ OT ×2?</span>
+                                <Tip text={`This employee has OT in both places for this period — ${attOtHrs.toFixed(1)} hr on the attendance sheet and approved Overtime entries. They are no longer added together: on any day an approved entry exists, it supersedes the attendance sheet's hours for that day, so nothing is paid twice. Days with no approved entry still pay their attendance OT at 1.5×.`} width={300}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>OT: 2 sources</span>
                                 </Tip>
                               )}
                             </div>
@@ -496,7 +618,7 @@ export default function PayrollRun() {
               </div>
             </div>
             <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-              {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can override any TDS value inline.'} SSF is applied only to employees with an SSF number. TDS is computed automatically from the fiscal-year tax slabs using year-to-date projection; finalize earlier months first so each month\'s tax builds on the last. TADA (travel/daily allowance) auto-fills from that employee's Approved TADA Claims for this period (🔗 marks a claim-linked amount) and is added after TDS as a non-taxable reimbursement, not part of taxable gross — you can still hand-edit or clear it. Finalize marks linked claims Paid in TADA Claims; Reopen reverts them to Approved. Active advance installments are auto-deducted; repayment rows are written to Advances & Loans on Finalize.
+              {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can override any TDS value inline.'} SSF is deducted only for employees who are marked SSF-enrolled AND have an SSF registration number — an enrolled employee with no number is flagged in the list and contributes nothing, since a contribution with no number cannot be filed on the challan. TDS is computed automatically from the fiscal-year tax slabs using year-to-date projection; finalize earlier months first so each month\'s tax builds on the last. TADA (travel/daily allowance) auto-fills from that employee's Approved TADA Claims for this period (🔗 marks a claim-linked amount) and is added after TDS as a non-taxable reimbursement, not part of taxable gross — you can still hand-edit or clear it. Finalize marks linked claims Paid in TADA Claims; Reopen reverts them to Approved. Active advance installments are auto-deducted; repayment rows are written to Advances & Loans on Finalize.
             </div>
           </>
         )}

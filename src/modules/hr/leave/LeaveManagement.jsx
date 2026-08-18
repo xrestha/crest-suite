@@ -357,7 +357,7 @@ export default function LeaveManagement() {
             </div>
           </div>
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request reverts those attendance days to Present. Every day in the range is included — mark the employee's own off days separately in Attendance if the range spans one.
+            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request clears those attendance days back to blank — not to Present, since the system has no way to know whether the employee actually worked; re-mark them in Attendance if they did. Every day in the range is included — mark the employee's own off days separately in Attendance if the range spans one.
           </div>
         </div>
       ) : tab === 'balances' ? (

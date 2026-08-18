@@ -16,15 +16,23 @@ export function calcAmount(comp, basic) {
 }
 
 // Tally an employee's attendance rows for the period.
-export function tallyAttendance(attendanceRows) {
+//
+// `supersededOtDays` is an optional Set of bs_days on which an APPROVED overtime entry exists.
+// OT typed on the attendance sheet for those days is not counted (see computePayslip) — the two
+// sources are alternatives, not addends. Callers that don't care pass nothing and behave exactly
+// as before; `sumOtSuperseded` reports what was withheld so a page can explain the difference.
+export function tallyAttendance(attendanceRows, supersededOtDays) {
   const t = {
     present: 0, half_day: 0, absent: 0, paid_leave: 0, unpaid_leave: 0,
-    half_paid_leave: 0, half_unpaid_leave: 0, weekly_off: 0, holiday: 0, sumHours: 0, sumOt: 0,
+    half_paid_leave: 0, half_unpaid_leave: 0, weekly_off: 0, holiday: 0,
+    sumHours: 0, sumOt: 0, sumOtSuperseded: 0,
   }
   attendanceRows.forEach(a => {
     if (t[a.status] != null) t[a.status] += 1
     t.sumHours += parseFloat(a.hours_worked) || 0
-    t.sumOt    += parseFloat(a.ot_hours) || 0
+    const ot = parseFloat(a.ot_hours) || 0
+    if (supersededOtDays && supersededOtDays.has(a.bs_day)) t.sumOtSuperseded += ot
+    else                                                    t.sumOt += ot
   })
   return t
 }
@@ -73,14 +81,24 @@ function entryOt(approvedOtEntries, hr) {
 
 // Compute one payslip breakdown.
 // `tds` is an optional manual override (default 0).
-// `approvedOtEntries` is an array of approved hr_overtime_entries rows for this
-// employee in this period — their OT amount is added on top of attendance OT.
+// `approvedOtEntries` is an array of approved hr_overtime_entries rows for this employee in this
+// period. Approved entries SUPERSEDE attendance-sheet OT on the same bs_day (decision 2026-08-18,
+// same shape as POS-supersedes-manual in sales depletion): the Overtime module is the approval
+// path and carries the holiday 2× rate, so where both exist the approved figure is the one that
+// was actually authorised. Days with no approved entry still pay their attendance OT at 1.5×.
 // Returns an object whose keys match the hr_payslips columns.
 export function computePayslip(employee, components, attendanceRows, period, tds = 0, approvedOtEntries = [], advanceDeduction = 0) {
   const basis    = employee.pay_basis || 'monthly'
   const basic    = parseFloat(employee.basic_salary) || 0
-  const enrolled = !!(employee.ssf_enrolled)
-  const t        = tallyAttendance(attendanceRows)
+  // SSF requires BOTH the enrolment flag and a registration number (decision 2026-08-18). Until
+  // then the flag alone deducted 11% while HrReports' challan tab filters on `ssf_no` too — so a
+  // flagged employee with a blank number had money withheld that no filing sheet ever claimed.
+  // Deducting nothing is the recoverable direction; the number is entered once, in Pay Setup.
+  const enrolled = !!(employee.ssf_enrolled && String(employee.ssf_no || '').trim())
+  const supersededOtDays = new Set(
+    approvedOtEntries.map(e => e.bs_day).filter(d => d != null)
+  )
+  const t        = tallyAttendance(attendanceRows, supersededOtDays)
   const tdsVal   = parseFloat(tds) || 0
   const advDed   = Math.round(parseFloat(advanceDeduction) || 0)
   const monthDays = daysInBsMonth(period.bs_year, period.bs_month)
@@ -91,6 +109,11 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     basic,
     present_days:      t.present + t.half_day * 0.5 + t.half_paid_leave * 0.5,
     absent_days:       t.absent,
+    // Every day the absence deduction actually docks — absences PLUS unpaid leave, half days and
+    // pre-join days. `absent_days` stays literal absences (Payroll Run's Excel column is labelled
+    // "Absent Days"), so the payslip needs its own figure: it prints this count beside the dock,
+    // and printing t.absent there understated it whenever any other unpaid component existed.
+    unpaid_days:       0,
     worked_days:       0,
     hours_worked:      t.sumHours,
     ot_hours:          t.sumOt,
@@ -151,6 +174,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     result = {
       ...base,
       allowances, gross,
+      unpaid_days:       unpaidDays,
       absence_deduction: absenceDed,
       other_deductions:  otherDed,
       ot_amount:         otAmount,
@@ -161,11 +185,17 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     }
   }
 
-  // Add OT from approved overtime entries on top of attendance OT — surfaced in `breakdown` so
-  // the Calculation page can show attendance OT and approved-entry OT as two distinct amounts
-  // (the ⚠ OT ×2? risk in PayrollRun.jsx is exactly these two sources overlapping).
+  // Add OT from approved overtime entries. Attendance OT for those same days was already withheld
+  // by tallyAttendance above, so this ADDS to a total that no longer contains the superseded
+  // hours — the two sources can't double-pay a day any more. `otSupersededHrs` records what the
+  // approval displaced so the Calculation page can explain a figure that differs from the
+  // attendance sheet, rather than the user finding an unexplained gap.
   const { extraHrs, extraAmt } = entryOt(approvedOtEntries, hr)
-  result.breakdown = { ...result.breakdown, otApprovedHrs: extraHrs, otApprovedAmt: extraAmt, otDoubleCountRisk: t.sumOt > 0 && extraHrs > 0 }
+  result.breakdown = {
+    ...result.breakdown,
+    otApprovedHrs: extraHrs, otApprovedAmt: extraAmt,
+    otSupersededHrs: t.sumOtSuperseded,
+  }
   if (extraHrs > 0) {
     result = {
       ...result,

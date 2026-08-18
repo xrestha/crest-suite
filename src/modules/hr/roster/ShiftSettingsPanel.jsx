@@ -77,7 +77,7 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
     if (val !== '' && val != null) return null
     const c = calcHours(startT, endT)
     if (c == null) return <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>auto</span>
-    return <span style={{ fontSize: 10, color: 'var(--theme-accent)' }}>= {c}h</span>
+    return <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)' }}>= {c}h</span>
   }
 
   return (
@@ -124,26 +124,27 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
                   {isEd ? (
                     <>
                       <td>
-                        <input type="color" value={editing.color}
+                        <input type="color" id={`shift-color-${s.id}`} aria-label="Shift colour" value={editing.color}
                           onChange={e => setEditing(p => ({ ...p, color: e.target.value }))}
                           style={{ width: 34, height: 28, border: 'none', borderRadius: 4, cursor: 'pointer', padding: 2, background: 'none' }} />
                       </td>
                       <td>
-                        <input style={{ ...INP, minWidth: 120 }} value={editing.name}
+                        <input id={`shift-name-${s.id}`} aria-label="Shift name" style={{ ...INP, minWidth: 120 }} value={editing.name}
                           onChange={e => setEditing(p => ({ ...p, name: e.target.value }))} />
                       </td>
                       <td>
-                        <input type="time" style={{ ...INP, width: 112 }} value={editing.start_time || ''}
+                        <input type="time" id={`shift-start-${s.id}`} aria-label="Shift start time" style={{ ...INP, width: 112 }} value={editing.start_time || ''}
                           onChange={e => setEditing(p => ({ ...p, start_time: e.target.value }))} />
                       </td>
                       <td>
-                        <input type="time" style={{ ...INP, width: 112 }} value={editing.end_time || ''}
+                        <input type="time" id={`shift-end-${s.id}`} aria-label="Shift end time" style={{ ...INP, width: 112 }} value={editing.end_time || ''}
                           onChange={e => setEditing(p => ({ ...p, end_time: e.target.value }))} />
                       </td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                           <HoursHint startT={editing.start_time} endT={editing.end_time} val={editing.hours} />
-                          <input type="number" style={{ ...INP, width: 64 }} step="0.5" min="0" max="24"
+                          <input type="number" id={`shift-hours-${s.id}`} aria-label="Shift hours (blank to auto-calculate)"
+                            style={{ ...INP, width: 64 }} step="0.5" min="0" max="24"
                             placeholder="auto" value={editing.hours ?? ''}
                             onChange={e => setEditing(p => ({ ...p, hours: e.target.value }))} />
                         </div>
@@ -163,7 +164,11 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
                       <td>
                         <span style={{ display: 'inline-block', width: 22, height: 22, borderRadius: 4, background: s.color }} />
                       </td>
-                      <td style={{ fontWeight: 600, color: s.color }}>{s.name}</td>
+                      {/* The shift's own hue is already carried by the swatch in the Color cell
+                          immediately to the left, so the name doesn't need to repeat it — and
+                          repeating it put an arbitrary user-picked colour on plain card as 13px
+                          type, which no palette can guarantee reads. */}
+                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{s.name}</td>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{s.start_time ? fmtTime(s.start_time) : '—'}</td>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{s.end_time   ? fmtTime(s.end_time)   : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{dispH != null ? `${dispH}h` : '—'}</td>
@@ -174,7 +179,7 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button className="btn btn-ghost" style={{ fontSize: 11 }}
                             onClick={() => setEditing({ ...s, hours: s.hours ?? '' })}>Edit</button>
-                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }}
+                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }}
                             onClick={() => deleteShift(s.id)}>Delete</button>
                         </div>
                       </td>

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
+import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { adToBs, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, formatAd } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
@@ -10,7 +11,7 @@ import {
   calcHours, rKey, computeEmpHours, computeDayHours,
   computePlannedLaborCost, computeRecommendedHeadcount,
 } from './laborForecast'
-import { fmtTime } from './rosterHelpers'
+import { fmtTime, shiftTextColor } from './rosterHelpers'
 import ShiftPicker from './ShiftPicker'
 import SuggestPopover from './SuggestPopover'
 import ShiftSettingsPanel from './ShiftSettingsPanel'
@@ -18,6 +19,11 @@ import SwapRequestsPanel from './SwapRequestsPanel'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
+// These hexes are a per-shift CATEGORICAL palette, not UI chrome — the same exemption chart series
+// take (DESIGN.md): a shift's colour has to stay distinguishable from the six others beside it on
+// the board, which five semantic tokens can't do, and the client can repaint any of them from Shift
+// Types anyway. They are FILL values only; the chip's label text goes through shiftTextColor()
+// (rosterHelpers.js) so a categorical hue never doubles as low-contrast type.
 const DEFAULT_SHIFTS = [
   { name: 'Morning',   color: '#3B82F6', start_time: '07:00', end_time: '15:00', hours: 8,  sort_order: 1 },
   { name: 'Afternoon', color: '#F59E0B', start_time: '13:00', end_time: '21:00', hours: 8,  sort_order: 2 },
@@ -65,6 +71,7 @@ const STICKY_CLS = 'roster-sticky'
 
 export default function Roster() {
   const { clientId, profile, hasHrAccess } = useAuth()
+  const { colors } = useTheme()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedDelete } = useScopedDb()
   const today = getBsToday()
 
@@ -151,6 +158,16 @@ export default function Roster() {
   const isDraggingRef = useRef(false)
   const dragInfoRef   = useRef(null) // {chunkIdx, closingSameCell}
   const anchorRef     = useRef(null)
+
+  // Touch path for the same multi-cell assignment (added S570). Drag-select is mouse-only by
+  // construction: a finger produces no mouseenter over the cells it passes across, and the obvious
+  // touchmove/elementFromPoint version has to preventDefault to stop the page scrolling — which
+  // would kill horizontal scrolling of a 32-column board on the exact devices this is for. So
+  // instead of touching the drag logic at all, "Select range" is an explicit mode: tap the first
+  // cell, tap the last, the picker opens for the rectangle between them. mousedown bails out while
+  // it's on, so the two paths can never both be live, and it works for keyboard and mouse too.
+  const [rangeMode,   setRangeMode]   = useState(false)
+  const [rangeAnchor, setRangeAnchor] = useState(null) // {chunkIdx, r, c} — first tap
 
   // "Suggest who to schedule" — opened from the ✨ button on a short-staffed day's column header
   const [suggestCol, setSuggestCol] = useState(null) // the day column currently being suggested for
@@ -390,6 +407,7 @@ export default function Roster() {
     })
     setSelection(null)
     setPickerOpen(false)
+    setRangeAnchor(null)
 
     if (shiftTypeId === null) {
       const ids = existingRows.map(r => r.id).filter(Boolean)
@@ -439,6 +457,12 @@ export default function Roster() {
     : [columns]
 
   const shiftMap     = Object.fromEntries(shiftTypes.map(s => [s.id, s]))
+  // Chip LABEL colours, derived once per render from each shift's fill colour and the current
+  // card surface (the chip is that fill at 0x22 alpha over the card). See rosterHelpers.js —
+  // the fill stays the categorical hue, only the type is corrected for contrast.
+  const shiftTextById = Object.fromEntries(
+    shiftTypes.map(s => [s.id, shiftTextColor(s.color, colors.card, 0x22 / 255)])
+  )
   const depts        = ['All', ...Array.from(new Set(employees.map(e => e.department).filter(Boolean))).sort()]
   const filteredEmps = deptFilter === 'All' ? employees : employees.filter(e => e.department === deptFilter)
 
@@ -603,7 +627,8 @@ export default function Roster() {
 
             {/* Department filter */}
             {depts.length > 2 && (
-              <select className="form-select" value={deptFilter} onChange={e => setDeptFilter(e.target.value)}>
+              <select id="roster-dept-filter" aria-label="Filter roster by department"
+                className="form-select" value={deptFilter} onChange={e => setDeptFilter(e.target.value)}>
                 {depts.map(d => <option key={d}>{d}</option>)}
               </select>
             )}
@@ -657,9 +682,26 @@ export default function Roster() {
 
           <SwapRequestsPanel employees={employees} shiftMap={shiftMap} />
 
-          <p className="no-print" style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 10px' }}>
-            Tip: click and drag across cells to assign the same shift to multiple days at once.
-          </p>
+          <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 10px' }}>
+            <button
+              className={`btn${rangeMode ? ' btn-primary' : ' btn-ghost'}`}
+              style={{ fontSize: 11 }}
+              aria-pressed={rangeMode}
+              onClick={() => {
+                setRangeMode(m => !m)
+                setRangeAnchor(null); setSelection(null); setPickerOpen(false)
+              }}
+            >
+              {rangeMode ? '✓ Select range: on' : '⬚ Select range'}
+            </button>
+            <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>
+              {rangeMode
+                ? (rangeAnchor
+                    ? 'Now tap the last cell of the block — the shift you pick applies to everything between.'
+                    : 'Tap the first cell of the block, then the last one. Works on touch and keyboard as well as mouse.')
+                : 'Tip: click and drag across cells to assign the same shift to multiple days at once — or use Select range on a tablet.'}
+            </p>
+          </div>
 
           {/* Board */}
           {loading ? (
@@ -712,7 +754,7 @@ export default function Roster() {
                                 {fr?.recommended != null && (
                                   <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2 }}>
                                     <Tip text={`Recommended ${fr.recommended} staff (~${Math.round(fr.forecastCovers)} forecasted covers ÷ ${coversPerStaffTarget}/staff). Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`} width={240}>
-                                      <span style={{ fontSize: 9, fontWeight: short ? 700 : 500, color: short ? 'var(--theme-amber)' : 'var(--theme-text3)', cursor: 'default' }}>
+                                      <span style={{ fontSize: 9, fontWeight: short ? 700 : 500, color: short ? 'var(--theme-amber-text)' : 'var(--theme-text3)', cursor: 'default' }}>
                                         Rec: {fr.recommended}
                                       </span>
                                     </Tip>
@@ -771,6 +813,7 @@ export default function Roster() {
                                           : 'Assign shift — click and drag across cells to assign multiple at once'}
                                       onMouseDown={e => {
                                         e.preventDefault()
+                                        if (rangeMode) return   // tap-to-tap mode owns the click instead
                                         const closingSameCell = pickerOpen && selection &&
                                           selection.chunkIdx === chunkIdx &&
                                           selection.anchorR === ri && selection.anchorC === ci &&
@@ -787,6 +830,22 @@ export default function Roster() {
                                         setSelection(prev => prev ? { ...prev, curR: ri, curC: ci } : prev)
                                       }}
                                       onClick={e => {
+                                        // Range mode is checked FIRST — it's the touch/keyboard path, and a tap
+                                        // arrives as a click with detail >= 1, so it has to run before the
+                                        // keyboard-only guard below.
+                                        if (rangeMode) {
+                                          anchorRef.current = e.currentTarget
+                                          if (!rangeAnchor || rangeAnchor.chunkIdx !== chunkIdx) {
+                                            setRangeAnchor({ chunkIdx, r: ri, c: ci })
+                                            setSelection({ chunkIdx, anchorR: ri, anchorC: ci, curR: ri, curC: ci })
+                                            setPickerOpen(false)
+                                          } else {
+                                            setSelection({ chunkIdx, anchorR: rangeAnchor.r, anchorC: rangeAnchor.c, curR: ri, curC: ci })
+                                            setRangeAnchor(null)
+                                            setPickerOpen(true)
+                                          }
+                                          return
+                                        }
                                         // e.detail is 0 for a keyboard-triggered click (Enter/Space) and >=1 for a
                                         // real mouse click — mouse clicks are already handled by the mousedown +
                                         // global mouseup drag-select pair above, so only act here for keyboard.
@@ -822,7 +881,7 @@ export default function Roster() {
                                     >
                                       {shift ? (
                                         <>
-                                          <span style={{ fontSize: viewMode === 'weekly' ? 11 : 9, fontWeight: 700, color: shift.color, lineHeight: 1.2 }}>
+                                          <span style={{ fontSize: viewMode === 'weekly' ? 11 : 9, fontWeight: 700, color: shiftTextById[shift.id] || shift.color, lineHeight: 1.2 }}>
                                             {viewMode === 'weekly' ? shift.name : shift.name.slice(0, 2).toUpperCase()}
                                           </span>
                                           {viewMode === 'weekly' && shift.start_time && (
@@ -835,7 +894,10 @@ export default function Roster() {
                                           )}
                                         </>
                                       ) : (
-                                        <span style={{ fontSize: 16, color: 'var(--theme-border)', lineHeight: 1 }}>+</span>
+                                        // The one affordance telling a manager an empty cell is clickable.
+                                        // Was --theme-border, which measured 1.27:1 on the Dark preset
+                                        // (rgb(42,47,61) on rgb(24,28,39)) — it read as an empty box.
+                                        <span aria-hidden="true" style={{ fontSize: 16, color: 'var(--theme-text3)', lineHeight: 1 }}>+</span>
                                       )}
                                     </button>
                                   </td>
@@ -863,7 +925,7 @@ export default function Roster() {
                               return (
                                 <td key={i} style={{
                                   textAlign: 'center', padding: '8px 2px', fontSize: 11,
-                                  color:      h > 0 ? 'var(--theme-text2)' : 'var(--theme-border)',
+                                  color:      h > 0 ? 'var(--theme-text2)' : 'var(--theme-text3)',
                                   fontWeight: h > 0 ? 600 : 400,
                                   borderRight: '1px solid var(--theme-border-lt)',
                                 }}>
@@ -905,7 +967,7 @@ export default function Roster() {
                 anchorRef={anchorRef}
                 cellCount={cells.length}
                 onSelect={shiftId => assignShiftBulk(cells, shiftId)}
-                onClose={() => { setSelection(null); setPickerOpen(false) }}
+                onClose={() => { setSelection(null); setPickerOpen(false); setRangeAnchor(null) }}
               />
             )
           })()}
@@ -959,10 +1021,12 @@ export default function Roster() {
             )}
 
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Tip text="Target covers each staff member can comfortably serve — used to compute Recommended Staff below. Saved per client.">
-                <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Covers/Staff target</span>
-              </Tip>
-              <input type="number" min="1" step="1" defaultValue={coversPerStaffTarget}
+              <label htmlFor="roster-covers-target" style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                <Tip text="Target covers each staff member can comfortably serve — used to compute Recommended Staff below. Saved per client.">
+                  Covers/Staff target
+                </Tip>
+              </label>
+              <input id="roster-covers-target" type="number" min="1" step="1" defaultValue={coversPerStaffTarget}
                 onBlur={e => saveCoversPerStaffTarget(e.target.value)}
                 className="form-select" style={{ width: 56, padding: '3px 6px', fontSize: 12 }} />
             </div>
@@ -1009,7 +1073,7 @@ export default function Roster() {
                       <td style={{ textAlign: 'right' }}>{r.scheduledHrs > 0 ? `${r.scheduledHrs}h` : '—'}</td>
                       <td style={{ textAlign: 'right' }}>{r.forecastRevenue != null ? fmtNpr(r.forecastRevenue) : '—'}</td>
                       <td style={{ textAlign: 'right' }}>{r.plannedCost > 0 ? fmtNpr(r.plannedCost) : '—'}</td>
-                      <td style={{ textAlign: 'right', color: r.costPct != null && r.costPct > 35 ? 'var(--theme-amber)' : 'inherit' }}>
+                      <td style={{ textAlign: 'right', color: r.costPct != null && r.costPct > 35 ? 'var(--theme-amber-text)' : 'inherit' }}>
                         {r.costPct != null ? `${r.costPct.toFixed(0)}%` : '—'}
                       </td>
                       <td style={{ textAlign: 'right' }}>{r.recommended ?? '—'}</td>

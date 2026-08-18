@@ -231,7 +231,9 @@ export default function PayrollCalculation() {
       // Paged — same reason as PayrollRun.jsx: one row per employee per day crosses the silent
       // 1000-row cap at ~34 staff, and a truncated read silently zeroes daily/hourly pay (S529).
       fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', p.id).order('id')),
-      scopedFrom('hr_overtime_entries', 'employee_id, ot_hours, ot_type')
+      // bs_day is load-bearing, not display data: computePayslip uses it to suppress
+      // attendance-sheet OT on days an approved entry already covers (approved supersedes).
+      scopedFrom('hr_overtime_entries', 'employee_id, bs_day, ot_hours, ot_type')
         .eq('bs_year', p.bs_year).eq('bs_month', p.bs_month).eq('status', 'approved'),
       scopedFrom('hr_advances').order('issued_date'),
       scopedFrom('hr_advance_repayments'),
@@ -283,7 +285,9 @@ export default function PayrollCalculation() {
       ytdSsf:       ytd.ssf,
       ytdWithheld:  ytd.withheld,
       ytdMonths:    ytd.count,
-      isSsf:        !!emp.ssf_enrolled,
+      // Mirrors PayrollRun's gate exactly — these two must agree or every SSF-enrolled employee
+      // with a blank number shows a permanent false Stale flag against a correct payslip.
+      isSsf:        !!(emp.ssf_enrolled && String(emp.ssf_no || '').trim()),
       isMarried:    emp.marital_status === 'married',
       annualLifeInsurance:   parseFloat(emp.life_insurance_premium) || 0,
       annualHealthInsurance: parseFloat(emp.health_insurance_premium) || 0,

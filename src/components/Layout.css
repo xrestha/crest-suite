@@ -1151,6 +1151,14 @@ tr.interactive-row:focus-visible {
   .tab-btn {
     min-height: 32px;
   }
+  /* The sidebar's own controls were in no coarse rule at all: measured 20px (outlet/client
+     dropdown trigger) and 25px (search) on every authenticated page. They are the entry point to
+     switching outlet and to the command palette, so on a tablet the two most frequent navigation
+     actions were the hardest to hit. */
+  .sidebar-dropdown-trigger,
+  .sidebar-search-btn {
+    min-height: 32px;
+  }
   .chart-icon-btn,
   .chart-close-btn {
     min-height: 44px;

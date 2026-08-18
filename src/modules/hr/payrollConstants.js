@@ -63,22 +63,28 @@ export const STANDARD_HOURS_PER_DAY = 8     // Nepal Labour Act standard working
 export const OT_MULTIPLIER          = 1.5   // overtime paid at 1.5× normal hourly rate (weekday)
 export const OT_HOLIDAY_MULTIPLIER  = 2.0   // overtime on a gazetted public holiday (Nepal Labour Act)
 
+// Two colour keys per status, and they are not interchangeable: `color` is the FILL (legend swatch
+// background/border, status dot) and stays a base token; `textColor` is the same hue's readable
+// text variant, for anywhere the status is rendered AS text (dropdown value, month-summary cell).
+// A base signal token used as 13px text fails WCAG AA on the light presets, which is why the pair
+// exists. Paid Leave and Holiday previously carried undocumented indigo hexes (#60a5fa/#818cf8)
+// with no home in the palette — mapped here to the nearest documented tokens (accent / purple).
 export const ATTENDANCE_STATUSES = [
-  { key: 'present',           label: 'Present',             short: 'P',   color: 'var(--theme-green)' },
-  { key: 'half_day',          label: 'Half-day',            short: '½',   color: 'var(--theme-accent)' },
-  { key: 'absent',            label: 'Absent',               short: 'A',   color: 'var(--theme-red)' },
-  { key: 'paid_leave',        label: 'Paid Leave',          short: 'PL',  color: '#60a5fa' },
-  { key: 'unpaid_leave',      label: 'Unpaid Leave',        short: 'UL',  color: 'var(--theme-text3)' },
+  { key: 'present',           label: 'Present',             short: 'P',   color: 'var(--theme-green)',  textColor: 'var(--theme-green-text)' },
+  { key: 'half_day',          label: 'Half-day',            short: '½',   color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
+  { key: 'absent',            label: 'Absent',               short: 'A',   color: 'var(--theme-red)',   textColor: 'var(--theme-red-text)' },
+  { key: 'paid_leave',        label: 'Paid Leave',          short: 'PL',  color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
+  { key: 'unpaid_leave',      label: 'Unpaid Leave',        short: 'UL',  color: 'var(--theme-text3)',  textColor: 'var(--theme-text3)' },
   // Half-day leave — distinct from the generic 'half_day' status above so payroll can respect
   // the underlying leave type's paid/unpaid flag instead of always deducting 0.5 day's pay.
-  { key: 'half_paid_leave',   label: 'Half-day Paid Leave',   short: '½PL', color: '#60a5fa' },
-  { key: 'half_unpaid_leave', label: 'Half-day Unpaid Leave', short: '½UL', color: 'var(--theme-text3)' },
+  { key: 'half_paid_leave',   label: 'Half-day Paid Leave',   short: '½PL', color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
+  { key: 'half_unpaid_leave', label: 'Half-day Unpaid Leave', short: '½UL', color: 'var(--theme-text3)',  textColor: 'var(--theme-text3)' },
   // Key stays 'weekly_off' (no DB migration needed — hr_attendance_status_check already allows
   // it) even though there's no more auto-computed "weekly" pattern; it's now just an explicit
   // per-employee, per-day Off marking. Label/short changed from "Weekly Off"/"W" to "Off"/"O"
   // to match — see attendanceFromRoster.js and AttendanceSheet.jsx.
-  { key: 'weekly_off',        label: 'Off',                 short: 'O',   color: 'var(--theme-text2)' },
-  { key: 'holiday',           label: 'Holiday',             short: 'H',   color: '#818cf8' },
+  { key: 'weekly_off',        label: 'Off',                 short: 'O',   color: 'var(--theme-text2)',  textColor: 'var(--theme-text2)' },
+  { key: 'holiday',           label: 'Holiday',             short: 'H',   color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)' },
 ]
 
 // A roster shift type whose name suggests it marks a non-working day (e.g. "OFF DAY", "Day Off",

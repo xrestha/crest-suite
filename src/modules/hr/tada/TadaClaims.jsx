@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import Modal from '../../../components/Modal'
 import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import TadaSettingsModal from './TadaSettingsModal'
@@ -23,7 +24,11 @@ const inp = {
 }
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 
-const STATUS_BADGE = { pending: 'badge-amber', approved: 'badge-yellow', rejected: 'badge-red', paid: 'badge-green' }
+// Status ladder, not categorical tags: pending = awaiting a decision (neutral), approved =
+// in progress, money owed but not yet disbursed (amber, the real caution colour), rejected,
+// paid. `badge-yellow` is the accent-tinted CATEGORICAL tag (see Advances' Advance/Loan type
+// column) and deliberately isn't used for any of these.
+const STATUS_BADGE = { pending: 'badge-gray', approved: 'badge-amber', rejected: 'badge-red', paid: 'badge-green' }
 function emptyAddForm() {
   const today = formatAd(new Date())
   return {
@@ -228,13 +233,13 @@ export default function TadaClaims() {
     const act = fn => e => { e.stopPropagation(); fn() }
     if (c.status === 'pending') return (
       <>
-        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green)' }} onClick={act(() => handleApprove(c.id))}>✓ Approve</button>
-        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }} onClick={act(() => setRejectTarget(c))}>✕ Reject</button>
-        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }} onClick={act(() => handleDelete(c.id))}>Delete</button>
+        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green-text)' }} onClick={act(() => handleApprove(c.id))}>✓ Approve</button>
+        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={act(() => setRejectTarget(c))}>✕ Reject</button>
+        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={act(() => handleDelete(c.id))}>Delete</button>
       </>
     )
     if (c.status === 'approved') return (
-      <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green)' }}
+      <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green-text)' }}
         onClick={act(() => { setPayMethod('Cash'); setPayTarget(c) })}>
         💵 Mark Paid
       </button>
@@ -259,7 +264,7 @@ export default function TadaClaims() {
         </div>
 
         {c.status === 'paid' && (
-          <div style={{ fontSize: 12, color: 'var(--theme-green)', marginBottom: 12 }}>
+          <div style={{ fontSize: 12, color: 'var(--theme-green-text)', marginBottom: 12 }}>
             Paid via {c.paid_method} on {fmtD(c.paid_at?.slice(0, 10))}
           </div>
         )}
@@ -339,7 +344,7 @@ export default function TadaClaims() {
           {tabBtn('all',      filterStatus, setFilterStatus, 'All')}
         </div>
         <Tip text="Filters claims by the BS month of their trip start date. Pick All Months to see full history.">
-          <select className="form-select" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}>
+          <select className="form-select" aria-label="Filter claims by month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}>
             <option value="all">All Months</option>
             {periods.map(p => (
               <option key={p.id} value={`${p.bs_year}-${p.bs_month}`}>
@@ -397,13 +402,13 @@ export default function TadaClaims() {
 
       {/* New Claim modal */}
       {showAdd && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <div className="card" style={{ width: 560, maxHeight: '85vh', overflowY: 'auto', padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>New TADA Claim</h3>
+        <Modal onClose={() => { setShowAdd(false); setError('') }} title="New TADA Claim" maxWidth={560}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
             <div>
-              <label style={lbl}>Employee</label>
+              <label style={lbl} htmlFor="tada-employee">Employee</label>
               <SearchableSelect
+                id="tada-employee"
                 options={employees.filter(e => e.status === 'active' || e.status === 'probation').map(e => ({ value: e.id, label: `${e.full_name}${e.employee_code ? ` (${e.employee_code})` : ''}` }))}
                 value={addForm.employee_id} onChange={v => setAdd('employee_id', v)} placeholder="Select employee…"
               />
@@ -411,8 +416,9 @@ export default function TadaClaims() {
 
             <div style={{ display: 'flex', gap: 12 }}>
               <div style={{ flex: 1 }}>
-                <label style={lbl}>Start Point</label>
+                <label style={lbl} htmlFor="tada-start-point">Start Point</label>
                 <select
+                  id="tada-start-point"
                   className="form-select" style={{ width: '100%' }}
                   value={startPointMode === 'custom' ? OTHER_PURPOSE : addForm.start_point}
                   onChange={e => {
@@ -426,14 +432,16 @@ export default function TadaClaims() {
                 </select>
                 {startPointMode === 'custom' && (
                   <input
+                    aria-label="Custom start point"
                     style={{ ...inp, marginTop: 6 }} placeholder="Where did the trip start?"
                     value={addForm.start_point} onChange={e => setAdd('start_point', e.target.value)}
                   />
                 )}
               </div>
               <div style={{ flex: 1 }}>
-                <label style={lbl}>Purpose</label>
+                <label style={lbl} htmlFor="tada-purpose">Purpose</label>
                 <select
+                  id="tada-purpose"
                   className="form-select" style={{ width: '100%' }}
                   value={purposeMode === 'custom' ? OTHER_PURPOSE : addForm.trip_purpose}
                   onChange={e => {
@@ -447,6 +455,7 @@ export default function TadaClaims() {
                 </select>
                 {purposeMode === 'custom' && (
                   <input
+                    aria-label="Custom trip purpose"
                     style={{ ...inp, marginTop: 6 }} placeholder="Describe the purpose"
                     value={addForm.trip_purpose} onChange={e => setAdd('trip_purpose', e.target.value)}
                   />
@@ -455,11 +464,12 @@ export default function TadaClaims() {
             </div>
 
             <div>
-              <label style={lbl}>Destination</label>
-              <input style={inp} placeholder="e.g. Pokhara" value={addForm.destination} onChange={e => setAdd('destination', e.target.value)} />
+              <label style={lbl} htmlFor="tada-destination">Destination</label>
+              <input id="tada-destination" style={inp} placeholder="e.g. Pokhara" value={addForm.destination} onChange={e => setAdd('destination', e.target.value)} />
               {addForm.trip_purpose === PURCHASE_PURPOSE && (
                 <div style={{ marginTop: 6 }}>
                   <SearchableSelect
+                    id="tada-destination-vendor"
                     options={vendors.map(v => ({ value: v.id, label: v.name }))}
                     value="" onChange={vId => { const v = vendors.find(x => x.id === vId); if (v) setAdd('destination', v.name) }}
                     placeholder="🏬 Or pick a registered vendor…"
@@ -470,48 +480,53 @@ export default function TadaClaims() {
 
             <div style={{ display: 'flex', gap: 12 }}>
               <div style={{ flex: 1 }}>
-                <label style={lbl}>Start Date (BS)</label>
-                <BsCalendarPicker value={addForm.start_date} onChange={v => setAdd('start_date', v)} placeholder="Select date" clearable />
+                <label style={lbl} htmlFor="tada-start-date">Start Date (BS)</label>
+                <BsCalendarPicker id="tada-start-date" value={addForm.start_date} onChange={v => setAdd('start_date', v)} placeholder="Select date" clearable />
               </div>
               <div style={{ flex: 1 }}>
-                <label style={lbl}>End Date (BS)</label>
-                <BsCalendarPicker value={addForm.end_date} onChange={v => setAdd('end_date', v)} placeholder="Select date" clearable />
+                <label style={lbl} htmlFor="tada-end-date">End Date (BS)</label>
+                <BsCalendarPicker id="tada-end-date" value={addForm.end_date} onChange={v => setAdd('end_date', v)} placeholder="Select date" clearable />
               </div>
             </div>
 
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <label style={{ ...lbl, marginBottom: 0 }}>Expenses</label>
+                {/* A group heading over the repeating expense rows, not a control label — a bare
+                    <label> here would name nothing, so it's a span. Each row's own controls carry
+                    their own aria-label instead. */}
+                <span style={{ ...lbl, marginBottom: 0 }}>Expenses</span>
                 <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={addItemRow}>+ Add line</button>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {addForm.items.map((it, idx) => (
                   <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <select className="form-select" style={{ width: 140, flexShrink: 0 }} value={it.category} onChange={e => setItem(idx, 'category', e.target.value)}>
+                      <select aria-label={`Expense ${idx + 1} category`} className="form-select" style={{ width: 140, flexShrink: 0 }} value={it.category} onChange={e => setItem(idx, 'category', e.target.value)}>
                         {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      <input style={inp} placeholder="Description (optional)" value={it.description} onChange={e => setItem(idx, 'description', e.target.value)} />
-                      <input style={{ ...inp, width: 110, flexShrink: 0 }} type="number" min="0" placeholder="Amount" value={it.amount} onChange={e => setItem(idx, 'amount', e.target.value)} />
+                      <input aria-label={`Expense ${idx + 1} description`} style={inp} placeholder="Description (optional)" value={it.description} onChange={e => setItem(idx, 'description', e.target.value)} />
+                      <input aria-label={`Expense ${idx + 1} amount (NPR)`} style={{ ...inp, width: 110, flexShrink: 0 }} type="number" min="0" placeholder="Amount" value={it.amount} onChange={e => setItem(idx, 'amount', e.target.value)} />
                       {addForm.items.length > 1 && (
-                        <button style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 16, flexShrink: 0 }} onClick={() => removeItemRow(idx)}>✕</button>
+                        <button aria-label={`Remove expense line ${idx + 1}`} style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 16, flexShrink: 0 }} onClick={() => removeItemRow(idx)}>✕</button>
                       )}
                     </div>
                     {it.category === 'Transport' && (
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingLeft: 2 }}>
                         <span style={{ fontSize: 12, flexShrink: 0 }}>🧮</span>
                         <select
+                          aria-label={`Expense ${idx + 1} vehicle type`}
                           className="form-select" style={{ width: 110, flexShrink: 0, fontSize: 12 }}
                           value={it.vehicle} onChange={e => setItemVehicle(idx, e.target.value)}
                         >
                           {VEHICLE_TYPES.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
                         </select>
                         <input
+                          aria-label={`Expense ${idx + 1} distance in km`}
                           style={{ ...inp, width: 100, flexShrink: 0 }} type="number" min="0" step="0.1"
                           placeholder="Distance (km)" value={it.distanceKm} onChange={e => setItemDistance(idx, e.target.value)}
                         />
                         {vehicleRates[it.vehicle] == null ? (
-                          <span style={{ fontSize: 11, color: 'var(--theme-amber)' }}>No rate set — ask an owner/admin, or enter Amount manually</span>
+                          <span style={{ fontSize: 11, color: 'var(--theme-amber-text)' }}>No rate set — ask an owner/admin, or enter Amount manually</span>
                         ) : (
                           <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>× NPR {vehicleRates[it.vehicle]}/km → Amount</span>
                         )}
@@ -520,36 +535,35 @@ export default function TadaClaims() {
                   </div>
                 ))}
               </div>
-              <div style={{ textAlign: 'right', marginTop: 8, fontSize: 13, fontWeight: 700, color: 'var(--theme-accent)' }}>
+              <div style={{ textAlign: 'right', marginTop: 8, fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                 Total: NPR {fmt(addTotal)}
               </div>
             </div>
 
             <div>
-              <label style={lbl}>Notes</label>
-              <textarea style={{ ...inp, height: 50, resize: 'vertical' }} placeholder="Optional" value={addForm.notes} onChange={e => setAdd('notes', e.target.value)} />
+              <label style={lbl} htmlFor="tada-notes">Notes</label>
+              <textarea id="tada-notes" style={{ ...inp, height: 50, resize: 'vertical' }} placeholder="Optional" value={addForm.notes} onChange={e => setAdd('notes', e.target.value)} />
             </div>
 
-            {error && <div style={{ fontSize: 12, color: 'var(--theme-red)' }}>{error}</div>}
+            {error && <div role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => { setShowAdd(false); setError('') }}>Cancel</button>
               <button className="btn btn-primary" onClick={handleAdd} disabled={saving}>{saving ? 'Submitting…' : 'Submit Claim'}</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Mark Paid modal */}
       {payTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 380, padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>Mark Paid</h3>
+        <Modal onClose={() => setPayTarget(null)} title="Mark Paid" maxWidth={380}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>
               {empMap[payTarget.employee_id]?.full_name} · NPR {fmt(payTarget.total_amount)}
             </p>
             <div>
-              <label style={lbl}>Payment Method</label>
-              <select className="form-select" value={payMethod} onChange={e => setPayMethod(e.target.value)}>
+              <label style={lbl} htmlFor="tada-pay-method">Payment Method</label>
+              <select id="tada-pay-method" className="form-select" value={payMethod} onChange={e => setPayMethod(e.target.value)}>
                 {PAID_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
@@ -558,14 +572,13 @@ export default function TadaClaims() {
               <button className="btn btn-primary" onClick={handleMarkPaid}>Confirm</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Reject confirmation */}
       {rejectTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 360, padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>Reject this claim?</h3>
+        <Modal onClose={() => setRejectTarget(null)} title="Reject this claim?" maxWidth={360}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
               {empMap[rejectTarget.employee_id]?.full_name} · NPR {fmt(rejectTarget.total_amount)}
             </p>
@@ -574,7 +587,7 @@ export default function TadaClaims() {
               <button className="btn btn-primary" onClick={handleReject}>Reject</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {showSettings && canManageSettings && (

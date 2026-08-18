@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../../../supabaseClient'
+import Modal from '../../../components/Modal'
 
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
@@ -16,7 +17,7 @@ const VEHICLE_TYPES = [
 
 // Shared chip-list editor for both Purpose Options and Start Points — same add/remove UI,
 // just a different label/hint/placeholder and backing state.
-function OptionListEditor({ label, hint, placeholder, options, setOptions }) {
+function OptionListEditor({ label, hint, placeholder, addLabel, options, setOptions }) {
   const [newOption, setNewOption] = useState('')
 
   function add() {
@@ -29,10 +30,13 @@ function OptionListEditor({ label, hint, placeholder, options, setOptions }) {
 
   return (
     <div>
-      <label style={sectionLbl}>{label}</label>
+      {/* A heading over the chip list, not a control label — the add field carries its own
+          aria-label instead, since one <label> can't name both the list and the input. */}
+      <div style={sectionLbl}>{label}</div>
       <p style={{ margin: '2px 0 10px', fontSize: 12, color: 'var(--theme-text3)' }}>{hint}</p>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <input
+          aria-label={addLabel}
           style={{ ...inp, flex: 1 }}
           value={newOption}
           onChange={e => setNewOption(e.target.value)}
@@ -55,7 +59,7 @@ function OptionListEditor({ label, hint, placeholder, options, setOptions }) {
               color: 'var(--theme-text1)',
             }}>
               {o}
-              <button onClick={() => remove(o)} title="Remove" style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+              <button onClick={() => remove(o)} title="Remove" aria-label={`Remove ${o}`} style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
             </span>
           ))}
         </div>
@@ -99,26 +103,19 @@ export default function TadaSettingsModal({ clientId, vehicleRates, purposeOptio
   }
 
   return (
-    <div
-      onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 270, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-    >
-      <div onClick={e => e.stopPropagation()} className="card" style={{ width: 460, maxHeight: '85vh', overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>TADA Settings</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>✕</button>
-        </div>
-
+    <Modal onClose={onClose} title="TADA Settings" maxWidth={460}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         <div>
-          <label style={sectionLbl}>Rate / KM by Vehicle</label>
+          <div style={sectionLbl}>Rate / KM by Vehicle</div>
           <p style={{ margin: '2px 0 10px', fontSize: 12, color: 'var(--theme-text3)' }}>
             Used by the Transport line's auto-fill — Amount = Distance × the selected vehicle's rate.
           </p>
           <div style={{ display: 'flex', gap: 10 }}>
             {VEHICLE_TYPES.map(v => (
               <div key={v.key} style={{ flex: 1 }}>
-                <label style={lbl}>{v.label} (NPR)</label>
+                <label style={lbl} htmlFor={`tada-rate-${v.key}`}>{v.label} (NPR)</label>
                 <input
+                  id={`tada-rate-${v.key}`}
                   style={{ ...inp, width: '100%' }} type="number" min="0" step="0.5" placeholder="—"
                   value={rates[v.key]} onChange={e => setRates(r => ({ ...r, [v.key]: e.target.value }))}
                 />
@@ -131,6 +128,7 @@ export default function TadaSettingsModal({ clientId, vehicleRates, purposeOptio
           label="Purpose Options"
           hint={'Preset choices for the New Claim form\'s Purpose dropdown. "Other" is always available for a one-off trip.'}
           placeholder="e.g. Vendor site visit"
+          addLabel="Add a purpose option"
           options={options} setOptions={setOptions}
         />
 
@@ -138,11 +136,13 @@ export default function TadaSettingsModal({ clientId, vehicleRates, purposeOptio
           label="Start Points"
           hint={'Preset choices for the New Claim form\'s Start Point dropdown (where the trip began). "Other" is always available.'}
           placeholder="e.g. Head Office"
+          addLabel="Add a start point"
           options={points} setOptions={setPoints}
         />
 
         {msg && (
-          <p style={{ margin: 0, fontSize: 12, color: msg.startsWith('ok:') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+          <p role={msg.startsWith('ok') ? 'status' : 'alert'}
+            style={{ margin: 0, fontSize: 12, color: msg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
             {msg.replace(/^(ok|error):/, '')}
           </p>
         )}
@@ -152,6 +152,6 @@ export default function TadaSettingsModal({ clientId, vehicleRates, purposeOptio
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save Settings'}</button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }

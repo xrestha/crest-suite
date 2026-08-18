@@ -195,13 +195,19 @@ export default function FinalSettlement() {
 
           {/* Employee */}
           <div>
-            <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }}>Employee</label>
-            <select className="form-select" value={empId} onChange={e => setEmpId(e.target.value)}>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-employee">Employee</label>
+            <select id="settle-employee" className="form-select" value={empId} onChange={e => setEmpId(e.target.value)}>
               <option value="">— Select employee —</option>
               {employees.filter(e => (e.pay_basis || 'monthly') === 'monthly').map(e => (
                 <option key={e.id} value={e.id}>{e.full_name}{e.employee_code ? ` (${e.employee_code})` : ''}</option>
               ))}
             </select>
+            {/* The filter above is silent otherwise: a daily-wage cook simply isn't in the list,
+                with nothing saying why — while Gratuity Tracker tells users wage-worker gratuity
+                "is computed at final settlement". Stating the gap beats an unexplained absence. */}
+            <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-text3)' }}>
+              Monthly-salaried employees only — settlement for daily and hourly staff isn't supported yet.
+            </p>
           </div>
 
           {/* Reason */}
@@ -452,6 +458,39 @@ export default function FinalSettlement() {
             {!result.vested && ' Gratuity is not included as service is under 1 year (this 1-year threshold is a common assumption, not confirmed in the current Labour Act text — verify with an accountant if this employee is close to the boundary).'}
             {result.gratuitySsfCovered > 0 && ' Gratuity is shown net of the portion already funded through employer SSF contributions.'}
             {' '}Consult your CA before disbursing.
+          </div>
+
+          {/* This page calculates and prints; it writes nothing. Each of the three follow-ups
+              below is a separate manual step, and the advance one has teeth: buildAdvanceMap
+              reads active advances, so an advance recovered here but left Active in the ledger is
+              deducted a second time on the employee's next payroll run. Naming the consequences
+              is the fix that was chosen over making this page perform the writes itself. */}
+          <div
+            className="card no-print"
+            style={{
+              marginTop: 16, padding: '14px 18px',
+              borderColor: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)',
+              background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)',
+            }}
+          >
+            <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
+              After you disburse this settlement — 3 things this page does not do for you
+            </p>
+            <ol style={{ margin: 0, paddingLeft: 20, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.8 }}>
+              <li>
+                <strong style={{ color: 'var(--theme-text1)' }}>Settle the recovered advances</strong> in HR → Advances &amp; Loans.
+                {' '}Advances recovered in this settlement stay <em>Active</em> until you mark them settled — and an active advance is
+                {' '}deducted again on this employee's next payroll run, recovering the same money twice.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--theme-text1)' }}>Mark the employee Inactive</strong> in HR → Employees, so they stop
+                {' '}appearing in payroll runs, rosters and attendance.
+              </li>
+              <li>
+                <strong style={{ color: 'var(--theme-text1)' }}>Record the leave encashment</strong> against their leave balance, if you
+                {' '}track encashed days — the amount above is calculated, not deducted from their balance.
+              </li>
+            </ol>
           </div>
         </div>
       )}

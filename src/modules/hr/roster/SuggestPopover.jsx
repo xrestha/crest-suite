@@ -44,7 +44,7 @@ export default function SuggestPopover({ candidates, shiftTypes, anchorRef, onAs
   }
 
   return createPortal(
-    <div ref={ref} style={{
+    <div ref={ref} role="menu" aria-label="Suggest who to schedule" style={{
       position: 'fixed', top, left, zIndex: 2100,
       background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
       borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
@@ -78,7 +78,12 @@ export default function SuggestPopover({ candidates, shiftTypes, anchorRef, onAs
           <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--theme-text3)', borderBottom: '1px solid var(--theme-border)',
             fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Shift for {pickedEmp.full_name}</span>
-            <span style={{ cursor: 'pointer', color: 'var(--theme-accent)' }} onClick={() => setPickedEmp(null)}>‹ back</span>
+            {/* Was a <span onClick> — no keyboard or screen-reader path back to the employee list. */}
+            <button
+              className="btn btn-ghost"
+              style={{ fontSize: 11, padding: '2px 8px', color: 'var(--theme-accent-ink)' }}
+              onClick={() => setPickedEmp(null)}
+            >‹ back</button>
           </div>
           {active.map(s => {
             const hrs = s.hours ?? calcHours(s.start_time, s.end_time)

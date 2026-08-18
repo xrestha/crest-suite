@@ -570,7 +570,7 @@ export default function AttendanceSheet() {
           <p className="page-subtitle">Daily attendance, hours, and overtime — {periodLabel}</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <select className="form-select" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
+          <select id="att-period" aria-label="Attendance period" className="form-select" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => (
               <option key={p.id} value={p.id}>
                 {BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}
@@ -601,51 +601,59 @@ export default function AttendanceSheet() {
       ) : tab === 'mark' ? (
         /* ── MARK ATTENDANCE ── */
         <div>
-          {/* Day selector + bulk actions */}
+          {/* Day selector + bulk actions. Three clusters, deliberately separated: entry aids ·
+              commit (Save Day) · destructive (Clear Day), the last pushed to its own bordered
+              group at the end so a delete-everything action can't sit mid-row beside a bulk-fill
+              button distinguished only by its text colour. */}
           <div className="card" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Day</span>
-              <select style={inp} value={selectedDay} onChange={e => setSelectedDay(parseInt(e.target.value, 10))}>
-                {days.map(d => <option key={d} value={d}>{d} · {weekdayOf(period, d)}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('present')}>All Present</button>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('weekly_off')}>All Off</button>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('holiday')}>All Holiday</button>
-            </div>
-            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={generateFromRoster} disabled={generating}>
-              {generating ? 'Generating…' : '⚡ Generate from Roster'}
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Tip text="Feeds both 'Apply Break' buttons on this page — change it once to use a different default." width={220}>
-                <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Default break</span>
-              </Tip>
-              <input type="number" min="0" step="5" style={{ ...inp, width: 60, textAlign: 'right' }}
-                value={defaultBreakMin} onChange={e => setDefaultBreakMin(parseInt(e.target.value, 10) || 0)} />
-              <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>min</span>
-              <Tip text="Fills the default break into every already-marked employee's blank Break cell for this day. Never overwrites a Break value already entered, and never marks an untouched employee." width={260}>
-                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={applyBreakToDay}>Apply Break to Day</button>
-              </Tip>
-            </div>
-            <Tip text="Deletes every employee's saved record for this day — reverts the whole day back to genuinely blank. Can't be undone.">
-              <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }} onClick={clearDay} disabled={saving}>
-                🗑 Clear Day
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label htmlFor="att-day" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Day</label>
+                <select id="att-day" style={inp} value={selectedDay} onChange={e => setSelectedDay(parseInt(e.target.value, 10))}>
+                  {days.map(d => <option key={d} value={d}>{d} · {weekdayOf(period, d)}</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('present')}>All Present</button>
+                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('weekly_off')}>All Off</button>
+                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAll('holiday')}>All Holiday</button>
+              </div>
+              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={generateFromRoster} disabled={generating}>
+                {generating ? 'Generating…' : '⚡ Generate from Roster'}
               </button>
-            </Tip>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Tip text="Feeds both 'Apply Break' buttons on this page — change it once to use a different default." width={220}>
+                  <label htmlFor="att-default-break" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Default break</label>
+                </Tip>
+                <input id="att-default-break" type="number" min="0" step="5" style={{ ...inp, width: 60, textAlign: 'right' }}
+                  value={defaultBreakMin} onChange={e => setDefaultBreakMin(parseInt(e.target.value, 10) || 0)} />
+                <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>min</span>
+                <Tip text="Fills the default break into every already-marked employee's blank Break cell for this day. Never overwrites a Break value already entered, and never marks an untouched employee." width={260}>
+                  <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={applyBreakToDay}>Apply Break to Day</button>
+                </Tip>
+              </div>
+            </div>
             <div style={{ flex: 1 }} />
             {savedMsg && (
-              <span style={{ fontSize: 12, color: savedMsg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+              <span role={savedMsg.startsWith('ok') ? 'status' : 'alert'}
+                style={{ fontSize: 12, color: savedMsg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                 {savedMsg.split(':').slice(1).join(':')}
               </span>
             )}
             <button className="btn btn-primary" onClick={saveDay} disabled={saving} style={{ fontSize: 13 }}>
               {saving ? 'Saving…' : 'Save Day'}
             </button>
+            <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
+              <Tip text="Deletes every employee's saved record for this day — reverts the whole day back to genuinely blank. Can't be undone.">
+                <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={clearDay} disabled={saving}>
+                  🗑 Clear Day
+                </button>
+              </Tip>
+            </div>
           </div>
 
           <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Every day defaults to Present until you mark it otherwise — nothing is assumed off automatically; use Off/Holiday/Leave per staff member as needed.{' '}
+            Only the days you actually mark are saved — an untouched day stays blank and is never assumed Present or Off. For daily- and hourly-paid staff a blank day pays nothing, so mark every day of the month (Present/Off/Holiday/Leave) before payroll runs.{' '}
             <Tip text="Fills blank days across the whole month from Staff Roster shift assignments — marked Present, with hours from the shift. A zero-hour roster entry named like an off day (e.g. 'OFF DAY', 'LEAVE') is marked Off; any other zero-hour entry is marked Holiday. Days with no roster entry at all are left blank for manual entry. Never overwrites a day that already has an entry, so a formal approved Leave Request or manual correction still takes precedence if entered afterward." width={320}>
               ⚡ Generate from Roster
             </Tip>{' '}pre-fills this month from Staff Roster shift assignments; it never overwrites a day you've already marked.
@@ -671,7 +679,7 @@ export default function AttendanceSheet() {
                       <Tip text="Hours worked that day — auto-filled from Start/End minus Break, or enter directly. Only used for hourly-paid staff." width={250}>Hours</Tip>
                     </th>
                     <th style={{ width: 90, textAlign: 'right' }}>
-                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster-assigned shift, or enter directly. Don't also log the same hours in the Overtime module — both sources are paid, so duplicates pay twice (payroll flags this with an ⚠ OT ×2? badge)." width={280}>OT Hours</Tip>
+                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster-assigned shift, or enter directly. If the same day also has an approved entry in the Overtime module, that approved entry is what gets paid and the hours here are ignored for that day — so the same overtime can never be paid twice. Holiday overtime at 2× is only available through the Overtime module." width={280}>OT Hours</Tip>
                     </th>
                     <th>Note</th>
                     <th style={{ width: 32 }} />
@@ -692,7 +700,9 @@ export default function AttendanceSheet() {
                         </td>
                         <td>
                           <select
-                            style={{ ...inp, color: sc?.color || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
+                            id={`att-status-${emp.id}`}
+                            aria-label={`${emp.full_name} — status`}
+                            style={{ ...inp, color: sc?.textColor || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
                             value={status || ''}
                             onChange={e => e.target.value ? setCell(emp.id, selectedDay, 'status', e.target.value) : clearCell(emp.id, selectedDay)}
                           >
@@ -701,47 +711,54 @@ export default function AttendanceSheet() {
                           </select>
                         </td>
                         <td>
-                          <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time, activeTimeKey === `${emp.id}:${selectedDay}:start_time`) ? 'var(--theme-red)' : undefined }}
+                          <input type="text" placeholder="--:--" id={`att-start-${emp.id}`} aria-label={`${emp.full_name} — start time`}
+                            style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time, activeTimeKey === `${emp.id}:${selectedDay}:start_time`) ? 'var(--theme-red)' : undefined }}
                             value={rec?.start_time || ''} onChange={e => setTimeCell(emp.id, selectedDay, 'start_time', e.target.value)}
                             onFocus={() => setActiveTimeKey(`${emp.id}:${selectedDay}:start_time`)}
                             onBlur={() => { normalizeTimeCell(emp.id, selectedDay, 'start_time'); setActiveTimeKey('') }} />
-                          {!isValidTimeStr(rec?.start_time, activeTimeKey === `${emp.id}:${selectedDay}:start_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
+                          {!isValidTimeStr(rec?.start_time, activeTimeKey === `${emp.id}:${selectedDay}:start_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
                         </td>
                         <td>
-                          <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time, activeTimeKey === `${emp.id}:${selectedDay}:end_time`) ? 'var(--theme-red)' : undefined }}
+                          <input type="text" placeholder="--:--" id={`att-end-${emp.id}`} aria-label={`${emp.full_name} — end time`}
+                            style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time, activeTimeKey === `${emp.id}:${selectedDay}:end_time`) ? 'var(--theme-red)' : undefined }}
                             value={rec?.end_time || ''} onChange={e => setTimeCell(emp.id, selectedDay, 'end_time', e.target.value)}
                             onFocus={() => setActiveTimeKey(`${emp.id}:${selectedDay}:end_time`)}
                             onBlur={() => { normalizeTimeCell(emp.id, selectedDay, 'end_time'); setActiveTimeKey('') }} />
-                          {!isValidTimeStr(rec?.end_time, activeTimeKey === `${emp.id}:${selectedDay}:end_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
+                          {!isValidTimeStr(rec?.end_time, activeTimeKey === `${emp.id}:${selectedDay}:end_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          <input type="number" min="0" step="5" style={{ ...inp, width: 60, textAlign: 'right' }}
+                          <input type="number" min="0" step="5" id={`att-break-${emp.id}`} aria-label={`${emp.full_name} — unpaid break minutes`}
+                            style={{ ...inp, width: 60, textAlign: 'right' }}
                             value={rec?.break_minutes ?? ''} onChange={e => setBreakCell(emp.id, selectedDay, e.target.value)} placeholder="0" />
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {emp.pay_basis === 'hourly' ? (
-                            <input type="number" min="0" step="0.5" style={{ ...inp, width: 80, textAlign: 'right' }}
+                            <input type="number" min="0" step="0.5" id={`att-hours-${emp.id}`} aria-label={`${emp.full_name} — hours worked`}
+                              style={{ ...inp, width: 80, textAlign: 'right' }}
                               value={rec?.hours_worked ?? ''} onChange={e => setCell(emp.id, selectedDay, 'hours_worked', e.target.value)} placeholder="0" />
                           ) : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          <input type="number" min="0" step="0.5" style={{ ...inp, width: 80, textAlign: 'right' }}
+                          <input type="number" min="0" step="0.5" id={`att-ot-${emp.id}`} aria-label={`${emp.full_name} — overtime hours`}
+                            style={{ ...inp, width: 80, textAlign: 'right' }}
                             value={rec?.ot_hours ?? ''} onChange={e => setCell(emp.id, selectedDay, 'ot_hours', e.target.value)} placeholder="0" />
                           {shortfallFor(rec, emp.id, selectedDay) > 0 && (
                             <Tip text={`Clocked ${rec.hours_worked}h against a ${assignedHoursFor(emp.id, selectedDay)}h roster shift — ${shortfallFor(rec, emp.id, selectedDay)}h short. Not auto-deducted; reclassify as Half Day if warranted.`} width={230}>
-                              <div style={{ fontSize: 11, color: 'var(--theme-amber)', marginTop: 2 }}>⚠ {shortfallFor(rec, emp.id, selectedDay)}h short</div>
+                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>⚠ {shortfallFor(rec, emp.id, selectedDay)}h short</div>
                             </Tip>
                           )}
                         </td>
                         <td>
-                          <input style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(emp.id, selectedDay, 'note', e.target.value)} placeholder="—" />
+                          <input id={`att-note-${emp.id}`} aria-label={`${emp.full_name} — note`}
+                            style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(emp.id, selectedDay, 'note', e.target.value)} placeholder="—" />
                         </td>
                         <td>
                           {rec && (
                             <Tip text="Delete this record — reverts to Not Marked">
                               <button onClick={() => clearCell(emp.id, selectedDay)}
+                                aria-label={`Delete ${emp.full_name}'s record for day ${selectedDay}`}
                                 style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 15, padding: 4, lineHeight: 1 }}
-                                onMouseEnter={e => { e.currentTarget.style.color = 'var(--theme-red)' }}
+                                onMouseEnter={e => { e.currentTarget.style.color = 'var(--theme-red-text)' }}
                                 onMouseLeave={e => { e.currentTarget.style.color = 'var(--theme-text3)' }}
                               >🗑</button>
                             </Tip>
@@ -758,47 +775,53 @@ export default function AttendanceSheet() {
       ) : tab === 'employee' ? (
         /* ── BY EMPLOYEE ── */
         <div>
-          {/* Employee selector + bulk actions */}
+          {/* Employee selector + bulk actions — same three-cluster grouping as the Mark tab:
+              entry aids · commit (Save Month) · destructive (Clear Month), separated. */}
           <div className="card" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Employee</span>
-              <select style={inp} value={selectedEmployeeId} onChange={e => setSelectedEmployeeId(e.target.value)}>
-                {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.full_name}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'present')}>All Present</button>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'weekly_off')}>All Off</button>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'holiday')}>All Holiday</button>
-            </div>
-            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => generateFromRosterForEmployee(selectedEmployeeId)} disabled={generating}>
-              {generating ? 'Generating…' : '⚡ Generate from Roster'}
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Tip text="Feeds both 'Apply Break' buttons on this page — change it once to use a different default." width={220}>
-                <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Default break</span>
-              </Tip>
-              <input type="number" min="0" step="5" style={{ ...inp, width: 60, textAlign: 'right' }}
-                value={defaultBreakMin} onChange={e => setDefaultBreakMin(parseInt(e.target.value, 10) || 0)} />
-              <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>min</span>
-              <Tip text="Fills the default break into every already-marked day's blank Break cell for this employee. Never overwrites a Break value already entered, and never marks an untouched day." width={260}>
-                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => applyBreakToEmployeeMonth(selectedEmployeeId)}>Apply Break to Month</button>
-              </Tip>
-            </div>
-            <Tip text="Deletes every saved record for this employee, this whole month — reverts it back to genuinely blank. Can't be undone.">
-              <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)' }} onClick={() => clearEmployeeMonth(selectedEmployeeId)} disabled={saving}>
-                🗑 Clear Month
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label htmlFor="att-emp" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Employee</label>
+                <select id="att-emp" style={inp} value={selectedEmployeeId} onChange={e => setSelectedEmployeeId(e.target.value)}>
+                  {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.full_name}</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'present')}>All Present</button>
+                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'weekly_off')}>All Off</button>
+                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => markAllDaysForEmployee(selectedEmployeeId, 'holiday')}>All Holiday</button>
+              </div>
+              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => generateFromRosterForEmployee(selectedEmployeeId)} disabled={generating}>
+                {generating ? 'Generating…' : '⚡ Generate from Roster'}
               </button>
-            </Tip>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Tip text="Feeds both 'Apply Break' buttons on this page — change it once to use a different default." width={220}>
+                  <label htmlFor="att-emp-default-break" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Default break</label>
+                </Tip>
+                <input id="att-emp-default-break" type="number" min="0" step="5" style={{ ...inp, width: 60, textAlign: 'right' }}
+                  value={defaultBreakMin} onChange={e => setDefaultBreakMin(parseInt(e.target.value, 10) || 0)} />
+                <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>min</span>
+                <Tip text="Fills the default break into every already-marked day's blank Break cell for this employee. Never overwrites a Break value already entered, and never marks an untouched day." width={260}>
+                  <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => applyBreakToEmployeeMonth(selectedEmployeeId)}>Apply Break to Month</button>
+                </Tip>
+              </div>
+            </div>
             <div style={{ flex: 1 }} />
             {savedMsg && (
-              <span style={{ fontSize: 12, color: savedMsg.startsWith('ok') ? 'var(--theme-green)' : 'var(--theme-red)' }}>
+              <span role={savedMsg.startsWith('ok') ? 'status' : 'alert'}
+                style={{ fontSize: 12, color: savedMsg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                 {savedMsg.split(':').slice(1).join(':')}
               </span>
             )}
             <button className="btn btn-primary" onClick={() => saveEmployeeMonth(selectedEmployeeId)} disabled={saving} style={{ fontSize: 13 }}>
               {saving ? 'Saving…' : 'Save Month'}
             </button>
+            <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
+              <Tip text="Deletes every saved record for this employee, this whole month — reverts it back to genuinely blank. Can't be undone.">
+                <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={() => clearEmployeeMonth(selectedEmployeeId)} disabled={saving}>
+                  🗑 Clear Month
+                </button>
+              </Tip>
+            </div>
           </div>
 
           <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
@@ -845,7 +868,9 @@ export default function AttendanceSheet() {
                           <td style={{ color: 'var(--theme-text1)', fontWeight: 600, fontSize: 13 }}>{d} · {weekdayOf(period, d)}</td>
                           <td>
                             <select
-                              style={{ ...inp, color: sc?.color || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
+                              id={`att-emp-status-${d}`}
+                              aria-label={`Day ${d} — status`}
+                              style={{ ...inp, color: sc?.textColor || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
                               value={status || ''}
                               onChange={e => e.target.value ? setCell(selectedEmployeeId, d, 'status', e.target.value) : clearCell(selectedEmployeeId, d)}
                             >
@@ -854,47 +879,54 @@ export default function AttendanceSheet() {
                             </select>
                           </td>
                           <td>
-                            <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time, activeTimeKey === `${selectedEmployeeId}:${d}:start_time`) ? 'var(--theme-red)' : undefined }}
+                            <input type="text" placeholder="--:--" id={`att-emp-start-${d}`} aria-label={`Day ${d} — start time`}
+                              style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time, activeTimeKey === `${selectedEmployeeId}:${d}:start_time`) ? 'var(--theme-red)' : undefined }}
                               value={rec?.start_time || ''} onChange={e => setTimeCell(selectedEmployeeId, d, 'start_time', e.target.value)}
                               onFocus={() => setActiveTimeKey(`${selectedEmployeeId}:${d}:start_time`)}
                               onBlur={() => { normalizeTimeCell(selectedEmployeeId, d, 'start_time'); setActiveTimeKey('') }} />
-                            {!isValidTimeStr(rec?.start_time, activeTimeKey === `${selectedEmployeeId}:${d}:start_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
+                            {!isValidTimeStr(rec?.start_time, activeTimeKey === `${selectedEmployeeId}:${d}:start_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
                           </td>
                           <td>
-                            <input type="text" placeholder="--:--" style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time, activeTimeKey === `${selectedEmployeeId}:${d}:end_time`) ? 'var(--theme-red)' : undefined }}
+                            <input type="text" placeholder="--:--" id={`att-emp-end-${d}`} aria-label={`Day ${d} — end time`}
+                              style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time, activeTimeKey === `${selectedEmployeeId}:${d}:end_time`) ? 'var(--theme-red)' : undefined }}
                               value={rec?.end_time || ''} onChange={e => setTimeCell(selectedEmployeeId, d, 'end_time', e.target.value)}
                               onFocus={() => setActiveTimeKey(`${selectedEmployeeId}:${d}:end_time`)}
                               onBlur={() => { normalizeTimeCell(selectedEmployeeId, d, 'end_time'); setActiveTimeKey('') }} />
-                            {!isValidTimeStr(rec?.end_time, activeTimeKey === `${selectedEmployeeId}:${d}:end_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
+                            {!isValidTimeStr(rec?.end_time, activeTimeKey === `${selectedEmployeeId}:${d}:end_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
                           </td>
                           <td style={{ textAlign: 'right' }}>
-                            <input type="number" min="0" step="5" style={{ ...inp, width: 60, textAlign: 'right' }}
+                            <input type="number" min="0" step="5" id={`att-emp-break-${d}`} aria-label={`Day ${d} — unpaid break minutes`}
+                              style={{ ...inp, width: 60, textAlign: 'right' }}
                               value={rec?.break_minutes ?? ''} onChange={e => setBreakCell(selectedEmployeeId, d, e.target.value)} placeholder="0" />
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {emp?.pay_basis === 'hourly' ? (
-                              <input type="number" min="0" step="0.5" style={{ ...inp, width: 80, textAlign: 'right' }}
+                              <input type="number" min="0" step="0.5" id={`att-emp-hours-${d}`} aria-label={`Day ${d} — hours worked`}
+                                style={{ ...inp, width: 80, textAlign: 'right' }}
                                 value={rec?.hours_worked ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'hours_worked', e.target.value)} placeholder="0" />
                             ) : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                           </td>
                           <td style={{ textAlign: 'right' }}>
-                            <input type="number" min="0" step="0.5" style={{ ...inp, width: 80, textAlign: 'right' }}
+                            <input type="number" min="0" step="0.5" id={`att-emp-ot-${d}`} aria-label={`Day ${d} — overtime hours`}
+                              style={{ ...inp, width: 80, textAlign: 'right' }}
                               value={rec?.ot_hours ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'ot_hours', e.target.value)} placeholder="0" />
                             {shortfallFor(rec, selectedEmployeeId, d) > 0 && (
                               <Tip text={`Clocked ${rec.hours_worked}h against a ${assignedHoursFor(selectedEmployeeId, d)}h roster shift — ${shortfallFor(rec, selectedEmployeeId, d)}h short. Not auto-deducted; reclassify as Half Day if warranted.`} width={230}>
-                                <div style={{ fontSize: 11, color: 'var(--theme-amber)', marginTop: 2 }}>⚠ {shortfallFor(rec, selectedEmployeeId, d)}h short</div>
+                                <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>⚠ {shortfallFor(rec, selectedEmployeeId, d)}h short</div>
                               </Tip>
                             )}
                           </td>
                           <td>
-                            <input style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'note', e.target.value)} placeholder="—" />
+                            <input id={`att-emp-note-${d}`} aria-label={`Day ${d} — note`}
+                              style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'note', e.target.value)} placeholder="—" />
                           </td>
                           <td>
                             {rec && (
                               <Tip text="Delete this record — reverts to Not Marked">
                                 <button onClick={() => clearCell(selectedEmployeeId, d)}
+                                  aria-label={`Delete the record for day ${d}`}
                                   style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 15, padding: 4, lineHeight: 1 }}
-                                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--theme-red)' }}
+                                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--theme-red-text)' }}
                                   onMouseLeave={e => { e.currentTarget.style.color = 'var(--theme-text3)' }}
                                 >🗑</button>
                               </Tip>
@@ -909,7 +941,7 @@ export default function AttendanceSheet() {
                   <tfoot>
                     <tr>
                       <td colSpan={6} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>Total OT Hours</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent)' }}>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                         {days.reduce((sum, d) => sum + (parseFloat(cellFor(selectedEmployeeId, d)?.ot_hours) || 0), 0).toFixed(1)}
                       </td>
                       <td colSpan={2} />
@@ -928,7 +960,11 @@ export default function AttendanceSheet() {
             <span style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Legend</span>
             {ATTENDANCE_STATUSES.map(s => (
               <span key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--theme-text3)' }}>
-                <span style={{ width: 18, height: 18, borderRadius: 4, background: `${s.color}22`, border: `1px solid ${s.color}55`, color: s.color, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{s.short}</span>
+                {/* Swatch fill/border are a tint of the BASE token, the short code on top is the
+                    readable *-text variant. color-mix, not `${s.color}22` — a `var()` can't carry
+                    a concatenated alpha suffix, so that produced invalid CSS (i.e. no tint at all)
+                    for every status already on a token. */}
+                <span style={{ width: 18, height: 18, borderRadius: 4, background: `color-mix(in srgb, ${s.color} 13%, transparent)`, border: `1px solid color-mix(in srgb, ${s.color} 33%, transparent)`, color: s.textColor, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{s.short}</span>
                 {s.label}
               </span>
             ))}
@@ -958,7 +994,9 @@ export default function AttendanceSheet() {
                       <Tip text="Total overtime hours for the month." width={200}>OT</Tip>
                     </th>
                     <th style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)' }}>
-                      <Tip text="P + A + O + OT added together for this employee." width={200}>Total</Tip>
+                      {/* Days only — OT is hours and stays in its own column beside this one.
+                          Adding the two together produced a figure in no unit at all. */}
+                      <Tip text="Total days accounted for — P + A + O. Overtime is not included: it's hours, not days, and has its own column." width={240}>Total Days</Tip>
                     </th>
                   </tr>
                 </thead>
@@ -979,15 +1017,15 @@ export default function AttendanceSheet() {
                           const sc = rec ? STATUS_MAP[rec.status] : null
                           return (
                             <td key={d} style={{ textAlign: 'center', padding: '6px 4px' }}>
-                              {sc ? <span style={{ color: sc.color, fontWeight: 700 }}>{sc.short}</span> : <span style={{ color: 'var(--theme-border)' }}>·</span>}
+                              {sc ? <span style={{ color: sc.textColor, fontWeight: 700 }}>{sc.short}</span> : <span style={{ color: 'var(--theme-border)' }}>·</span>}
                             </td>
                           )
                         })}
-                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-green)', fontWeight: 600 }}>{pVal || 0}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>{aVal || 0}</td>
+                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-green-text)', fontWeight: 600 }}>{pVal || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{aVal || 0}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{oVal || 0}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontWeight: 600 }}>{otVal || 0}</td>
-                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-text1)', fontWeight: 700 }}>{pVal + aVal + oVal + otVal || 0}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{otVal || 0}</td>
+                        <td style={{ textAlign: 'right', borderLeft: '2px solid var(--theme-border)', color: 'var(--theme-text1)', fontWeight: 700 }}>{pVal + aVal + oVal || 0}</td>
                       </tr>
                     )
                   })}

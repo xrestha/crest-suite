@@ -31,8 +31,19 @@ describe('tallyAttendance', () => {
     expect(tallyAttendance(rows)).toEqual({
       present: 3, half_day: 1, absent: 1, paid_leave: 2, unpaid_leave: 1,
       half_paid_leave: 0, half_unpaid_leave: 0,
-      weekly_off: 4, holiday: 1, sumHours: 28, sumOt: 1,
+      weekly_off: 4, holiday: 1, sumHours: 28, sumOt: 1, sumOtSuperseded: 0,
     })
+  })
+
+  test('OT on a day an approved entry covers is withheld from sumOt, not silently dropped', () => {
+    const rows = [
+      { status: 'present', bs_day: 1, hours_worked: 8, ot_hours: 2 },
+      { status: 'present', bs_day: 2, hours_worked: 8, ot_hours: 3 },
+    ]
+    const t = tallyAttendance(rows, new Set([2]))
+    expect(t.sumOt).toBe(2)            // day 1 only — day 2 is superseded by an approved entry
+    expect(t.sumOtSuperseded).toBe(3)  // reported, so a page can explain the difference
+    expect(t.sumHours).toBe(16)        // ordinary hours are unaffected by OT supersession
   })
 })
 
@@ -77,23 +88,68 @@ describe('computePayslip — monthly basis', () => {
   })
 
   test('SSF is capped at SSF_CAP even when basic salary exceeds it', () => {
-    const employee = { pay_basis: 'monthly', basic_salary: 150000, ssf_enrolled: true }
+    const employee = { pay_basis: 'monthly', basic_salary: 150000, ssf_enrolled: true, ssf_no: '1234567890' }
     const slip = computePayslip(employee, [], [], period)
     expect(slip.ssf_employee).toBe(11000)  // 11% of the 100,000 cap, not of 150,000
     expect(slip.ssf_employer).toBe(20000)  // 20% of the 100,000 cap
     expect(slip.net_pay).toBe(139000)      // 150000 - 11000
   })
 
-  test('approved overtime entries add on top of attendance OT, weekday vs. holiday multiplier', () => {
+  // The enrolment flag alone used to deduct 11%, while HrReports' SSF challan tab filters on
+  // ssf_no — so a flagged employee with a blank number had money withheld that no filing sheet
+  // ever claimed. Both sides now require the number (decision 2026-08-18).
+  test('SSF is NOT deducted when enrolled but the registration number is missing', () => {
+    const noNumber = { pay_basis: 'monthly', basic_salary: 50000, ssf_enrolled: true }
+    expect(computePayslip(noNumber, [], [], period).ssf_employee).toBe(0)
+
+    const blankNumber = { pay_basis: 'monthly', basic_salary: 50000, ssf_enrolled: true, ssf_no: '   ' }
+    expect(computePayslip(blankNumber, [], [], period).ssf_employee).toBe(0)
+
+    const withNumber = { pay_basis: 'monthly', basic_salary: 50000, ssf_enrolled: true, ssf_no: '1234567890' }
+    expect(computePayslip(withNumber, [], [], period).ssf_employee).toBe(5500)
+  })
+
+  // `absent_days` stays literal absences (Payroll Run's Excel column depends on it); the payslip
+  // prints `unpaid_days`, which must account for every day the deduction actually docks.
+  test('unpaid_days counts unpaid leave and half days, not just absences', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false }
+    const attendanceRows = [
+      { status: 'absent' }, { status: 'unpaid_leave' }, { status: 'unpaid_leave' },
+      { status: 'half_day', hours_worked: 4 },
+    ]
+    const slip = computePayslip(employee, [], attendanceRows, period)
+    expect(slip.absent_days).toBe(1)     // one literal absence
+    expect(slip.unpaid_days).toBe(3.5)   // 1 absent + 2 unpaid leave + 0.5 half day
+  })
+
+  test('approved overtime entries price weekday vs. holiday at their own multipliers', () => {
     const employee = { pay_basis: 'monthly', basic_salary: 24800, ssf_enrolled: false } // hr = 100
     const approvedOtEntries = [
-      { ot_hours: 3, ot_type: 'normal' },   // 1.5x
-      { ot_hours: 2, ot_type: 'holiday' },  // 2x
+      { bs_day: 5, ot_hours: 3, ot_type: 'normal' },   // 1.5x
+      { bs_day: 6, ot_hours: 2, ot_type: 'holiday' },  // 2x
     ]
     const slip = computePayslip(employee, [], [], period, 0, approvedOtEntries)
     expect(slip.ot_hours).toBe(5)
     expect(slip.ot_amount).toBe(850)  // 3*100*1.5 + 2*100*2.0
     expect(slip.net_pay).toBe(25650)  // 24800 + 850
+  })
+
+  // Decision 2026-08-18: the two OT sources are alternatives, not addends. An approved entry is
+  // the authorised figure for its day (and the only route to the holiday 2x rate), so attendance
+  // OT for that same day is withheld — the pair can no longer pay the same hours twice.
+  test('an approved OT entry supersedes attendance-sheet OT on the same day only', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 24800, ssf_enrolled: false } // hr = 100
+    const attendanceRows = [
+      { status: 'present', bs_day: 5, hours_worked: 8, ot_hours: 3 }, // superseded below
+      { status: 'present', bs_day: 9, hours_worked: 8, ot_hours: 2 }, // no approved entry — still paid
+    ]
+    const approvedOtEntries = [{ bs_day: 5, ot_hours: 4, ot_type: 'holiday' }]
+    const slip = computePayslip(employee, [], attendanceRows, period, 0, approvedOtEntries)
+
+    expect(slip.ot_hours).toBe(6)                          // 2 attendance (day 9) + 4 approved (day 5)
+    expect(slip.ot_amount).toBe(1100)                      // 2*100*1.5 + 4*100*2.0
+    expect(slip.breakdown.otSupersededHrs).toBe(3)         // day 5's attendance OT, displaced
+    expect(slip.breakdown.otApprovedHrs).toBe(4)
   })
 
   test('TDS and advance deduction both come off net pay', () => {

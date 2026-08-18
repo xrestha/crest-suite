@@ -253,7 +253,7 @@ export default function IncentiveRun() {
         </div>
       ) : (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 20 }}>
+          <div className="stat-grid stat-grid--compact" style={{ marginBottom: 20 }}>
             {[
               { label: 'Gross Payout', value: fmt(total), color: 'var(--theme-accent)', tip: 'Total gross incentive before TDS withholding.' },
               { label: 'TDS Withheld', value: fmt(totalTds), color: 'var(--theme-red)', tip: 'Income tax withheld from this incentive, at each employee\'s marginal rate.' },

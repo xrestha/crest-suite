@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
+import Modal from '../../../components/Modal'
 import EmployeeForm from './EmployeeForm'
 import EmployeeJoiningForm from './EmployeeJoiningForm'
 import { EMPLOYEE_STATUS_COLORS as STATUS_COLORS } from '../payrollConstants'
@@ -26,8 +27,10 @@ function retireInfo(dateStr) {
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const d = new Date(dateStr); d.setHours(0, 0, 0, 0)
   const days = Math.round((d - today) / 86400000)
-  if (days < 0)               return { retired: true, label: 'Retired',       color: 'var(--theme-red)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' }
-  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-accent)', bg: 'rgba(201,168,76,0.1)', border: 'rgba(201,168,76,0.2)', days }
+  // `color` is only ever used as the badge's TEXT (the tint + border are the fill), so it takes
+  // the *-text contrast variants per the S549 rule.
+  if (days < 0)               return { retired: true, label: 'Retired',       color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' }
+  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-accent-ink)', bg: 'rgba(201,168,76,0.1)', border: 'rgba(201,168,76,0.2)', days }
   return { future: true, days }
 }
 
@@ -198,8 +201,8 @@ export default function EmployeeList() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Active</div>
-          <div className="stat-value" style={{ color: 'var(--theme-green)' }}>{active}</div>
-          {probation > 0 && <div className="stat-sub" style={{ color: 'var(--theme-accent)' }}>{probation} on probation</div>}
+          <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{active}</div>
+          {probation > 0 && <div className="stat-sub" style={{ color: 'var(--theme-accent-ink)' }}>{probation} on probation</div>}
         </div>
         <div className="stat-card">
           <div className="stat-label">
@@ -218,7 +221,7 @@ export default function EmployeeList() {
               Retiring Soon
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: retiringSoon > 0 ? 'var(--theme-accent)' : 'var(--theme-green)' }}>{retiringSoon}</div>
+          <div className="stat-value" style={{ color: retiringSoon > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)' }}>{retiringSoon}</div>
           <div className="stat-sub">within 180 days</div>
         </div>
       </div>
@@ -226,6 +229,7 @@ export default function EmployeeList() {
       {/* Filters */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
+          aria-label="Search employees by name, code, department or designation"
           style={{
             background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6,
             padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260
@@ -250,6 +254,7 @@ export default function EmployeeList() {
             className="form-select"
             value={supFilter}
             onChange={e => setSupFilter(e.target.value)}
+            aria-label="Filter by reporting supervisor"
             title="Filter by reporting supervisor"
           >
             <option value="all">All supervisors</option>
@@ -273,12 +278,12 @@ export default function EmployeeList() {
         }}>
           <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{selected.size} selected</span>
           <Tip text="Blocks Self-Service PIN login for the selected employees only. Does not change their Status, so they stay fully visible to Payroll Run, Payroll Calculation and Final Settlement.">
-            <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)' }} disabled={bulkBusy} onClick={() => bulkSetAccess(true)}>
+            <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)' }} disabled={bulkBusy} onClick={() => bulkSetAccess(true)}>
               {bulkBusy ? 'Working…' : 'Deactivate (block login)'}
             </button>
           </Tip>
           <Tip text="Restores Self-Service PIN login for the selected employees.">
-            <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-green)' }} disabled={bulkBusy} onClick={() => bulkSetAccess(false)}>
+            <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-green-text)' }} disabled={bulkBusy} onClick={() => bulkSetAccess(false)}>
               {bulkBusy ? 'Working…' : 'Activate (allow login)'}
             </button>
           </Tip>
@@ -343,7 +348,7 @@ export default function EmployeeList() {
                         aria-label={`Select ${e.full_name}`}
                       />
                     </td>
-                    <td style={{ color: 'var(--theme-accent)', fontWeight: 700, fontSize: 12 }}>
+                    <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, fontSize: 12 }}>
                       {e.employee_code || '—'}
                     </td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{e.full_name}</td>
@@ -436,28 +441,28 @@ export default function EmployeeList() {
       {printForm && <EmployeeJoiningForm onClose={() => setPrintForm(false)} />}
 
       {ssTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 380, padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>Enable Self-Service</h3>
+        <Modal onClose={() => { if (!ssBusy) setSsTarget(null) }} title="Enable Self-Service" maxWidth={380}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>
               {ssTarget.full_name} will be able to log in with this PIN via the "Copy Self-Service Link" button
               above to view their own payslip, submit leave requests, and see their roster. Set an initial PIN —
               they can be given a new one later by repeating this action.
             </p>
             <div>
-              <label style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }}>PIN (4–6 digits)</label>
+              <label htmlFor="emp-ss-pin" style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }}>PIN (4–6 digits)</label>
               <input
+                id="emp-ss-pin"
                 style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
                 type="password" autoComplete="new-password" inputMode="numeric" maxLength={6} value={ssPin} onChange={e => setSsPin(e.target.value.replace(/\D/g, ''))}
               />
             </div>
-            {ssMsg && <div style={{ fontSize: 12, color: 'var(--theme-red)' }}>{ssMsg}</div>}
+            {ssMsg && <div role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{ssMsg}</div>}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setSsTarget(null)}>Cancel</button>
               <button className="btn btn-primary" onClick={enableSelfService} disabled={ssBusy}>{ssBusy ? 'Enabling…' : 'Enable'}</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

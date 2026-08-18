@@ -53,9 +53,16 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint 
       {/* The day count, not just the amount, is what lets an employee actually check a dock —
           "paid for 22 of 30 days" is auditable against their own memory; a bare rupee figure
           isn't. Only shown when there IS a dock, so a clean month stays uncluttered. */}
+      {/* `unpaid_days`, not `absent_days`: this dock covers absences AND unpaid leave, half days
+          and pre-join days, while `absent_days` counts only literal absences (Payroll Run's Excel
+          column depends on that narrower meaning). Printing the narrow figure here understated
+          the count on the one line whose whole purpose is being checkable — an employee with one
+          absence and three unpaid-leave days read "(1.0 days)" against four days of money. Older
+          payslips written before the column existed have no value, and correctly print no count
+          rather than a wrong one. */}
       {slip.absence_deduction > 0 && (
         <Row
-          label={slip.absent_days > 0 ? `Absence / Unpaid Leave (${(slip.absent_days || 0).toFixed(1)} days)` : 'Absence / Unpaid Leave'}
+          label={slip.unpaid_days > 0 ? `Absence / Unpaid Leave (${(slip.unpaid_days || 0).toFixed(1)} days)` : 'Absence / Unpaid Leave'}
           value={slip.absence_deduction}
           neg
         />

@@ -41,6 +41,7 @@ export default function HrReports() {
   const [certSlips,   setCertSlips]   = useState([])
   const [certLoading, setCertLoading] = useState(false)
   const [clientName,  setClientName]  = useState('')
+  const [clientPan,   setClientPan]   = useState('')
 
   const empMap = Object.fromEntries(employees.map(e => [e.id, e]))
   const nameById = Object.fromEntries(employees.map(e => [e.id, e.full_name]))
@@ -63,11 +64,19 @@ export default function HrReports() {
     init()
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch company name once for TDS certificate header
+  // Fetch company name and PAN once for the TDS certificate header. settings.vat_number IS
+  // Nepal's PAN (same field the Tax Invoice and the payslip letterhead already print) — the
+  // certificate used to leave a blank line for it, so an accountant hand-wrote a number the
+  // system already held. Falls back to the blank line only when it genuinely isn't set.
   useEffect(() => {
     if (!clientId) return
-    supabase.from('clients').select('name').eq('id', clientId).single()
-      .then(({ data }) => { if (data) setClientName(data.name) })
+    Promise.all([
+      supabase.from('clients').select('name').eq('id', clientId).single(),
+      supabase.from('settings').select('vat_number').eq('client_id', clientId).maybeSingle(),
+    ]).then(([{ data: client }, { data: settings }]) => {
+      if (client) setClientName(client.name)
+      if (settings?.vat_number) setClientPan(settings.vat_number)
+    })
   }, [clientId])
 
   // Fetch finalized payslips for the selected FY + employee (TDS Certificate tab)
@@ -176,7 +185,7 @@ export default function HrReports() {
   }, { base: 0, emp: 0, empr: 0, total: 0 })
 
   const TABS = [
-    { id: 'roster',   label: 'Roster' },
+    { id: 'roster',   label: 'Employee Directory' },
     { id: 'summary',  label: 'Payroll Summary' },
     { id: 'ssf',      label: 'SSF Challan' },
     { id: 'bank',     label: 'Bank Transfer' },
@@ -265,7 +274,7 @@ export default function HrReports() {
               ) : certSlips.length === 0 ? (
                 <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text2)' }}>No finalized payslips found for this employee in FY {certFy.label}.</div>
               ) : (
-                <TdsCertificate emp={empMap[certEmpId] || {}} slips={certSlips} fy={certFy} clientName={clientName} />
+                <TdsCertificate emp={empMap[certEmpId] || {}} slips={certSlips} fy={certFy} clientName={clientName} clientPan={clientPan} />
               )}
             </div>
           )}
@@ -275,7 +284,7 @@ export default function HrReports() {
             <div className="card" style={{ padding: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--theme-border)', flexWrap: 'wrap', gap: 8 }}>
                 <div>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>Employee Roster</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>Employee Directory</span>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                     {employees.length} employee{employees.length !== 1 ? 's' : ''}
                     {retiringCount > 0 && <span> · <span style={{ color: 'var(--theme-accent)' }}>{retiringCount} retiring within 180 days</span></span>}
@@ -288,7 +297,7 @@ export default function HrReports() {
                       Code: e.employee_code || '', Name: e.full_name, Department: e.department || '', Designation: e.designation || '',
                       Supervisor: e.supervisor_id ? (nameById[e.supervisor_id] || '') : '',
                       'Join Date': fmtDate(e.join_date), 'Retirement Date': e.retirement_date ? fmtDate(e.retirement_date) : '', Status: e.status,
-                    })), 'Roster')}>⬇ Export</button>
+                    })), 'Employee Directory')}>⬇ Export</button>
                 </div>
               </div>
               {rosterRows.length === 0 ? (
@@ -344,7 +353,7 @@ export default function HrReports() {
           {/* ── SUMMARY ── */}
           {tab === 'summary' && (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+              <div className="stat-grid stat-grid--compact" style={{ marginBottom: 20 }}>
                 {[
                   { label: 'Total Gross',    value: tot.gross,   color: 'var(--theme-accent)', tip: 'Gross earnings + overtime across all payslips.' },
                   { label: 'Total Deductions', value: tot.ded,   color: 'var(--theme-red)', tip: 'Absence + SSF employee + other deductions + TDS.' },
@@ -525,7 +534,7 @@ export default function HrReports() {
   }
 }
 
-function TdsCertificate({ emp, slips, fy, clientName }) {
+function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
   const fmtN = n => Math.round(n || 0).toLocaleString('en-NP')
   const today = getBsToday()
   const issuedDate = `${BS_MONTHS[today.month - 1]} ${today.day}, ${today.year} B.S.`
@@ -558,7 +567,7 @@ function TdsCertificate({ emp, slips, fy, clientName }) {
         <div style={card}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Employer</div>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 6 }}>{clientName || '—'}</div>
-          <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>PAN: <span style={{ color: 'var(--theme-text2)' }}>_______________</span></div>
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>PAN: <span style={{ color: clientPan ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{clientPan || '_______________'}</span></div>
         </div>
         <div style={card}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Employee</div>

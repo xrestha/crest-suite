@@ -120,12 +120,12 @@ export default function PaySetup() {
       </div>
 
       {/* Stat cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
         {[
-          { label: 'Total Gross Payroll', value: fmt(totals.gross),        color: 'var(--theme-accent)', tip: 'Sum of gross earnings (basic + allowances) across all monthly employees. Daily/hourly workers are excluded — their pay is computed at payroll.' },
-          { label: 'SSF — Employee',       value: fmt(totals.ssf_emp),      color: 'var(--theme-red)', tip: 'Total 11% SSF deducted from employees this month, computed on basic salary (capped at NPR 100,000 each).' },
+          { label: 'Total Gross Payroll', value: fmt(totals.gross),        color: 'var(--theme-accent-ink)', tip: 'Sum of gross earnings (basic + allowances) across all monthly employees. Daily/hourly workers are excluded — their pay is computed at payroll.' },
+          { label: 'SSF — Employee',       value: fmt(totals.ssf_emp),      color: 'var(--theme-red-text)', tip: 'Total 11% SSF deducted from employees this month, computed on basic salary (capped at NPR 100,000 each).' },
           { label: 'SSF — Employer',       value: fmt(totals.ssf_employer), color: 'var(--theme-text2)', tip: 'Total 20% SSF the company pays on top of salaries — not deducted from employee net pay.' },
-          { label: 'Net Payroll',          value: fmt(totals.net),          color: 'var(--theme-green)', tip: 'Total take-home pay (gross − SSF employee − other deductions) across all monthly employees.' },
+          { label: 'Net Payroll',          value: fmt(totals.net),          color: 'var(--theme-green-text)', tip: 'Total take-home pay (gross − SSF employee − other deductions) across all monthly employees.' },
         ].map(s => (
           <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
@@ -173,7 +173,7 @@ export default function PaySetup() {
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="SSF Employee (11% of basic) plus any other deductions configured for the employee." width={250}>Deductions</Tip>
                   </th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-accent)' }}>
+                  <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
                     <Tip text="Take-home pay = gross − deductions. What the employee actually receives." width={230}>Net Salary</Tip>
                   </th>
                   <th style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
@@ -207,10 +207,10 @@ export default function PaySetup() {
                       {s.monthly ? (
                         <>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 13 }}>{fmt(s.basic)}</td>
-                          <td style={{ textAlign: 'right', color: s.totalAllowances > 0 ? 'var(--theme-green)' : 'var(--theme-text2)', fontSize: 13 }}>{s.totalAllowances > 0 ? `+${fmt(s.totalAllowances)}` : '—'}</td>
+                          <td style={{ textAlign: 'right', color: s.totalAllowances > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)', fontSize: 13 }}>{s.totalAllowances > 0 ? `+${fmt(s.totalAllowances)}` : '—'}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 13, fontWeight: 500 }}>{fmt(s.gross)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-red)', fontSize: 13 }}>−{fmt(s.totalDed)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontSize: 14, fontWeight: 700 }}>{fmt(s.net)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontSize: 13 }}>−{fmt(s.totalDed)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 14, fontWeight: 700 }}>{fmt(s.net)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>{fmt(s.ssf_employer)}</td>
                         </>
                       ) : (
@@ -219,14 +219,14 @@ export default function PaySetup() {
                             NPR {fmt(s.rate)} / {s.unit}
                           </td>
                           <td style={{ textAlign: 'right', fontSize: 12 }}>
-                            <span style={{ color: 'var(--theme-accent)', fontWeight: 600 }}>~{fmt(s.estMonthly)}</span>
+                            <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>~{fmt(s.estMonthly)}</span>
                             <span style={{ color: 'var(--theme-text2)', fontSize: 10, marginLeft: 4 }}>est/mo</span>
                           </td>
                           <td colSpan={2} style={{ color: 'var(--theme-text2)', fontSize: 11, fontStyle: 'italic' }}>from attendance</td>
                         </>
                       )}
                       <td style={{ fontSize: 12 }}>
-                        {hasBank ? <span style={{ color: 'var(--theme-text3)' }}>{emp.bank_name}</span> : <span style={{ color: 'var(--theme-accent)' }}>⚠ not set</span>}
+                        {hasBank ? <span style={{ color: 'var(--theme-text3)' }}>{emp.bank_name}</span> : <span style={{ color: 'var(--theme-amber-text)' }}>⚠ not set</span>}
                       </td>
                     </tr>
                   )
@@ -238,8 +238,8 @@ export default function PaySetup() {
                   <td />
                   <td />
                   <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totals.gross)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-red)' }}>−{fmt(totals.deductions)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-accent)', fontSize: 15 }}>{fmt(totals.net)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmt(totals.deductions)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(totals.net)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmt(totals.ssf_employer)}</td>
                   <td />
                 </tr>

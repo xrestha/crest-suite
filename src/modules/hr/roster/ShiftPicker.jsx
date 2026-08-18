@@ -33,7 +33,7 @@ export default function ShiftPicker({ shifts, anchorRef, onSelect, onClose, cell
   const active = shifts.filter(s => s.active !== false)
 
   return createPortal(
-    <div ref={ref} style={{
+    <div ref={ref} role="menu" aria-label={cellCount > 1 ? `Assign a shift to ${cellCount} cells` : 'Assign a shift'} style={{
       position: 'fixed', top, left, zIndex: 2100,
       background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
       borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
@@ -48,7 +48,7 @@ export default function ShiftPicker({ shifts, anchorRef, onSelect, onClose, cell
       {active.map(s => {
         const hrs = s.hours ?? calcHours(s.start_time, s.end_time)
         return (
-          <button key={s.id} onClick={() => onSelect(s.id)}
+          <button key={s.id} role="menuitem" onClick={() => onSelect(s.id)}
             style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%',
               padding: '9px 14px', background: 'none', border: 'none',
               cursor: 'pointer', color: 'var(--theme-text1)', fontSize: 13, textAlign: 'left' }}
@@ -63,7 +63,7 @@ export default function ShiftPicker({ shifts, anchorRef, onSelect, onClose, cell
         )
       })}
       <div style={{ borderTop: '1px solid var(--theme-border)', padding: '2px 0' }}>
-        <button onClick={() => onSelect(null)}
+        <button role="menuitem" onClick={() => onSelect(null)}
           style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%',
             padding: '8px 14px', background: 'none', border: 'none',
             cursor: 'pointer', color: 'var(--theme-text3)', fontSize: 12 }}

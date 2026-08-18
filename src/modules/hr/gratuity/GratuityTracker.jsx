@@ -147,34 +147,34 @@ export default function GratuityTracker() {
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 <Tip text="Total gratuity liability accrued under the Nepal Labour Act for all active monthly-paid employees. Formula: basic ÷ 12 × months of service." width={280}>Total Liability</Tip>
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-red)' }}>NPR {fmt(totalNet)}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {fmt(totalNet)}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Gross accrued: NPR {fmt(totalAccrued)}</div>
             </div>
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 <Tip text="Monthly accrual rate — how fast the total gratuity pool is growing. Sum of (basic ÷ 12) across all monthly employees." width={280}>Monthly Accrual</Tip>
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-accent)' }}>NPR {fmt(totalMonthly)}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {fmt(totalMonthly)}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Added to liability per month</div>
             </div>
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 <Tip text="Employees who have completed ≥ 1 year of service, commonly treated as eligible for gratuity payment on departure. This 1-year threshold is not confirmed in the current Labour Act 2074 text (which reads as day-1 accrual with no explicit vesting gate) — verify with an accountant before relying on it for an actual payout." width={320}>Vested Employees</Tip>
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-green)' }}>{vestedCount}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-green-text)' }}>{vestedCount}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{rows.length - vestedCount} still vesting</div>
             </div>
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 <Tip text="Amount already funded through the SSF employer gratuity contribution (3.33% of capped basic per month). Reduces the additional cash liability for SSF-enrolled employees." width={300}>SSF Fund (est.)</Tip>
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-purple)' }}>NPR {fmt(totalSsf)}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-purple-text)' }}>NPR {fmt(totalSsf)}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>3.33% employer SSF → gratuity fund</div>
             </div>
           </div>
 
           {nonMonthly > 0 && (
-            <div className="card" style={{ marginBottom: 14, padding: '10px 16px', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', fontSize: 12, color: 'var(--theme-text3)' }}>
+            <div className="card" style={{ marginBottom: 14, padding: '10px 16px', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)', fontSize: 12, color: 'var(--theme-text3)' }}>
               ⚠ {nonMonthly} daily/hourly staff excluded — gratuity for wage workers is computed at settlement based on actual days/hours worked.
             </div>
           )}

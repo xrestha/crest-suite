@@ -249,7 +249,7 @@ The lookup table covers BS 2000–2087 (extended from 2079–2087, S559). Out-of
 
 ### HR payroll engine
 
-See `.claude/rules/hr-payroll.md` (auto-loads when editing `src/modules/hr/`). Headline rules: pure functions in `payrollCompute.js`; monthly pay prorates for `join_date`; `payrollData.js` helpers must be robust to what Finalize changes (S565 Stale-badge trap); `hr_tada_claims` has no period columns.
+See `.claude/rules/hr-payroll.md` (auto-loads when editing `src/modules/hr/`). Headline rules: pure functions in `payrollCompute.js`; monthly pay prorates for `join_date`; `payrollData.js` helpers must be robust to what Finalize changes (S565 Stale-badge trap); `hr_tada_claims` has no period columns. As of S570: SSF needs enrolment flag **and** `ssf_no` (three call sites must agree); approved OT supersedes attendance OT per `bs_day` (so OT queries must select `bs_day`); Payroll Run blocks Finalize on a stale draft.
 
 ### Page-revisit caching (`src/shared/sessionDataCache.js`, added S460)
 

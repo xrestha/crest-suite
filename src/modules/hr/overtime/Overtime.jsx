@@ -364,6 +364,7 @@ export default function Overtime() {
       <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
         <strong style={{ color: 'var(--theme-text2)' }}>Payroll integration:</strong> only <strong>Approved</strong> entries feed into the payroll run.
         Approved weekday OT is paid at <strong>1.5×</strong> the normal hourly rate; public holiday OT at <strong>2×</strong>.
+        An approved entry <strong>supersedes</strong> any OT typed on the attendance sheet for that same day, so the same hours are never paid twice — and this is the only route to the holiday 2× rate.
         Regenerate payroll after approving new entries to include them.
       </div>
 

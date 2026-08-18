@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import Modal from '../../../components/Modal'
 import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs } from '../../../utils/bsCalendar'
@@ -247,8 +248,8 @@ export default function Advances() {
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                     {a.installment_amount ? fmt(a.installment_amount) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                   </td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-green)' }}>{fmt(repaid)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600, color: outstanding > 0 ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{fmt(repaid)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600, color: outstanding > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                     {fmt(outstanding)}
                   </td>
                   <td style={{ color: 'var(--theme-text3)', fontSize: 12, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -287,14 +288,14 @@ export default function Advances() {
                     onClick={() => { setRepayForm({ ...EMPTY_REPAY, amount: selectedAdv.installment_amount || '' }); setError(''); setShowRepay(true) }}>
                     + Record Repayment
                   </button>
-                  <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-green)' }}
+                  <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-green-text)' }}
                     onClick={() => setSettleTarget(selectedAdv)}>
                     ✓ Settle
                   </button>
                 </>
               )}
               {(repayMap[selectedAdv.id]?.rows || []).length === 0 && (
-                <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red)' }}
+                <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}
                   onClick={() => handleDelete(selectedAdv.id)}>
                   Delete
                 </button>
@@ -336,7 +337,7 @@ export default function Advances() {
                   {selectedReps.map(r => (
                     <tr key={r.id}>
                       <td>{fmtD(r.repaid_date)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-green)', fontWeight: 600 }}>NPR {fmt(r.amount)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontWeight: 600 }}>NPR {fmt(r.amount)}</td>
                       <td style={{ color: 'var(--theme-text3)' }}>{r.notes || '—'}</td>
                     </tr>
                   ))}
@@ -349,13 +350,13 @@ export default function Advances() {
 
       {/* Add Advance/Loan modal */}
       {showAdd && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 480, padding: 28, display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h3 style={{ margin: 0, fontSize: 16, color: 'var(--theme-text1)' }}>Issue Advance / Loan</h3>
+        <Modal onClose={() => { setShowAdd(false); setError('') }} title="Issue Advance / Loan" maxWidth={480}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
             <div>
-              <label style={lbl}>Employee</label>
+              <label style={lbl} htmlFor="adv-employee">Employee</label>
               <SearchableSelect
+                id="adv-employee"
                 options={employees.filter(e => e.status === 'active' || e.status === 'probation').map(e => ({ value: e.id, label: `${e.full_name}${e.employee_code ? ` (${e.employee_code})` : ''}` }))}
                 value={addForm.employee_id}
                 onChange={v => setAdd('employee_id', v)}
@@ -365,46 +366,46 @@ export default function Advances() {
 
             <div style={{ display: 'flex', gap: 12 }}>
               <div style={{ flex: 1 }}>
-                <label style={lbl}>Type</label>
-                <select className="form-select" value={addForm.type} onChange={e => setAdd('type', e.target.value)}>
+                <label style={lbl} htmlFor="adv-type">Type</label>
+                <select id="adv-type" className="form-select" value={addForm.type} onChange={e => setAdd('type', e.target.value)}>
                   <option value="advance">Advance (short-term)</option>
                   <option value="loan">Loan (multi-month)</option>
                 </select>
               </div>
               <div style={{ flex: 1 }}>
-                <label style={lbl}>Issued Date (BS)</label>
-                <BsCalendarPicker value={addForm.issued_date} onChange={v => setAdd('issued_date', v)} placeholder="Select date" clearable />
+                <label style={lbl} htmlFor="adv-issued-date">Issued Date (BS)</label>
+                <BsCalendarPicker id="adv-issued-date" value={addForm.issued_date} onChange={v => setAdd('issued_date', v)} placeholder="Select date" clearable />
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: 12 }}>
               <div style={{ flex: 1 }}>
-                <label style={lbl}><Tip text="Total amount issued to the employee." width={200}>Amount (NPR)</Tip></label>
-                <input style={inp} type="number" min="1" placeholder="e.g. 20000" value={addForm.amount} onChange={e => setAdd('amount', e.target.value)} />
+                <label style={lbl} htmlFor="adv-amount"><Tip text="Total amount issued to the employee." width={200}>Amount (NPR)</Tip></label>
+                <input id="adv-amount" style={inp} type="number" min="1" placeholder="e.g. 20000" value={addForm.amount} onChange={e => setAdd('amount', e.target.value)} />
               </div>
               <div style={{ flex: 1 }}>
-                <label style={lbl}><Tip text="Monthly deduction amount. Shows in the detail panel as a reminder during payroll." width={240}>Installment / Month (NPR)</Tip></label>
-                <input style={inp} type="number" min="0" placeholder="e.g. 5000" value={addForm.installment_amount} onChange={e => setAdd('installment_amount', e.target.value)} />
+                <label style={lbl} htmlFor="adv-installment"><Tip text="Monthly deduction amount. Shows in the detail panel as a reminder during payroll." width={240}>Installment / Month (NPR)</Tip></label>
+                <input id="adv-installment" style={inp} type="number" min="0" placeholder="e.g. 5000" value={addForm.installment_amount} onChange={e => setAdd('installment_amount', e.target.value)} />
               </div>
             </div>
 
             <div>
-              <label style={lbl}>Purpose</label>
-              <input style={inp} placeholder="e.g. Medical emergency, festival advance…" value={addForm.purpose} onChange={e => setAdd('purpose', e.target.value)} />
+              <label style={lbl} htmlFor="adv-purpose">Purpose</label>
+              <input id="adv-purpose" style={inp} placeholder="e.g. Medical emergency, festival advance…" value={addForm.purpose} onChange={e => setAdd('purpose', e.target.value)} />
             </div>
 
             <div>
-              <label style={lbl}>Notes</label>
-              <textarea style={{ ...inp, height: 60, resize: 'vertical' }} placeholder="Optional internal notes" value={addForm.notes} onChange={e => setAdd('notes', e.target.value)} />
+              <label style={lbl} htmlFor="adv-notes">Notes</label>
+              <textarea id="adv-notes" style={{ ...inp, height: 60, resize: 'vertical' }} placeholder="Optional internal notes" value={addForm.notes} onChange={e => setAdd('notes', e.target.value)} />
             </div>
 
-            {error && <div style={{ fontSize: 12, color: 'var(--theme-red)' }}>{error}</div>}
+            {error && <div role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => { setShowAdd(false); setError('') }}>Cancel</button>
               <button className="btn btn-primary" onClick={handleAdd} disabled={saving}>{saving ? 'Saving…' : 'Issue'}</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Record Repayment modal */}
