@@ -214,8 +214,10 @@ export default function AdminClients() {
           <p className="page-subtitle">{clients.length} propert{clients.length !== 1 ? 'ies' : 'y'} on the platform</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label htmlFor="clients-search" className="sr-only">Search clients</label>
           <input
-            type="text" value={search} onChange={e => setSearch(e.target.value)}
+            id="clients-search"
+            type="search" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search clients…" className="form-select" style={{ maxWidth: 220 }}
           />
           <button className="btn btn-primary" onClick={() => { setShowNewForm(true); setFormError('') }}>+ New Client</button>
@@ -244,7 +246,7 @@ export default function AdminClients() {
               <input id="adm-new-phone" value={newForm.contact_phone} onChange={e => setNewForm({ ...newForm, contact_phone: e.target.value })} placeholder="98XXXXXXXX" />
             </div>
           </div>
-          {formError && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{formError}</p>}
+          {formError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{formError}</p>}
           <div className="form-actions">
             <button className="btn btn-ghost" onClick={() => { setShowNewForm(false); setNewForm(EMPTY_CLIENT_FORM) }}>Cancel</button>
             <button className="btn btn-primary" onClick={createClient} disabled={saving}>{saving ? 'Creating…' : 'Create Client'}</button>
@@ -262,7 +264,7 @@ export default function AdminClients() {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
         }} role="status">
           <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            <strong style={{ color: autoBackup.blocked ? 'var(--theme-amber)' : 'var(--theme-green)', fontSize: 13 }}>
+            <strong style={{ color: autoBackup.blocked ? 'var(--theme-amber-text)' : 'var(--theme-green-text)', fontSize: 13 }}>
               {autoBackup.blocked
                 ? `🗂 ${autoBackup.pending.length} trial account${autoBackup.pending.length !== 1 ? 's' : ''} near the purge deadline need a backup`
                 : autoBackup.busy ? '🗂 Backing up…' : '🗂 Pre-purge backup pending'}
@@ -293,7 +295,7 @@ export default function AdminClients() {
             <div style={{ background: 'rgba(248,113,113,0.10)', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
               <span style={{ fontSize: 18 }}>🧪</span>
               <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-red)', letterSpacing: 0.3 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-red-text)', letterSpacing: 0.3 }}>
                   Trial Accounts
                   <span style={{ marginLeft: 8, background: 'rgba(248,113,113,0.18)', color: 'var(--theme-red-text)', borderRadius: 'var(--radius-md)', padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
                 </div>
@@ -343,17 +345,17 @@ export default function AdminClients() {
                           </span>
                         )}
                         {expired
-                          ? <span style={{ color: 'var(--theme-red)', fontWeight: 600 }}>
+                          ? <span style={{ color: 'var(--theme-red-text)', fontWeight: 600 }}>
                               · Trial expired{purgeDays != null && purgeDays > 0 ? ` · data purge in ${purgeDays}d` : ' · purge imminent'}
                             </span>
                           : daysLeft != null
-                            ? <span style={{ color: daysLeft <= 2 ? 'var(--theme-amber)' : 'var(--theme-text2)' }}>
+                            ? <span style={{ color: daysLeft <= 2 ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>
                                 · {daysLeft === 0 ? 'Expires today' : `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`}
                               </span>
                             : ''}
                         {c.contact_phone && (
                           <span style={{ marginLeft: 8, color: 'var(--theme-text3)' }}>
-                            · 📱 <a href={`https://wa.me/977${c.contact_phone.replace(/^0/, '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--theme-green)', textDecoration: 'none' }}>{c.contact_phone}</a>
+                            · 📱 <a href={`https://wa.me/977${c.contact_phone.replace(/^0/, '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--theme-green-text)', textDecoration: 'none' }}>{c.contact_phone}</a>
                           </span>
                         )}
                       </div>
@@ -384,7 +386,7 @@ export default function AdminClients() {
                       </button>
                       <button
                         className="btn btn-ghost"
-                        style={{ fontSize: 11, padding: '4px 8px', color: 'var(--theme-red)' }}
+                        style={{ fontSize: 11, padding: '4px 8px', color: 'var(--theme-red-text)' }}
                         onClick={() => setActiveDrawer(c)}>
                         Manage
                       </button>
@@ -419,7 +421,7 @@ export default function AdminClients() {
           return (
             <div className="card">
               <div className="empty-state">
-                <p className="empty-state-text">No clients match "{search}".</p>
+                <p className="empty-state-text">{search.trim() ? <>No clients match “{search.trim()}”.</> : 'No regular clients yet — everyone on the platform is still in the Trial Accounts panel above.'}</p>
               </div>
             </div>
           )

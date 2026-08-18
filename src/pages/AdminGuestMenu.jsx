@@ -6,13 +6,15 @@ import { supabase } from '../supabaseClient'
 // /pos/menu/:tableId) without needing to scan a printed QR code or ask the client for one.
 // Embeds the exact same public, unauthenticated route a guest's phone would load — no separate
 // preview-only component to keep in sync, so it's always byte-for-byte what a guest actually sees,
-// including live guest ordering if that client has the Pro-tier guest_ordering flag on.
+// including live guest ordering if that client has the guest_ordering flag on (a POS-module
+// feature since the S548 retier — it is not gated by any IMS tier).
 export default function AdminGuestMenu() {
   const { adminViewClientId } = useAuth()
   const [clientName, setClientName] = useState('')
   const [tables, setTables] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState('')
 
   useEffect(() => {
     if (!adminViewClientId) { setTables([]); setClientName(''); setLoading(false); return }
@@ -66,16 +68,26 @@ export default function AdminGuestMenu() {
           <h1 className="page-title">Guest Menu Preview — {clientName}</h1>
           <p className="page-subtitle">The exact live page a guest sees after scanning this table's QR code.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select className="form-select" value={selectedId} onChange={e => setSelectedId(e.target.value)}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label htmlFor="guest-menu-table" className="sr-only">Table to preview</label>
+          <select id="guest-menu-table" className="form-select" value={selectedId} onChange={e => setSelectedId(e.target.value)}>
             {tables.map(t => <option key={t.id} value={t.id}>{t.name}{t.section ? ` · ${t.section}` : ''}</option>)}
           </select>
-          <button className="btn btn-ghost" onClick={() => navigator.clipboard.writeText(url)}>Copy Link</button>
+          {/* Feedback both ways — the bare writeText() call gave no signal on success and
+              swallowed its own rejection, so a denied clipboard permission meant pasting stale
+              clipboard content into a client email with nothing on screen to warn (S574). */}
+          <button className="btn btn-ghost" onClick={() => {
+            navigator.clipboard.writeText(url)
+              .then(() => setCopied('ok'))
+              .catch(() => setCopied('fail'))
+            setTimeout(() => setCopied(''), 2500)
+          }}>{copied === 'ok' ? '✓ Copied' : copied === 'fail' ? 'Copy failed — copy from the address bar' : 'Copy Link'}</button>
+          <span role="status" className="sr-only">{copied === 'ok' ? 'Link copied' : copied === 'fail' ? 'Copy failed' : ''}</span>
           <a className="btn btn-ghost" href={url} target="_blank" rel="noopener noreferrer">Open in New Tab ↗</a>
         </div>
       </div>
 
-      <div className="card" style={{ padding: '10px 16px', marginBottom: 14, borderLeft: '3px solid var(--theme-amber)', fontSize: 12, color: 'var(--theme-text2)' }}>
+      <div className="card" style={{ padding: '10px 16px', marginBottom: 14, background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.25)', fontSize: 12, color: 'var(--theme-text2)' }}>
         ⚠ This is the real, live guest menu for {clientName} — if guest ordering is enabled and you place an order below, it creates a genuine pending order their staff will see in POS Orders. Preview only; avoid submitting a test order unless the client knows to expect it.
       </div>
 

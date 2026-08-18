@@ -7,7 +7,6 @@
 // place ahead of the risk, not a race against it. When a purge is eventually built it must gate
 // on clients.last_backup_at rather than on this having fired at the right moment.
 import { useEffect, useRef, useState } from 'react'
-import { supabase } from '../../../supabaseClient'
 import { runBackup } from './runBackup'
 import { ensureBackupDirectory } from './backupDirectory'
 
@@ -88,9 +87,7 @@ export async function refreshBackupPermission() {
   return state
 }
 
-// Used by AdminClients to refresh its own list after a background backup stamps last_backup_at.
-export async function reloadClientBackupStamps(ids) {
-  if (!ids?.length) return {}
-  const { data } = await supabase.from('clients').select('id, last_backup_at').in('id', ids)
-  return Object.fromEntries((data || []).map(c => [c.id, c.last_backup_at]))
-}
+// reloadClientBackupStamps was deleted here (S574): its comment claimed AdminClients used it,
+// but the refresh actually goes through the hook's onDone callback (loadClients re-reads the
+// whole list) and a grep found zero importers — the same dead-code-with-a-live-comment shape
+// as shared/constants/shiftTypes.js.

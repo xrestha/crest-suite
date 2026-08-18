@@ -1132,7 +1132,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       {pinAccounts.map(a => (
                         <tr key={a.id}>
                           <td>{a.full_name || '—'}</td>
-                          <td><span className="badge-yellow">{a.kind}</span></td>
+                          <td><span className="badge badge-yellow">{a.kind}</span></td>
                           <td style={{ fontFamily: 'monospace', fontSize: 14, letterSpacing: '0.12em' }}>
                             {revealedPins[a.id] ? revealedPins[a.id] : '••••'}
                           </td>
@@ -1278,7 +1278,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     <option value="">No group (single outlet)</option>
                     {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                   </select>
+                  <label htmlFor="new-group-name" className="sr-only">New group name</label>
                   <input
+                    id="new-group-name"
                     value={newGroupName}
                     onChange={e => setNewGroupName(e.target.value)}
                     placeholder="or create a new group…"
