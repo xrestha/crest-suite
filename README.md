@@ -348,6 +348,34 @@ staff deliberately *not* excluded since they are the accounts whose removals it 
 RPC runs as INVOKER. `authenticated` gets SELECT and INSERT only: an audit record a till session
 can rewrite is not an audit record.
 
+**Smoke-tested live 2026-08-19 against the BHATTI CHOILA test client, and it found a bug.** The
+KOT-pull prompt was rendered in the FLOOR VIEW return while `setQty` only ever runs on the ORDER
+SCREEN, so pressing × on an already-fired item did nothing visible at all — state set, removal
+correctly blocked, no dialog anywhere. It compiled, passed every scan, and was invisible to all of
+them; only pressing the button found it. Fixed and re-verified. What the pass confirmed, driven
+from a real POS PIN session (`tulki`, Supervisor, 10% cap, Allow Void off):
+
+- **The guard refuses the exact attack the critique described.** A direct `PATCH
+  /rest/v1/pos_orders?id=eq.<uuid>` from the till's own session, no UI involved:
+  `{"close_type":"void"}` → **403**, *"this account is not permitted to void a bill"*; a 30%
+  discount (NPR 78 on a 260 subtotal) → **403**, *"exceeds this account's cap (10 percent of the
+  260.00 subtotal, i.e. at most 26.01)"*; a 10% discount → **200**, so legitimate discounts still
+  pass. The UI and the server now agree — the Void tab is also correctly absent for that account.
+- **An ordinary bill still closes**, which was the real regression risk from `closeOrder` now
+  persisting the cart first: invoice #12 assigned, `ims_posted_at` stamped, and the stored lines
+  matched both the printed bill and the `sales_entries` row — the divergence that change closes.
+- **The removal record works end to end**: prompt names the item and quantity, Remove stays
+  disabled until a reason is chosen, `pos_kot_removals` gets the row, and KOT Log → Pulled Items
+  renders it with the staff member's name resolved.
+- **The converted modals behave**: Reset PIN, Covers and the billing modal all report
+  `role="dialog"` with a real accessible name (the billing one `aria-label="Take payment"` at
+  zIndex 1100, above the order screen), and focus moves in on open.
+- Setting a Discount % left the staff member's Role intact — the S517 conditional-write fix holds.
+
+One retraction: the header briefly read "Viewing as admin" during a PIN session, which looked like
+a leak. It was leftover admin state in the same browser profile; a clean PIN login shows the
+correct header. Not a bug.
+
 **All manual steps cleared the same session.** Both migrations applied in the Supabase SQL Editor
 and `admin-user-ops` deployed, in that order — which was the one thing that mattered here, since
 the function's new `pos_kot_removals` delete throws if the table does not exist and `del()` aborts
