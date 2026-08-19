@@ -109,7 +109,7 @@ export const IMS_GUIDE_GROUPS = [
           'The master ingredient list — every purchasable/stockable item, its purchase rate, base unit of measure, optional bulk-purchase-unit conversion, and trim/yield loss %. Nearly everything else in the module (Purchases, Recipe Costing, Stock Count, Requisitions) draws from this list.',
         workflow: [
           'If no categories exist yet, a "Load Default Categories" button seeds 7 standard ones (Dairy & Bakery, Meats & Poultry, Groceries, Veg & Fruits, Beverage, Misc. Items).',
-          'Add/Edit via a 2-tab modal: Details (name, category, Yield %, UOM, Purchase Qty, Rate, or an optional "Total (NPR)" field that back-solves Rate) and Conversion (Purchase Unit / Base Unit / Conversion Factor).',
+          'Add/Edit via a 2-tab modal: Details (name, category, Yield %, UOM, Purchase Qty, Rate, or an optional "Price per unit (NPR)" field that computes Rate as per-unit × Purchase Qty) and Conversion (Purchase Unit / Base Unit / Conversion Factor).',
           'List view: search, category tabs, a "Used In" usage-badge filter (Recipes/Purchases/Stock/Unused), and a "With Conversion" sort toggle.',
           'Delete is blocked with an explanation if the item is referenced anywhere across 8 tables — unless you\'re admin, in which case a force-delete option cascades the delete across all of them.',
           '"Hide"/"Show" toggles is_active instead of deleting — inactive items disappear from pickers but their history stays intact. Prefer this over delete in almost every real case.',
@@ -118,7 +118,7 @@ export const IMS_GUIDE_GROUPS = [
           { label: 'Yield %', desc: 'Usable percentage after trim/prep/cook loss (whole chicken ≈70%, spinach ≈60%, onion ≈85%). Default 100 = no loss. Factors into recipe costing (you must buy more than you serve) but NOT into nutrition (the diner eats exactly what\'s in the recipe).' },
           { label: 'Purchase Qty / Rate', desc: 'Stored so that Rate ÷ Purchase Qty = per-base-unit cost (per_uom_rate) — the generated field every downstream calculation actually reads.' },
           { label: 'Conversion (Purchase Unit / Base Unit / Conversion Factor)', desc: 'Set only when you buy in one unit (e.g. CTN) but track in another (e.g. BTL). All three fields are required together or not at all — a partial conversion is rejected at save.' },
-          { label: '"Total (NPR)" field', desc: 'Type the total amount paid instead of a per-unit rate; Rate is back-computed as Total ÷ Purchase Qty.' },
+          { label: '"Price per unit (NPR)" field', desc: 'Type the cost of ONE base unit instead of the whole pack; Rate is computed as per-unit × Purchase Qty. Changing Purchase Qty afterwards re-scales Rate from this entered per-unit price rather than leaving a stale pack rate behind. (This replaced an older "Total (NPR)" box that divided instead of multiplying — any item entered through that box carried a per-unit rate Purchase-Qty× too small, mispricing it in every valuation at once.)' },
           { label: 'Clear All Conversions (admin)', desc: 'Bulk-resets every item\'s conversion setup to none — an undo-everything button, use with care.' },
         ],
         formulas: [
@@ -126,6 +126,7 @@ export const IMS_GUIDE_GROUPS = [
           'Conversion preview: 1 {purchase_unit} = {conversion_factor} {base_unit}; per-base-unit cost = rate ÷ conversion_factor.',
         ],
         gotchas: [
+          'Rate (NPR) is the price of the whole Purchase Qty pack, never of one base unit — a 1 KG bag tracked as 1000 GM and costing NPR 500 is Purchase Qty 1000, Rate 500, per_uom_rate 0.50. A sub-paisa per_uom_rate is legitimate (a PCS item bought by the 1000) and displays with up to 6 decimals rather than a misleading flat 0.00.',
           'Item names are always upper-cased on save.',
           'A category literally named "Sub-Recipes" is reserved and excluded from this page\'s category list — it\'s managed automatically by Recipe Costing\'s sub-recipe mirroring, not editable here.',
           'The "Used In" reference check is scoped to the client\'s own item IDs specifically because several referencing tables aren\'t directly client_id-scoped — an earlier unscoped version of this check was a real cross-tenant data leak risk for admins in "view as client" mode. Don\'t simplify this back to a raw client_id filter.',
@@ -299,7 +300,7 @@ export const IMS_GUIDE_GROUPS = [
         gotchas: [
           'Wastage/staff-meal saves are delete-then-insert (two round trips), unlike opening/closing\'s atomic upsert — a per-cell save lock serializes concurrent autosave-vs-Save-All/Clear-All so the delete/insert pairs can never interleave into duplicate, double-counted rows.',
           'A closing_stock row can exist with a NULL physical_qty (an aborted save) — always treat this as 0, never NaN, or the item silently drops out of Reorder/Variance math.',
-          'The Summary tab\'s header text for the COGS formula omits "− Returns," but the actual calculation does subtract returns — the label is slightly out of sync with the real math; trust the formula above, not the on-screen wording.',
+          'Items with no category (or a stale category id) appear in an "Uncategorised" group on the Summary tab, rendered only when it actually holds something. Before that group existed, such items silently dropped out of the category rollup\'s Totals while still appearing in the item table below — so if the two Summary tables ever look like they disagree, check for uncategorised items first.',
           'Offline mode queues edits locally and replays them on reconnect — a "N pending" badge shows queued writes that haven\'t synced yet.',
           'The automatic carry-forward is a one-time snapshot taken at the instant the period is closed — it is not a live link. If the closing count was not fully saved at that moment (the common real-world case: the month gets closed first and physically counted afterwards), the new period\'s Opening Stock is left blank and nothing re-triggers it on its own. This is the single most likely cause of a "my opening stock is empty even though I counted last month" report; the fix is the "↩ Pull from last month" button on the Opening Stock tab, which is safe to run at any point.',
           'Only items with a counted closing quantity carry forward. An item with no closing_stock row is not carried at all — identical to never having entered it manually, not a zero.',
@@ -384,6 +385,7 @@ export const IMS_GUIDE_GROUPS = [
           'POS-only clients (no IMS): no Item Master exists, so this page is the only place to create a menu item at all — columns are On POS toggle, Item, a manually-entered Cost Price (used only to value comps), and Price (VAT-inclusive).',
           'IMS clients: full food-cost table — Food Cost is computed from real ingredients (same recursive engine as Recipe Costing), plus Current Price, FC % (color-coded), a New Price (incl. VAT) input, live New FC % preview, and NPR Change. A "↻ Refresh Costs" button recomputes every recipe\'s cost from current Item Master rates.',
           'Both branches: type a new VAT-inclusive price and press Enter to save; toggle On POS to control order-screen visibility (also how staff "86" an item that\'s run out); click Pair to save cross-sell suggestions shown on the POS order screen.',
+          '🖨 Print and ⬇ Excel both export the table exactly as filtered on screen (the active category tab). Both deliberately leave New Price BLANK: the printed sheet\'s New Price boxes come out as empty ruled boxes to price by hand with a pen, and the Excel has an empty New Price column for the same send-it-out-get-prices-back round trip over email.',
         ],
         fields: [
           { label: 'On POS toggle', desc: 'Controls recipes.pos_enabled — whether the item appears on the POS order screen, and the mechanism staff use to temporarily disable a sold-out item.' },
@@ -588,7 +590,7 @@ export const IMS_GUIDE_GROUPS = [
         id: 'stock-report',
         title: 'Stock Report',
         route: '/stock-report',
-        plan: 'Starter+',
+        plan: 'Growth+',
         summary: 'Current on-hand quantity and NPR valuation per item for a selected period, with low/out-of-stock flags.',
         workflow: [
           'Select period. Filter by category/status (All/Low/Out/OK). Each row shows a Source badge: Physical (a real closing count exists) vs Theor. (calculated, less reliable).',
@@ -600,6 +602,7 @@ export const IMS_GUIDE_GROUPS = [
           'Status: Out if on-hand ≤0; Low if par>0 and on-hand ≤ par; else OK.',
         ],
         gotchas: [
+          'This report is Growth, not Starter, on purpose: its On-hand figure subtracts recipe-explosion usage, and recipes don\'t exist on Starter — so on Starter, stock only ever grew and the Low/Out status column could never fire. Clients who had it on Starter before the move were grandfathered via a feature_flags override.',
           'A negative theoretical result (usage/wastage exceeds recorded purchases+opening — usually a data-entry problem) triggers a warning banner and is clamped to 0 for display, with a ⚠ marker on the affected rows.',
           'Requisitioned qty (issued status only) is subtracted from theoretical on-hand here — a subtlety not present in every other stock page.',
         ],
@@ -734,14 +737,15 @@ export const IMS_GUIDE_GROUPS = [
         plan: 'Growth+',
         summary: '"The money report" — compares actual ingredient usage (from stock movement math) against theoretical usage (recipes × sales) and flags over/under variance.',
         workflow: [
-          'Select period. Filter by category and flag (Over/Under/OK). An in-app banner explains what Theoretical vs Actual and Over/Under mean.',
+          'Defaults to the most recent CLOSED period — closing stock is counted at month end, so an open month structurally cannot show a real variance yet (with no closing count, "actual used" would be everything on hand plus everything bought). Selecting an open period anyway shows a count-missing notice and renders the figures neutral and unflagged rather than painting a false red loss.',
+          'Filter by category and flag (Over/Under/OK). An in-app banner explains what Theoretical vs Actual and Over/Under mean.',
         ],
         fields: [],
         formulas: [
           'Actual Used = Opening + Net Purchased − Closing − Wastage − Staff Meals.',
           'Theoretical Used = Σ over sold recipes of (qty sold × exploded ingredient qty), recursive through sub-recipes with yield adjustment.',
           'Variance = Actual − Theoretical. Variance % = Variance ÷ Theoretical × 100. Value = Variance × per_uom_rate.',
-          'Flag: Over if Variance% >10; Under if <−10; else OK. Special case: Theoretical=0 but Actual>0 → forced Over (no recipe data explains any consumption at all).',
+          'Flag: Over/Under when |Variance%| exceeds the client\'s Variance Flag threshold (Settings → Thresholds, default 10%); else OK. Special case: Theoretical=0 but Actual>0 → forced Over (no recipe data explains any consumption at all).',
         ],
         gotchas: [
           'This uses the shared explodeRecipeIngredients() utility. Theoretical Variance (below) reimplements the same recursion locally in its own file — the two pages CAN disagree if the two code paths ever drift, since a fix to one doesn\'t automatically apply to the other. Worth checking both if a client disputes a variance number.',
@@ -1069,6 +1073,36 @@ export const IMS_GUIDE_GROUPS = [
         connections: 'Overlaps conceptually with Outstanding Payables (bill status/aging) and VAT Report (discount-VAT proration), both independently implemented here rather than shared — a good report to present first when introducing vendor analytics, with Payment Summary, Outstanding Payables, and VAT/Non-VAT as narrower cuts of the same underlying data.',
       },
       {
+        id: 'supplier-contribution',
+        title: 'Supplier Contribution',
+        route: '/supplier-contribution',
+        plan: 'Pro · Manager-tier only',
+        summary:
+          'Which suppliers this period\'s sales actually depended on. Items carry no vendor column in Crest (a supplier only ever exists on a purchase line), so a direct "sales by supplier" report is impossible — instead this derives it: what sold, exploded into raw ingredients and valued at per-unit rates, then split across the vendors that supplied each ingredient this period, in proportion to net spend with each. Built for supplier-concentration risk: how much of your menu one delivery failure can take off.',
+        workflow: [
+          'Select period — defaults to the OPEN period, deliberately unlike Variance/Shrinkage: nothing here subtracts a closing count, so an open month gives a truthful partial-month answer rather than a structurally impossible one.',
+          'KPI strip: Attributed Cost of Sales, supplier count, Top Supplier Share (turns amber at ≥50% — the concentration-risk headline), and Not Attributed.',
+          'One row per supplier that either fed what you sold OR was bought from this period — a vendor you bought from and used nothing of is exactly as interesting as the reverse. Click a row to expand its per-item and per-recipe breakdown.',
+          '🖨 Print and Export Excel output the summary table as shown.',
+        ],
+        fields: [
+          { label: 'Cost of Sales vs Net Purchases (and Δ)', desc: 'Cost of Sales is the supplier\'s share of the ingredient cost behind what sold; Net Purchases is what you actually spent with them (same figure Vendor Report calls Net Spend). The Δ column is the gap in percentage points — a large positive Δ means you depend on that supplier more than the purchase ledger suggests.' },
+          { label: 'Not attributed', desc: 'Ingredients your sales consumed that you bought from nobody this period — usually stock purchased in an earlier month. Ordinary, not an error; shown as its own row so attributed + unattributed always equals total consumption instead of a believable-but-short total.' },
+          { label: 'No vendor recorded', desc: 'Consumption traced to purchases whose bills were entered without a vendor — fixable data entry, unlike Not attributed.' },
+        ],
+        formulas: [
+          'Consumed (per item) = Σ over sold recipes of (qty sold × exploded ingredient qty) × per_uom_rate — recursive through sub-recipes, so only raw bottom-of-tree items (the only things a vendor ever supplied) appear.',
+          'Supplier share of an item = that supplier\'s net spend on the item ÷ all suppliers\' net spend on it this period (positive parts only — a return larger than the period\'s purchases can\'t produce a negative share).',
+          'Net spend = gross − bill discount (deduped by bill, allocated across the bill\'s lines proportionally) − returns — the same definition as Vendor Report\'s Net Spend, so the two pages\' vendor totals tie out.',
+        ],
+        gotchas: [
+          'The consumption figure is RECIPE-THEORETICAL (what the sold dishes should have used), not the actual COGS from the physical count — the same distinction Variance draws, stated on the page itself.',
+          'Wastage and staff meals are deliberately excluded — this is the cost of what was SOLD. Complimentary items ARE included: the food still came out of a supplier\'s delivery.',
+          'POS-synced and manual bulk sales for the same period are deduplicated through the shared POS-supersedes-manual rule (same as Stock Movements) — the dishes are never double-counted.',
+        ],
+        connections: 'Shares its net-spend definition with Vendor Report (verify against its Net Spend if a figure is disputed), its recipe explosion with Variance/Recipe Costing, and its sales-source dedup rule with Stock Movements. Reads sales_entries, purchase_entries, vendor_returns, items, recipes.',
+      },
+      {
         id: 'vendor-balance-confirmation',
         title: 'Vendor Balance Confirmation',
         route: '/vendor-balance-confirmation',
@@ -1089,7 +1123,7 @@ export const IMS_GUIDE_GROUPS = [
           'A return against a bill is walked chronologically through calcBillTotals from that bill\'s gross total, so Purchase (gross) + Return (VAT-adjusted) always sums to exactly what a single netted line would have shown — nothing lost, just not hidden the way a netted figure would hide it.',
         ],
         gotchas: [
-          'This report deliberately uses its own local billKeyOf/aging logic rather than the shared purchasesHelpers.js version Outstanding Payables uses — it is single-fiscal-year-scoped by construction, and pointing it at the cross-period-safe shared helper would silently misgroup bills across year boundaries instead of simplifying anything.',
+          'Bill grouping here uses the shared cross-period-safe billKeyOf from purchasesHelpers.js (same as Outstanding Payables) — a fiscal year spans many periods, so it needs the cross-period key. Vendor Report deliberately keeps its own single-period-scoped local copy instead; don\'t "unify" the two, since pointing a single-period report at the cross-period key (or vice versa) silently misgroups bills.',
           'If a bill shows a stray sub-paisa balance even after being marked fully paid elsewhere, the cause can be in three different layers (this report\'s own rounding, Outstanding Payables\' payment-allocation rounding, or unrounded per-line rates) — check all three independently rather than assuming one fix covers it, see Outstanding Payables\' own gotchas for the same underlying issue.',
         ],
         connections: 'Reads the same purchase_entries/vendor_returns/payable_payments tables as Outstanding Payables and Vendor Report, but scoped to one vendor and one BS fiscal year rather than a period or a live snapshot.',
