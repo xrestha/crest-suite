@@ -102,7 +102,7 @@ enforced, and derives `client_id` from the order rather than taking it as a para
   as its own Expected Cash line and the frozen `closing_report`. Exactly one definition; a local
   formula in `buildShiftSlipHtml` is how it broke last time.
 
-## Server-side enforcement of the close (S576)
+## Server-side enforcement of the close (S577)
 
 `pos_orders_client` is a plain same-client `FOR ALL` policy, so a Staff-rank till JWT holds UPDATE
 on every one of its own client's orders — and the discount cap and the void permission were both
@@ -132,7 +132,7 @@ Three things to know before touching it:
   trigger: `writeSalesEntries` posts revenue from the in-memory cart, so an unsaved line was
   already reaching IMS revenue and the printed bill while never existing in `pos_order_items`.
 
-## Pulling an already-fired item is now on the record (S576)
+## Pulling an already-fired item is now on the record (S577)
 
 `save_pos_order_items` replaces an order's lines wholesale, so a line carrying `sent_to_kot` simply
 ceased to exist on the next save: food cooked, ticket printed, line gone from the bill and from
@@ -149,7 +149,7 @@ name against it.
   cannot remove a fired line without producing the record, whatever it sends.
 - The browser contributes **only the reason** (`p_removal_reason`), which the RPC has no way to
   invent. A missing reason renders as `none given` rather than hiding the row — that is what an
-  offline sync, or a till on a pre-S576 bundle, honestly looks like.
+  offline sync, or a till on a pre-S577 bundle, honestly looks like.
 - The **offline replay** was moved onto the same RPC. It was still delete-then-insert, which meant
   going offline was a way to pull a fired item leaving no trace — and it carried S573's
   non-atomic-save risk besides.
@@ -180,15 +180,37 @@ Note also that neither branch needs an explicit `zIndex` on a child dialog: the 
 `position: fixed` at 1000 and therefore its own stacking context, so a nested overlay at the default
 100 already paints above it. The billing modal's 1100 is belt-and-braces, not a requirement.
 
-## Verified live (S578 smoke test)
+## How to smoke-test any of these guards
 
-Driven from a real POS PIN session on a dummy client — **admin and Owner are exempt from
-`guard_pos_order_close()` by design, so an admin session proves nothing about it**. The definitive
-check is a direct `PATCH /rest/v1/pos_orders?id=eq.<uuid>` from the page's own session, which is the
-attack the guard exists to stop: `{"close_type":"void"}` → 403, a 30% discount → 403 naming the cap,
-a 10% discount → 200. An ordinary close still assigns an invoice, stamps `ims_posted_at`, and leaves
-`pos_order_items` matching the `sales_entries` row — the divergence `closeOrder`'s save-before-billing
-step closes.
+All three were exercised this way; do the same for the next one.
+
+**Admin and Owner are exempt from every one of them by design, so an admin session proves nothing.**
+Use a POS PIN account on a dummy client. The definitive check is not the UI — it is a request fired
+straight at PostgREST with that session's own token, which is precisely the attack the guard exists
+to stop. Read the anon key out of `/static/js/bundle.js` and the `access_token` out of
+`localStorage`, then `fetch` the REST endpoint directly.
+
+**Always include a control that must still succeed.** A guard that refuses everything looks
+identical to a guard that works, right up until order-taking breaks. The close guard's control was
+an ordinary bill closing; the comp guard's was a plain `{"notes": "..."}` edit on the very row whose
+comp columns had just been refused.
+
+**To test a RANK refusal you need the staff token while an admin changes that staff member's role.**
+Stash the JWT in `sessionStorage` first — it stays valid independently of the session that issued
+it, so one browser profile is enough. Restore the role afterwards and re-read the page to confirm it
+took, rather than trusting the change event.
+
+Results, all confirmed live on 2026-08-19:
+
+- **Close guard (S577)** — `{"close_type":"void"}` → 403; a 30% discount → 403 naming the cap; a 10%
+  discount → 200. An ordinary close still assigns an invoice, stamps `ims_posted_at`, and leaves
+  `pos_order_items` matching the `sales_entries` row.
+- **KOT-removal record (S577)** — the prompt names the item and quantity, Remove stays disabled
+  until a reason is chosen, and KOT Log → Pulled Items renders the row with the staff name resolved.
+- **Comp guard (S579)** — direct `PATCH {comped:true}` → 403, the same dressed with a forged
+  `comp_no`/`comped_by` → 403, an INSERT arriving already comped → 403, an ordinary `notes` edit →
+  200. The RPC called with `p_comped_by` set to a colleague's real uuid stored the **caller's** id
+  instead, and returned 403 once the account was demoted to Staff.
 
 ## Item-level comp is enforced server-side too (S579)
 
@@ -225,8 +247,9 @@ Two things to preserve if this is ever touched:
 
 Recorded so they aren't rediscovered from scratch:
 
-- Nothing. The three server-side items (discount cap, void, item comp) are all closed; what remains
-  on this page's beat is the offline/QR work blocked on merchant onboarding, tracked in
+- Nothing. All three server-side items (discount cap, void, item comp) are closed, applied and
+  smoke-tested; what remains on this page's beat is the payment-QR work blocked on FonePay/eSewa
+  merchant onboarding, which is a business relationship rather than engineering — tracked in
   `POS_TODO.md`.
 - ~~**The mechanical sweep.**~~ **Closed across S576–S578.** Labels: 0 bare `<label>` vs 54
   `htmlFor`, every `<select>` named. Colour: 117 base-signal-token `color:` sites converted, 0

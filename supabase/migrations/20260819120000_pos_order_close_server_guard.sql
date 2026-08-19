@@ -1,5 +1,5 @@
 -- ════════════════════════════════════════════════════════════════════════════════════════════
--- S576 — the POS discount cap and the void permission were enforced ONLY in the browser.
+-- S577 — the POS discount cap and the void permission were enforced ONLY in the browser.
 --
 -- `pos_orders_client` is a plain same-client `FOR ALL` policy, so a Staff-rank till JWT holds
 -- UPDATE on every one of its own client's orders. Everything that decides whether a till operator

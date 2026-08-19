@@ -1,5 +1,5 @@
 -- ════════════════════════════════════════════════════════════════════════════════════════════
--- S576 — an item already fired to the kitchen could be removed by any Staff-rank account with no
+-- S577 — an item already fired to the kitchen could be removed by any Staff-rank account with no
 -- permission, no reason, and no record that it ever existed.
 --
 -- save_pos_order_items() replaces an order's lines WHOLESALE (`DELETE ... ; INSERT ...`), which is

@@ -22,10 +22,13 @@ Last updated: 2026-08-19 (S579)
 - [ ] 🟡 `sales_entries`/`purchase_entries` hard-delete on edit (accepted risk — only matters near the NRs 5 crore certification tier; `pos_orders` itself never hard-deletes once billed, verified)
 - [ ] ⚪ Tier-1 software-certification legal question (needs an accountant's answer, not code)
 
-## B2. Till controls — enforced server-side (added S577)
+## B2. Till controls — enforced server-side (added S577, completed S579)
 
-Not from a competitor audit; these came out of the phase-6 critique of our own code, and both were
-the same shape: a rule the browser applied and the database did not.
+Not from a competitor audit; these came out of the phase-6 critique of our own code, and all three were
+the same shape: a rule the browser applied and the database did not. **All three are applied to
+the live DB and smoke-tested from a real POS PIN session (2026-08-19)** — method in
+`.claude/rules/pos-billing.md`; note that admin and Owner are exempt from every one of these guards
+by design, so an admin session proves nothing about them.
 
 - [x] ~~Discount cap + void permission enforced only in React~~ — shipped S577. `pos_orders_client`
   is a plain same-client `FOR ALL` policy, so a Staff-rank till JWT held UPDATE on every one of its
