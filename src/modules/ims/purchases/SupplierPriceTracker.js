@@ -22,6 +22,7 @@ export default function SupplierPriceTracker() {
   const [loading, setLoading]           = useState(true)
 
   const [selectedVendorId, setSelectedVendorId] = useState('all')
+  const [selectedPeriodId, setSelectedPeriodId] = useState('all')
   const [search, setSearch]             = useState('')
   const [filterTrend, setFilterTrend]   = useState('all')
   const [expandedItems, setExpandedItems] = useState({})
@@ -65,10 +66,20 @@ export default function SupplierPriceTracker() {
   const vendorMap = {}
   vendors.forEach(v => { vendorMap[v.id] = v })
 
+  const selectedPeriod = selectedPeriodId === 'all' ? null : periodMap[selectedPeriodId]
+  const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : 'All Months'
+
   function getPurchasesForVendor(vendorId) {
-    const relevant = vendorId === 'all'
+    // Month filter applies before grouping, so within a selected month the trend/change figures
+    // compare purchases inside that month only — an item bought once that month honestly shows
+    // "— —" rather than borrowing a prior month's rate. 'all' keeps the page's original
+    // full-history behaviour.
+    const inPeriod = selectedPeriodId === 'all'
       ? allPurchases
-      : allPurchases.filter(p => p.vendor_id === vendorId)
+      : allPurchases.filter(p => p.period_id === selectedPeriodId)
+    const relevant = vendorId === 'all'
+      ? inPeriod
+      : inPeriod.filter(p => p.vendor_id === vendorId)
     const byItem = {}
     relevant.forEach(pe => {
       const period = periodMap[pe.period_id]
@@ -205,7 +216,8 @@ export default function SupplierPriceTracker() {
       })
     })
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailRows), 'Purchase History')
-    XLSX.writeFile(wb, `PriceTracker_${vendorLabel}.xlsx`)
+    const periodSuffix = selectedPeriod ? `_${periodLabel.replace(/\s+/g, '_')}` : ''
+    XLSX.writeFile(wb, `PriceTracker_${vendorLabel}${periodSuffix}.xlsx`)
   }
 
   // ── Derived data for table ─────────────────────────────────────────────────
@@ -251,7 +263,7 @@ export default function SupplierPriceTracker() {
           <p className="page-subtitle">Purchase price history by vendor</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }} className="no-print">
-          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => printWithTitle(`Supplier Price Tracker - ${selectedVendorId === 'all' ? 'All Vendors' : (vendorMap[selectedVendorId]?.name || 'Vendor')}`)}>
+          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => printWithTitle(`Supplier Price Tracker - ${selectedVendorId === 'all' ? 'All Vendors' : (vendorMap[selectedVendorId]?.name || 'Vendor')}${selectedPeriod ? ` - ${periodLabel}` : ''}`)}>
             🖨 Print
           </button>
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}>
@@ -291,6 +303,19 @@ export default function SupplierPriceTracker() {
           })}
         </select>
 
+        <select aria-label="Filter by month"
+          className="form-select"
+          value={selectedPeriodId}
+          onChange={e => { setSelectedPeriodId(e.target.value); setExpandedItems({}) }}
+        >
+          <option value="all">All Months</option>
+          {[...periods].reverse().map(p => (
+            <option key={p.id} value={p.id}>
+              {BS_MONTHS[p.bs_month - 1]} {p.bs_year}{p.status === 'open' ? ' (open)' : ''}
+            </option>
+          ))}
+        </select>
+
         <input
           className="form-select" style={{ width: 200 }}
           placeholder="Search items…"
@@ -316,6 +341,7 @@ export default function SupplierPriceTracker() {
       <div className="print-only" style={{ marginBottom: 12 }}>
         <p style={{ fontSize: 13 }}>
           Vendor: <strong>{selectedVendorId === 'all' ? 'All Vendors' : vendorMap[selectedVendorId]?.name}</strong>
+          {selectedPeriod && <> &nbsp;·&nbsp; Month: <strong>{periodLabel}</strong></>}
           {filterTrend !== 'all' && <> &nbsp;·&nbsp; Trend: <strong>{filterTrend}</strong></>}
           {search && <> &nbsp;·&nbsp; Search: <strong>{search}</strong></>}
         </p>
@@ -329,8 +355,8 @@ export default function SupplierPriceTracker() {
             <p className="empty-state-text">
               {Object.keys(vendorPurchases).length === 0
                 ? selectedVendorId === 'all'
-                  ? 'No purchases recorded yet.'
-                  : `No purchases recorded from ${vendorMap[selectedVendorId]?.name} yet.`
+                  ? selectedPeriod ? `No purchases recorded in ${periodLabel}.` : 'No purchases recorded yet.'
+                  : `No purchases recorded from ${vendorMap[selectedVendorId]?.name}${selectedPeriod ? ` in ${periodLabel}` : ''} yet.`
                 : 'No items match the current filters.'}
             </p>
           </div>
@@ -346,7 +372,7 @@ export default function SupplierPriceTracker() {
                 <th>UOM</th>
                 <th style={{ textAlign: 'right' }}><Tip text="Current rate per UOM in the Item Master — what recipe costing uses. Gold ⚠ means it differs from last purchase by >5%." width={260}>Master Rate</Tip></th>
                 <th style={{ textAlign: 'right' }} className="no-print"><Tip text="Manually set a new master rate. Updates the Item Master and affects all recipe costs immediately." width={240}>Update Rate</Tip></th>
-                <th style={{ textAlign: 'right' }}><Tip text="Rate per UOM from the most recent purchase entry across all periods.">Last Rate</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text={selectedPeriod ? `Rate per UOM from the most recent purchase entry in ${periodLabel}.` : 'Rate per UOM from the most recent purchase entry across all periods.'}>Last Rate</Tip></th>
                 <th>Last Period</th>
                 <th><Tip text="Price direction vs. previous purchase: ↑ Rising (red), ↓ Falling (green), → Stable.">Trend</Tip></th>
                 <th style={{ textAlign: 'right' }}><Tip text="% change from the second-to-last purchase to the most recent one. Red = price increase." width={240}>Change %</Tip></th>

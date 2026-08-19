@@ -158,6 +158,22 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S585 — 2026-08-19 — Price Tracker gets a month selector
+
+A Month filter on `/supplier-prices`, defaulting to **All Months** so the page's original
+full-history behaviour is unchanged. Picking a BS month narrows the tracked purchases to that
+period — client-side, since the page already loads all history — and everything downstream
+follows: the vendor dropdown's per-vendor item counts, the rising counter, the Excel export
+(month lands in the filename), the print title and print-only header, and the empty state names
+the month. Trend semantics stay honest within a month: Trend/Change % compare purchases inside
+the selected month only, so an item bought once that month shows "— —" rather than borrowing a
+prior month's rate — and the Last Rate tooltip rewords itself to say which range it is reading.
+Changing the month collapses expanded history rows, same as changing the vendor. The IMS guide's
+Price Tracker section documents the new filter.
+
+**Files:** `src/modules/ims/purchases/SupplierPriceTracker.js`,
+`src/pages/settings/imsGuideData.js`, `public/service-worker.js` (v105 → v106), `README.md`
+
 ### S584 — 2026-08-19 — HR and POS get their own deep guides; the IMS guide brought current
 
 Two pieces, same beat: the Admin Settings → Guides tab.

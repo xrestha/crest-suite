@@ -1034,7 +1034,8 @@ export const IMS_GUIDE_GROUPS = [
         plan: 'Pro',
         summary: 'Tracks historical purchase rate per item per vendor over time, flags rising-price trends, and lets an admin update the Item Master\'s cost rate directly from observed purchase history.',
         workflow: [
-          'Filter by Vendor and item search, plus a Trend filter. Click a row to expand full purchase history. Inline-edit the Master Rate to write straight to Item Master — if the item is used in any recipes, a banner lists every affected recipe after saving.',
+          'Filter by Vendor, Month, item search, and Trend. Click a row to expand full purchase history. Inline-edit the Master Rate to write straight to Item Master — if the item is used in any recipes, a banner lists every affected recipe after saving.',
+          'The Month filter defaults to All Months (full history — the page\'s original behaviour). Picking one BS month narrows everything to purchases in that month: within it, Trend and Change % compare purchases inside the month only, so an item bought once that month shows "— —" rather than borrowing a prior month\'s rate. Print and Excel follow the filter.',
         ],
         fields: [
           { label: 'Master Rate vs Last Rate', desc: 'Master Rate is the current Item Master rate actually used by Recipe Costing right now. Last Rate is the most recent purchase\'s rate. An amber ⚠ warns if they differ by more than 5%.' },
