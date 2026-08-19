@@ -132,7 +132,7 @@ export default function PaymentReport() {
           <p className="page-subtitle">Purchase spend by payment method (net of returns) — {periodLabel}</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
+          <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
           <button className="btn btn-ghost" onClick={exportExcel}>Export Excel</button>

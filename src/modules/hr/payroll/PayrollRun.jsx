@@ -438,7 +438,7 @@ export default function PayrollRun() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-            <select className="form-select" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
+            <select aria-label="Period" className="form-select" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
               {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
             </select>
             {run && (

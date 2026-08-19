@@ -1268,7 +1268,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   </Tip>
                 </p>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <select
+                  <select aria-label="Outlet group"
                     className="form-select"
                     style={{ maxWidth: 240 }}
                     value={groupId || ''}

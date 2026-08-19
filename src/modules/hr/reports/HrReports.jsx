@@ -225,7 +225,7 @@ export default function HrReports() {
             {run && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
           </p>
         </div>
-        <select className="form-select no-print" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
+        <select aria-label="Period" className="form-select no-print" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
           {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
         </select>
       </div>
@@ -247,7 +247,7 @@ export default function HrReports() {
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Fiscal Year</div>
-                    <select className="form-select" value={certFy?.fyStart || ''} onChange={e => {
+                    <select aria-label="Fiscal year" className="form-select" value={certFy?.fyStart || ''} onChange={e => {
                       const opt = fyOptions.find(f => f.fyStart === parseInt(e.target.value))
                       setCertFy(opt || null); setCertSlips([])
                     }}>
@@ -257,7 +257,7 @@ export default function HrReports() {
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Employee</div>
-                    <select className="form-select" value={certEmpId} onChange={e => { setCertEmpId(e.target.value); setCertSlips([]) }}>
+                    <select aria-label="Employee" className="form-select" value={certEmpId} onChange={e => { setCertEmpId(e.target.value); setCertSlips([]) }}>
                       <option value="">Select employee…</option>
                       {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}{e.employee_code ? ` (${e.employee_code})` : ''}</option>)}
                     </select>

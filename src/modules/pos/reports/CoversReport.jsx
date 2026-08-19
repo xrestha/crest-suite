@@ -281,12 +281,12 @@ export default function CoversReport() {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>From (BS)</label>
-          <BsCalendarPicker value={fromIso} onChange={setFromIso} />
+          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="covers-report-from-bs">From (BS)</label>
+          <BsCalendarPicker id="covers-report-from-bs" value={fromIso} onChange={setFromIso} />
         </div>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>To (BS)</label>
-          <BsCalendarPicker value={toIso} onChange={setToIso} />
+          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="covers-report-to-bs">To (BS)</label>
+          <BsCalendarPicker id="covers-report-to-bs" value={toIso} onChange={setToIso} />
         </div>
         {tab !== 'overview' && (
           <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
@@ -339,12 +339,12 @@ export default function CoversReport() {
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div>
-                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Open</label>
-                <input type="time" className="form-select" value={openTime} onChange={e => setOpenTime(e.target.value)} />
+                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="covers-report-open">Open</label>
+                <input id="covers-report-open" type="time" className="form-select" value={openTime} onChange={e => setOpenTime(e.target.value)} />
               </div>
               <div>
-                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Close</label>
-                <input type="time" className="form-select" value={closeTime} onChange={e => setCloseTime(e.target.value)} />
+                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="covers-report-close">Close</label>
+                <input id="covers-report-close" type="time" className="form-select" value={closeTime} onChange={e => setCloseTime(e.target.value)} />
               </div>
               <button className="btn btn-primary" disabled={hoursSaving} onClick={saveOperatingHours}>
                 {hoursSaving ? 'Saving…' : 'Save'}

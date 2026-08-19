@@ -279,7 +279,7 @@ export default function SupplierPriceTracker() {
 
       {/* Filters bar */}
       <div className="no-print" style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select
+        <select aria-label="Filter by vendor"
           className="form-select" style={{ minWidth: 220 }}
           value={selectedVendorId}
           onChange={e => { setSelectedVendorId(e.target.value); setExpandedItems({}) }}
@@ -298,7 +298,7 @@ export default function SupplierPriceTracker() {
           onChange={e => setSearch(e.target.value)}
         />
 
-        <select className="form-select" value={filterTrend} onChange={e => setFilterTrend(e.target.value)}>
+        <select aria-label="Filter by price trend" className="form-select" value={filterTrend} onChange={e => setFilterTrend(e.target.value)}>
           <option value="all">All Trends</option>
           <option value="up">↑ Rising Only</option>
           <option value="down">↓ Decreasing</option>

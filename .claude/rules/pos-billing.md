@@ -112,6 +112,12 @@ Recorded so they aren't rediscovered from scratch:
   is a `close_pos_order(...)` RPC re-deriving the cap and re-checking `pos_allow_void` server-side.
 - **An item already fired to the kitchen can be removed by any Staff-rank account** with no
   permission, reason or order-level record — caught after the fact by KOT Reconciliation only.
-- **The mechanical sweep**: ~52 bare labels (POS measures 60 `<label>` vs 7 `htmlFor`), 9
-  hand-rolled modals, and ~104 base-signal-token text sites vs 10 contrast-variant adoptions —
-  the one module the S549–S551 sweeps never reached.
+- **The mechanical sweep**, partly done. **Labels are closed (S576)**: POS now measures 0 bare
+  `<label>` vs 53 `htmlFor`, and every `<select>` in the module carries an accessible name. Two
+  shapes recur here and are worth copying rather than rediscovering — a caption over a button
+  group or a read-only figure must be a `<span>` plus `role="group"`/`aria-labelledby` (a
+  `<label>` naming no labelable element announces a name the browser never binds), and a label
+  for a conditionally-rendered control still pairs by `id` since `SearchableSelect` and
+  `BsCalendarPicker` both forward one. **Still open**: 9 hand-rolled modals, and ~104
+  base-signal-token text sites vs 10 contrast-variant adoptions — the S549–S551 colour sweep has
+  still never reached this module.

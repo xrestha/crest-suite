@@ -194,22 +194,22 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
               Net amount to credit: {fmtNpr(amounts.net)}
             </div>
 
-            <label style={labelStyle}>Reason <span style={{ color: 'var(--theme-red)' }}>*</span></label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+            <label style={labelStyle} htmlFor="icn-reason">Reason <span style={{ color: 'var(--theme-red)' }}>*</span></label>
+            <div role="group" aria-label="Common reasons" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
               {REASON_CHIPS.map(r => (
                 <button key={r} type="button" className="tab-btn" onClick={() => setReason(r)}
                   style={{ fontSize: 11, padding: '4px 10px' }}>{r}</button>
               ))}
             </div>
-            <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
+            <textarea id="icn-reason" value={reason} onChange={e => setReason(e.target.value)} rows={2}
               placeholder="e.g. Billing error — wrong item charged"
               style={{ ...inputStyle, width: '100%', resize: 'vertical', marginBottom: 12 }} />
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-              <div><label style={labelStyle}>Buyer Name</label><input style={inputStyle} value={buyerName} onChange={e => setBuyerName(e.target.value)} /></div>
-              <div><label style={labelStyle}>Buyer PAN</label><input style={inputStyle} value={buyerPan} onChange={e => setBuyerPan(e.target.value)} /></div>
-              <div><label style={labelStyle}>Address</label><input style={inputStyle} value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)} /></div>
-              <div><label style={labelStyle}>Phone</label><input style={inputStyle} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} /></div>
+              <div><label style={labelStyle} htmlFor="issue-credit-note-modal-buyer-name">Buyer Name</label><input id="issue-credit-note-modal-buyer-name" style={inputStyle} value={buyerName} onChange={e => setBuyerName(e.target.value)} /></div>
+              <div><label style={labelStyle} htmlFor="issue-credit-note-modal-buyer-pan">Buyer PAN</label><input id="issue-credit-note-modal-buyer-pan" style={inputStyle} value={buyerPan} onChange={e => setBuyerPan(e.target.value)} /></div>
+              <div><label style={labelStyle} htmlFor="issue-credit-note-modal-address">Address</label><input id="issue-credit-note-modal-address" style={inputStyle} value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)} /></div>
+              <div><label style={labelStyle} htmlFor="issue-credit-note-modal-phone">Phone</label><input id="issue-credit-note-modal-phone" style={inputStyle} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} /></div>
             </div>
 
             {msg && <p role="alert" style={{ color: msg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)', fontSize: 12, marginBottom: 8 }}>{msg.replace('error:', '')}</p>}

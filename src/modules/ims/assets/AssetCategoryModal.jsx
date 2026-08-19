@@ -90,7 +90,7 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
                 </td>
                 <td>
                   <Tip text={row.tax_pool_hint ? POOL_EXAMPLES[row.tax_pool_hint] : 'Which pool this category\'s equipment usually falls in — hover the column header for what each pool means.'} width={280}>
-                    <select
+                    <select aria-label="Tax depreciation pool"
                       value={row.tax_pool_hint}
                       onChange={e => update(idx, 'tax_pool_hint', e.target.value)}
                       className="form-select"

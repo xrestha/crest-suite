@@ -429,12 +429,12 @@ export default function Overtime() {
 
           {/* OT Type */}
           <div style={{ marginBottom: 14 }}>
-            <label style={lbl}>
+            <span style={lbl} id="ot-type-label">
               <Tip text="Auto-detected from the date: if the date matches a gazetted public holiday in your Holiday Calendar, Holiday (2×) is selected. You can override manually." width={300}>
                 OT Type *
               </Tip>
-            </label>
-            <div style={{ display: 'flex', gap: 20, marginTop: 6 }}>
+            </span>
+            <div role="radiogroup" aria-labelledby="ot-type-label" style={{ display: 'flex', gap: 20, marginTop: 6 }}>
               {[
                 { key: 'weekday', label: 'Weekday (1.5×)' },
                 { key: 'holiday', label: 'Public Holiday (2×)' },

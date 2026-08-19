@@ -192,7 +192,7 @@ export default function AnnualSummary() {
                 </button>
               ))}
             </div>
-            <select className="form-select" value={selectedYear ?? ''} onChange={e => setSelectedYear(Number(e.target.value))}>
+            <select aria-label="Fiscal year" className="form-select" value={selectedYear ?? ''} onChange={e => setSelectedYear(Number(e.target.value))}>
               {yearOptions.map(y => <option key={y.value} value={y.value}>{y.label}</option>)}
             </select>
           </div>

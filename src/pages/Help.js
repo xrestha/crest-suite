@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
-import { MODULE_COLORS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
+import { MODULE_COLORS, MODULE_INK, colorTint, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
 
 // ── IMS feature data, grouped by plan tier (Getting Started module guide — distinct from the
 // IMS_TIERS pricing data imported above) ─────────────────────────────────────
@@ -153,7 +153,7 @@ const IMS_FEATURE_TIERS = [
     ]
   },
   {
-    tier: 'growth', label: 'Growth Plan', planLabel: 'Growth', planColor: 'var(--theme-green)',
+    tier: 'growth', label: 'Growth Plan', planLabel: 'Growth', planColor: 'var(--theme-green-text)',
     features: [
       {
         icon: '◈', name: 'Recipe Costing',
@@ -1358,7 +1358,7 @@ export default function Help() {
                         {tier.label}
                       </span>
                       {!unlocked && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: tier.planColor, background: `${tier.planColor}15`, border: `1px solid ${tier.planColor}30`, padding: '1px 7px', borderRadius: 8 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: tier.planColor, background: colorTint(tier.planColor, 8), border: `1px solid ${colorTint(tier.planColor, 19)}`, padding: '1px 7px', borderRadius: 8 }}>
                           🔒 {tier.features.length} features locked
                         </span>
                       )}
@@ -1375,7 +1375,7 @@ export default function Help() {
                     {!unlocked && (
                       <div style={{
                         marginTop: 8, padding: '10px 14px',
-                        background: `${tier.planColor}08`, border: `1px dashed ${tier.planColor}30`,
+                        background: colorTint(tier.planColor, 3), border: `1px dashed ${colorTint(tier.planColor, 19)}`,
                         borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12
                       }}>
                         <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
@@ -1383,7 +1383,7 @@ export default function Help() {
                         </span>
                         <button
                           onClick={() => navigate('/pricing')}
-                          style={{ fontSize: 11, fontWeight: 700, color: tier.planColor, background: `${tier.planColor}15`, border: `1px solid ${tier.planColor}35`, borderRadius: 5, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                          style={{ fontSize: 11, fontWeight: 700, color: tier.planColor, background: colorTint(tier.planColor, 8), border: `1px solid ${colorTint(tier.planColor, 21)}`, borderRadius: 5, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' }}
                         >
                           View plans →
                         </button>
@@ -1514,22 +1514,22 @@ export default function Help() {
           </div>
 
           {/* Crest IMS — 3 tiers */}
-          <p style={{ fontSize: 11, color: MODULE_COLORS.ims, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest IMS</p>
+          <p style={{ fontSize: 11, color: MODULE_INK.ims, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest IMS</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
             {IMS_TIERS.map(plan => {
               const highlight = plan.key === 'growth'
               const price = pricingAnnual ? plan.annual : plan.monthly
               return (
-                <div key={plan.key} className="card" style={{ border: highlight ? `1px solid ${MODULE_COLORS.ims}70` : '1px solid var(--theme-border)', position: 'relative', display: 'flex', flexDirection: 'column', padding: '32px 22px 22px', boxShadow: highlight ? `0 4px 32px ${MODULE_COLORS.ims}18` : 'none' }}>
+                <div key={plan.key} className="card" style={{ border: highlight ? `1px solid ${colorTint(MODULE_COLORS.ims, 44)}` : '1px solid var(--theme-border)', position: 'relative', display: 'flex', flexDirection: 'column', padding: '32px 22px 22px', boxShadow: highlight ? `0 4px 32px ${colorTint(MODULE_COLORS.ims, 9)}` : 'none' }}>
                   {highlight && (
-                    <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: MODULE_COLORS.ims, color: '#0b0b0b', fontSize: 9, fontWeight: 800, padding: '3px 12px', borderRadius: 8, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                    <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: MODULE_COLORS.ims, color: 'var(--theme-accent-text)', fontSize: 9, fontWeight: 800, padding: '3px 12px', borderRadius: 8, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                       Most Popular
                     </div>
                   )}
                   <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: MODULE_COLORS.ims, fontFamily: 'Georgia, serif' }}>{plan.label}</span>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: MODULE_INK.ims, fontFamily: 'Georgia, serif' }}>{plan.label}</span>
                     {plan.key === 'starter' && !pricingAnnual && (
-                      <span style={{ fontSize: 9, fontStyle: 'italic', fontWeight: 800, color: MODULE_COLORS.ims, background: `${MODULE_COLORS.ims}15`, border: `1px solid ${MODULE_COLORS.ims}40`, padding: '2px 6px', borderRadius: 7, letterSpacing: '0.05em' }}>
+                      <span style={{ fontSize: 9, fontStyle: 'italic', fontWeight: 800, color: MODULE_INK.ims, background: colorTint(MODULE_COLORS.ims, 8), border: `1px solid ${colorTint(MODULE_COLORS.ims, 25)}`, padding: '2px 6px', borderRadius: 7, letterSpacing: '0.05em' }}>
                         FREE FOR 7 DAYS TRIAL
                       </span>
                     )}
@@ -1552,7 +1552,7 @@ export default function Help() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
                     {plan.features.map((f, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
-                        <span style={{ color: MODULE_COLORS.ims, fontSize: 12, flexShrink: 0, marginTop: 1 }}>✓</span>
+                        <span style={{ color: MODULE_INK.ims, fontSize: 12, flexShrink: 0, marginTop: 1 }}>✓</span>
                         <span style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.4 }}>{f}</span>
                       </div>
                     ))}
@@ -1564,14 +1564,14 @@ export default function Help() {
 
           {/* Crest HR + Crest POS — flat modules */}
           <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>
-            <span style={{ color: MODULE_COLORS.hr }}>Crest HR</span>
+            <span style={{ color: MODULE_INK.hr }}>Crest HR</span>
             <span style={{ color: 'var(--theme-text3)' }}> &amp; </span>
-            <span style={{ color: MODULE_COLORS.pos }}>Crest POS</span>
+            <span style={{ color: MODULE_INK.pos }}>Crest POS</span>
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 24 }}>
             {[
-              { key: 'hr',  name: 'Crest HR',  color: MODULE_COLORS.hr,  pricing: HR_PRICING },
-              { key: 'pos', name: 'Crest POS', color: MODULE_COLORS.pos, pricing: POS_PRICING },
+              { key: 'hr',  name: 'Crest HR',  color: MODULE_INK.hr,  pricing: HR_PRICING },
+              { key: 'pos', name: 'Crest POS', color: MODULE_INK.pos, pricing: POS_PRICING },
             ].map(mod => {
               const price = pricingAnnual ? mod.pricing.annual : mod.pricing.monthly
               return (
@@ -1597,7 +1597,7 @@ export default function Help() {
           </div>
 
           {/* Crest Suite Pro — an add-on on top of the modules above, not a bundle containing them */}
-          <p style={{ fontSize: 11, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest Suite Pro — the owner layer, added on top</p>
+          <p style={{ fontSize: 11, color: 'var(--theme-accent-ink)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest Suite Pro — the owner layer, added on top</p>
           <div className="card" style={{ marginBottom: 24, borderColor: 'rgba(201,168,76,0.2)' }}>
             <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <div style={{ minWidth: 180 }}>

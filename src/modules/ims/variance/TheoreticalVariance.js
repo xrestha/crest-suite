@@ -245,7 +245,7 @@ export default function TheoreticalVariance() {
             Compare what should have been consumed (recipes × sales) against what was actually used — {periodLabel}
           </p>
         </div>
-        <select
+        <select aria-label="Period"
           style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
           value={selectedPeriod?.id || ''}
           onChange={e => handlePeriodChange(e.target.value)}
@@ -295,7 +295,7 @@ export default function TheoreticalVariance() {
       {/* Filters + export */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <select
+          <select aria-label="Filter by category"
             style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
             value={filterCat} onChange={e => setFilterCat(e.target.value)}
           >
@@ -314,7 +314,7 @@ export default function TheoreticalVariance() {
             ))}
           </div>
 
-          <select
+          <select aria-label="Sort by"
             style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
             value={sortBy} onChange={e => setSortBy(e.target.value)}
           >

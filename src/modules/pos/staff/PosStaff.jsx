@@ -399,7 +399,7 @@ export default function PosStaff() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <select
+                        <select aria-label="POS role"
                           className="form-select"
                           style={{ minWidth: 160 }}
                           value={displayTitle || ''}
@@ -423,7 +423,7 @@ export default function PosStaff() {
                       }
                     </td>
                     <td>
-                      <select
+                      <select aria-label="POS team"
                         className="form-select"
                         style={{ minWidth: 140 }}
                         value={p.pos_team || 'foh'}
@@ -512,7 +512,7 @@ export default function PosStaff() {
                 {customRoles.map((r, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
                     <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>{r.label}</span>
-                    <select
+                    <select aria-label={`Permission level for ${r.label}`}
                       className="form-select"
                       style={{ width: 120, fontSize: 12 }}
                       value={r.level}
@@ -539,8 +539,8 @@ export default function PosStaff() {
             {/* Add new role */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 20 }}>
               <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Role Name</label>
-                <input
+                <label style={labelStyle} htmlFor="pos-staff-role-name">Role Name</label>
+                <input id="pos-staff-role-name"
                   style={inputStyle}
                   placeholder="e.g. Cashier, Bartender…"
                   value={newRole.label}
@@ -549,8 +549,8 @@ export default function PosStaff() {
                 />
               </div>
               <div style={{ width: 140 }}>
-                <label style={labelStyle}>Permission Level</label>
-                <select
+                <label style={labelStyle} htmlFor="pos-staff-permission-level">Permission Level</label>
+                <select id="pos-staff-permission-level"
                   className="form-select"
                   style={{ width: '100%' }}
                   value={newRole.level}
@@ -606,7 +606,7 @@ export default function PosStaff() {
 
             {addMode === 'hr' ? (
               <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>
+                <label style={labelStyle} htmlFor="pos-staff-hr-employee">
                   <Tip text="Links this POS login to an existing HR employee record — their name stays in sync with HR, and payroll/attendance can be matched to the same person.">HR Employee</Tip>
                 </label>
                 {unlinkedEmployees.length === 0 ? (
@@ -615,6 +615,7 @@ export default function PosStaff() {
                   </p>
                 ) : (
                   <SearchableSelect
+                    id="pos-staff-hr-employee"
                     options={unlinkedEmployees.map(e => ({ value: e.id, label: `${e.full_name}${e.employee_code ? ` (${e.employee_code})` : ''}` }))}
                     value={addForm.employee_id} onChange={v => setAddForm(f => ({ ...f, employee_id: v }))}
                     placeholder="Select employee…"
@@ -623,8 +624,8 @@ export default function PosStaff() {
               </div>
             ) : (
               <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>Full Name</label>
-                <input
+                <label style={labelStyle} htmlFor="pos-staff-full-name">Full Name</label>
+                <input id="pos-staff-full-name"
                   style={inputStyle}
                   placeholder="e.g. Ram Bahadur"
                   value={addForm.full_name}
@@ -635,10 +636,10 @@ export default function PosStaff() {
             )}
 
             <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>
+              <label style={labelStyle} htmlFor="pos-staff-pin">
                 <Tip text="Staff enter this PIN on the POS login screen. 4–6 digits only.">PIN</Tip>
               </label>
-              <input
+              <input id="pos-staff-pin"
                 style={inputStyle}
                 type="password"
                 autoComplete="new-password"
@@ -651,10 +652,10 @@ export default function PosStaff() {
             </div>
 
             <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}>
+              <label style={labelStyle} htmlFor="pos-staff-role">
                 <Tip text="The role shown on the POS login screen. Permission level is shown in brackets.">Role</Tip>
               </label>
-              <select
+              <select id="pos-staff-role"
                 className="form-select"
                 style={{ width: '100%' }}
                 value={addForm.job_title}
@@ -669,10 +670,10 @@ export default function PosStaff() {
             </div>
 
             <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}>
+              <label style={labelStyle} htmlFor="pos-staff-team">
                 <Tip text="Which station this login works. Kitchen/Bar accounts see only the ticket display, locked to their own queue.">Team</Tip>
               </label>
-              <select
+              <select id="pos-staff-team"
                 className="form-select"
                 style={{ width: '100%' }}
                 value={addForm.team}
@@ -706,8 +707,8 @@ export default function PosStaff() {
               New PIN for <strong style={{ color: 'var(--theme-text1)' }}>{pinTarget.full_name}</strong>
             </p>
             <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}>New PIN (4–6 digits)</label>
-              <input
+              <label style={labelStyle} htmlFor="pos-staff-new-pin-4-6-digits">New PIN (4–6 digits)</label>
+              <input id="pos-staff-new-pin-4-6-digits"
                 style={inputStyle}
                 type="password"
                 autoComplete="new-password"

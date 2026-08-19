@@ -390,10 +390,10 @@ export default function MenuPricing() {
                 </datalist>
               </div>
               <div>
-                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>VAT</label>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>VAT</span>
+                <div role="group" aria-label="VAT" style={{ display: 'flex', gap: 8 }}>
                   {[{ label: 'VAT 13%', val: 0.13 }, { label: 'No VAT', val: 0 }].map(opt => (
-                    <button key={opt.val} onClick={() => setAddForm(f => ({ ...f, vatRate: opt.val }))} style={{
+                    <button key={opt.val} aria-pressed={addForm.vatRate === opt.val} onClick={() => setAddForm(f => ({ ...f, vatRate: opt.val }))} style={{
                       flex: 1, padding: '7px 0', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: 'pointer',
                       background: addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                       color: addForm.vatRate === opt.val ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
@@ -705,10 +705,10 @@ export default function MenuPricing() {
               </div>
 
               <div>
-                <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>VAT</label>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }}>VAT</span>
+                <div role="group" aria-label="VAT" style={{ display: 'flex', gap: 8 }}>
                   {[{ label: 'VAT 13%', val: 0.13 }, { label: 'No VAT', val: 0 }].map(opt => (
-                    <button key={opt.val} onClick={() => setAddForm(f => ({ ...f, vatRate: opt.val }))}
+                    <button key={opt.val} aria-pressed={addForm.vatRate === opt.val} onClick={() => setAddForm(f => ({ ...f, vatRate: opt.val }))}
                       style={{
                         flex: 1, padding: '7px 0', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: 'pointer',
                         background: addForm.vatRate === opt.val ? 'var(--theme-accent)' : 'var(--theme-input-bg)',

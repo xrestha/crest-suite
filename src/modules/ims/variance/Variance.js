@@ -191,7 +191,7 @@ export default function Variance() {
           <h1 className="page-title">Variance Report</h1>
           <p className="page-subtitle">Theoretical vs actual usage — the money report — {periodLabel}</p>
         </div>
-        <select
+        <select aria-label="Period"
           className="form-select"
           value={selectedPeriod?.id || ''}
           onChange={e => handlePeriodChange(e.target.value)}
@@ -262,12 +262,12 @@ export default function Variance() {
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select className="form-select"
+          <select aria-label="Filter by category" className="form-select"
             value={filterCat} onChange={e => setFilterCat(e.target.value)}>
             <option value="all">All Categories</option>
             {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
-          <select className="form-select"
+          <select aria-label="Filter by variance flag" className="form-select"
             value={filterFlag} onChange={e => setFilterFlag(e.target.value)}>
             <option value="all">All Items</option>
             <option value="over">Over variance only</option>

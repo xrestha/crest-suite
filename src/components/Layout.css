@@ -1472,6 +1472,10 @@ textarea:focus-visible {
   gap: 6px;
 }
 
+/* A caption inside a .form-field that names a READ-ONLY value or a button group rather than a
+   form control. It must not be a <label>: a label that references no labelable element names
+   nothing to a screen reader, which is the bug this class exists to avoid (S576). */
+.form-field .field-label,
 .form-field label {
   font-size: 12px;
   font-weight: 500;

@@ -158,6 +158,74 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S576 — 2026-08-19 — Phase-8 residue: the tint bug's fourth site, and every unnamed control in the product
+
+Two items off the S575 report, both bug classes rather than single bugs, so both were closed
+product-wide rather than at the one site the report named.
+
+**1 — `${var()}NN` broken tints, live in `Help.js`.** The Module Guide's locked-tier chip, its
+upgrade-nudge panel and its "View plans" button, plus the Pricing tab's highlighted plan card and
+its FREE TRIAL chip, all built their fill and border by concatenating a hex alpha onto
+`tier.planColor` / `MODULE_COLORS.ims` — which have been `var()` tokens since the pricing data
+moved to `pricingPlans.js`. `var(--theme-green)15` is not a colour, so those five elements rendered
+with **no fill and no border at all**, silently, on every theme. Fixed with `colorTint()` (the
+existing one-place alpha maths in `pricingPlans.js`), which is what `moduleTint()` already
+delegates to. This is the fourth shipping of this exact class — Attendance (S570), Leave Management
+and Overtime (S572), now Help — and the reason it keeps recurring is that it fails without an
+error: no console warning, no build failure, just an element that quietly stops being tinted.
+
+Two S424-family findings in the same block, fixed with it: the "Most Popular" ribbon set
+`color: '#0b0b0b'` on a `var(--theme-accent)` fill (the accent-text pairing rule — `#0b0b0b`
+measured 3.85:1 on Latte), and the pricing cards printed `MODULE_COLORS.*` **as text** at 9–16px
+bold. `MODULE_INK` exists for exactly that (accent-ink / green-text / purple-text) and was already
+what the Pro tier's own `planColor` used — so the file disagreed with itself. Growth's
+`planColor` moved from `var(--theme-green)` to `var(--theme-green-text)` for the same reason.
+Settings' theme-preview badges got the same treatment, so the preview now shows what a real
+`.badge-green` actually looks like.
+
+**2 — every unlabelled control in the product.** Two counts from the report, swept together
+because most sites are the same element pair:
+
+- **86 unnamed `<select>`s across 43 files** — period pickers, category/status/vendor/source
+  filters, day ranges, sort orders. A `<select>` with no accessible name reads as an unlabelled
+  combo box: a screen-reader user hears the current option and nothing about what it selects.
+  Fixed with `aria-label` where there is no visible caption (the filter-toolbar case), and
+  `id`/`htmlFor` where there is. Two in-loop selects take a template `aria-label` naming the row
+  (`Permission level for ${r.label}`) rather than a constant that would repeat down the list. The
+  only `<select>` matches left in the codebase are five inside comments.
+- **POS: 52 bare `<label>`s vs 7 `htmlFor` → 0 vs 53.** The one module the S569 app-wide label
+  sweep never reached. 44 were a plain label-then-control pair and were paired mechanically
+  (`BsCalendarPicker` and `SearchableSelect` both already forward an `id`). The other 8 were the
+  interesting ones, and they split into two shapes worth naming, because **a `<label>` that
+  references no labelable element is worse than no label** — it announces a name for something the
+  browser will never associate it with:
+  - **Captions over a button group or a read-only value.** POS Orders' "Short by / Change" (a
+    computed figure, not an input), the Parking slip's Date and Vehicle Type, Delivery Partners'
+    three column headings over a repeating row. These become `<span>`s; the group gets
+    `role="group"` + `aria-labelledby`, the toggle buttons get `aria-pressed`, and each partner
+    row's inputs get their own `aria-label` naming the column and the platform.
+  - **Labels for a conditionally-rendered control.** POS Staff's "HR Employee" names a
+    `SearchableSelect` that only renders when unlinked employees exist.
+
+  The same two shapes then accounted for all 11 remaining bare labels outside POS — Menu Pricing's
+  two VAT toggles, Combo Builder's Window, Overtime's OT Type (now a real `radiogroup`), Purchase
+  Bill's all-lines VAT toggle (a `<button>`, which a `<label>` cannot name — it takes a tri-state
+  `aria-pressed` since "VAT Mixed" is a real state), IMS Staff's two SearchableSelects, and
+  Settings' Logo. Purchase Orders had a deliberately invisible spacer `<label>VAT</label>` used to
+  align a checkbox with the row above: invisible to sight, announced to a screen reader, naming
+  nothing. Now an `aria-hidden` span.
+
+  New `.form-field .field-label` in `Layout.css` gives a non-control caption the same typography a
+  `<label>` had, so this fix never costs a visual change.
+
+**Verified:** `CI=true npm run build` clean; a duplicate-`id` scan across `src/` returns only one
+pre-existing pair in `NewGatePassModal.jsx`, whose two branches are mutually exclusive.
+
+**Files:** `src/pages/{Help.js, Settings.js, Periods.js}`, `src/components/{Layout.css,
+BsCalendarPicker.js}`, 20 IMS files, 5 HR files, 9 POS files, `src/pages/adminClients/ClientDrawer.js`,
+`src/pages/dashboard/MonthlyOwnerReport.jsx`, `public/service-worker.js` (v92 → v93), `README.md`,
+`.claude/rules/pos-billing.md`, `CLAUDE.md`
+
 ### S575 — 2026-08-19 — Critique campaign phase 8 (Synthesis): 34/40, then the money-path residue fixed
 
 The campaign's final phase — the full scored report the per-phase runs deferred. Two isolated

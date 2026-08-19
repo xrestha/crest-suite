@@ -233,7 +233,7 @@ export default function MonthlyOwnerReport() {
 
       <SuiteGate featureKey="monthly_owner_report" featureLabel="Monthly Owner/Manager Report" requireModules={['ims']}>
         <div className="no-print card" style={{ marginBottom: 16, display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
+          <select aria-label="Period"
             className="form-select" style={{ maxWidth: 220 }}
             value={selectedPeriodId || ''} onChange={e => setSelectedPeriodId(e.target.value)}
           >

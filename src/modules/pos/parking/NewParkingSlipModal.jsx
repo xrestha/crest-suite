@@ -82,7 +82,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
     <Modal onClose={onClose} title="New Parking Slip" maxWidth={420}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="form-field">
-          <label>Date</label>
+          <span className="field-label">Date</span>
           <div style={{
             background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
             borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text2)',
@@ -101,12 +101,13 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
           />
         </div>
         <div className="form-field">
-          <label><Tip text="Optional">Vehicle Type</Tip></label>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <span className="field-label" id="park-vehicle-type-label"><Tip text="Optional">Vehicle Type</Tip></span>
+          <div role="group" aria-labelledby="park-vehicle-type-label" style={{ display: 'flex', gap: 8 }}>
             {VEHICLE_TYPES.map(t => (
               <button
                 key={t} type="button"
                 className={`tab-btn${vehicleType === t ? ' tab-btn--active' : ''}`}
+                aria-pressed={vehicleType === t}
                 style={{ flex: 1 }}
                 onClick={() => setVehicleType(v => v === t ? '' : t)}
               >

@@ -2363,8 +2363,8 @@ export default function PosOrders() {
                     <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
                       {fmtNpr(itemCompFoodCost)} in food cost across {itemCompCount} comped item{itemCompCount !== 1 ? 's' : ''} — printed on a separate Complimentary Slip, not this bill.
                     </p>
-                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Comp Reason</label>
-                    <select className="form-select" style={{ width: '100%' }} value={itemCompReason} onChange={e => setItemCompReason(e.target.value)}>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-comp-reason">Comp Reason</label>
+                    <select id="pos-orders-comp-reason" className="form-select" style={{ width: '100%' }} value={itemCompReason} onChange={e => setItemCompReason(e.target.value)}>
                       <option value="">— Select —</option>
                       {COMP_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
@@ -2470,8 +2470,8 @@ export default function PosOrders() {
                 )}
                 {discountAmt > 0 && (
                   <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Discount Reason</label>
-                    <select className="form-select" style={{ width: '100%' }} value={discountReason} onChange={e => setDiscountReason(e.target.value)}>
+                    <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-discount-reason">Discount Reason</label>
+                    <select id="pos-orders-discount-reason" className="form-select" style={{ width: '100%' }} value={discountReason} onChange={e => setDiscountReason(e.target.value)}>
                       <option value="">— Select —</option>
                       {discountReasons.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
@@ -2484,14 +2484,14 @@ export default function PosOrders() {
                     {payMethod === 'Cash' && (
                       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
                         <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Tender</label>
-                          <input type="number" min="0" step="any" placeholder={payTotal.toFixed(0)}
+                          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-tender">Tender</label>
+                          <input id="pos-orders-tender" type="number" min="0" step="any" placeholder={payTotal.toFixed(0)}
                             value={tenderedStr} onChange={e => setTenderedStr(e.target.value)} style={{ ...billInput, width: '100%' }} />
                         </div>
                         <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
+                          <span style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
                             {cashShortfall > 0 ? 'Short by' : 'Change'}
-                          </label>
+                          </span>
                           <div role={cashShortfall > 0 ? 'alert' : undefined}
                             style={{ fontSize: 15, fontWeight: 700, color: cashShortfall > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
                             {cashShortfall > 0 ? fmtNpr(cashShortfall) : fmtNpr(Math.max(0, resolveTendered(payTotal) - payTotal))}
@@ -2552,8 +2552,8 @@ export default function PosOrders() {
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 6 }}>
                           <div style={{ flex: 1 }}>
-                            <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Amount</label>
-                            <input type="number" min="0" step="any" placeholder={remaining.toFixed(0)}
+                            <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-amount">Amount</label>
+                            <input id="pos-orders-amount" type="number" min="0" step="any" placeholder={remaining.toFixed(0)}
                               value={tenderAmtStr} onChange={e => setTenderAmtStr(e.target.value)}
                               onKeyDown={e => e.key === 'Enter' && addTender()} style={{ ...billInput, width: '100%' }} />
                           </div>
@@ -2583,8 +2583,8 @@ export default function PosOrders() {
 
             {billingTab === 'void' && (
               <>
-                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Reason</label>
-                <select className="form-select" style={{ width: '100%', marginBottom: 12 }} value={closeReason} onChange={e => setCloseReason(e.target.value)}>
+                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-reason">Reason</label>
+                <select id="pos-orders-reason" className="form-select" style={{ width: '100%', marginBottom: 12 }} value={closeReason} onChange={e => setCloseReason(e.target.value)}>
                   <option value="">— Select —</option>
                   {VOID_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
@@ -2598,8 +2598,8 @@ export default function PosOrders() {
 
             {billingTab === 'writeoff' && (
               <>
-                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Reason</label>
-                <select className="form-select" style={{ width: '100%', marginBottom: 12 }} value={closeReason} onChange={e => setCloseReason(e.target.value)}>
+                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-reason-2">Reason</label>
+                <select id="pos-orders-reason-2" className="form-select" style={{ width: '100%', marginBottom: 12 }} value={closeReason} onChange={e => setCloseReason(e.target.value)}>
                   <option value="">— Select —</option>
                   {COMP_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>

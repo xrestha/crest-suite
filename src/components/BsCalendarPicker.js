@@ -180,7 +180,7 @@ export default function BsCalendarPicker({
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
-            <select
+            <select aria-label="Month"
               value={navMonth}
               onChange={e => setNavMonth(parseInt(e.target.value, 10))}
               style={{

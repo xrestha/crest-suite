@@ -289,7 +289,7 @@ export default function Settings() {
 
           {/* Logo upload */}
           <div style={{ marginTop: 20 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text3)', display: 'block', marginBottom: 10 }}>Logo</label>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text3)', display: 'block', marginBottom: 10 }}>Logo</span>
             <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
               <div style={{ width: 64, height: 64, borderRadius: 8, border: '1px solid var(--theme-border)', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {form.logo_url
@@ -848,10 +848,10 @@ export default function Settings() {
               <div style={{ padding: '10px 20px', borderRadius: 6, background: 'transparent', color: colors.text2, border: `1px solid ${colors.border}`, fontSize: 13 }}>
                 Ghost Button
               </div>
-              <div style={{ padding: '6px 14px', borderRadius: 5, background: `${colors.green}18`, color: colors.green, fontSize: 11, fontWeight: 700 }}>
+              <div style={{ padding: '6px 14px', borderRadius: 5, background: `${colors.green}18`, color: colors.greenText, fontSize: 11, fontWeight: 700 }}>
                 Active Badge
               </div>
-              <div style={{ padding: '6px 14px', borderRadius: 5, background: `${colors.red}18`, color: colors.red, fontSize: 11, fontWeight: 700 }}>
+              <div style={{ padding: '6px 14px', borderRadius: 5, background: `${colors.red}18`, color: colors.redText, fontSize: 11, fontWeight: 700 }}>
                 Error Badge
               </div>
             </div>

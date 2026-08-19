@@ -343,7 +343,7 @@ export default function PayrollCalculation() {
           <h1 className="page-title">Payroll Calculation</h1>
           <p className="page-subtitle">Verify the numbers behind Payroll, one employee at a time — {periodLabel}</p>
         </div>
-        <select className="form-select" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
+        <select aria-label="Period" className="form-select" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
           {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
         </select>
       </div>

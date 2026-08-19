@@ -190,7 +190,7 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
             style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', boxSizing: 'border-box' }} />
         </div>
         <div className="form-field">
-          <label><Tip text="Apply 13% VAT to all line items at once. You can also toggle VAT on each individual line row." width={270}>VAT</Tip></label>
+          <span className="field-label"><Tip text="Apply 13% VAT to all line items at once. You can also toggle VAT on each individual line row." width={270}>VAT</Tip></span>
           {(() => {
             const allVat  = billLines.every(l => l.vat_inclusive)
             const someVat = billLines.some(l => l.vat_inclusive)
@@ -199,6 +199,8 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
             return (
               <button
                 type="button"
+                aria-label="Apply 13% VAT to all line items"
+                aria-pressed={allVat ? true : someVat ? 'mixed' : false}
                 onClick={() => setBillLines(ls => ls.map(l => ({ ...l, vat_inclusive: !allVat })))}
                 style={{ cursor: 'pointer', background: 'none', border: 'none', padding: '8px 4px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
               >

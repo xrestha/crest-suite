@@ -256,7 +256,7 @@ export default function StockMovements() {
             <button className="btn btn-ghost" onClick={printCurrentTab} style={{ fontSize: 12 }}>🖨 Print</button>
           </Tip>
           <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>Export Excel</button>
-          <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
+          <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>)}
           </select>
         </div>
@@ -326,7 +326,7 @@ export default function StockMovements() {
       <div className="no-print" style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <input style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
           placeholder={tab === 'subs' ? 'Search sub-recipes…' : 'Search items…'} value={search} onChange={e => setSearch(e.target.value)} />
-        <select className="form-select" value={filterSource} onChange={e => setFilterSource(e.target.value)}>
+        <select aria-label="Filter by source" className="form-select" value={filterSource} onChange={e => setFilterSource(e.target.value)}>
           <option value="all">All Sources</option>
           <option value="pos_sale">POS Sale</option>
           <option value="pos_comp">POS Comp</option>
@@ -340,12 +340,12 @@ export default function StockMovements() {
           <Tip text="Filters by Day within the selected period above — not a calendar date." width={220}>
             <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Day</span>
           </Tip>
-          <select className="form-select" style={{ width: 90 }} value={dayFrom} onChange={e => setDayFrom(e.target.value)}>
+          <select aria-label="Day from" className="form-select" style={{ width: 90 }} value={dayFrom} onChange={e => setDayFrom(e.target.value)}>
             <option value="">From</option>
             {Array.from({ length: maxDay }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
           </select>
           <span style={{ color: 'var(--theme-text3)' }}>–</span>
-          <select className="form-select" style={{ width: 90 }} value={dayTo} onChange={e => setDayTo(e.target.value)}>
+          <select aria-label="Day to" className="form-select" style={{ width: 90 }} value={dayTo} onChange={e => setDayTo(e.target.value)}>
             <option value="">To</option>
             {Array.from({ length: maxDay }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
           </select>
@@ -359,7 +359,7 @@ export default function StockMovements() {
             toggle is shared, since "biggest first" means the same thing on either table. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Sort</span>
-          <select
+          <select aria-label="Sort by"
             className="form-select"
             value={tab === 'subs' ? subSort : itemSort}
             onChange={e => (tab === 'subs' ? setSubSort : setItemSort)(e.target.value)}

@@ -277,12 +277,12 @@ export default function KotLog() {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>From (BS)</label>
-          <BsCalendarPicker value={fromIso} onChange={setFromIso} />
+          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="kot-log-from-bs">From (BS)</label>
+          <BsCalendarPicker id="kot-log-from-bs" value={fromIso} onChange={setFromIso} />
         </div>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>To (BS)</label>
-          <BsCalendarPicker value={toIso} onChange={setToIso} />
+          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="kot-log-to-bs">To (BS)</label>
+          <BsCalendarPicker id="kot-log-to-bs" value={toIso} onChange={setToIso} />
         </div>
         <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
       </div>

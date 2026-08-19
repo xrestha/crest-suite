@@ -89,10 +89,10 @@ export default function ComboBuilder() {
           <SearchableSelect id="combob-f1" value={anchorId} onChange={setAnchorId} options={menuOptions} placeholder="Select an item…" />
         </div>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Window</label>
-          <div className="tab-bar" style={{ marginBottom: 0 }}>
+          <span style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Window</span>
+          <div role="group" aria-label="Look-back window" className="tab-bar" style={{ marginBottom: 0 }}>
             {WINDOW_OPTIONS.map(d => (
-              <button key={d} className={`tab-btn${days === d ? ' tab-btn--active' : ''}`} onClick={() => setDays(d)}>{d}d</button>
+              <button key={d} aria-pressed={days === d} className={`tab-btn${days === d ? ' tab-btn--active' : ''}`} onClick={() => setDays(d)}>{d}d</button>
             ))}
           </div>
         </div>

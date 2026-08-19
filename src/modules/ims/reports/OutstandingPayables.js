@@ -593,17 +593,17 @@ export default function OutstandingPayables() {
 
       <div style={{ display: 'flex', gap: 20, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <select className="form-select" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
+          <select aria-label="Filter by vendor" className="form-select" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
             <option value="all">All Vendors</option>
             {vendors.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
           </select>
           {activeTab === 'outstanding' && (
-            <select className="form-select" value={filterAging} onChange={e => setFilterAging(e.target.value)}>
+            <select aria-label="Filter by age" className="form-select" value={filterAging} onChange={e => setFilterAging(e.target.value)}>
               <option value="all">All Ages</option>
               {AGING_LABELS.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           )}
-          <select className="form-select" value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
+          <select aria-label="Filter by month" className="form-select" value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)}>
             <option value="all">All Months</option>
             {periodOptions.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
           </select>
@@ -637,7 +637,7 @@ export default function OutstandingPayables() {
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Payment Mode</div>
-            <select className="form-select" style={{ ...INPUT }}
+            <select aria-label="Payment mode" className="form-select" style={{ ...INPUT }}
               value={bulkForm.payment_mode} onChange={ev => setBulkForm(f => ({ ...f, payment_mode: ev.target.value }))}>
               {PAYMENT_MODES.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
@@ -888,7 +888,7 @@ export default function OutstandingPayables() {
                                           </div>
                                           <div>
                                             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Payment Mode</div>
-                                            <select className="form-select" style={{ ...INPUT }}
+                                            <select aria-label="Payment mode" className="form-select" style={{ ...INPUT }}
                                               value={payForm.payment_mode}
                                               onChange={ev => setPayForm(f => ({ ...f, payment_mode: ev.target.value }))}
                                               onClick={ev => ev.stopPropagation()}>

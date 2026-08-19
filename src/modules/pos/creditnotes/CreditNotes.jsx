@@ -144,16 +144,16 @@ export default function CreditNotes() {
         <>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
             <div>
-              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>From (BS)</label>
-              <BsCalendarPicker value={fromIso} onChange={setFromIso} />
+              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="credit-notes-from-bs">From (BS)</label>
+              <BsCalendarPicker id="credit-notes-from-bs" value={fromIso} onChange={setFromIso} />
             </div>
             <div>
-              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>To (BS)</label>
-              <BsCalendarPicker value={toIso} onChange={setToIso} />
+              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="credit-notes-to-bs">To (BS)</label>
+              <BsCalendarPicker id="credit-notes-to-bs" value={toIso} onChange={setToIso} />
             </div>
             <div>
-              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Invoice No.</label>
-              <input className="form-select" style={{ width: 140 }} placeholder="e.g. 2238" value={invoiceSearch}
+              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="credit-notes-invoice-no">Invoice No.</label>
+              <input id="credit-notes-invoice-no" className="form-select" style={{ width: 140 }} placeholder="e.g. 2238" value={invoiceSearch}
                 onChange={e => setInvoiceSearch(e.target.value)} />
             </div>
           </div>
@@ -197,12 +197,12 @@ export default function CreditNotes() {
         <>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
             <div>
-              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>From (BS)</label>
-              <BsCalendarPicker value={fromIso} onChange={setFromIso} />
+              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="credit-notes-from-bs-2">From (BS)</label>
+              <BsCalendarPicker id="credit-notes-from-bs-2" value={fromIso} onChange={setFromIso} />
             </div>
             <div>
-              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>To (BS)</label>
-              <BsCalendarPicker value={toIso} onChange={setToIso} />
+              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="credit-notes-to-bs-2">To (BS)</label>
+              <BsCalendarPicker id="credit-notes-to-bs-2" value={toIso} onChange={setToIso} />
             </div>
             <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={notes.length === 0}>⬇ Excel</button>
           </div>

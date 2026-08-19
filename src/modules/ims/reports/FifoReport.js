@@ -188,7 +188,7 @@ export default function FifoReport() {
           <p className="page-subtitle">Stock expiry tracking — net of returns, sales usage, wastage and staff meals (allocated oldest-batch-first) — {periodLabel}</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
+          <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
           <button className="btn btn-ghost" onClick={exportExcel}>Export Excel</button>
@@ -230,7 +230,7 @@ export default function FifoReport() {
             </button>
           ))}
         </div>
-        <select className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+        <select aria-label="Filter by category" className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
           <option value="all">All Categories</option>
           {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
         </select>

@@ -588,7 +588,7 @@ export default function Stock() {
           <p className="page-subtitle">Opening stock, physical closing count & wastage — {periodLabel}</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <select
+          <select aria-label="Period"
             style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
             value={selectedPeriod?.id || ''}
             onChange={e => handlePeriodChange(e.target.value)}
@@ -834,7 +834,7 @@ export default function Stock() {
                 style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
                 placeholder="Search items…" value={search} onChange={e => setSearch(e.target.value)}
               />
-              <select
+              <select aria-label="Filter by category"
                 style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
                 value={filterCat} onChange={e => setFilterCat(e.target.value)}
               >
@@ -1068,7 +1068,7 @@ export default function Stock() {
                     style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
                     placeholder="Search items…" value={search} onChange={e => setSearch(e.target.value)}
                   />
-                  <select
+                  <select aria-label="Filter by category"
                     style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
                     value={filterCat} onChange={e => setFilterCat(e.target.value)}
                   >

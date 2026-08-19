@@ -382,7 +382,7 @@ export default function PurchaseOrders() {
               </select>
             </div>
             <div className="form-field" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-              <label style={{ visibility: 'hidden' }}>VAT</label>
+              <span aria-hidden="true" style={{ visibility: 'hidden', fontSize: 13 }}>VAT</span>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13,
                 color: receiveVatInclusive ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', userSelect: 'none', paddingBottom: 6 }}>
                 <input type="checkbox" checked={receiveVatInclusive} onChange={e => setReceiveVatInclusive(e.target.checked)}
@@ -556,7 +556,7 @@ export default function PurchaseOrders() {
                 return (
                   <tr key={row._key}>
                     <td style={{ padding: '5px 0' }}>
-                      <select value={row.item_id} onChange={e => handleItemSelect(row._key, e.target.value)}
+                      <select aria-label="Item" value={row.item_id} onChange={e => handleItemSelect(row._key, e.target.value)}
                         className="form-select" style={{ width: '100%' }}>
                         <option value="">— Select item —</option>
                         {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
@@ -730,7 +730,7 @@ export default function PurchaseOrders() {
           <p className="page-subtitle">{pos.length} POs · {periodLabel}</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
+          <select aria-label="Period"
             value={selectedPeriod?.id || ''}
             onChange={e => handlePeriodChange(e.target.value)}
             className="form-select"

@@ -4,14 +4,14 @@ Living checklist compiled from: the competitor "IMS" ERP report-menu audit, the 
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-08-10 (S532)
+Last updated: 2026-08-19 (S576)
 
 ---
 
 ## A. Core feature gaps (Nepal-market research, 2026-07-04)
 
 - [x] ~~Guest-facing QR digital menu~~ — shipped S288, 2026-07-07 (view-only; self-order deferred, see Shipped section). Crest's other QR use (payment) is unaffected.
-- [ ] 🔴 Multi-branch/multi-outlet management (Crest is single-location per client) — reconfirmed S517 via a competitor (IMS WebPOS) screenshot audit: their per-branch Report/Transaction Privilege checklist has no equivalent here at all, and adding one is a genuine architecture change (every table is single-`client_id`), not a feature — see the per-staff permission items shipped from that same audit, below.
+- [x] ~~Multi-branch/multi-outlet management~~ — **shipped S548, 2026-08-12.** A group of outlets is several `clients` rows joined by `clients.group_id → client_groups`; an Owner switches between them from the sidebar and the Group Console (`/group-dashboard`, Suite Pro) rolls them up. Done as **selected-outlet indirection, not policy rewriting** — `profiles.active_client_id` was added and only `my_client_id()` changed, to `coalesce(active_client_id, client_id)`, so all ~151 policy sites kept their exact shape. This item said the architecture change was infeasible; it wasn't, because it never needed a set-returning `my_client_ids()`. Still open from it: a per-branch report/transaction **privilege matrix** (the specific thing the S517 competitor screenshot showed), and HQ→branch master-data push — deliberately not built, and when it is, `items`/`recipes` have no `UNIQUE(client_id, name)`, so it must match on an added `master_id`, never by name.
 - [x] ~~Delivery aggregator integration (Foodmandu/Pathao-style) — tagging only~~ — shipped S290, reworked S291, 2026-07-07 (see Shipped section). Real order-injection/menu-sync is still 🔵 deferred — that needs API partner access from Foodmandu/Pathao (a business relationship, not just engineering, same shape of blocker as QR payment auto-confirmation's merchant onboarding).
 - [ ] 🟡 Loyalty/rewards program (Customers page tracks contact + credit ledger, no points/rewards mechanic)
 - [x] ~~Kitchen Display System~~ — shipped S289, 2026-07-07 (runs alongside printed KOT/BOT, not a replacement — see Shipped section). Extended S407/S408, 2026-07-17: estimated prep time on Start + live timers, see Shipped section entry. Extended again S431, 2026-07-21: `profiles.pos_team` (foh/kitchen/bar) locks a kitchen/bar staff account to its own KOT/BOT queue with the toggle hidden entirely, and strips their sidebar to just Dashboard + Kitchen Display — see Shipped section entry.

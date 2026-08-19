@@ -253,7 +253,7 @@ export default function MenuEngineering() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select className="form-select" value={periodId} onChange={e => setPeriodId(e.target.value)}>
+          <select aria-label="Period" className="form-select" value={periodId} onChange={e => setPeriodId(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
           {/* View toggle */}
@@ -298,7 +298,7 @@ export default function MenuEngineering() {
           onChange={e => setSearch(e.target.value)}
           style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 220 }}
         />
-        <select className="form-select" value={filterQ} onChange={e => setFilterQ(e.target.value)}>
+        <select aria-label="Filter by quadrant" className="form-select" value={filterQ} onChange={e => setFilterQ(e.target.value)}>
           <option value="All">All Quadrants</option>
           {Object.keys(QUADRANTS).map(q => <option key={q} value={q}>{q}</option>)}
         </select>

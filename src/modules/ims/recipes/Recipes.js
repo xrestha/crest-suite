@@ -1328,7 +1328,7 @@ export default function Recipes() {
                   return (
                     <tr key={ing._key}>
                       <td style={{ padding: '6px 0' }}>
-                        <select
+                        <select aria-label="Ingredient type"
                           value={ing.type}
                           onChange={e => setIngType(ing._key, e.target.value)}
                           style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 8px', fontSize: 12, color: ing.type === 'sub_recipe' ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', outline: 'none', width: 95 }}

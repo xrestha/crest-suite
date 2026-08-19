@@ -326,7 +326,7 @@ export default function Overheads() {
           <p className="page-subtitle">Fixed costs · Labor · Tax & Fees · True P&L — {period?.label || '—'}</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <select
+          <select aria-label="Period"
             value={periodId}
             onChange={e => setPeriodId(e.target.value)}
             style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
@@ -446,7 +446,7 @@ export default function Overheads() {
               {activeRows.map((row, idx) => (
                 <tr key={idx}>
                   <td>
-                    <select
+                    <select aria-label="Overhead category"
                       value={cfg.presets.includes(row.category) ? row.category : '__custom__'}
                       onChange={e => {
                         if (e.target.value === '__custom__') updateRow(activeBucket, idx, 'category', '')

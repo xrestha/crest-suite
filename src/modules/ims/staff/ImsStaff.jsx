@@ -373,7 +373,7 @@ export default function ImsStaff() {
                     <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{p.email || '—'}</td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <select
+                        <select aria-label="IMS role"
                           className="form-select"
                           style={{ minWidth: 160 }}
                           value={displayTitle || ''}
@@ -444,7 +444,7 @@ export default function ImsStaff() {
                 {customRoles.map((r, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
                     <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>{r.label}</span>
-                    <select
+                    <select aria-label="Permission level for this role"
                       className="form-select"
                       style={{ width: 120, fontSize: 12 }}
                       value={r.level}
@@ -543,7 +543,7 @@ export default function ImsStaff() {
 
             {addMode === 'hr' && (
               <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>
+                <label style={labelStyle} htmlFor="ims-staff-hr-employee">
                   <Tip text="Links this IMS login to an existing HR employee record — their name stays in sync with HR, and payroll/attendance can be matched to the same person.">HR Employee</Tip>
                 </label>
                 {unlinkedEmployees.length === 0 ? (
@@ -552,6 +552,7 @@ export default function ImsStaff() {
                   </p>
                 ) : (
                   <SearchableSelect
+                    id="ims-staff-hr-employee"
                     options={unlinkedEmployees.map(e => ({ value: e.id, label: `${e.full_name}${e.employee_code ? ` (${e.employee_code})` : ''}` }))}
                     value={addForm.employee_id} onChange={v => setAddForm(f => ({ ...f, employee_id: v }))}
                     placeholder="Select employee…"
@@ -562,7 +563,7 @@ export default function ImsStaff() {
 
             {addMode === 'existing' && (
               <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>
+                <label style={labelStyle} htmlFor="ims-staff-existing-user">
                   <Tip text="Assigns an IMS role to a login that already exists for this client (e.g. one created from Admin → Clients → Manage → Users) instead of creating a new one. Only accounts with no POS/HR/IMS role already set are shown.">Existing User</Tip>
                 </label>
                 {eligibleUsers.length === 0 ? (
@@ -571,6 +572,7 @@ export default function ImsStaff() {
                   </p>
                 ) : (
                   <SearchableSelect
+                    id="ims-staff-existing-user"
                     options={eligibleUsers.map(u => ({ value: u.id, label: `${u.full_name || '—'} (${u.email})` }))}
                     value={addForm.existing_user_id} onChange={v => setAddForm(f => ({ ...f, existing_user_id: v }))}
                     placeholder="Select user…"

@@ -575,20 +575,20 @@ export default function SalesReport() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         {tab === 'onelakh' ? (
           <div>
-            <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Fiscal Year (BS)</label>
-            <select className="form-select" value={selectedFy} onChange={e => setSelectedFy(e.target.value)}>
+            <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="sales-report-fiscal-year-bs">Fiscal Year (BS)</label>
+            <select id="sales-report-fiscal-year-bs" className="form-select" value={selectedFy} onChange={e => setSelectedFy(e.target.value)}>
               {fyOptions.map(fy => <option key={fy} value={fy}>{fy}</option>)}
             </select>
           </div>
         ) : (
           <>
             <div>
-              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>From (BS)</label>
-              <BsCalendarPicker value={fromIso} onChange={setFromIso} />
+              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="sales-report-from-bs">From (BS)</label>
+              <BsCalendarPicker id="sales-report-from-bs" value={fromIso} onChange={setFromIso} />
             </div>
             <div>
-              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>To (BS)</label>
-              <BsCalendarPicker value={toIso} onChange={setToIso} />
+              <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="sales-report-to-bs">To (BS)</label>
+              <BsCalendarPicker id="sales-report-to-bs" value={toIso} onChange={setToIso} />
             </div>
           </>
         )}

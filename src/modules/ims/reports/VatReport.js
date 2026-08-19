@@ -216,7 +216,7 @@ export default function VatReport() {
           <p className="page-subtitle">Input VAT summary on purchases — {periodLabel(selectedPeriod)}</p>
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>
+          <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>
             {periods.map(p => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
           </select>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

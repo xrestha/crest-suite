@@ -73,17 +73,17 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
-        <select className="form-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+        <select aria-label="Filter by category" className="form-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
           <option value="all">All Categories</option>
           {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+        <select aria-label="Filter by status" className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           <option value="active">Active</option>
           <option value="disposed">Disposed</option>
           <option value="written_off">Written Off</option>
           <option value="all">All Statuses</option>
         </select>
-        <select className="form-select" value={filterLocation} onChange={e => setFilterLocation(e.target.value)}>
+        <select aria-label="Filter by location" className="form-select" value={filterLocation} onChange={e => setFilterLocation(e.target.value)}>
           <option value="all">All Locations</option>
           {locations.map(l => <option key={l} value={l}>{l}</option>)}
         </select>

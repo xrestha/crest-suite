@@ -437,7 +437,7 @@ export default function Periods() {
                                 min="2070" max="2100"
                                 style={{ width: 90, padding: '4px 8px', fontSize: 13, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, color: 'var(--theme-text1)' }}
                               />
-                              <select
+                              <select aria-label="BS month"
                                 value={editAllForm.bs_month}
                                 onChange={e => setEditAllForm(f => ({ ...f, bs_month: parseInt(e.target.value) }))}
                                 style={{ padding: '4px 8px', fontSize: 13, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, color: 'var(--theme-text1)' }}
@@ -679,7 +679,7 @@ export default function Periods() {
                                   borderRadius: 6, color: 'var(--theme-text1)'
                                 }}
                               />
-                              <select
+                              <select aria-label="BS month"
                                 value={editForm.bs_month}
                                 onChange={e => setEditForm({ ...editForm, bs_month: parseInt(e.target.value) })}
                                 style={{

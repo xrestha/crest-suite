@@ -220,16 +220,16 @@ export default function PosExceptionReport() {
       {/* Filters */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>From (BS)</label>
-          <BsCalendarPicker value={fromIso} onChange={setFromIso} />
+          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-exception-report-from-bs">From (BS)</label>
+          <BsCalendarPicker id="pos-exception-report-from-bs" value={fromIso} onChange={setFromIso} />
         </div>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>To (BS)</label>
-          <BsCalendarPicker value={toIso} onChange={setToIso} />
+          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-exception-report-to-bs">To (BS)</label>
+          <BsCalendarPicker id="pos-exception-report-to-bs" value={toIso} onChange={setToIso} />
         </div>
         <div>
-          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Staff</label>
-          <select className="form-select" value={staffFilter} onChange={e => setStaffFilter(e.target.value)}>
+          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-exception-report-staff">Staff</label>
+          <select id="pos-exception-report-staff" className="form-select" value={staffFilter} onChange={e => setStaffFilter(e.target.value)}>
             <option value="all">All staff</option>
             {staffOptions.map(id => <option key={id} value={id}>{staffNames[id] || id}</option>)}
           </select>

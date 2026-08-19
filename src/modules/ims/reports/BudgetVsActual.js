@@ -114,7 +114,7 @@ export default function BudgetVsActual() {
           <h1 className="page-title">Budget vs Actual</h1>
           <p className="page-subtitle">Compare planned spend against actual net purchases — {periodLabel}</p>
         </div>
-        <select
+        <select aria-label="Period"
           style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
           value={selectedPeriod?.id || ''}
           onChange={e => handlePeriodChange(e.target.value)}

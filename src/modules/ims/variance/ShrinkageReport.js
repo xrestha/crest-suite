@@ -212,7 +212,7 @@ export default function ShrinkageReport() {
           <h1 className="page-title">Shrinkage Report</h1>
           <p className="page-subtitle">Consistent unexplained stock loss across periods — {periodsUsed} closed periods analysed</p>
         </div>
-        <select className="form-select" value={periodCount} onChange={e => setPeriodCount(Number(e.target.value))}>
+        <select aria-label="Number of periods to analyse" className="form-select" value={periodCount} onChange={e => setPeriodCount(Number(e.target.value))}>
           <option value={3}>Last 3 periods</option>
           <option value={6}>Last 6 periods</option>
           <option value={12}>Last 12 periods</option>
@@ -260,11 +260,11 @@ export default function ShrinkageReport() {
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+          <select aria-label="Filter by category" className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
             <option value="all">All Categories</option>
             {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
-          <select className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <select aria-label="Filter by status" className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
             <option value="flagged">Flagged items only</option>
             <option value="consistent">Consistent only</option>
             <option value="all">All tracked items</option>

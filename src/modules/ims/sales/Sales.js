@@ -500,7 +500,7 @@ export default function Sales() {
           <p className="page-subtitle print-only" style={{ marginTop: 2 }}>{tabPrintLabel}</p>
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <select
+          <select aria-label="Period"
             style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
             value={selectedPeriod?.id || ''}
             onChange={e => handlePeriodChange(e.target.value)}
@@ -599,7 +599,7 @@ export default function Sales() {
               </div>
             )}
             {(viewMode === 'daily' || viewMode === 'breakdown' || viewMode === 'summary') && (
-              <select
+              <select aria-label="Filter by category"
                 value={categoryFilter}
                 onChange={e => setCategoryFilter(e.target.value)}
                 style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', marginBottom: 6 }}
@@ -609,7 +609,7 @@ export default function Sales() {
               </select>
             )}
             {viewMode === 'summary' && (
-              <select
+              <select aria-label="Sort by"
                 value={sortBy}
                 onChange={e => setSortBy(e.target.value)}
                 style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', marginBottom: 6 }}
