@@ -215,9 +215,11 @@ everything-this-session): the `${var()}NN` broken-tint bug class live in `Help.j
 shipping — tier lock-chips and plan badges render untinted today); ~171 unnamed filter selects
 plus POS's 60-labels/7-htmlFor gap; 31 `badge-*` chips missing the base `badge` class (sites
 enumerated in the snapshot); and the standing server-side POS items in
-`.claude/rules/pos-billing.md`. **Pending manual steps unchanged from S574:** migrations
-`20260818180000` + `20260818190000` in the SQL Editor, `supabase functions deploy
-admin-user-ops`.
+`.claude/rules/pos-billing.md`. **All pending manual steps cleared same session:** both
+migrations applied in the SQL Editor — each a verified no-op on the live book (zero clients
+carried `is_premium`; zero admin-created legacy trials to fold), so the ORDER-MATTERS deploy-gap
+risk never materialised — and `admin-user-ops` deployed, so Archive now preserves the staff PIN
+vault. Nothing pending.
 
 **Files:** `src/components/{ConfirmModal.js (new), Layout.js}`, `src/modules/pos/orders/PosOrders.jsx`,
 `src/modules/pos/shifts/PosShifts.jsx`, `src/modules/pos/reports/PosExceptionReport.jsx`,
@@ -320,7 +322,9 @@ were fixed individually).
 
 **Pending manual steps:** run migrations `20260818180000` (is_premium fold — BEFORE deploying)
 and `20260818190000` (trial fold) in the SQL Editor; `supabase functions deploy admin-user-ops`
-(keep_staff_vault); bump the service-worker `CACHE_NAME` on deploy.
+(keep_staff_vault); bump the service-worker `CACHE_NAME` on deploy. *(All completed 2026-08-19 in
+S575 — both migrations were verified no-ops on the live book, the function is deployed, and the
+cache bumped to v92.)*
 
 ### S573 — 2026-08-18 — Critique campaign phase 6 (POS): five money-path defects, fixed in steps
 
