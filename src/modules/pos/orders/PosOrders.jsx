@@ -375,6 +375,14 @@ export default function PosOrders() {
   const tendersTotal = tenders.reduce((s, t) => s + t.amount, 0)
   const remaining     = Math.max(0, payTotal - tendersTotal)
 
+  // Single-payment Cash: a tender below the bill total is a short drawer with no cause recorded —
+  // the change line clamps to 0, so without this nothing on screen even hints. Block Confirm
+  // instead (split mode already guards via `remaining`). '' means "exact cash" (see
+  // resolveTendered), so only a genuinely entered number can register a shortfall.
+  const cashShortfall = (!splitMode && payMethod === 'Cash' && !Number.isNaN(parseFloat(tenderedStr)))
+    ? Math.max(0, payTotal - resolveTendered(payTotal))
+    : 0
+
   // Regenerate the dynamic payment QR as the payable amount changes (discount typed, items
   // edited) — the modal QR and print preview always encode the exact current amount. In split
   // mode this targets whatever the next tender's amount is (defaulting to the remaining balance),
@@ -1420,6 +1428,9 @@ export default function PosOrders() {
     }
     if (closeType === 'paid' && splitMode && (remaining > 0 || tenders.length === 0)) {
       setCloseMsg('error:Split payment is not fully collected yet.'); return false
+    }
+    if (closeType === 'paid' && cashShortfall > 0) {
+      setCloseMsg(`error:Tendered ${fmtNpr(resolveTendered(payTotal))} is ${fmtNpr(cashShortfall)} short of the bill total ${fmtNpr(payTotal)} — collect the difference, or put the bill on Credit if the customer will pay later.`); return false
     }
     if (closeType === 'paid' && hasItemComp && !itemCompReason) {
       setCloseMsg('error:Select a reason for the complimentary item(s).'); return false
@@ -2478,9 +2489,12 @@ export default function PosOrders() {
                             value={tenderedStr} onChange={e => setTenderedStr(e.target.value)} style={{ ...billInput, width: '100%' }} />
                         </div>
                         <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Change</label>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>
-                            {fmtNpr(Math.max(0, resolveTendered(payTotal) - payTotal))}
+                          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
+                            {cashShortfall > 0 ? 'Short by' : 'Change'}
+                          </label>
+                          <div role={cashShortfall > 0 ? 'alert' : undefined}
+                            style={{ fontSize: 15, fontWeight: 700, color: cashShortfall > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
+                            {cashShortfall > 0 ? fmtNpr(cashShortfall) : fmtNpr(Math.max(0, resolveTendered(payTotal) - payTotal))}
                           </div>
                         </div>
                       </div>
@@ -2605,9 +2619,10 @@ export default function PosOrders() {
             {billingTab === 'pay' && (
               <button className="btn btn-primary" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
                 onClick={() => closeOrder('paid')}
-                disabled={closing || (splitMode && (remaining > 0 || tenders.length === 0)) || (discountAmt > 0 && !discountReason) || (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim())) || (hasItemComp && !itemCompReason) || allItemsComped}>
+                disabled={closing || cashShortfall > 0 || (splitMode && (remaining > 0 || tenders.length === 0)) || (discountAmt > 0 && !discountReason) || (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim())) || (hasItemComp && !itemCompReason) || allItemsComped}>
                 {closing ? 'Processing…'
                   : splitMode ? (remaining > 0 ? `Remaining ${fmtNpr(remaining)}` : `Complete Order — ${fmtNpr(payTotal)}`)
+                  : cashShortfall > 0 ? `Short by ${fmtNpr(cashShortfall)} — collect ${fmtNpr(payTotal)}`
                   : `Confirm Payment — ${fmtNpr(payTotal)}`}
               </button>
             )}

@@ -82,7 +82,12 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
   const now    = new Date()
   const nowStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   const total  = mode === 'open' ? opening : closing
-  const variance = mode === 'close' ? closing - (opening + (report?.cashSales || 0)) : 0
+  // Variance derives from the SAME expected-cash figure the slip prints two rows above it —
+  // through expectedCashOf, the one definition (hoisted; see below). A local formula here once
+  // ignored cash in/out, so any shift with a supplier payment or credit settlement printed a
+  // signed slip whose Variance disagreed with its own Expected Cash line and with the screen.
+  const expected = mode === 'close' ? expectedCashOf({ opening_cash: opening }, report) : 0
+  const variance = mode === 'close' ? closing - expected : 0
   const varianceLabel = Math.abs(variance) < 1 ? 'Balanced' : `${variance > 0 ? '+' : ''}NPR ${variance.toFixed(2)} (${variance > 0 ? 'over' : 'short'})`
 
   return `<!DOCTYPE html>
@@ -123,7 +128,7 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
   <div class="row"><span>Cash Sales:</span><span>${report.cashSales.toFixed(2)}</span></div>
   ${report.cashIn  ? `<div class="row"><span>Cash In${report.creditSettlementsCash ? ` (incl. ${report.creditSettlementsCash.toFixed(2)} credit settled)` : ''}:</span><span>+${report.cashIn.toFixed(2)}</span></div>` : ''}
   ${report.cashOut ? `<div class="row"><span>Cash Out:</span><span>-${report.cashOut.toFixed(2)}</span></div>` : ''}
-  <div class="row tot"><span>Expected Cash:</span><span>${(opening + report.cashSales + (report.cashIn || 0) - (report.cashOut || 0)).toFixed(2)}</span></div>
+  <div class="row tot"><span>Expected Cash:</span><span>${expected.toFixed(2)}</span></div>
   <div class="row"><span>Counted Cash:</span><span>${closing.toFixed(2)}</span></div>
   <div class="row tot"><span>Variance:</span><span>${varianceLabel}</span></div>
   ` : ''}
