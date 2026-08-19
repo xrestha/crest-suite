@@ -158,6 +158,22 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S589 — 2026-08-19 — Schema-drift test for feature_flags (guards the S547 class)
+
+A Jest test that makes the S547 failure impossible to ship again: FeatureAccessModal's Save
+upserts its entire `DEFAULT_FLAGS` object, so one key with no matching DB column rejects **every**
+feature-flag save for **every** client — invisible until an admin presses Save weeks later, since
+the feature itself works via the plan tier. The test reads FeatureAccessModal.js and the migration
+SQL as **text** (no DB connection, no React/Supabase imports), extracts the keys the modal upserts
+and the `boolean` columns the migrations create (baseline `CREATE TABLE` + every `ALTER TABLE
+feature_flags ADD COLUMN`, scoped so an ADD COLUMN on another table can't leak in), and requires
+the diff empty in **both directions** (save-breaker + orphan columns). Proven to actually catch
+drift — injecting a bogus flag key with no column makes it fail. Currently passes: schema is in
+sync. Deliberately does not assert the modal list equals SettingsContext's `DEFAULT_FLAGS` (they
+legitimately differ — the modal is the full upsert superset).
+
+**Files:** `src/pages/adminClients/featureFlagsSchema.test.js` (new), `README.md`
+
 ### S588 — 2026-08-19 — Variance stops double-counting POS + manual sales
 
 The Variance Report ("the money report"), Theoretical Variance and Shrinkage Report all summed
