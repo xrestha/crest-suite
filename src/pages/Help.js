@@ -569,6 +569,8 @@ const POS_FEATURES = [
                   desc: 'Every discount, void, and complimentary in one report — revenue that leaked, filterable by BS date range, exception type, and staff member. Discounts show the amount knocked off; Voids show the menu value forgone (incl. VAT); Comps show food cost, matching the Complimentary Slip, plus a separate Potential Sales Value column showing what the comped item(s) would have sold for at menu price. Includes both whole-order Complimentary and individually item-comped bills (see Order Taking). Requires Manager role or above.',
                   tips: [
                     'The By Staff Member table is the report\'s real job — one cashier discounting far more than everyone else is worth a conversation (training gap or permission creep)',
+                    'Staff are ranked by Revenue Impact — discounts + voided menu value + what comps would have sold for, all at sales value, so the total is one coherent number. Comp food cost stays visible in its own column',
+                    'Attribution records whoever was signed in on the till when the bill closed. The till now locks back to the PIN screen after 3 idle minutes, so on a shared till that attribution stays honest — but treat an outlier as a starting point for a conversation, not proof',
                     'A quiet report is a healthy one — a sudden spike in voids usually means order-entry mistakes, not fraud',
                     'Amounts mean different things per type: Discount = NPR knocked off the bill, Void = full menu value that was cancelled, Comp = ingredient cost of what was served free (see Potential Sales Value for what it would have sold for instead)',
                     'Click any row to view the actual bill/slip in a new tab — same layout that printed, view-only (won\'t trigger your printer)',
@@ -651,6 +653,7 @@ const POS_FEATURES = [
                     'Users with no role assigned cannot see any POS screens — the POS section is hidden from their sidebar',
                     'If Crest HR is also enabled, + Add Staff defaults to picking an existing HR Employee instead of typing a fresh name — the POS login is linked to that employee record (shown with a 🔗 HR tag) so the name never drifts out of sync. Switch to POS-only Staff for someone who isn\'t in HR (e.g. a casual/part-time role).',
                     'Discount Limit caps how much % discount that login can give at billing — leave it blank for unlimited. Allow Void lets that login void a bill themselves instead of needing the owner/admin. Both default to unrestricted-off, i.e. unlimited discount and no void access, until set here.',
+                    'A staff PIN session on a POS device locks back to the PIN screen after 3 minutes of no input (with a 20-second warning first) — so every bill, comp and void is recorded against the person who actually did it, not whoever signed in last. The Kitchen Display never locks, and owner email logins are unaffected.',
                   ],
                 },
 ]

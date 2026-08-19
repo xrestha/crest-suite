@@ -86,6 +86,22 @@ cost Sales Entry real data (S456). Use `save_pos_order_items(p_order_id, p_rows)
 `SECURITY INVOKER` so all three RESTRICTIVE staff-isolation families on `pos_order_items` stay
 enforced, and derives `client_id` from the order rather than taking it as a parameter.
 
+## Closed in S575 (phase 8), for the record
+
+- **Short cash tender**: single-payment Cash now blocks Confirm Payment when tendered < bill
+  total (`cashShortfall` in `PosOrders.jsx` — guard in `closeOrder` too, covering the QR-poll
+  path; the Change field flips to a red "Short by"). Split mode always guarded this.
+- **Idle lock is WIRED** — `usePosIdleLock` runs from `Layout.js`: PIN-staff sessions
+  (`posRole` set) on a bound device (`pos_device_client_id` in localStorage) lock to
+  `/pos/login` after 3 idle minutes, 20s `role="alert"` countdown first. `/pos/kds` and
+  owner/admin sessions are deliberately exempt. Don't add a second lock per page.
+- **Sales Exceptions ranks by Revenue Impact** (discount + void menu value + comp *potential
+  sales value*) — one coherent unit. Comp food cost stays in its own column. Never reintroduce a
+  total that adds comp COST to revenue figures.
+- **The printed settlement slip's Variance now derives from `expectedCashOf`** — the same figure
+  as its own Expected Cash line and the frozen `closing_report`. Exactly one definition; a local
+  formula in `buildShiftSlipHtml` is how it broke last time.
+
 ## Still open from the phase 6 critique
 
 Recorded so they aren't rediscovered from scratch:
@@ -94,12 +110,8 @@ Recorded so they aren't rediscovered from scratch:
   same-client `FOR ALL` policy, so a Staff-rank till JWT can PATCH `discount_amount`,
   `close_type` or `paid_amount` directly. This is privilege invariant #3 in its POS form; the fix
   is a `close_pos_order(...)` RPC re-deriving the cap and re-checking `pos_allow_void` server-side.
-- **No idle lock on a shared till**, so every `closed_by`/`comped_by`/`sent_by` attribution — and
-  the whole "By Staff Member" table in Sales Exceptions — records whoever last typed a PIN.
-  `src/modules/pos/usePosIdleLock.js` exists but is not yet wired into the shell.
-- **A short cash tender is accepted and stored as full payment** (single-payment Cash only; split
-  mode already guards it).
 - **An item already fired to the kitchen can be removed by any Staff-rank account** with no
   permission, reason or order-level record — caught after the fact by KOT Reconciliation only.
-- **Sales Exceptions sums three incompatible units** (discount NPR + void menu value incl. VAT +
-  comp food cost) into one "Total" and ranks staff by it.
+- **The mechanical sweep**: ~52 bare labels (POS measures 60 `<label>` vs 7 `htmlFor`), 9
+  hand-rolled modals, and ~104 base-signal-token text sites vs 10 contrast-variant adoptions —
+  the one module the S549–S551 sweeps never reached.

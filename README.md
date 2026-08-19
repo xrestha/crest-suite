@@ -158,6 +158,74 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S575 — 2026-08-19 — Critique campaign phase 8 (Synthesis): 34/40, then the money-path residue fixed
+
+The campaign's final phase — the full scored report the per-phase runs deferred. Two isolated
+agents (A: product-wide design review from source; B: detector + structural greps + measured
+evidence on a fresh production build) landed on **34/40 (Good)** with **0 P0s** — every P0 the
+campaign found in phases 1–7 is fixed. Snapshot:
+`.impeccable/critique/2026-08-18T23-56-44Z__crest-suite-all-modules.md`. Trend vs the July
+baselines (IMS 24, HR 25, POS 27, GuestMenu 27): the deeper phase critiques scored *lower* than
+July on the same surfaces (21 for IMS in phase 4 — more evidence, harsher), and the post-fix
+product now sits 7–10 points above every baseline. Verified live: the built /login and /pricing
+pass AA on all 21 measured contrast combinations and render 100% Poppins.
+
+**Then fixed the report's top findings, in five committed steps, per the user's priority call
+(money paths → high-stakes confirms → verdict consistency):**
+
+- **P1 — a short cash tender was accepted and stored as full payment** (single-payment Cash;
+  split mode always guarded it). The change line clamped to 0, so the drawer went short with no
+  cause recorded, surfacing hours later at shift close attributed to nobody. Confirm Payment now
+  blocks with the shortfall named (guard in `closeOrder` too, covering the QR auto-confirm
+  path), and the Change field flips to a red "Short by" figure.
+- **P1 — the printed cash-settlement slip contradicted itself.** `buildShiftSlipHtml` computed
+  Variance ignoring cash in/out while the Expected Cash line two rows above on the *same signed
+  slip* included them — any shift with a supplier payment or credit settlement printed a
+  self-contradicting paper record. Both rows now derive from `expectedCashOf`, the one
+  definition, matching the frozen `closing_report`.
+- **P2 — Sales Exceptions ranked named staff by a number that wasn't a quantity of anything**
+  (discount NPR + void menu value incl. VAT + comp *food cost*, summed). Now ranked by **Revenue
+  Impact** — comps at their potential sales value, so all three terms are revenue given away —
+  with per-column unit Tips, and the same fix on the stat card's blended sum.
+- **The idle lock is finally wired** (`usePosIdleLock` was written in S573 and imported nowhere):
+  PIN-staff sessions on a bound POS device lock back to `/pos/login` after 3 idle minutes with a
+  20-second `role="alert"` countdown; any deliberate input resets it. KDS and owner/admin email
+  sessions are deliberately exempt. This is what makes every `closed_by`/`comped_by` attribution
+  — and the staff ranking above — belong to the person, not the habit.
+- **Seven high-stakes confirms left `window.confirm`'s OS chrome** for a new shared
+  `ConfirmModal` (on `Modal`, so Escape/focus-trap/restore/stacking come free): dashboard period
+  close (now names the read-only lock, the opening-stock carry-forward and the frozen Owner
+  Report snapshot), payroll Regenerate/Finalize/Reopen (Finalize keeps its S570 consequence
+  summary, as a real dialog), the drawer-short shift close (danger variant, rendered inside the
+  close overlay's zIndex-1100 stacking context — a sibling Modal at zIndex 100 would stack
+  *underneath*), and Attendance's Clear Day / Clear-employee-month (which now state that a blank
+  day pays zero for daily/hourly staff). Routine row-deletes deliberately stay on
+  `window.confirm`; Purchases' Delete All already had its typed-name modal.
+- **One food-cost verdict scale.** OwnerDashboard's FC card banded against a hardcoded 35/45
+  while Variance/Recipes band against the client's own Settings thresholds via `fcBand()` — a
+  client who customised them could see the same month verdict-coloured differently on two
+  screens. Routed through `fcBand(settings)`; the sub-label now reads "Your target ≤N%".
+- **The sub-recipe COGS difference is disclosed on-page.** Stock Count's Summary includes prep;
+  Monthly Summary excludes it — deliberate, documented only in CLAUDE.md, which the accountant
+  reconciling the two doesn't read. One sentence on each page now names the difference and its
+  direction.
+
+**Still open from the report, in priority order** (the user chose money-paths-first over
+everything-this-session): the `${var()}NN` broken-tint bug class live in `Help.js` (its fourth
+shipping — tier lock-chips and plan badges render untinted today); ~171 unnamed filter selects
+plus POS's 60-labels/7-htmlFor gap; 31 `badge-*` chips missing the base `badge` class (sites
+enumerated in the snapshot); and the standing server-side POS items in
+`.claude/rules/pos-billing.md`. **Pending manual steps unchanged from S574:** migrations
+`20260818180000` + `20260818190000` in the SQL Editor, `supabase functions deploy
+admin-user-ops`.
+
+**Files:** `src/components/{ConfirmModal.js (new), Layout.js}`, `src/modules/pos/orders/PosOrders.jsx`,
+`src/modules/pos/shifts/PosShifts.jsx`, `src/modules/pos/reports/PosExceptionReport.jsx`,
+`src/modules/hr/payroll/PayrollRun.jsx`, `src/modules/hr/attendance/AttendanceSheet.jsx`,
+`src/pages/dashboard/{ClientDashboard.jsx, OwnerDashboard.jsx}`,
+`src/modules/ims/{stockcount/Stock.js, reports/MonthlySummary.js}`, `src/pages/Help.js`,
+`public/service-worker.js` (v91 → v92), `CLAUDE.md`, `.claude/rules/pos-billing.md`, `README.md`
+
 ### S574 — 2026-08-18 — Critique campaign phase 7 (Admin): entitlement, data-loss and recovery defects
 
 Ran phase 7 over the admin surfaces (AdminClients, ClientDrawer, FeatureAccessModal, AuditLog,
