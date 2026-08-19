@@ -62,7 +62,7 @@ export default function KotLog() {
   const { clientId, hasPosAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
 
-  const [tab, setTab] = useState('register') // 'register' | 'reconciliation' | 'trail'
+  const [tab, setTab] = useState('register') // 'register' | 'reconciliation' | 'trail' | 'pulled'
   const [fromIso, setFromIso] = useState(formatAd(new Date()))
   const [toIso,   setToIso]   = useState(formatAd(new Date()))
 
@@ -199,6 +199,37 @@ export default function KotLog() {
 
   useEffect(() => { if (tab === 'trail') loadBillTrail() }, [tab, loadBillTrail])
 
+  /* ── Pulled Items ──
+     Reconciliation INFERS a pulled line by comparing tickets against the order as it stands now,
+     which is why it can say "this was cooked and is no longer on the bill" but never who did it or
+     why. pos_kot_removals is the record itself, written inside save_pos_order_items (migration
+     20260819130000) at the moment the line is replaced. The two tabs answer different questions
+     and are both worth having: this one is attributable, that one still catches a removal made by
+     a path that predates the record. */
+  const [pulledRows, setPulledRows] = useState([])
+  const [pulledLoading, setPulledLoading] = useState(true)
+
+  const loadPulled = useCallback(async () => {
+    if (!clientId) return
+    setPulledLoading(true)
+    const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
+    const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
+    const [{ data: rows }, { data: profs }] = await Promise.all([
+      // Paged like every other tab here: one row per pulled line, so a busy month crosses 1000
+      // sooner than the ticket log does on a client that edits orders a lot.
+      fetchAllRows(() => scopedFrom('pos_kot_removals',
+        'id, order_id, item_name, qty_removed, reason, removed_by, removed_at, pos_orders(order_no, table_name, invoice_no, close_type)')
+        .gte('removed_at', fromTs).lte('removed_at', toTs)
+        .order('removed_at', { ascending: false }).order('id')),
+      supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
+    ])
+    setStaffNames(prev => ({ ...prev, ...Object.fromEntries((profs || []).map(p => [p.id, p.full_name])) }))
+    setPulledRows(rows || [])
+    setPulledLoading(false)
+  }, [clientId, fromIso, toIso, scopedFrom])
+
+  useEffect(() => { if (tab === 'pulled') loadPulled() }, [tab, loadPulled])
+
   if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
 
   async function exportExcel() {
@@ -221,6 +252,23 @@ export default function KotLog() {
       }))
       XLSX.utils.book_append_sheet(wb, ws, 'KOT Register')
       XLSX.writeFile(wb, `kot-register-${fromIso}-to-${toIso}.xlsx`)
+    } else if (tab === 'pulled') {
+      const ws = XLSX.utils.json_to_sheet(pulledRows.map(r => {
+        const bs = adToBs(new Date(r.removed_at))
+        return {
+          'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
+          'Time': new Date(r.removed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          'Order#': r.pos_orders?.order_no ?? '',
+          'Invoice#': r.pos_orders?.invoice_no || '',
+          'Table': r.pos_orders?.table_name || 'Takeaway',
+          'Item': r.item_name,
+          'Qty Pulled': r.qty_removed,
+          'Reason': r.reason || '(none given)',
+          'Removed By': staffNames[r.removed_by] || '—',
+        }
+      }))
+      XLSX.utils.book_append_sheet(wb, ws, 'Pulled Items')
+      XLSX.writeFile(wb, `kot-pulled-items-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'reconciliation') {
       const ws = XLSX.utils.json_to_sheet(discrepancies.map(d => ({
         'Order#': d.order.order_no, 'Table': d.order.table_name || 'Takeaway', 'Status': statusBadge(d.order).label,
@@ -255,17 +303,17 @@ export default function KotLog() {
     }
   }
 
-  const loading = tab === 'register' ? registerLoading : tab === 'reconciliation' ? reconLoading : billTrailLoading
-  const isEmpty = tab === 'register' ? logRows.length === 0 : tab === 'reconciliation' ? discrepancies.length === 0 : billTrailRows.length === 0
+  const loading = tab === 'register' ? registerLoading : tab === 'reconciliation' ? reconLoading : tab === 'pulled' ? pulledLoading : billTrailLoading
+  const isEmpty = tab === 'register' ? logRows.length === 0 : tab === 'reconciliation' ? discrepancies.length === 0 : tab === 'pulled' ? pulledRows.length === 0 : billTrailRows.length === 0
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1150 }}>
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
-          KOT Log <Tip text="Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was sent to the kitchen against what's currently on each order, flagging food that was cooked but then reduced, removed, or the order was voided entirely — the anti-fraud check. Bill Trail shows every paid/voided bill with its complete KOT/BOT history, including bills that never sent anything to the kitchen at all." width={340}>ⓘ</Tip>
+          KOT Log <Tip text="Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was sent to the kitchen against what's currently on each order, flagging food that was cooked but then reduced, removed, or the order was voided entirely — the anti-fraud check. Bill Trail shows every paid/voided bill with its complete KOT/BOT history, including bills that never sent anything to the kitchen at all. Pulled Items is the named record: who took an already-cooked line off a bill, when, and why — Reconciliation can only infer that it happened." width={360}>ⓘ</Tip>
         </h2>
         <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
-          Every ticket sent to the kitchen, and whether it matches what was actually billed.
+          Every ticket sent to the kitchen, whether it matches what was actually billed, and who pulled anything that no longer does.
         </p>
       </div>
 
@@ -273,6 +321,7 @@ export default function KotLog() {
         <button className={`tab-btn${tab === 'register' ? ' tab-btn--active' : ''}`} onClick={() => setTab('register')}>Register</button>
         <button className={`tab-btn${tab === 'reconciliation' ? ' tab-btn--active' : ''}`} onClick={() => setTab('reconciliation')}>Reconciliation</button>
         <button className={`tab-btn${tab === 'trail' ? ' tab-btn--active' : ''}`} onClick={() => setTab('trail')}>Bill Trail</button>
+        <button className={`tab-btn${tab === 'pulled' ? ' tab-btn--active' : ''}`} onClick={() => setTab('pulled')}>Pulled Items</button>
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
@@ -291,7 +340,10 @@ export default function KotLog() {
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : isEmpty ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-          {tab === 'register' ? 'No KOT/BOT tickets sent in this range.' : tab === 'reconciliation' ? 'No discrepancies — a quiet report is a healthy one. 🎉' : 'No paid or voided bills in this range.'}
+          {tab === 'register' ? 'No KOT/BOT tickets sent in this range.'
+            : tab === 'reconciliation' ? 'No discrepancies — a quiet report is a healthy one. 🎉'
+            : tab === 'pulled' ? 'Nothing already sent to the kitchen was taken off a bill in this range. 🎉'
+            : 'No paid or voided bills in this range.'}
         </div>
       ) : tab === 'register' ? (
         <div className="table-wrap">
@@ -321,6 +373,48 @@ export default function KotLog() {
                     <td style={{ textAlign: 'right', color: overEst ? 'var(--theme-red)' : undefined }}>
                       {est == null && actual == null ? '—' : `${est ?? '—'}m / ${actual ?? '—'}m`}
                     </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : tab === 'pulled' ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Date/Time (BS)</th><th>Table</th><th>Order#</th><th>Item</th>
+                <th style={{ textAlign: 'right' }}>Qty Pulled</th>
+                <th><Tip text="Chosen by the person removing the line at the moment they removed it. '(none given)' means the removal came through a path that could not ask — an offline sync, or a device still running a bundle from before this was added." width={320}>Reason</Tip></th>
+                <th>Removed By</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pulledRows.map(r => {
+                const bs = adToBs(new Date(r.removed_at))
+                const o = r.pos_orders
+                return (
+                  <tr key={r.id}>
+                    <td>
+                      {bs.day} {BS_MONTHS[bs.month - 1]}
+                      <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 6 }}>
+                        {new Date(r.removed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </td>
+                    <td>{o?.table_name || 'Takeaway'}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                      #{o?.order_no ?? '—'}
+                      {o?.invoice_no && <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 6 }}>{o.invoice_no}</span>}
+                    </td>
+                    <td>{r.item_name}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{r.qty_removed}</td>
+                    <td>
+                      {r.reason
+                        ? r.reason
+                        : <span className="badge-amber" style={{ fontSize: 11 }}>none given</span>}
+                    </td>
+                    <td>{staffNames[r.removed_by] || '—'}</td>
                   </tr>
                 )
               })}

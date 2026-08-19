@@ -75,6 +75,19 @@ export const PAYMENT_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay']
 export const VOID_REASONS    = ['Wrong table', 'Duplicate order', 'Test order', 'Order entry mistake', 'Other']
 export const COMP_REASONS    = ['Walkout / unpaid', 'Customer goodwill', 'Customer complaint', 'Staff error', 'Owners', 'Company Guest', 'Other']
 export const DEFAULT_DISCOUNT_REASONS = ['Loyalty customer', 'Promo / coupon code', 'Manager goodwill', 'Bulk / corporate order', 'Price match', 'Other']
+// Asked for whenever a line is cut BELOW the quantity the kitchen or bar has already been sent —
+// the food exists, so its disappearance from the bill needs a stated cause. Deliberately not the
+// same list as VOID_REASONS: voiding is about a whole bill that was never fulfilled, this is about
+// one dish that was. Recorded server-side in pos_kot_removals by save_pos_order_items, so the
+// reason is the only part of the record the browser contributes.
+export const KOT_PULL_REASONS = [
+  'Kitchen 86 / out of stock',
+  'Wrong item fired',
+  'Customer changed their mind',
+  'Moved to another table',
+  'Quality issue — remade',
+  'Other',
+]
 // The 1st print (n=1) carries no label at all — it IS the original, nothing to distinguish it
 // from. Every print after that is "COPY OF ORIGINAL - (n)" where n counts the copy/reprint
 // itself, not the total print count — e.g. the 2nd print overall is copy 1, the 5th print

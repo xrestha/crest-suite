@@ -1219,6 +1219,10 @@ Deno.serve(async (req) => {
         // Before orders/shifts: its FKs to both are ON DELETE SET NULL, so leaving it until
         // after would orphan the rows rather than remove them.
         await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
+        // pos_kot_removals cascades from pos_orders, so this delete is not load-bearing — it is
+        // here so the sequence still names every table it clears, which is what makes a missed
+        // one visible on review (S382's pos_credit_notes was missed exactly by being implicit).
+        await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
         await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
         await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
         await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')
@@ -1298,6 +1302,7 @@ Deno.serve(async (req) => {
       await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
       // Before orders/shifts — its FKs to both are ON DELETE SET NULL.
       await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
+      await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
       await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
       await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
       await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')

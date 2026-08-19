@@ -1405,7 +1405,20 @@ textarea:focus-visible {
   box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 
-.badge {
+/* The badge BOX. Every colour variant carries it too, and that is the point: a chip written as
+   `badge-green` alone — 103 references across 22 files before S576 — otherwise got only the tint and
+   text colour, rendering as bare inherited-size text with no padding, radius, weight or capitalize,
+   and nothing in the markup said the class pair was incomplete. This is the same silent-failure
+   shape as the missing `badge-gold` (2026-08-12): CSS has no error for a class that does half a
+   job. Listing the variants here makes the colour classes self-sufficient, so `badge badge-green`
+   and `badge-green` render identically and the mistake can no longer be made. */
+.badge,
+.badge-green,
+.badge-yellow,
+.badge-amber,
+.badge-purple,
+.badge-red,
+.badge-gray {
   display: inline-block;
   padding: 2px 8px;
   border-radius: var(--radius-sm);

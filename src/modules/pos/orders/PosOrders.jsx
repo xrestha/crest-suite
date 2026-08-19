@@ -11,6 +11,7 @@ import { adToBs, getBsToday, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
+import Modal from '../../../components/Modal'
 import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
 import {
   cachePosMenu, getCachedPosMenu, cachePosTables, getCachedPosTables,
@@ -21,7 +22,7 @@ import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml 
 import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, STATUS_COLOR,
   KOT_STATUS_BADGE, KOT_STATUS_LABEL, KOT_STATUS_RANK, kotTimerLabel,
-  PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, COPY_LABEL,
+  PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput,
 } from './posOrdersConstants'
 
@@ -178,6 +179,12 @@ export default function PosOrders() {
   const [discountStr,     setDiscountStr]     = useState('')
   const [discountReason,  setDiscountReason]  = useState('')
   const [discountReasons, setDiscountReasons] = useState(DEFAULT_DISCOUNT_REASONS)
+  // Pulling an already-fired line: the open prompt, the reason being typed into it, and the reason
+  // that then rides along with the NEXT save. One reason covers one save rather than one line —
+  // a save is one deliberate act, and asking twice for the same edit reads as a malfunction.
+  const [pullPrompt, setPullPrompt] = useState(null)
+  const [pullReason, setPullReason] = useState('')
+  const [kotPullReason, setKotPullReason] = useState('')
   const [hscMap,      setHscMap]      = useState({}) // { recipeId: hscCode } — fetched once when Billing modal opens
   const [openShiftId, setOpenShiftId] = useState(null) // cached, not queried per-close — see loadOpenShift()
   const [billQrUrl,   setBillQrUrl]   = useState('')   // per-bill dynamic payment QR (data URL), regenerated as the total changes
@@ -719,8 +726,23 @@ export default function PosOrders() {
           await scopedUpdate('pos_orders', { covers: q.covers }).eq('id', oid)
         }
 
-        await scopedDelete('pos_order_items').eq('order_id', oid)
-        await scopedInsert('pos_order_items', q.items.map(i => ({ order_id: oid, ...i })))
+        // Through the RPC, not delete-then-insert: this replay carries exactly the same two risks
+        // the online path does. It must be atomic (S573 — a stall between the two writes leaves a
+        // live order with zero lines), and it must record any already-fired line the offline edit
+        // dropped, or going offline becomes the way to pull a fired item without leaving a trace.
+        // The reason is null by construction — the prompt ran on a device that was offline hours
+        // ago and its answer was never queued — so these rows read as "none given" on the Pulled
+        // Items tab, which is the honest label for a removal nobody can now be asked about.
+        const { error: syncErr } = await supabase.rpc('save_pos_order_items', {
+          p_order_id: oid,
+          p_rows: q.items,
+          p_removal_reason: null,
+        })
+        if (syncErr) {
+          if (!isMissingPosSaveFn(syncErr)) throw syncErr
+          await scopedDelete('pos_order_items').eq('order_id', oid)
+          await scopedInsert('pos_order_items', q.items.map(i => ({ order_id: oid, ...i })))
+        }
 
         for (const send of q.kot_sends || []) {
           try { await scopedInsert('pos_kot_log', { ...send, order_id: oid }) } catch (_) { /* best-effort, matches online logKotSend */ }
@@ -1005,7 +1027,29 @@ export default function PosOrders() {
     setSuggestions(reranked.length ? reranked : categoryNudgeSuggestions(recipe, currentIds))
   }
 
+  // How much of this line the kitchen/bar has actually been sent. `sent_qty` carries the
+  // previously-sent quantity once an edit clears `sent_to_kot` on the line, so the two together
+  // are the only honest answer — reading `sent_to_kot` alone reports 0 the moment someone nudges
+  // the qty, which is exactly the edit this needs to catch.
+  const kitchenQtyOf = item => item?.sent_to_kot ? item.qty : (item?.sent_qty || 0)
+
+  // Cutting a line below what the kitchen already has means food that exists is leaving the bill.
+  // That is the classic till-shrinkage route (ring it, fire it, serve it, pull the line before
+  // charging) and until S576 it took no permission, left no record and asked no question. The
+  // record itself is written server-side inside save_pos_order_items — a browser check would be
+  // advisory — so all this prompt owns is the reason, which the RPC has no way to invent.
   function setQty(idx, qty) {
+    const item = orderItems[idx]
+    const kitchenQty = kitchenQtyOf(item)
+    if (kitchenQty > 0 && qty < kitchenQty) {
+      setPullPrompt({ idx, qty, name: item.name, pulled: kitchenQty - Math.max(0, qty) })
+      setPullReason('')
+      return
+    }
+    applyQty(idx, qty)
+  }
+
+  function applyQty(idx, qty) {
     if (qty <= 0) {
       setOrderItems(prev => prev.filter((_, i) => i !== idx))
     } else {
@@ -1101,18 +1145,28 @@ export default function PosOrders() {
     // so deployed code can briefly predate the function. It is NOT a retry-on-failure path: any
     // other error is returned as a failure so nothing gets written twice. Delete it, and
     // isMissingFunctionError, once 20260818150000 is applied everywhere.
+    // p_removal_reason is the ONLY part of the KOT-removal record the browser supplies. The RPC
+    // computes the removal itself by diffing the stored sent quantities against these rows inside
+    // the same transaction, so omitting the reason (an old bundle, or a hand-rolled request) loses
+    // the reason and nothing else — the row is still written, still attributed, still timestamped.
     const { error: rpcErr } = await supabase.rpc('save_pos_order_items', {
       p_order_id: oid,
       p_rows: itemsPayload,
+      p_removal_reason: kotPullReason || null,
     })
     if (rpcErr) {
       if (!isMissingPosSaveFn(rpcErr)) return null
+      // Pre-migration fallback only. Note it cannot record a removal — that is the whole reason
+      // the diff lives in the RPC — so it is one more thing that disappears once the migration
+      // is applied everywhere and this branch is deleted.
       await scopedDelete('pos_order_items').eq('order_id', oid)
       const { error: iErr } = await scopedInsert('pos_order_items',
         itemsPayload.map(i => ({ order_id: oid, ...i }))
       )
       if (iErr) return null
     }
+    // Consumed by that save; a later edit asks again rather than silently reusing this one.
+    if (kotPullReason) setKotPullReason('')
     if (activeTable?.id) cachePosOrderForTable(activeTable.id, { orderId: oid, orderNo: oNo, covers, items: orderItems })
 
     // Only now — the merged items are actually persisted — mark any Accepted-locally guest
@@ -1448,6 +1502,24 @@ export default function PosOrders() {
     setClosing(true); setCloseMsg('')
 
     try {
+      // Persist the cart before billing it. Two reasons, and the second one predates the first:
+      //
+      //   1. The server-side discount cap (migration 20260819120000) measures the cap against the
+      //      order's STORED lines, because those are the only ones a trigger can trust. A bill can
+      //      legitimately be charged straight after an edit — the Payment button gates on
+      //      saving/orderId/isOnline, never on a dirty cart — so without this an at-the-cap
+      //      discount could be rejected for a subtotal the server cannot see.
+      //   2. writeSalesEntries posts revenue from the in-memory cart. An unsaved line was already
+      //      reaching IMS revenue and the printed bill while never existing in pos_order_items —
+      //      the bill and its own lines disagreeing, quietly, with nothing on either side saying so.
+      //
+      // Runs before apply_pos_item_comps, not after: save_pos_order_items replaces the lines
+      // wholesale, so persisting afterwards would erase the comp rows it had just written.
+      if (closeType === 'paid' && orderItems.length > 0) {
+        const persisted = await performSave()
+        if (!persisted) { setCloseMsg('error:Could not save the order before billing it — try again.'); return false }
+      }
+
       const isSplit = closeType === 'paid' && splitMode && tenders.length > 0
       const today = getBsToday()
 
@@ -1523,7 +1595,14 @@ export default function PosOrders() {
 
       const { data: updated, error } = await scopedUpdate('pos_orders', payload).eq('id', orderId)
         .select('*').single()
-      if (error) { setCloseMsg('error:' + error.message); return false }
+      if (error) {
+        // guard_pos_order_close() (migration 20260819120000) refuses an over-cap discount or a void
+        // from an account without Allow Void, and phrases the refusal for the person holding the
+        // till. Its messages are prefixed with the table name the way every Postgres error is;
+        // strip that so the cashier reads the sentence, not the schema.
+        setCloseMsg('error:' + String(error.message || '').replace(/^pos_orders:\s*/, ''))
+        return false
+      }
 
       if (closeType === 'void') {
         // Best-effort — a KDS ticket for a voided order should disappear from the board rather
@@ -2996,6 +3075,42 @@ export default function PosOrders() {
           </button>
         </div>
       </div>
+    )}
+
+    {/* Pulling an already-fired line. Not a ConfirmModal: this asks for an input, and the input
+        is the entire point — a yes/no dialog would add friction and record nothing. */}
+    {pullPrompt && (
+      <Modal onClose={() => setPullPrompt(null)} title="Remove an item the kitchen already has" maxWidth={440}>
+        <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 14px', lineHeight: 1.5 }}>
+          <strong style={{ color: 'var(--theme-text1)' }}>{pullPrompt.pulled} × {pullPrompt.name}</strong>{' '}
+          {pullPrompt.pulled === 1 ? 'has' : 'have'} already been sent to the kitchen or bar. Taking{' '}
+          {pullPrompt.pulled === 1 ? 'it' : 'them'} off this bill is recorded against your login with the
+          reason you give here, and shows on POS Reports → KOT Log → Pulled Items.
+        </p>
+        <div className="form-field" style={{ marginBottom: 12 }}>
+          <label htmlFor="kot-pull-reason">Reason</label>
+          <select id="kot-pull-reason" className="form-select" value={pullReason}
+            onChange={e => setPullReason(e.target.value)}>
+            <option value="">— Select —</option>
+            {KOT_PULL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost" onClick={() => setPullPrompt(null)}>Keep the item</button>
+          <button
+            className="btn btn-primary"
+            disabled={!pullReason}
+            onClick={() => {
+              setKotPullReason(pullReason)
+              applyQty(pullPrompt.idx, pullPrompt.qty)
+              setPullPrompt(null)
+              setMsg('ok:Removed — save the order to record it.')
+            }}
+          >
+            Remove it
+          </button>
+        </div>
+      </Modal>
     )}
 
     {creditNoteOrder && (

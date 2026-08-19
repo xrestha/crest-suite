@@ -102,16 +102,71 @@ enforced, and derives `client_id` from the order rather than taking it as a para
   as its own Expected Cash line and the frozen `closing_report`. Exactly one definition; a local
   formula in `buildShiftSlipHtml` is how it broke last time.
 
+## Server-side enforcement of the close (S576)
+
+`pos_orders_client` is a plain same-client `FOR ALL` policy, so a Staff-rank till JWT holds UPDATE
+on every one of its own client's orders — and the discount cap and the void permission were both
+React. A single PATCH with `{"close_type":"void"}` or any `discount_amount` walked past them.
+Privilege invariant #3 in its POS form.
+
+**`guard_pos_order_close()` (migration `20260819120000`) is a BEFORE UPDATE trigger, not the
+`close_pos_order(...)` RPC the phase-6 critique proposed.** An RPC only protects the callers that
+choose to call it and leaves the open policy in place; a trigger sees every write to the table,
+through PostgREST or anywhere else, now and for any path added later. Same reasoning, same
+`current_user NOT IN ('anon','authenticated')` seam, as `guard_profiles_privileged_columns()`.
+
+Three things to know before touching it:
+
+- **It fires only when `close_type`, `status` or `discount_amount` actually change.** Everything
+  else on `pos_orders` — the `ims_posted_at` stamp closeOrder writes straight after the close,
+  credit-note linkage, reprint counters, the offline queue replaying `covers` — pays nothing.
+- **`paid_amount` is deliberately NOT enforced.** Re-deriving the bill total in SQL means a second
+  copy of the VAT-on-discounted-base arithmetic and the round-to-the-rupee rule, i.e. a second
+  definition of a figure the product is sold on. A drifted copy would not misreport a number, it
+  would REJECT real bills mid-service. The two checks that ARE enforced need no money formula: the
+  cap is measured against a plain `SUM(qty * unit_price)` over non-comped lines, which is
+  byte-for-byte `paySubEx`.
+- **`closeOrder` now persists the cart through `save_pos_order_items` before billing a paid
+  order**, because the trigger can only measure the cap against STORED lines and the Payment
+  button never gated on a dirty cart. That also closed a quieter divergence that predates the
+  trigger: `writeSalesEntries` posts revenue from the in-memory cart, so an unsaved line was
+  already reaching IMS revenue and the printed bill while never existing in `pos_order_items`.
+
+## Pulling an already-fired item is now on the record (S576)
+
+`save_pos_order_items` replaces an order's lines wholesale, so a line carrying `sent_to_kot` simply
+ceased to exist on the next save: food cooked, ticket printed, line gone from the bill and from
+every report that reads it. The only surviving trace was `pos_kot_log`, which is why KOT
+Reconciliation could say *that* it happened but never who, when or why. No privilege was needed.
+
+**The fix is a record, not a block, and that is deliberate** — pulling a fired item is routine and
+legitimate (kitchen ran out, wrong item fired, customer changed their mind), and rank-gating it
+would stall a live service behind a manager on every genuine mistake. What was missing was the
+name against it.
+
+- `pos_kot_removals` (migration `20260819130000`) is written **inside** `save_pos_order_items`, by
+  diffing stored sent quantities against the incoming rows in the same transaction. A caller
+  cannot remove a fired line without producing the record, whatever it sends.
+- The browser contributes **only the reason** (`p_removal_reason`), which the RPC has no way to
+  invent. A missing reason renders as `none given` rather than hiding the row — that is what an
+  offline sync, or a till on a pre-S576 bundle, honestly looks like.
+- The **offline replay** was moved onto the same RPC. It was still delete-then-insert, which meant
+  going offline was a way to pull a fired item leaving no trace — and it carried S573's
+  non-atomic-save risk besides.
+- Surfaced on **KOT Log → Pulled Items**. Keep Reconciliation too: it *infers* a pull from the
+  order's current state, so it still catches one made by a path that predates the record.
+- The 2-arg `save_pos_order_items` signature was **dropped**, against the standing keep-the-old-
+  arity rule in `.claude/rules/supabase-sql.md`. PostgREST resolves by argument name, so keeping
+  both would make every 2-arg call ambiguous (`function is not unique`) — dropping it is what lets
+  a stale bundle keep working via the parameter default.
+
 ## Still open from the phase 6 critique
 
 Recorded so they aren't rediscovered from scratch:
 
-- **Discount cap, void and comp are enforced only in the browser.** `pos_orders_client` is a plain
-  same-client `FOR ALL` policy, so a Staff-rank till JWT can PATCH `discount_amount`,
-  `close_type` or `paid_amount` directly. This is privilege invariant #3 in its POS form; the fix
-  is a `close_pos_order(...)` RPC re-deriving the cap and re-checking `pos_allow_void` server-side.
-- **An item already fired to the kitchen can be removed by any Staff-rank account** with no
-  permission, reason or order-level record — caught after the fact by KOT Reconciliation only.
+- **Comp is still browser-only.** S576 covered the two the critique named (discount cap, void);
+  item-level comp goes through `apply_pos_item_comps`, which has its own caller check, but nothing
+  stops a direct PATCH of `pos_order_items.comped`. Same trigger shape would close it.
 - **The mechanical sweep**, partly done. **Labels are closed (S576)**: POS now measures 0 bare
   `<label>` vs 53 `htmlFor`, and every `<select>` in the module carries an accessible name. Two
   shapes recur here and are worth copying rather than rediscovering — a caption over a button

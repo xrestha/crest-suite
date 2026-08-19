@@ -618,12 +618,15 @@ const POS_FEATURES = [
                 },
                 {
                   icon: '🧾', name: 'KOT Log', path: '/pos/kot-log',
-                  desc: 'Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was actually sent to the kitchen against what\'s currently on each order — the anti-fraud check that catches food cooked and served but quietly reduced, removed, or never billed. Bill Trail shows every paid/voided bill with its complete KOT/BOT history in one expandable view, including bills that never sent anything to the kitchen at all. Requires Manager role or above.',
+                  desc: 'Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was actually sent to the kitchen against what\'s currently on each order — the anti-fraud check that catches food cooked and served but quietly reduced, removed, or never billed. Bill Trail shows every paid/voided bill with its complete KOT/BOT history in one expandable view, including bills that never sent anything to the kitchen at all. Pulled Items names the person: every time a line the kitchen had already been sent was taken off a bill, with the reason they gave. Requires Manager role or above.',
                   tips: [
                     'Reconciliation only shows flagged rows — a quiet report is a healthy one, same philosophy as Sales Exceptions',
                     'A row flags when an item\'s total sent-to-kitchen quantity is more than what\'s currently on the order (cooked, then reduced or removed before billing)',
                     'Any KOT/BOT send on an order that ends up Voided is always flagged, regardless of quantity — the kitchen made food but zero revenue was ever recorded for it',
                     'Bill Trail is the complete picture — click a bill to expand its full ticket history. An amber "No KOT" badge means that bill never sent anything to the kitchen (could be a legitimate self-serve tab, or worth a second look); a red "Discrepancy" badge means the same issue Reconciliation flags',
+                    'Pulled Items and Reconciliation answer the same question from opposite ends. Reconciliation INFERS a pull by comparing tickets against the order as it stands now, so it catches one however it happened but can never say who. Pulled Items is the record written at the moment of the removal — staff member, item, quantity, time and stated reason',
+                    'Taking a line off a bill below what the kitchen already has now asks the person for a reason before it lets them. There is deliberately no rank gate on it — pulling a fired item is a routine, legitimate thing (the kitchen ran out, wrong item fired, customer changed their mind) and stalling a live service behind a manager would cost more than it catches. What was missing was the name against it, not the permission',
+                    'A "none given" reason is not a fault — it means the removal reached the server by a path that could not ask, which today is an offline device syncing back hours later, or a till still running a bundle from before this shipped',
                     'The Register only goes back as far as this feature was added — sends from before that date were never logged',
                   ],
                 },

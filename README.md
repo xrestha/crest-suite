@@ -158,6 +158,121 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S577 — 2026-08-19 — The two POS server-side items, and the badge class that did half a job
+
+Closes the phase-6 critique's standing server-side pair and the last of the phase-8 report's
+mechanical findings. **Both migrations are pending manual application — see the end of this entry,
+the order matters.**
+
+**1 — the discount cap and the void permission were React.** `pos_orders_client` is a plain
+same-client `FOR ALL` policy, so a Staff-rank till JWT holds UPDATE on every one of its own
+client's orders, and everything deciding whether that account could void a bill or how far it
+could discount lived in `PosOrders.jsx`. A single PATCH to `/rest/v1/pos_orders?id=eq.<uuid>` with
+`{"close_type":"void","status":"voided"}` — from the session the till already holds — walked past
+both. Privilege invariant #3 in its POS form.
+
+Fixed with **`guard_pos_order_close()`** (migration `20260819120000`), a BEFORE UPDATE trigger
+rather than the `close_pos_order(...)` RPC the critique proposed. An RPC protects only the callers
+that choose to call it and leaves the open policy exactly where it was; a trigger sees every write
+to the table, through PostgREST or anywhere else, now and for any path added later — the same
+reasoning already recorded for `guard_profiles_privileged_columns()`, and it reuses the same
+`current_user NOT IN ('anon','authenticated')` seam so the service role and every SECURITY DEFINER
+body pass through untouched.
+
+Three deliberate limits, each of which is the interesting part:
+
+- **It fires only when `close_type`, `status` or `discount_amount` actually change.** `closeOrder`
+  stamps `ims_posted_at` in a second write straight after the close, credit notes set
+  `credit_note_id`, reprints bump `print_count`, the offline queue replays `covers` — none of
+  those pay for the guard.
+- **`paid_amount` is not enforced, on purpose.** Re-deriving the bill total in SQL means a second
+  copy of the VAT-on-discounted-base arithmetic and the round-to-the-rupee rule — a second
+  definition of a figure the product is sold on, which is the failure this codebase keeps writing
+  rules against. A drifted copy here would not misreport a number, it would **reject real bills
+  mid-service**. The two checks that are enforced need no money formula at all: "may this account
+  void" is pure authorisation, and the cap is measured against a plain `SUM(qty * unit_price)`
+  over non-comped lines, which is byte-for-byte what `paySubEx` is.
+- **`closeOrder` now persists the cart before billing a paid order**, because a trigger can only
+  measure the cap against STORED lines and the Payment button gates on `saving`/`orderId`/
+  `isOnline`, never on a dirty cart. That incidentally closed a quieter divergence that predates
+  the trigger entirely: `writeSalesEntries` posts revenue from the **in-memory** cart, so an item
+  added and charged without an explicit save was already reaching IMS revenue and the printed bill
+  while never existing in `pos_order_items` — the bill and its own lines disagreeing, silently.
+
+**2 — an item already fired to the kitchen could be removed with no permission, no reason and no
+record.** `save_pos_order_items` replaces an order's lines wholesale (correct, and what made the
+save atomic in S573), so a line carrying `sent_to_kot` simply ceases to exist on the next save.
+The food was cooked, the ticket printed, and then the line is gone from the bill and from every
+report that reads it — with `pos_kot_log` the only surviving trace, which is why the critique
+recorded this as "caught after the fact by KOT Reconciliation only": that page can tell you a
+ticket exists with no matching bill line, never who pulled it or why. It is the classic till
+shrinkage route and it needed no privilege at all.
+
+**The fix is a record, not a block, and that is a call rather than an omission.** Pulling a fired
+item is routine and legitimate — the kitchen ran out, the wrong item was fired, the customer
+changed their mind — and rank-gating it would stall a live service behind a manager on every
+genuine mistake. What was missing was the name against it.
+
+- **`pos_kot_removals`** (migration `20260819130000`) is written **inside** `save_pos_order_items`,
+  by diffing the stored sent quantities against the incoming rows in the same transaction. A
+  caller cannot remove a fired line without producing the record, whatever it sends. The
+  comparison is old *sent* qty vs new *total* qty, not sent vs sent — the client clears
+  `sent_to_kot` on a line it intends to re-fire, and treating that as a removal would file a row
+  every time an order is edited and re-sent. Comped rows are excluded: a comp is already its own
+  audited event, and `apply_pos_item_comps` splits a partially-comped line in two.
+- **The browser contributes only the reason.** A prompt fires when a line is cut below what the
+  kitchen has (`sent_to_kot ? qty : sent_qty` — reading `sent_to_kot` alone reports 0 the moment
+  anyone nudges the quantity, which is exactly the edit this needs to catch). A missing reason
+  renders as `none given` rather than hiding the row — the honest label for a removal nobody can
+  now be asked about.
+- **The offline replay moved onto the same RPC.** It was still delete-then-insert, so going
+  offline was a way to pull a fired item leaving no trace at all — and it carried S573's
+  non-atomic-save risk besides.
+- Surfaced as **KOT Log → Pulled Items** (staff member, item, quantity, time, reason, order and
+  invoice number), with an Excel export. Reconciliation stays: it *infers* a pull from the order's
+  current state, so it still catches one made by a path that predates the record. The two tabs
+  answer the same question from opposite ends.
+- The 2-arg `save_pos_order_items` signature is **dropped**, against the standing keep-the-old-
+  arity rule in `.claude/rules/supabase-sql.md`. Keeping both is not an option: PostgREST resolves
+  an RPC by argument name, so a `{p_order_id, p_rows}` call would match both candidates and
+  Postgres answers that with `function is not unique` — every save failing, on every device.
+  Dropping it is what *makes* the stale-bundle case work, via the parameter default.
+
+**3 — 103 `badge-*` chips across 22 files were missing the base `badge` class.** `.badge` carried
+the box (inline-block, 2px 8px padding, `--radius-sm`, 11px, 500, capitalize) and `.badge-green`
+and friends carried only the tint and the text colour, so a chip written as `badge-green` alone
+rendered as bare inherited-size text with no padding, radius or weight — and nothing in the markup
+said the class pair was incomplete. Same silent-failure shape as the missing `badge-gold` (the
+seven unstyled spans found 2026-08-12). Fixed at the **CSS** rather than at 103 call sites: the six
+colour variants now join `.badge` on the box rule, so `badge badge-green` and `badge-green` render
+identically and the mistake can no longer be made. Verified every one of the 99 elements carrying a
+`badge-*` class is a `<span>`, so gaining `display: inline-block` cannot disturb a layout.
+
+**Registered per the new-table checklist:** `pos_kot_removals` added to `CLIENT_SCOPED_TABLES`
+(`scopedDb.js`), to `RESTORE_ORDER` (`restoreClientData.js`, after `pos_kot_log`), and to both
+`clearModuleData` and `deleteClientData` in `admin-user-ops`. RLS mirrors `pos_order_items`
+exactly — same-client-or-admin plus the three RESTRICTIVE staff-isolation policies, with POS PIN
+staff deliberately *not* excluded since they are the accounts whose removals it records and the
+RPC runs as INVOKER. `authenticated` gets SELECT and INSERT only: an audit record a till session
+can rewrite is not an audit record.
+
+**PENDING MANUAL STEPS — the order matters.** Apply
+`20260819120000_pos_order_close_server_guard.sql` then `20260819130000_pos_kot_removal_record.sql`
+in the Supabase SQL Editor, **then** `supabase functions deploy admin-user-ops`. The function's new
+`pos_kot_removals` delete throws if the table does not exist yet, and `del()` aborts the whole
+Danger Zone sequence on a throw — so deploying the function first breaks Clear POS Transactions
+until the migration lands. The frontend is safe in either order: `save_pos_order_items` falls back
+to delete-then-insert on `PGRST202` (recording no removal, which is today's behaviour), and the
+close guard simply does not exist until the trigger does.
+
+**Files:** `supabase/migrations/{20260819120000_pos_order_close_server_guard.sql (new),
+20260819130000_pos_kot_removal_record.sql (new)}`, `supabase/functions/admin-user-ops/index.ts`,
+`src/modules/pos/orders/{PosOrders.jsx, posOrdersConstants.js}`,
+`src/modules/pos/reports/KotLog.jsx`, `src/shared/scopedDb.js`,
+`src/modules/admin/dataExport/restoreClientData.js`, `src/components/Layout.css`,
+`src/pages/Help.js`, `public/service-worker.js` (v93 → v94), `CLAUDE.md`,
+`.claude/rules/pos-billing.md`, `DESIGN.md`, `README.md`
+
 ### S576 — 2026-08-19 — Phase-8 residue: the tint bug's fourth site, and every unnamed control in the product
 
 Two items off the S575 report, both bug classes rather than single bugs, so both were closed
