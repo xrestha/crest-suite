@@ -158,6 +158,45 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S595 — 2026-08-19 — `/impeccable document`, and the rule that only existed where nobody reads
+
+Refreshed `DESIGN.md` + `.impeccable/design.json` (six days and ~10 sessions stale), then fixed
+what the refresh turned up.
+
+**The frontmatter was missing ten tokens its own Named Rules are about.** `ThemeContext.js` sets
+`--theme-accent-text`, `--theme-accent-ink`, the four `signal-*-text` variants, `--theme-focus-ring`,
+`--theme-focus-outline`, `--theme-input-bg` and `--theme-table-hover`; `DESIGN.md` declared none of
+them. So *The Accent-Text Pairing Rule* and the whole "Signal colors used as TEXT" section pointed at
+tokens the normative layer never had, and the sidecar's `colorMeta` carried five entries keyed to
+nothing. Colors went 28 → 38, orphans 5 → 0, and the detector's `src/` sweep dropped 34 → 31 findings
+because three values that read as undocumented drift are now declared. Each entry carries the caveat
+that on a dark preset every `*-text` variant resolves to its own base colour, so `signal-success` and
+`signal-success-text` sharing a hex is correct rather than a redundancy to delete.
+
+**`role="button"` on a `<tr>` was documented only in the sidecar — and was live in four tables.**
+That role overrides the row's implicit `row` role, taking it out of the table's structure: a screen
+reader stops associating the row's cells with their column headers. On Vendor Report, Outstanding
+Payables, Supplier Price Tracker and Supplier Contribution — tables that are almost entirely currency
+columns — that is the whole content. The rule was in `.impeccable/design.json`'s don't-list and
+nowhere a human or an agent reads, which is precisely why it kept being copied forward; the fourth
+copy was added the day before by S594's accessibility fix, reaching for the incumbent shape in good
+faith and trading a mouse-only row for one that no longer announced its own columns.
+
+All four now use **`RowDisclosure`** (`src/components/RowDisclosure.jsx`): a real `<button>` inside a
+`<td>`, `aria-expanded` set, `stopPropagation()` so the row's existing `onClick` still works for mouse
+users without double-firing. Enter/Space need no handler — a real button does that natively.
+`aria-controls` is optional by design: it needs exactly one element id, and Supplier Price Tracker's
+detail is many sibling `<tr>`s, so pointing it at the first would assert something untrue about the
+rest. Vendor Report keeps its own "▼ Details / ▲ Hide" wording via `children`.
+
+The rule is now in `DESIGN.md` prose and `CLAUDE.md`'s component table as well as the sidecar. **A
+rule that lives only in the machine-readable sidecar is a rule nobody reads.**
+
+Also: sidecar 16 → 22 components (the five S594 pieces plus `RowDisclosure`), 26 → 39 narrative rules,
+Do's/Don'ts synced verbatim with DESIGN.md at 11/10. One correction to the S594 report — the sidecar
+was *not* mojibake-corrupted; its bytes are clean UTF-8 and the replacement characters were a cp1252
+console rendering.
+
 ### S594 — 2026-08-19 — `/impeccable critique` of everything built since Monday, and the five fixes it earned
 
 A dual-agent critique of the pages created 17–19 Aug: **Stock Ageing**, **Supplier Contribution**,

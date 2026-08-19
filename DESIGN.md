@@ -16,6 +16,36 @@ colors:
   signal-danger: "#f87171"
   signal-warning: "#fbbf24"
   signal-categorical: "#a78bfa"
+  # The paired foregrounds and the two state tints, added to the frontmatter 2026-08-19 (S594).
+  # They were missing here for as long as they have existed in ThemeContext, which meant two of
+  # this file's own Named Rules — the Accent-Text Pairing Rule, and the whole "Signal colors used
+  # as TEXT" section — pointed at tokens the normative layer never declared, and the sidecar's
+  # colorMeta carried five entries keyed to nothing.
+  #
+  # READ THE VALUES BELOW WITH ONE CAVEAT: the frontmatter carries the DEFAULT (Dark) preset, and
+  # on a dark preset every *-text variant deliberately resolves to its own base colour —
+  # applyTheme does `t.greenText || t.green`. So `signal-success` and `signal-success-text` being
+  # the same hex here is correct and is not a redundancy to clean up. They diverge only on the
+  # five light presets, which is the entire reason the variants exist (measured: 23 of 25
+  # signal/surface combinations failed AA before they did). Same for accent-ink, which equals the
+  # accent on Dark and is a darkened hue-match on Latte, Rosé Dawn, Solarized, Warm Light and
+  # Bright. Never resolve one of these to a literal from this file — read the token.
+  accent-text: "#0f1117"          # foreground ON an accent fill. Per-preset; #ffffff on Bright
+  accent-ink: "#c9a84c"           # the accent used AS text (a link, an active nav item)
+  signal-success-text: "#34d399"
+  signal-danger-text: "#f87171"
+  signal-warning-text: "#fbbf24"
+  signal-categorical-text: "#a78bfa"
+  # Two state tints and the input ground. focus-ring is a TINT and its alpha must stay low — it
+  # doubles as the active-state background for rail buttons, module tabs and sidebar links, and
+  # measured alone on Rosé Dawn it composited to 1.15:1, 2.6x below WCAG 2.2's 3:1 focus floor.
+  # focus-outline is the actual keyboard indicator that fixed it (S574): a 2px solid, resolved
+  # per preset as accentInk on light and the accent on dark. A new focusable control pairs the
+  # two; the ring alone is not a focus indicator.
+  focus-ring: "rgba(201,168,76,0.15)"
+  focus-outline: "#c9a84c"
+  input-bg: "#0f1117"
+  table-hover: "rgba(255,255,255,0.03)"
   # Print-only, documented 2026-07-20, expanded 2026-07-28. Print is a real surface here (stock
   # count sheets, payslips, purchase bills, KOTs, gate passes, recipe cost cards, POs), but the
   # palette above is all theme-token driven and none of it survives onto paper — @media print
@@ -444,6 +474,12 @@ Dense, functional, and the component most of the product's screens are actually 
 
 **`.data-table--sticky-first` is opt-in, for a matrix whose first column is the row label.** Consolidated P&L with one column per outlet is the case it was built for: inside `.table-wrap`, scrolling right to reach the last column scrolls the labels away, leaving the reader matching numbers to remembered row order. A sticky cell needs an opaque background (`var(--theme-card)`) or the scrolling columns show through underneath it — the same requirement `Stock.js`'s Summary tab already documents.
 
+**Never put `role="button"` on a `<tr>`.** The role *overrides* the row's implicit `row` role, which takes it out of the table's structure: a screen reader stops associating that row's cells with their column headers, so every figure in it loses the label that gave it meaning. On a table of currency columns that is the entire content.
+
+The control belongs **in a cell**, as a real `<button>` — the row keeps its header associations, the button is natively focusable and operable, and no `onKeyDown` has to re-implement Enter/Space. `RowDisclosure` (`src/components/RowDisclosure.jsx`, added 2026-08-19/S595) is that button: it takes `expanded`/`onToggle`/`label` and an optional `controls`, sets `aria-expanded`, and `stopPropagation()`s so the row's own `onClick` — which every one of these tables already had, and which still works — cannot double-fire against it. `controls` is deliberately optional: `aria-controls` needs exactly one element id, and Supplier Price Tracker's detail is *many* sibling `<tr>`s, so pointing it at the first would assert something untrue about the rest.
+
+**The history is the reason this paragraph exists at all.** The rule was carried in `.impeccable/design.json`'s don't-list and **only** there — it had never been written into this file. So nothing a human or an agent actually reads said it, and it was copied forward into four tables: `SupplierPriceTracker.js`, `OutstandingPayables.js`, `VendorReport.js`, and then `SupplierContribution.js` on 2026-08-19/S594, by an accessibility fix reaching for the incumbent shape in good faith — trading a mouse-only row for one that no longer announced its own columns. All four moved to `RowDisclosure` in S595. **A rule that lives only in the machine-readable sidecar is a rule nobody reads**; if it belongs to the system, it belongs in this file's prose.
+
 **Expanding a row shows detail in place, directly beneath it** — a `<tr className="detail-row">` with a full-width `colSpan` cell, never a panel appended after the table (added 2026-08-12, `TadaClaims.jsx`). Two cascade notes, because both bit on the first implementation: `table.data-table tr:hover td` is a *descendant* selector, so without the two `.detail-row` overrides in `Layout.css` hovering an expanded detail tints its own cell **and** every cell of any table nested inside it, lighting the whole panel up as though it were one hoverable row. And if the parent row toggles the expansion on click, every control inside the row must call `stopPropagation()` or acting on the record also collapses the panel you were reading.
 
 ## Motion
@@ -480,6 +516,11 @@ Anything longer than `--motion-slow` on a working screen reads as latency, not m
 - **Do** reserve the rationed 4th color (purple) for a genuine 4th/5th categorical need, not as a second accent.
 - **Do** put labels above form fields, always - never a placeholder standing in for a label.
 - **Do** give every status message a live region - `role="alert"` for errors, `role="status"` for confirmations. A message that is only *shown* announces nothing, and on a destructive surface that means no confirmation an action ran at all.
+- **Do** use the `*-text` variant whenever a signal colour is set as `color:` — and check the ternaries, which is where about half the real sites are.
+- **Do** keep a legend swatch identical to the series it labels, and let the adjacent label text carry the readable contrast.
+- **Do** give any modal the full dialog contract: role, `aria-modal`, a labelled title, initial focus, a Tab trap, Escape, and focus restored to the trigger.
+- **Do** disclose an estimate where it is read, inline and visible, not in a hover tooltip — a figure carrying a red/amber/green verdict has to say what it is built from.
+- **Do** render a report's could-not-load state as its own thing, never as the empty state, and never above a KPI strip that is still showing zeros (added 2026-08-19/S594 — see Report shell).
 
 ### Don't:
 - **Don't** build dense, hierarchy-less layouts in the name of "fitting more in" - that's the legacy-ERP failure mode this product is explicitly positioned against.
@@ -487,3 +528,8 @@ Anything longer than `--motion-slow` on a working screen reads as latency, not m
 - **Don't** invent a stronger/different shadow to mean "important" or "premium." Card elevation (`--theme-card-shadow`) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning (see Elevation).
 - **Don't** hardcode white or black as text on an accent background - use the paired `accent-text` token.
 - **Don't** use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (Bright's colorful KPI badges on `ClientDashboard.jsx` are the one named exception - see Badges / Status Chips.)
+- **Don't** build a multi-series chart palette from the semantic tokens — accent and purple are the same hex on three of ten presets.
+- **Don't** dim a row with `opacity` to de-emphasise it; opacity multiplies through the text colour and takes it below AA. Label the state instead.
+- **Don't** put `role="button"` on a `<tr>`. It removes the row from the table's structure, so the cells stop being associated with their column headers. Put a real `<button>` in the first cell (see Data Tables).
+- **Don't** paint a verdict colour on a figure that has not settled yet — early in a period a lumpy-numerator ratio is arithmetic, not signal.
+- **Don't** let a page compute a number it then shows before the read has returned. A KPI painted during load is a claim the page cannot yet support, and on a green token it reads as a healthy one.

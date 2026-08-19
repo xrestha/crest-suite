@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import RowDisclosure from '../../../components/RowDisclosure'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
@@ -796,19 +797,11 @@ export default function VendorReport() {
                       const isExpanded = expandedBillKey === b.key
                       return (
                         <Fragment key={b.key}>
-                          <tr
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => setExpandedBillKey(prev => prev === b.key ? null : b.key)}
-                            role="button"
-                            tabIndex={0}
-                            aria-expanded={isExpanded}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                setExpandedBillKey(prev => prev === b.key ? null : b.key)
-                              }
-                            }}
-                          >
+                          {/* The <tr> keeps its implicit `row` role: role="button" on a row takes it out of the
+                              table's structure and its cells stop being associated with their column headers.
+                              The control lives in a cell instead — see components/RowDisclosure.jsx (S595). */}
+                          <tr style={{ cursor: 'pointer' }}
+                            onClick={() => setExpandedBillKey(prev => prev === b.key ? null : b.key)}>
                             <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{b.day}</td>
                             <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{b.invoice || '—'}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.itemCount}</td>
@@ -820,7 +813,16 @@ export default function VendorReport() {
                             <td>
                               <span style={{ fontSize: 11, fontWeight: 700, color: b.status.color, background: `color-mix(in srgb, ${b.status.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${b.status.color} 40%, transparent)`, borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.status.label}</span>
                             </td>
-                            <td style={{ color: 'var(--theme-text3)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : '▼ Details'}</td>
+                            <td style={{ color: 'var(--theme-text3)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                              <RowDisclosure
+                                expanded={isExpanded}
+                                onToggle={() => setExpandedBillKey(prev => prev === b.key ? null : b.key)}
+                                controls={`vendor-bill-detail-${b.key}`}
+                                label={`Bill ${b.invoice || b.day} — ${isExpanded ? 'hide' : 'show'} line items, returns and payment history`}
+                              >
+                                <span aria-hidden="true">{isExpanded ? '▲ Hide' : '▼ Details'}</span>
+                              </RowDisclosure>
+                            </td>
                           </tr>
 
                           {isExpanded && (

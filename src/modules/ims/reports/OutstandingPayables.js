@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import RowDisclosure from '../../../components/RowDisclosure'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd, adToBs } from '../../../utils/bsCalendar'
 import { calcBillTotals, billKeyOf, aging } from '../purchases/purchasesHelpers'
@@ -733,26 +734,25 @@ export default function OutstandingPayables() {
                         const willSettle = payForm.amount && parseFloat(payForm.amount) + b.paid >= b.total - EPS
                         return (
                           <Fragment key={b.key}>
-                            <tr
-                              style={{ cursor: 'pointer' }}
-                              onClick={() => toggleBill(b.key)}
-                              role="button"
-                              tabIndex={0}
-                              aria-expanded={isExpanded}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault()
-                                  toggleBill(b.key)
-                                }
-                              }}
-                            >
+                            {/* The <tr> keeps its implicit `row` role: role="button" on a row takes it out of the
+                                table's structure and its cells stop being associated with their column headers.
+                                The control lives in a cell instead — see components/RowDisclosure.jsx (S595). */}
+                            <tr style={{ cursor: 'pointer' }} onClick={() => toggleBill(b.key)}>
                               {activeTab === 'outstanding' && (
                                 <td onClick={ev => ev.stopPropagation()}>
                                   <input type="checkbox" checked={selectedBills.has(b.key)} onChange={() => toggleSelectBill(b.key)}
                                     aria-label={`Select bill ${b.invoice_ref || ''}`} />
                                 </td>
                               )}
-                              <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{b.invoice_ref || '—'}</td>
+                              <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                                <RowDisclosure
+                                  expanded={isExpanded}
+                                  onToggle={() => toggleBill(b.key)}
+                                  controls={`bill-detail-${b.key}`}
+                                  label={`Bill ${b.invoice_ref || 'without an invoice number'} — ${isExpanded ? 'hide' : 'show'} line items and payment history`}
+                                />{' '}
+                                #{b.invoice_ref || '—'}
+                              </td>
                               <td style={{ color: 'var(--theme-text2)' }}>{BS_MONTHS[(b.period.bs_month || 1) - 1]} {b.period.bs_year}</td>
                               <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.entries.length}</td>
                               <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)' }}>{fmt(b.total)}</td>
@@ -774,7 +774,7 @@ export default function OutstandingPayables() {
                             </tr>
 
                             {isExpanded && (
-                              <tr>
+                              <tr id={`bill-detail-${b.key}`}>
                                 <td colSpan={cols} style={{ padding: 0, background: 'rgba(10,12,18,0.7)' }}>
                                   <div style={{ padding: '16px 20px' }}>
 

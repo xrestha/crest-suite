@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import RowDisclosure from '../../../components/RowDisclosure'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -401,21 +402,19 @@ export default function SupplierPriceTracker() {
 
                 return (
                   <Fragment key={key}>
+                    {/* The <tr> keeps its implicit `row` role: role="button" on a row takes it out of the
+                        table's structure and its cells stop being associated with their column headers.
+                        The control lives in a cell instead — see components/RowDisclosure.jsx (S595). */}
                     <tr
                       style={{ background: trend === 'up' ? 'rgba(248,113,113,0.03)' : 'transparent', cursor: 'pointer' }}
                       onClick={() => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
-                      role="button"
-                      tabIndex={0}
-                      aria-expanded={isExpanded}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))
-                        }
-                      }}
                     >
                       <td style={{ textAlign: 'center', color: 'var(--theme-text2)', fontSize: 12, userSelect: 'none' }}>
-                        {isExpanded ? '▾' : '▸'}
+                        <RowDisclosure
+                          expanded={isExpanded}
+                          onToggle={() => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
+                          label={`${item.name} — ${isExpanded ? 'hide' : 'show'} purchase history`}
+                        />
                       </td>
                       {selectedVendorId === 'all' && (
                         <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{vendor?.name || '—'}</td>

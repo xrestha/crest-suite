@@ -1408,6 +1408,42 @@ table.data-table--sticky-first tr:hover td:first-child {
   background: var(--theme-table-hover);
 }
 
+/* The expand control on a table row (RowDisclosure.jsx). It sits inside a <td> so the <tr> keeps
+   its implicit `row` role and its cells keep their column-header associations — see that file for
+   why four tables had it on the <tr> instead. Visually it is the bare glyph the rows already
+   showed; the only additions are a real hit area and a focus indicator, because before S595 the
+   control could not be focused at all. */
+.row-disclosure {
+  -webkit-appearance: none;
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  font: inherit;
+  color: inherit;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+}
+
+.row-disclosure:hover {
+  color: var(--theme-accent-ink);
+}
+
+.row-disclosure:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 1px;
+  background: var(--theme-focus-ring);
+}
+
+@media (pointer: coarse) {
+  .row-disclosure {
+    padding: 8px 10px;
+    margin: -8px -10px;
+  }
+}
+
 /* A report that could not load. This is deliberately NOT the empty state: "nothing to show" and
    "could not load" are different facts and only one of them means the figures on screen are real.
    See ReportPage.jsx for why every report renders one or the other and never a page of zeros. */

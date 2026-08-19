@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-13T01:36:17.851Z",
+  "generatedAt": "2026-08-19T16:27:01.000Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -391,6 +391,56 @@
           "#d0b6f1",
           "#f1eafb"
         ]
+      },
+      "accent-text": {
+        "role": "primary",
+        "displayName": "Accent Ink (on-fill)",
+        "canonical": "#0f1117",
+        "purpose": "The foreground that sits ON an accent-coloured fill — the label of a primary button, an active pill. Per preset: near-black on Dark, #ffffff on Bright, and a dark hue-match on Latte/Rose Dawn/Solarized where plain white measured 2.84-3.68:1 and failed AA on every .btn-primary in the product. Never hardcode a white or black here; reach for the token, then verify the token.",
+        "tonalRamp": [
+          "#05060a",
+          "#0a0c11",
+          "#0f1117",
+          "#1a1d26",
+          "#2a2f3d",
+          "#4a5163",
+          "#8a92a3",
+          "#e8e0d0"
+        ]
+      },
+      "focus-ring": {
+        "role": "neutral",
+        "displayName": "Focus Ring (tint)",
+        "canonical": "rgba(201,168,76,0.15)",
+        "purpose": "A TINT, not a focus indicator. It doubles as the active-state background for rail buttons, module tabs and sidebar links, so its alpha must stay low — measured alone on Rose Dawn it composited to 1.15:1, 2.6x below WCAG 2.2's 3:1 focus floor. Always paired with focus-outline; the ring by itself is decoration."
+      },
+      "focus-outline": {
+        "role": "primary",
+        "displayName": "Focus Outline",
+        "canonical": "#c9a84c",
+        "purpose": "The actual keyboard-focus indicator (added S574): a 2px solid, resolved per preset as accentInk on light presets and the accent on dark. Every :focus-visible rule pairs this with the soft ring. A new focusable control that takes only the ring has no visible focus state on a light theme."
+      },
+      "input-bg": {
+        "role": "neutral",
+        "displayName": "Input Ground",
+        "canonical": "#0f1117",
+        "purpose": "The recessed ground behind a form control — equal to the page background on the dark presets, so a field reads as cut INTO the card rather than raised off it. Reached through .form-field input or .form-input; an input that gets neither renders as the browser's native white box (S593).",
+        "tonalRamp": [
+          "#05060a",
+          "#0a0c11",
+          "#0f1117",
+          "#181c27",
+          "#232838",
+          "#2a2f3d",
+          "#4a5163",
+          "#8a92a3"
+        ]
+      },
+      "table-hover": {
+        "role": "neutral",
+        "displayName": "Row Hover Tint",
+        "canonical": "rgba(255,255,255,0.03)",
+        "purpose": "The barely-there row-hover wash — 2-8% depending on preset. It is a pointer cue, not a selection state, and it must never be opaque enough to compete with the figures in the row. It is also what a sticky first column has to paint over, which is why .data-table--sticky-first sets an opaque card background."
       }
     },
     "typographyMeta": {
@@ -685,6 +735,54 @@
       "description": "The expanded chart view. Keeps its own look (blurred backdrop, wide panel, legend inline in the header) but carries the full dialog contract: role/aria-modal/labelled title, initial focus on the panel rather than its Close button, a Tab trap, Escape, and focus restored to the trigger.",
       "html": "<div class=\"ds-chart-modal-panel\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"ds-cm-title\" tabindex=\"-1\"><div class=\"ds-chart-modal-head\"><div id=\"ds-cm-title\" class=\"ds-chart-modal-title\">Spend by Category</div><button class=\"ds-chart-close-btn\">✕ Close</button></div><div class=\"ds-chart-modal-body\">chart</div></div>",
       "css": ".ds-chart-modal-panel { background: var(--theme-card); border: 1px solid var(--theme-border); border-radius: var(--radius-xl); padding: 20px 28px; max-width: 1100px; box-shadow: 0 8px 60px rgba(0,0,0,0.5); outline: none; } .ds-chart-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--theme-border); } .ds-chart-modal-title { font-size: 13px; font-weight: 700; color: var(--theme-text1); } .ds-chart-modal-body { color: var(--theme-text2); font-size: 12px; } .ds-chart-close-btn { color: var(--theme-text2); background: transparent; border: 1px solid var(--theme-border); border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px; cursor: pointer; transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard); } .ds-chart-close-btn:hover { color: var(--theme-text1); background: var(--theme-table-hover); border-color: var(--theme-accent); } .ds-chart-close-btn:focus-visible { outline: none; border-color: var(--theme-accent); box-shadow: 0 0 0 3px var(--theme-focus-ring); }"
+    },
+    {
+      "name": "Report Error State",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "What a report renders INSTEAD of its KPI strip and table when a read fails. Deliberately not the empty state: 'nothing to show' and 'could not load' are different facts, and only one of them means the zeros on screen are real. Carries role=\"alert\".",
+      "html": "<div class=\"ds-report-error\" role=\"alert\"><div class=\"ds-report-error-title\">Could not load this report</div><p class=\"ds-report-error-body\">permission denied for table purchase_entries</p><p class=\"ds-report-error-hint\">Nothing here is a real figure &mdash; this is a failed read, not an empty period. Reload the page, and if it keeps happening send this message to support.</p></div>",
+      "css": ".ds-report-error { font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; padding: 20px 24px; border-radius: 18px; border: 1px solid var(--theme-red, #f87171); background: color-mix(in srgb, var(--theme-red, #f87171) 8%, var(--theme-card, #181c27)); }\n.ds-report-error-title { font-size: 15px; font-weight: 600; color: var(--theme-red-text, #f87171); margin-bottom: 6px; }\n.ds-report-error-body { font-size: 13px; color: var(--theme-text1, #e8e0d0); margin: 0 0 8px; }\n.ds-report-error-hint { font-size: 12px; color: var(--theme-text2, #8a92a3); margin: 0; line-height: 1.6; }"
+    },
+    {
+      "name": "Standalone Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "An input OUTSIDE a .form-field wrapper — the natural shape whenever a field sits inline beside a button. Until .form-input existed (S593) the only themed rule was the descendant selector .form-field input, so these rendered as the browser's native white box: unmissable on dark presets, nearly invisible on light ones. Shares one declaration block with .form-field input so the two cannot drift.",
+      "html": "<input class=\"ds-form-input\" type=\"text\" placeholder=\"or create a new group…\" />",
+      "css": ".ds-form-input { font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; width: 100%; box-sizing: border-box; background: var(--theme-input-bg, #0f1117); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--theme-text1, #e8e0d0); }\n.ds-form-input::placeholder { color: var(--theme-text3, #9ca3af); }\n.ds-form-input:focus { outline: none; border-color: var(--theme-accent, #c9a84c); box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }\n.ds-form-input:focus-visible { outline: 2px solid var(--theme-focus-outline, #c9a84c); outline-offset: 1px; }"
+    },
+    {
+      "name": "Table Totals Row",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "A table's tfoot. Until S594 .data-table tfoot had NO rule at all, so every totals row in the product was hand-styled at its call site and three report pages built in one week produced three different treatments. The row-hover tint is suppressed: a totals row is not a data row.",
+      "html": "<table class=\"ds-table\"><tbody><tr><td>Basmati Rice</td><td class=\"ds-num\">12,400</td></tr><tr><td>Sunflower Oil</td><td class=\"ds-num\">8,150</td></tr></tbody><tfoot><tr><td>TOTAL (all items)</td><td class=\"ds-num\">NPR 20,550</td></tr></tfoot></table>",
+      "css": ".ds-table { font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--theme-text1, #e8e0d0); }\n.ds-table td { padding: 11px 5px; border-bottom: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-num { text-align: right; }\n.ds-table tfoot td { border-top: 2px solid var(--theme-border, #2a2f3d); border-bottom: none; font-weight: 700; padding-top: 12px; }\n.ds-table tfoot tr:hover td { background: transparent; }"
+    },
+    {
+      "name": "Field Caption (non-label)",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "A caption that looks like a <label> but is a <span>, used over a button group, a read-only figure, or a repeating row's column. A <label> referencing no labelable element announces a name the browser never binds to anything — worse than no label. .form-field .field-label carries the same typography, so the fix costs no visual change.",
+      "html": "<div class=\"ds-field\"><span class=\"ds-field-label\" id=\"ds-axis-label\">Group by</span><div class=\"ds-chips\" role=\"radiogroup\" aria-labelledby=\"ds-axis-label\"><button class=\"ds-chip ds-chip-on\" aria-pressed=\"true\">Veg / Non-Veg</button><button class=\"ds-chip\" aria-pressed=\"false\">VAT Mode</button></div></div>",
+      "css": ".ds-field { font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-field-label { display: block; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--theme-text2, #8a92a3); margin-bottom: 6px; }\n.ds-chips { display: flex; gap: 6px; flex-wrap: wrap; }\n.ds-chip { font-family: inherit; background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 12px; padding: 6px 12px; font-size: 12px; color: var(--theme-text2, #8a92a3); cursor: pointer; }\n.ds-chip-on { color: var(--theme-accent-ink, #c9a84c); font-weight: 600; border-color: color-mix(in srgb, var(--theme-accent, #c9a84c) 50%, transparent); background: var(--theme-focus-ring, rgba(201,168,76,0.15)); }\n.ds-chip:focus-visible { outline: 2px solid var(--theme-focus-outline, #c9a84c); outline-offset: 2px; }"
+    },
+    {
+      "name": "Sticky-First Matrix",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Opt-in .data-table--sticky-first, for a wide matrix whose first column is the row label — Consolidated P&L with one column per outlet is the case it was built for. Without it, scrolling right to reach the last column scrolls the labels away and the reader matches numbers to remembered row order. The sticky cell needs an opaque background or the scrolling columns show through underneath.",
+      "html": "<div class=\"ds-wrap\"><table class=\"ds-mtx\"><thead><tr><th>Line</th><th class=\"ds-num\">Thamel</th><th class=\"ds-num\">Patan</th><th class=\"ds-num\">Consolidated</th></tr></thead><tbody><tr><td>Revenue</td><td class=\"ds-num\">1,840,000</td><td class=\"ds-num\">1,210,000</td><td class=\"ds-num\">3,050,000</td></tr><tr><td>Cost of Goods Sold</td><td class=\"ds-num\">(612,000)</td><td class=\"ds-num\">(402,000)</td><td class=\"ds-num\">(1,014,000)</td></tr></tbody></table></div>",
+      "css": ".ds-wrap { overflow-x: auto; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-mtx { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--theme-text1, #e8e0d0); }\n.ds-mtx th { text-align: left; padding: 10px 5px; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--theme-text2, #8a92a3); border-bottom: 1px solid var(--theme-border, #2a2f3d); white-space: nowrap; }\n.ds-mtx td { padding: 11px 5px; border-bottom: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-mtx .ds-num { text-align: right; }\n.ds-mtx th:first-child, .ds-mtx td:first-child { position: sticky; left: 0; z-index: 1; background: var(--theme-card, #181c27); }"
+    },
+    {
+      "name": "Row Disclosure Button",
+      "kind": "button",
+      "refersTo": null,
+      "description": "The control that expands a table row's detail. It lives INSIDE a <td> so the <tr> keeps its implicit row role and its cells keep their column-header associations. The row's own onClick still toggles for mouse users; this button stops propagation so the two cannot cancel each other out.",
+      "html": "<table class=\"ds-disc-tbl\"><tbody><tr><td><button type=\"button\" class=\"ds-row-disclosure\" aria-expanded=\"false\" aria-label=\"Big Mart — show the 14 ingredients traced to this supplier\"><span aria-hidden=\"true\">&#9656;</span></button> Big Mart</td><td class=\"ds-disc-num\">NPR 248,900</td></tr><tr><td><button type=\"button\" class=\"ds-row-disclosure\" aria-expanded=\"true\" aria-label=\"Sunrise Foods — hide the 9 ingredients traced to this supplier\"><span aria-hidden=\"true\">&#9662;</span></button> Sunrise Foods</td><td class=\"ds-disc-num\">NPR 131,400</td></tr></tbody></table>",
+      "css": ".ds-disc-tbl { font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--theme-text1, #e8e0d0); }\n.ds-disc-tbl td { padding: 11px 5px; border-bottom: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-disc-num { text-align: right; }\n.ds-row-disclosure { -webkit-appearance: none; appearance: none; background: none; border: none; padding: 2px 4px; margin: -2px -4px; font: inherit; color: inherit; line-height: 1; cursor: pointer; border-radius: 4px; }\n.ds-row-disclosure:hover { color: var(--theme-accent-ink, #c9a84c); }\n.ds-row-disclosure:focus-visible { outline: 2px solid var(--theme-focus-outline, #c9a84c); outline-offset: 1px; background: var(--theme-focus-ring, rgba(201,168,76,0.15)); }"
     }
   ],
   "narrative": {
@@ -826,30 +924,97 @@
         "name": "Opacity is not de-emphasis on text",
         "section": "colors",
         "body": "It multiplies straight through the text colour — text2 at 0.45 measured well under AA. If a row is inactive, say so with a label; do not dim it."
+      },
+      {
+        "name": "A paired token is only correct while it is actually measured",
+        "section": "colors",
+        "body": "--theme-accent-text was plain #ffffff on all five light presets and failed on three of them: 2.84:1 on Rose Dawn, 3.61:1 on Light, 3.68:1 on Solarized — i.e. every .btn-primary in the product on those themes, for as long as they have existed. Fixed by giving those presets a dark hue-matched ink rather than darkening the accent, which also serves as a tint, border and dot where it was already correct. Reach for the token, then verify the token."
+      },
+      {
+        "name": "A wrapper being new does not put the thing it wraps in scope",
+        "section": "colors",
+        "body": "ModuleGuideTab.jsx rendered its whole 'Watch out for' list in --theme-amber as body text — 2.05:1 on Rose Dawn, the worst measurement in the system — and survived because only its wrapper GuidesTab.jsx was in the changed-file set, so the hook never ran on it. When a critique or audit targets a page, include the components it composes, not just the files git reports (S594; the S521 stale-file lesson restated)."
+      },
+      {
+        "name": "A tier or add-on above the module set takes the accent plus a mark, not a fourth hue",
+        "section": "components",
+        "body": "The admin client list carries IMS/HR/POS pills in accent/green/purple; Crest Suite Pro had none, and a fourth colour would have been exactly the One Accent Rule drift. It renders as ★ SUITE in the accent at a heavier fill (0.20 vs the modules' 0.10) and 700 weight — the glyph and the weight carry the distinction, the hue stays inside the system. A lapsed one greys to text3 rather than disappearing: an add-on that vanishes reads as one never bought."
+      },
+      {
+        "name": "A <label> that names nothing is worse than no label",
+        "section": "components",
+        "body": "The shape that survives every htmlFor sweep because it looks correct: a <label> over a button group, a read-only figure, or a repeating row's column is announced as a name the browser will never bind to a control. Those become a <span class=\"field-label\"> with role=\"group\"/\"radiogroup\" + aria-labelledby on the container and aria-pressed on the buttons. A <button> can never be named by a <label> at all, however adjacent."
+      },
+      {
+        "name": "A <select> needs an accessible name even where the design gives it no visible caption",
+        "section": "components",
+        "body": "Filter toolbars are the product's blind spot: 86 unnamed selects across 43 files — period pickers, category/status/vendor filters, sort orders — each announcing only its current option. aria-label where there is no visible text, id/htmlFor where there is. Inside a .map(), use a template aria-label naming the row, never a constant that repeats down the list."
+      },
+      {
+        "name": "A standalone input takes .form-input; only a .form-field child is styled for free",
+        "section": "components",
+        "body": "Until that class existed the only themed input rule was the descendant selector .form-field input, so an input in a plain flex row got no treatment and rendered as the browser's native white box — unmissable on dark presets, nearly invisible on light ones. The tell that the gap was real: sites that noticed either hand-copied all six declarations inline or borrowed .form-select, which carries cursor:pointer, so a text field announced itself as a menu."
+      },
+      {
+        "name": "A native <input type=\"file\"> is never shippable UI",
+        "section": "components",
+        "body": "Its 'Choose File / No file chosen' chrome is drawn by the browser: no token reaches it, it ignores the type scale, and it renders in the OS language rather than the app's. The pattern is a .visually-hidden input (not display:none) with a real .btn forwarding the click."
+      },
+      {
+        "name": "Use .panel-tab-bar for the row itself",
+        "section": "components",
+        "body": "It carries display:flex + gap + flex-wrap + the bottom rule, so wrap behaviour is a property of the class rather than something each page has to remember. Seven IMS pages had hand-rolled the row inline; Stock Count's had seven tabs and no flexWrap — the exact shape that hid ClientDrawer's Danger tab."
+      },
+      {
+        "name": "A report page must not show a number it has not computed",
+        "section": "components",
+        "body": "The KPI strip does not render while loading or after a failure. Two report pages painted four stat cards ABOVE their own loading guard, so a multi-second fiscal-year read showed 'Capital in 90+ Day Stock: NPR 0' in green until the real number arrived, and on a failed read it stayed there. ReportPage gates stats/note/filters/footnote on !loading && !error; banners are not gated, because a period warning qualifies the page including its absence of data."
+      },
+      {
+        "name": "A failed read is not an empty period",
+        "section": "components",
+        "body": "'Nothing to show' and 'could not load' are different facts and only one of them means the zeros on screen are real. Every read on two report pages destructured { data } and dropped error, then ran it through || [] — so an RLS rejection or a stalled token produced a complete, confident report of NPR 0. Strictly worse than a crash: a crash gets reported, a zero gets believed. firstError(results) is the one place a Promise.all batch is checked."
+      },
+      {
+        "name": "The totals row and lining figures are the table's own, not the call site's",
+        "section": "components",
+        "body": ".data-table tfoot had NO rule at all until S594, so every totals row in the product was hand-styled where it was written and three report pages built in one week produced three different treatments. font-variant-numeric: tabular-nums now sits on every .data-table td and .stat-value: Poppins' default figures are proportional, so a right-aligned currency column does not line up digit-for-digit."
+      },
+      {
+        "name": "Never put role=\"button\" on a <tr>",
+        "section": "components",
+        "body": "The role overrides the row's implicit row role, taking it out of the table's structure — a screen reader stops associating that row's cells with their column headers, which on a table of currency columns is the entire content. The control belongs in a cell, as a real <button>: RowDisclosure (src/components/RowDisclosure.jsx) sets aria-expanded and stopPropagation()s so the row's own onClick cannot double-fire. This rule lived ONLY in this sidecar for months and was therefore copied forward into four tables; all four were fixed in S595 and the rule now also lives in DESIGN.md's prose, where someone reads it."
+      },
+      {
+        "name": "A report that states a scope must state it everywhere the report goes",
+        "section": "components",
+        "body": "Stock Ageing aged every fiscal year against new Date() while its selector accepted any past year, pushing every surviving batch into the 90+ band and reporting the whole stock value as stale — silently, in the alarming direction. It had no as-of date in the subtitle, the print title or the workbook, and its filter bar is no-print so a printed sheet showed a filtered table with no record of the filter. One scopeLine now feeds all four."
       }
     ],
     "dos": [
-      "Do use the theme's accent-text token as the foreground on any accent-colored background - it changes per preset and a hardcoded color will fail contrast on at least one of the ten themes.",
-      "Do keep tonal alpha-tints (table-hover, focus-ring, badge backgrounds) at 2-18% opacity - enough to register as a state, never opaque enough to compete with real content.",
+      "Do use the theme's `accent-text` token as the foreground on any accent-colored background - it changes per preset and a hardcoded color will fail contrast on at least one of the ten themes.",
+      "Do keep tonal alpha-tints (`table-hover`, `focus-ring`, badge backgrounds) at 2-18% opacity - enough to register as a state, never opaque enough to compete with real content.",
       "Do wrap every wide table in the horizontal-scroll container rather than shrinking columns.",
       "Do reserve the rationed 4th color (purple) for a genuine 4th/5th categorical need, not as a second accent.",
       "Do put labels above form fields, always - never a placeholder standing in for a label.",
-      "Do give every status message a live region - role=\"alert\" for errors, role=\"status\" for confirmations. A message that is only *shown* announces nothing, and on a destructive surface that means no confirmation an action ran at all.",
-      "Do use the *-text variant whenever a signal colour is set as `color:` — and check the ternaries, which is where about half the real sites are.",
+      "Do give every status message a live region - `role=\"alert\"` for errors, `role=\"status\"` for confirmations. A message that is only *shown* announces nothing, and on a destructive surface that means no confirmation an action ran at all.",
+      "Do use the `*-text` variant whenever a signal colour is set as `color:` — and check the ternaries, which is where about half the real sites are.",
       "Do keep a legend swatch identical to the series it labels, and let the adjacent label text carry the readable contrast.",
-      "Do give any modal the full dialog contract: role, aria-modal, a labelled title, initial focus, a Tab trap, Escape, and focus restored to the trigger.",
-      "Do disclose an estimate where it is read, inline and visible, not in a hover tooltip — a figure carrying a red/amber/green verdict has to say what it is built from."
+      "Do give any modal the full dialog contract: role, `aria-modal`, a labelled title, initial focus, a Tab trap, Escape, and focus restored to the trigger.",
+      "Do disclose an estimate where it is read, inline and visible, not in a hover tooltip — a figure carrying a red/amber/green verdict has to say what it is built from.",
+      "Do render a report's could-not-load state as its own thing, never as the empty state, and never above a KPI strip that is still showing zeros (added 2026-08-19/S594 — see Report shell)."
     ],
     "donts": [
       "Don't build dense, hierarchy-less layouts in the name of \"fitting more in\" - that's the legacy-ERP failure mode this product is explicitly positioned against.",
       "Don't reach for purple gradients, Inter-everywhere, or a templated hero-plus-three-cards layout - the generic-AI-SaaS look PRODUCT.md names directly as an anti-reference.",
-      "Don't invent a stronger/different shadow to mean \"important\" or \"premium.\" Card elevation (--theme-card-shadow) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning (see Elevation).",
-      "Don't hardcode white or black as text on an accent background - use the paired accent-text token.",
-      "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (Bright's colorful KPI badges on ClientDashboard.jsx are the one named exception - see Badges / Status Chips.)",
+      "Don't invent a stronger/different shadow to mean \"important\" or \"premium.\" Card elevation (`--theme-card-shadow`) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning (see Elevation).",
+      "Don't hardcode white or black as text on an accent background - use the paired `accent-text` token.",
+      "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (Bright's colorful KPI badges on `ClientDashboard.jsx` are the one named exception - see Badges / Status Chips.)",
       "Don't build a multi-series chart palette from the semantic tokens — accent and purple are the same hex on three of ten presets.",
-      "Don't dim a row with opacity to de-emphasise it; opacity multiplies through the text colour and takes it below AA. Label the state instead.",
-      "Don't put role=\"button\" on a <tr>. It removes the row from the table's structure, so the cells stop being associated with their column headers.",
-      "Don't paint a verdict colour on a figure that has not settled yet — early in a period a lumpy-numerator ratio is arithmetic, not signal."
+      "Don't dim a row with `opacity` to de-emphasise it; opacity multiplies through the text colour and takes it below AA. Label the state instead.",
+      "Don't put `role=\"button\"` on a `<tr>`. It removes the row from the table's structure, so the cells stop being associated with their column headers. Put a real `<button>` in the first cell (see Data Tables).",
+      "Don't paint a verdict colour on a figure that has not settled yet — early in a period a lumpy-numerator ratio is arithmetic, not signal.",
+      "Don't let a page compute a number it then shows before the read has returned. A KPI painted during load is a claim the page cannot yet support, and on a green token it reads as a healthy one."
     ]
   }
 }

@@ -25,6 +25,7 @@ import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import Tip from '../../../components/Tip'
 import ReportPage from '../../../components/ReportPage'
+import RowDisclosure from '../../../components/RowDisclosure'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
@@ -372,24 +373,25 @@ export default function SupplierContribution() {
               const isOpen = expanded === r.id
               const special = r.id === UNATTRIBUTED || r.id === NO_VENDOR
               const canExpand = r.itemRows.length > 0
+              // The drill-down is this page's only interaction and was a bare `<tr onClick>` —
+              // unreachable without a mouse. S594 fixed that by putting role="button" on the row,
+              // which traded one defect for another: that role takes the row out of the table's
+              // structure, so its cells stop being associated with their column headers. On a
+              // table that is almost entirely currency columns, that is the whole content. The
+              // control belongs in a cell — see components/RowDisclosure.jsx (S595).
               return [
                 <tr key={r.id}
-                  // The drill-down is this page's only interaction and was a bare `<tr onClick>`
-                  // until S594 — no tabIndex, no role, no key handler — so it was unreachable
-                  // without a mouse and a screen reader was never told the row expanded.
-                  {...(canExpand ? {
-                    tabIndex: 0,
-                    role: 'button',
-                    'aria-expanded': isOpen,
-                    'aria-label': `${r.name} — ${isOpen ? 'hide' : 'show'} the ${r.itemRows.length} ingredients traced to this supplier`,
-                    onClick: () => toggleRow(r.id),
-                    onKeyDown: e => {
-                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRow(r.id) }
-                    },
-                  } : {})}
+                  {...(canExpand ? { onClick: () => toggleRow(r.id) } : {})}
                   style={{ cursor: canExpand ? 'pointer' : 'default' }}>
                   <td style={{ fontWeight: 600, color: special ? 'var(--theme-text3)' : 'var(--theme-text1)' }}>
-                    {canExpand && <span aria-hidden="true" style={{ marginRight: 6 }}>{isOpen ? '▾' : '▸'}</span>}
+                    {canExpand && (
+                      <RowDisclosure
+                        expanded={isOpen}
+                        onToggle={() => toggleRow(r.id)}
+                        controls={`supplier-detail-${r.id}`}
+                        label={`${r.name} — ${isOpen ? 'hide' : 'show'} the ${r.itemRows.length} ingredients traced to this supplier`}
+                      />
+                    )}{canExpand ? ' ' : ''}
                     {r.name}
                     {r.code && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>{r.code}</span>}
                   </td>
@@ -408,7 +410,7 @@ export default function SupplierContribution() {
                   <td style={{ textAlign: 'right' }}>{r.itemRows.length}</td>
                 </tr>,
                 isOpen && canExpand && (
-                  <tr key={`${r.id}-detail`} className="detail-row">
+                  <tr key={`${r.id}-detail`} id={`supplier-detail-${r.id}`} className="detail-row">
                     <td colSpan={7} style={{ background: 'var(--theme-table-hover)', padding: '12px 16px' }}>
                       <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
                         <div style={{ minWidth: 260, flex: 1 }}>
