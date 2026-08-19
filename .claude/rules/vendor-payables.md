@@ -20,3 +20,38 @@ Vendor Balance Confirmation's Opening Balance (balance as of a fiscal year's *st
 **A phantom sub-paisa balance on a fully-settled bill can come from three genuinely different layers — don't assume the first (or second) fix found the real cause.** S502's fix above (rounding `billGrandTotal()`'s output) covers *this report's own* summation-order float noise, but a separate bug lived one layer down, in `OutstandingPayables.js`'s payment-allocation itself: `payBill()`/`paySelectedBills()` used to compute each unpaid line's proportional share as a raw float and let Postgres round each of the (say) 10 inserted `payable_payments.amount` rows independently to 2dp on write — independent per-line rounding can lose fractions of a paisa in aggregate, so a "Pay in full" lump sum can land a paisa short of the real total with no way to ever fully clear the bill afterward. Found live (S505) re-entering a real vendor payment: the rounding tweak from S502 alone did *not* fix it — verified by direct `payable_payments` inspection, not assumed — because the true cause was upstream of this report entirely. Fixed via a shared `allocatePayment()` in `OutstandingPayables.js` using running-cumulative rounding (round the cumulative allocated-so-far total at each line, take the difference from the previous cumulative rounded total) so the inserted rows always sum to exactly the rounded payment amount, however many lines it splits across.
 
 A third, distinct layer surfaced later (S510): `OutstandingPayables.js`'s own `l.value`/`l.remaining` (the per-line figures `allocatePayment()` allocates against) were carried **unrounded** — a per-line rate with 3+ decimals (e.g. an NPR/gram cost like `0.20915`) can leave a bill's true net total sub-paisa (NPR 1400.00175, not a clean 1400.00) even though every displayed figure shows only 2dp. "Pay in full" pre-fills the editable amount via `.toFixed(2)`, and `Math.min(amount, bill.remaining)` then silently caps the actual payment a hair below the true unrounded remaining — the shortfall lands entirely on whichever line `allocatePayment()` processes *last*: its written `payable_payments.amount` still rounds to a clean figure (so Payment History shows it as fully paid), but the *raw* allocation used for the settle check (`e.paidTotal + rawAlloc >= e.value - EPS`) falls just short of that line's unrounded `e.value`, so it never gets `purchase_entries.paid_at` stamped — the bill stays stuck "outstanding" with a line that visibly shows zero remaining. `allocatePayment()`'s own cumulative-rounding fix from S505 does not touch this, since the bug is upstream of it, in the inputs it receives. Fixed the same way as S502's `billGrandTotal()`: round `l.value`/`l.remaining` to currency precision the moment they're computed, not just at display time. If a phantom-balance or stuck-settlement report ever recurs, check all three layers independently rather than assuming any prior fix subsumes the others.
+
+### Supplier Contribution: a supplier can only ever be DERIVED (S580)
+
+`items` has **no vendor column**. A supplier exists in Crest only on a purchase line, so nothing
+about a sale can name one — which is why the competitor ERP's "Sales Report – Supplier Wise" has
+no direct equivalent and shipped instead as `/supplier-contribution` (Pro), a cost-attribution
+report: what sold (`selectDepletingSales`) → what it consumed (`explodeRecipeIngredients`, valued
+at `per_uom_rate`) → split across the vendors that supplied each item that period, in proportion to
+net spend with each. The arithmetic is pure and tested in
+`src/modules/ims/reports/supplierAttribution.js` (+ `.test.js`).
+
+Three rules if this is ever touched:
+
+- **Net spend must keep meaning exactly what `VendorReport.js` means by it** — gross less bill
+  discount less returns, with the discount deduped by `purchase_group_id` because
+  `purchase_entries.discount_amount` is a bill-level figure repeated on every line. The one
+  extension is allocating that discount across the bill's own lines proportionally, since
+  attribution is per item where Vendor Report only ever needed per vendor; the vendor totals still
+  sum to Vendor Report's number. Verified live (S580) at NPR 250,000 on both pages for the same
+  period. Two figures for the same thing that disagree by a discount rule is the S551 defect class.
+- **Shares are taken from positive parts only, and an item with none is NAMED.** A return larger
+  than the period's purchases can leave an (item, vendor) pair negative, and a negative share is
+  meaningless. An item consumed this period but last bought in an earlier one is ordinary, not an
+  error — it lands in an explicit **Not attributed** row so attributed + unattributed is always the
+  whole consumed value (asserted in the tests). A rollup that silently cannot claim a row produces
+  a believable wrong total, which is S567's lesson.
+- **The figure is recipe-theoretical consumption, not count-based COGS**, and wastage/staff meals
+  are excluded (this is the cost of what was *sold*). Both are stated on the page. It needs no
+  closed period, since nothing here subtracts a closing count — so the Variance-style
+  closed-period default deliberately does not apply.
+
+Related observation, deliberately not acted on: **`Variance.js` sums `sales_entries.qty_sold`
+without `selectDepletingSales`**, so for a client running POS *and* manual bulk entry its
+theoretical usage can exceed this page's consumption for the same period. That is a call on a
+shipped figure, not a bug fix to make in passing.

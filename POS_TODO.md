@@ -4,7 +4,7 @@ Living checklist compiled from: the competitor "IMS" ERP report-menu audit, the 
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-08-19 (S579)
+Last updated: 2026-08-19 (S580)
 
 ---
 
@@ -62,8 +62,27 @@ by design, so an admin session proves nothing about them.
 - [x] ~~KOT vs Prebill vs Sales reconciliation~~ — shipped S236, 2026-07-04. `/pos/kot-log` (Reconciliation tab). Flags items whose total sent-to-kitchen qty exceeds their current order qty, and any KOT/BOT send on an order that ends up Voided. Only shows flagged rows.
 - [x] ~~Bill Register / Voucher Wise Sales Report~~ — shipped S237, 2026-07-04 (added after comparing against a competitor's "Sales Book Report" screenshot, not originally on this list). 7th tab in `/pos/sales-report`. One row per bill — Voucher#, Invoice#, Customer, Payment Mode, Order Mode, amounts, Remarks, Entered By. No migration needed — every column already existed on `pos_orders`.
 - [ ] 🔴 Stock Ageing Report (FIFO/Expiry shows dates, not aging buckets)
-- [ ] ⚪ "Supplier Wise" / "Product Type Wise" sales reports (unclear fit vs Crest's data model — needs clarification before scoping)
-- [ ] 🟡 Item Wise tab: add Product Code + UoM columns (found via competitor screenshot comparison, 2026-07-04 — `recipes.recipe_code`/`yield_uom` already exist, just not pulled into the report query; no migration needed)
+- [x] ~~"Supplier Wise" / "Product Type Wise" sales reports~~ — **shipped S580, 2026-08-19**, and
+  neither as the competitor ships it, because neither can exist in Crest's model as written.
+  **Product Type Wise:** their Masters menu has two menu axes (Product Category *and* Product
+  Group/Item Type); Crest has one, `recipes.category`, which Category Wise already reports — a
+  second tab on the same column would have been the same report renamed. Three real axes were
+  already in the data with nothing reading them, so it shipped as an 11th `/pos/sales-report` tab
+  with a **Group by** switch: Kitchen/Bar (`settings.pos_bot_categories`, the same split the tills
+  route BOT tickets by), VAT Mode (`pos_order_items.vat_rate`, as billed), Veg/Non-Veg
+  (`recipes.is_veg`). No migration, no extra round trip. An axis that could only produce one row
+  is hidden rather than rendered empty.
+  **Supplier Wise:** `items` has no vendor column at all — a supplier exists only on a purchase
+  line, so no sale can name one. Sales-by-supplier is a trading-ERP concept (it works when you
+  resell what you buy). Shipped instead as **Supplier Contribution** (`/supplier-contribution`,
+  Pro, IMS not POS, so manual-entry clients get it too): what sold → `selectDepletingSales` →
+  `explodeRecipeIngredients` → each ingredient's consumed value split across the vendors that
+  supplied it this period, in proportion to net spend with each. Net spend means exactly what
+  Vendor Report means by it, so the two pages can never disagree. Items nothing can be attributed
+  to get a named **Not attributed** row rather than being dropped (S567).
+- [ ] 🟡 Item Wise tab: add Product Code + UoM columns (found via competitor screenshot comparison,
+  2026-07-04 — `recipes.recipe_code`/`yield_uom` already exist, just not pulled into the report
+  query; no migration needed). Now the smallest open item on this list.
 - [x] ~~Printed letterhead baked into Excel exports~~ — shipped S238, 2026-07-04. All 7 `/pos/sales-report` tabs now export Company Name/VAT No./Address + `@As On Dated : ... To : ...` date-range line (or `@Fiscal Year :` for 1L+ Report) above the data, matching the statutory-report look of competitor exports.
 - [x] ~~KOT Log: Bill Trail tab~~ — shipped S239, 2026-07-04 (not originally on this list — requested after seeing Reconciliation only surfaces exceptions). 3rd tab in `/pos/kot-log`: every paid/voided bill, expandable to its full KOT/BOT send history, with an amber "No KOT" badge for bills that never sent anything to the kitchen. No migration needed.
 - [x] ~~Payment Summary Report~~ — shipped S245, 2026-07-05 (not originally on this list). One of 8 tabs in `/pos/sales-report`: payment-method breakdown (Cash/Card/eSewa/Khalti/FonePay/Credit) over a BS date range.

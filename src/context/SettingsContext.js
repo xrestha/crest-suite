@@ -35,6 +35,7 @@ const DEFAULT_FLAGS = {
   monthly_summary: false,
   payment_summary: false,
   vendor_report: false,
+  supplier_contribution: false,
   vendor_balance_confirmation: false,
   variance_report: false,
   fifo_report: false,

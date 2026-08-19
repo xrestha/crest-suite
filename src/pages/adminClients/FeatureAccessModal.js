@@ -14,6 +14,7 @@ import { colorTint } from '../../data/pricingPlans'
 const DEFAULT_FLAGS = {
   sales_entry: null, monthly_summary: null, payment_summary: null,
   vendor_report: null, vendor_balance_confirmation: null, variance_report: null, fifo_report: null,
+  supplier_contribution: null,
   reorder_report: null, price_tracker: null, recipe_costing: null,
   menu_engineering: null, overheads: null, budget_vs_actual: null,
   best_sellers: null, vat_report: null, non_vat_report: null,
@@ -102,6 +103,7 @@ const FEATURE_GROUPS = [
     { key: 'theoretical_variance', label: 'Theoretical Variance' },
     { key: 'period_comparison',    label: 'Period Comparison' },
     { key: 'shrinkage_report',     label: 'Shrinkage Report' },
+    { key: 'supplier_contribution', label: 'Supplier Contribution' },
   ]},
   // POS is flat — no tiers — so its features unlock with the module itself. guest_ordering used
   // to sit in the Pro column above, which gated a POS feature on the IMS plan: a POS client on

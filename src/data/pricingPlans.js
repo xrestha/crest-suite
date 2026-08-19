@@ -91,6 +91,7 @@ const PRO_EXTRAS = [
   'Menu Engineering (Star / Puzzle / Dog)',
   'FIFO / Expiry Batch Tracking',
   'Vendor Spend Report',
+  'Supplier Contribution (Cost of Sales by Supplier)',
   'Supplier Price Tracker & Rate Alerts',
   'Theoretical Variance (Advanced Drill-Down)',
 ]

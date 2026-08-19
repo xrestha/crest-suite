@@ -10,7 +10,7 @@ import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
 import { getBsToday, formatAd, adToBs, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
-import { computeOrderAmounts, computeCategoryAmounts, computeItemAmounts } from '../../../utils/posBillingMath'
+import { computeOrderAmounts, computeGroupAmounts } from '../../../utils/posBillingMath'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
@@ -31,6 +31,7 @@ const TABS = [
   { key: 'payment',  label: 'Payment Summary' },
   { key: 'delivery', label: 'Delivery Partners' },
   { key: 'category', label: 'Category Wise' },
+  { key: 'producttype', label: 'Product Type' },
   { key: 'item',     label: 'Item Wise' },
   { key: 'customer', label: 'Customer Wise' },
   { key: 'onelakh',  label: '1L+ Report' },
@@ -54,14 +55,21 @@ export default function SalesReport() {
 
   /* ── Letterhead info for Excel exports — fetched once per client, independent of date range ── */
   const [bizInfo, setBizInfo] = useState({ name: '', vat: '', address: '' })
+  // recipes.is_veg backs one of the Product Type tab's axes. Master data, so it rides along with
+  // the letterhead fetch (once per client) rather than the date-range one, and needs no paging —
+  // no client's menu comes close to PostgREST's 1000-row cap.
+  const [vegById, setVegById] = useState({})
   useEffect(() => {
     if (!clientId) return
     Promise.all([
       supabase.from('clients').select('name').eq('id', clientId).single(),
       supabase.from('settings').select('vat_number, property_address').eq('client_id', clientId).maybeSingle(),
-    ]).then(([{ data: client }, { data: settings }]) => {
+      scopedFrom('recipes', 'id, is_veg'),
+    ]).then(([{ data: client }, { data: settings }, { data: recipeRows }]) => {
       setBizInfo({ name: client?.name || '', vat: settings?.vat_number || '', address: settings?.property_address || '' })
+      setVegById(Object.fromEntries((recipeRows || []).map(r => [r.id, r.is_veg])))
     })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId])
 
   /* ── Daily / Hourly / Category / Customer — one shared date-range fetch ── */
@@ -71,6 +79,10 @@ export default function SalesReport() {
   const [itemsByOrder, setItemsByOrder] = useState({})
   const [compsByOrder, setCompsByOrder] = useState({}) // { order_id: [{ compNo, reason, items, foodCost, potentialValue }] }
   const [vatReg, setVatReg] = useState(true)
+  // The same Kitchen/Bar split the tills route tickets by (Table Management → Ticket Routing),
+  // and the same ['Beverage'] fallback PosOrders.jsx and PosTableManagement.jsx use — if this
+  // page disagreed with them, the Bar figure would not match the BOT tickets it came from.
+  const [botCategories, setBotCategories] = useState(new Set(['Beverage']))
   const [staffNames, setStaffNames] = useState({})
   const [rangeLoading, setRangeLoading] = useState(true)
 
@@ -88,7 +100,7 @@ export default function SalesReport() {
         .eq('close_type', 'paid')
         .gte('closed_at', fromTs).lte('closed_at', toTs)
         .order('id')),
-      supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
+      supabase.from('settings').select('is_vat_registered, pos_bot_categories').eq('client_id', clientId).maybeSingle(),
       // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin)
       // — resolving OTHER staff members' names needs get_client_profile_names(), a SECURITY
       // DEFINER RPC. A raw query here silently showed "—" for every staff member except
@@ -96,6 +108,8 @@ export default function SalesReport() {
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
     setVatReg(settings?.is_vat_registered ?? true)
+    setBotCategories(new Set(Array.isArray(settings?.pos_bot_categories) && settings.pos_bot_categories.length > 0
+      ? settings.pos_bot_categories : ['Beverage']))
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
     const orderList = orderData || []
     setOrders(orderList)
@@ -243,36 +257,22 @@ export default function SalesReport() {
     netReceived: s.netReceived + (r.settled ? r.amount - r.commission : 0),
   }), { bills: 0, amount: 0, outstanding: 0, commission: 0, netReceived: 0 })
 
-  const categoryRows = useMemo(() => {
-    const grouped = {}
-    const ensure = cat => grouped[cat] = grouped[cat] || { name: cat, qtySales: 0, qtyReturn: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0 }
-    for (const o of orders) {
-      const items = itemsByOrder[o.id] || []
-      if (o.credit_note_id) {
-        for (const i of items) ensure(i.category || 'Uncategorized').qtyReturn += i.qty
-        continue
-      }
-      const byCat = computeCategoryAmounts(o, items, vatReg)
-      for (const [cat, v] of Object.entries(byCat)) {
-        const b = ensure(cat)
-        b.qtySales += v.qty; b.gross += v.gross; b.discount += v.discount
-        b.taxable += v.taxable; b.nonTaxable += v.nonTaxable; b.vat += v.vat
-      }
-    }
-    return Object.values(grouped).sort((a, b) => (b.gross - b.discount + b.vat) - (a.gross - a.discount + a.vat))
-  }, [orders, itemsByOrder, vatReg])
-
-  const itemRows = useMemo(() => {
+  // One builder behind Category Wise, Item Wise and Product Type - they differ only in which
+  // bucket a line falls into and what that bucket is called. The credit-note branch is part of
+  // the rule rather than incidental: a credit-noted bill contributes returned QUANTITY only and
+  // never revenue, since the reversal posts on the day the note is issued (see dailyRows). Three
+  // hand-written copies of that is how the tabs would come to disagree about a return.
+  const buildGroupedRows = useCallback((keyOf, labelOf) => {
     const grouped = {}
     const ensure = (key, name) => grouped[key] = grouped[key] || { key, name, qtySales: 0, qtyReturn: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0 }
     for (const o of orders) {
       const items = itemsByOrder[o.id] || []
       if (o.credit_note_id) {
-        for (const i of items) ensure(i.recipe_id || i.name, i.name).qtyReturn += i.qty
+        for (const i of items) ensure(keyOf(i), labelOf(i)).qtyReturn += i.qty
         continue
       }
-      const byItem = computeItemAmounts(o, items, vatReg)
-      for (const [key, v] of Object.entries(byItem)) {
+      const byKey = computeGroupAmounts(o, items, vatReg, keyOf, i => ({ name: labelOf(i) }))
+      for (const [key, v] of Object.entries(byKey)) {
         const b = ensure(key, v.name)
         b.qtySales += v.qty; b.gross += v.gross; b.discount += v.discount
         b.taxable += v.taxable; b.nonTaxable += v.nonTaxable; b.vat += v.vat
@@ -280,6 +280,48 @@ export default function SalesReport() {
     }
     return Object.values(grouped).sort((a, b) => (b.gross - b.discount + b.vat) - (a.gross - a.discount + a.vat))
   }, [orders, itemsByOrder, vatReg])
+
+  const categoryRows = useMemo(
+    () => buildGroupedRows(i => i.category || 'Uncategorized', i => i.category || 'Uncategorized'),
+    [buildGroupedRows])
+
+  const itemRows = useMemo(
+    () => buildGroupedRows(i => i.recipe_id || i.name, i => i.name),
+    [buildGroupedRows])
+
+  /* -- Product Type: the same bill data cut by an axis ABOVE category ----------------------
+     Crest has one menu axis (recipes.category) where the competitor ERP has two, so 'Product
+     Type' has to be a real second axis rather than a rename of the first. All three below
+     already exist in the data and none was reportable before: the Kitchen/Bar split the tills
+     route tickets by, the VAT mode each line was billed at, and the veg flag set in Recipes. */
+  const [productAxis, setProductAxis] = useState('station')
+  const hasVegData = useMemo(() => Object.values(vegById).some(v => v === true || v === false), [vegById])
+  // An axis that can only ever produce one row is hidden rather than rendered empty: VAT Mode
+  // collapses to a single Non-Taxable row for a client that is not VAT-registered, and Veg/
+  // Non-Veg to a single 'Not set' row until someone has actually set the flag on a recipe.
+  const productAxes = useMemo(() => [
+    { key: 'station', label: 'Kitchen / Bar' },
+    ...(vatReg ? [{ key: 'vat', label: 'VAT Mode' }] : []),
+    ...(hasVegData ? [{ key: 'veg', label: 'Veg / Non-Veg' }] : []),
+  ], [vatReg, hasVegData])
+  useEffect(() => {
+    if (!productAxes.some(a => a.key === productAxis)) setProductAxis('station')
+  }, [productAxes, productAxis])
+
+  const productTypeKeyOf = useCallback(i => {
+    if (productAxis === 'vat') return (i.vat_rate ?? 0) > 0 ? 'Taxable' : 'Non-Taxable'
+    if (productAxis === 'veg') {
+      const v = vegById[i.recipe_id]
+      return v === true ? 'Veg' : v === false ? 'Non-Veg' : 'Not set'
+    }
+    // Matches sendTicket()'s own rule in PosOrders.jsx exactly, default category included, so
+    // the Bar figure here is the same set of lines that printed on BOT tickets.
+    return botCategories.has(i.category || 'Other') ? 'Bar (BOT)' : 'Kitchen (KOT)'
+  }, [productAxis, vegById, botCategories])
+
+  const productTypeRows = useMemo(
+    () => buildGroupedRows(productTypeKeyOf, productTypeKeyOf),
+    [buildGroupedRows, productTypeKeyOf])
 
   const customerRows = useMemo(() => {
     const grouped = {}
@@ -401,10 +443,13 @@ export default function SalesReport() {
   // double-counting a bill whose revenue was already reversed.
   const voucherTotals = filteredVoucherRows.filter(v => !v.credited).reduce((s, v) => ({ gross: s.gross + v.gross, discount: s.discount + v.discount, taxable: s.taxable + v.taxable, nonTaxable: s.nonTaxable + v.nonTaxable, vat: s.vat + v.vat, net: s.net + v.net }), { gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
   const paymentTotals = paymentRows.reduce((s, p) => ({ bills: s.bills + p.bills, gross: s.gross + p.gross, discount: s.discount + p.discount, taxable: s.taxable + p.taxable, nonTaxable: s.nonTaxable + p.nonTaxable, vat: s.vat + p.vat, net: s.net + p.net }), { bills: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
-  const categoryNetOf = c => c.gross - c.discount + c.vat
-  const categoryTotals = categoryRows.reduce((s, c) => ({ qtySales: s.qtySales + c.qtySales, qtyReturn: s.qtyReturn + c.qtyReturn, gross: s.gross + c.gross, discount: s.discount + c.discount, taxable: s.taxable + c.taxable, nonTaxable: s.nonTaxable + c.nonTaxable, vat: s.vat + c.vat }), { qtySales: 0, qtyReturn: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0 })
-  const itemNetOf = i => i.gross - i.discount + i.vat
-  const itemTotals = itemRows.reduce((s, i) => ({ qtySales: s.qtySales + i.qtySales, qtyReturn: s.qtyReturn + i.qtyReturn, gross: s.gross + i.gross, discount: s.discount + i.discount, taxable: s.taxable + i.taxable, nonTaxable: s.nonTaxable + i.nonTaxable, vat: s.vat + i.vat }), { qtySales: 0, qtyReturn: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0 })
+  const groupNetOf = r => r.gross - r.discount + r.vat
+  const totalsOf = rows => rows.reduce((s, r) => ({ qtySales: s.qtySales + r.qtySales, qtyReturn: s.qtyReturn + r.qtyReturn, gross: s.gross + r.gross, discount: s.discount + r.discount, taxable: s.taxable + r.taxable, nonTaxable: s.nonTaxable + r.nonTaxable, vat: s.vat + r.vat }), { qtySales: 0, qtyReturn: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0 })
+  const categoryNetOf = groupNetOf
+  const itemNetOf = groupNetOf
+  const categoryTotals = totalsOf(categoryRows)
+  const itemTotals = totalsOf(itemRows)
+  const productTypeTotals = totalsOf(productTypeRows)
   const customerTotals = customerRows.reduce((s, c) => ({ gross: s.gross + c.gross, discount: s.discount + c.discount, taxable: s.taxable + c.taxable, nonTaxable: s.nonTaxable + c.nonTaxable, vat: s.vat + c.vat, net: s.net + c.net }), { gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 })
   const compedBillTotals = compedBillRows.reduce((s, c) => ({ foodCost: s.foodCost + c.foodCost, potentialValue: s.potentialValue + c.potentialValue }), { foodCost: 0, potentialValue: 0 })
   const oneLakhTotals = parties.reduce((s, p) => ({ gross: s.gross + p.gross, vat: s.vat + p.vat, net: s.net + p.net }), { gross: 0, vat: 0, net: 0 })
@@ -511,6 +556,18 @@ export default function SalesReport() {
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'Category Sales')
       XLSX.writeFile(wb, `category-sales-${fromIso}-to-${toIso}.xlsx`)
+    } else if (tab === 'producttype') {
+      // The axis is named in the sheet title: an exported file that just said 'Product Type'
+      // would be ambiguous about which of the three cuts it holds.
+      const axisLabel = productAxes.find(a => a.key === productAxis)?.label || 'Kitchen / Bar'
+      const ws = withLetterhead(XLSX, `Sales Report - Product Type Wise (${axisLabel})`, dateRangeLine, productTypeRows.map(r => ({
+        'Product Type': r.name, 'Qty Sales': r.qtySales, 'Qty Return': r.qtyReturn, 'Qty Net': r.qtySales - r.qtyReturn,
+        'Gross (NPR)': Math.round(r.gross * 100) / 100, 'Discount (NPR)': Math.round(r.discount * 100) / 100,
+        'Non-Taxable (NPR)': Math.round(r.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(r.taxable * 100) / 100,
+        'VAT (NPR)': Math.round(r.vat * 100) / 100, 'Net (NPR)': Math.round(groupNetOf(r) * 100) / 100,
+      })))
+      XLSX.utils.book_append_sheet(wb, ws, 'Product Type Sales')
+      XLSX.writeFile(wb, `product-type-sales-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'item') {
       const ws = withLetterhead(XLSX, 'Sales Report - Item Wise', dateRangeLine, itemRows.map(i => ({
         'Item': i.name, 'Qty Sales': i.qtySales, 'Qty Return': i.qtyReturn, 'Qty Net': i.qtySales - i.qtyReturn,
@@ -551,6 +608,7 @@ export default function SalesReport() {
     (tab === 'payment' && paymentRows.length === 0) ||
     (tab === 'delivery' && deliveryPartnerRows.length === 0) ||
     (tab === 'category' && categoryRows.length === 0) ||
+    (tab === 'producttype' && productTypeRows.length === 0) ||
     (tab === 'item' && itemRows.length === 0) ||
     (tab === 'customer' && customerRows.length === 0) ||
     (tab === 'onelakh' && parties.length === 0)
@@ -562,7 +620,7 @@ export default function SalesReport() {
           Sales Report <Tip text="Ten views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Delivery Partners tracks Foodmandu/Pathao bills from Credit through settlement, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
         </h2>
         <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
-          One report, ten ways to slice it.
+          One report, eleven ways to slice it.
         </p>
       </div>
 
@@ -974,6 +1032,74 @@ export default function SalesReport() {
             </tfoot>
           </table>
         </div>
+      ) : tab === 'producttype' ? (
+        <>
+          <div className="form-field" style={{ marginBottom: 12 }}>
+            <span className="field-label" id="product-axis-label">
+              <Tip text="Category Wise groups by the menu category each item sits in. Product Type groups by an axis ABOVE that — the same lines, cut a different way." width={300}>Group by</Tip>
+            </span>
+            <div className="tab-bar" role="group" aria-labelledby="product-axis-label">
+              {productAxes.map(a => (
+                <button
+                  key={a.key} type="button"
+                  className={`tab-btn${productAxis === a.key ? ' tab-btn--active' : ''}`}
+                  aria-pressed={productAxis === a.key}
+                  onClick={() => setProductAxis(a.key)}
+                >{a.label}</button>
+              ))}
+            </div>
+            <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>
+              {productAxis === 'station'
+                ? `Bar (BOT) is every line in a bar category (${[...botCategories].join(', ')}) — the same split the tills print BOT tickets from, set in Table Management → Ticket Routing. Everything else is Kitchen (KOT).`
+                : productAxis === 'vat'
+                ? 'Taxable is every line billed at a VAT rate above zero, Non-Taxable everything else — as billed, not as the item is configured today.'
+                : 'Veg / Non-Veg comes from the flag on each recipe. Items with the flag unset are shown separately rather than assumed.'}
+            </p>
+          </div>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Product Type</th>
+                  <th style={{ textAlign: 'right' }}>Qty Sales</th><th style={{ textAlign: 'right' }}>Qty Return</th><th style={{ textAlign: 'right' }}>Qty Net</th>
+                  <th style={{ textAlign: 'right' }}>Gross</th><th style={{ textAlign: 'right' }}>Discount</th>
+                  <th style={{ textAlign: 'right' }}>Non-Taxable</th><th style={{ textAlign: 'right' }}>Taxable</th>
+                  <th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>Net</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productTypeRows.map(r => (
+                  <tr key={r.key}>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.name}</td>
+                    <td style={{ textAlign: 'right' }}>{r.qtySales}</td>
+                    <td style={{ textAlign: 'right' }}>{r.qtyReturn}</td>
+                    <td style={{ textAlign: 'right' }}>{r.qtySales - r.qtyReturn}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtNpr(r.gross)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtNpr(r.discount)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtNpr(r.nonTaxable)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtNpr(r.taxable)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtNpr(r.vat)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(groupNetOf(r))}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 700 }}>
+                  <td>TOTAL</td>
+                  <td style={{ textAlign: 'right' }}>{productTypeTotals.qtySales}</td>
+                  <td style={{ textAlign: 'right' }}>{productTypeTotals.qtyReturn}</td>
+                  <td style={{ textAlign: 'right' }}>{productTypeTotals.qtySales - productTypeTotals.qtyReturn}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(productTypeTotals.gross)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(productTypeTotals.discount)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(productTypeTotals.nonTaxable)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(productTypeTotals.taxable)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(productTypeTotals.vat)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtNpr(productTypeTotals.gross - productTypeTotals.discount + productTypeTotals.vat)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </>
       ) : tab === 'item' ? (
         <div className="table-wrap">
           <table className="data-table">

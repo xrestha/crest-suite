@@ -35,6 +35,7 @@ const FifoReport = lazy(() => import('./modules/ims/reports/FifoReport'))
 const PaymentReport = lazy(() => import('./modules/ims/reports/PaymentReport'))
 const Help = lazy(() => import('./pages/Help'))
 const VendorReport = lazy(() => import('./modules/ims/reports/VendorReport'))
+const SupplierContribution = lazy(() => import('./modules/ims/reports/SupplierContribution'))
 const VendorBalanceConfirmation = lazy(() => import('./modules/ims/reports/VendorBalanceConfirmation'))
 const ReorderReport = lazy(() => import('./modules/ims/stockcount/ReorderReport'))
 const StockMovements = lazy(() => import('./modules/ims/stockcount/StockMovements'))
@@ -215,6 +216,10 @@ export default function App() {
                 element={<ModuleGate module="ims"><PremiumGate featureKey="fifo_report" minPlan="pro"><FifoReport /></PremiumGate></ModuleGate>} />
               <Route path="/vendors-report"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="vendor_report" minPlan="pro"><VendorReport /></PremiumGate></ModuleGate>} />
+              {/* Vendor Report answers what you SPENT with each supplier; this one answers
+                  which suppliers the food you sold actually came from. Same nav group. */}
+              <Route path="/supplier-contribution"
+                element={<ModuleGate module="ims"><PremiumGate featureKey="supplier_contribution" minPlan="pro"><SupplierContribution /></PremiumGate></ModuleGate>} />
               {/* Statutory (IRD Annexure 13), same class as VAT/Non-VAT which are already
                   Starter. A legal filing requirement does not gate above the base tier. */}
               <Route path="/vendor-balance-confirmation"

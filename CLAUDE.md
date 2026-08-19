@@ -405,7 +405,7 @@ This is distinct from the `purchase_entries` convention above: that one is about
 
 ### `billKeyOf`/`aging` are centralized in `purchasesHelpers.js` — but not everywhere
 
-See `.claude/rules/vendor-payables.md` (auto-loads when editing IMS report files). Headline rules: `VendorReport.js` and `computeVendorPurchasingSection.js` deliberately keep local single-period copies; a phantom sub-paisa balance can come from three different layers (S502/S505/S510) — check all three.
+See `.claude/rules/vendor-payables.md` (auto-loads when editing IMS report files). Headline rules: `VendorReport.js` and `computeVendorPurchasingSection.js` deliberately keep local single-period copies; a phantom sub-paisa balance can come from three different layers (S502/S505/S510) — check all three. As of S580 it also covers **Supplier Contribution** (`/supplier-contribution`, Pro): `items` has no vendor column, so a supplier is only ever DERIVED — what sold, exploded into ingredients, split across the vendors that supplied them — and its net-spend figure must keep meaning exactly what `VendorReport.js` means by it.
 
 ### Sales Entry saves through one atomic RPC, not three round trips
 
@@ -433,7 +433,9 @@ carry a link to the order); `sales_entries` is period-scoped so `scopedDb` rejec
 is captured at close and frozen; order lines are replaced through `save_pos_order_items`, never
 delete-then-insert — which also means a line already fired to the kitchen vanishes silently unless
 something records it, so that RPC now writes `pos_kot_removals` from its own before/after diff and
-`closeOrder` persists the cart before billing it.
+`closeOrder` persists the cart before billing it. Since S580 it also carries the bill-math rule: a
+new way to slice a bill is a new `keyOf` passed to `computeGroupAmounts`, never a fourth copy of
+the proportional-discount arithmetic.
 
 ### Sub-recipe mirror items
 

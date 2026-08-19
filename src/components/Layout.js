@@ -91,6 +91,7 @@ const REPORTS = [
   { to: '/menu-repricing',       label: 'Menu Repricing',       icon: Tags, featureKey: 'menu_repricing', cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
   { to: '/supplier-prices',      label: 'Price Tracker',        icon: LineChart, featureKey: 'price_tracker',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
   { to: '/vendors-report',       label: 'Vendor Report',        icon: Building2, featureKey: 'vendor_report',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
+  { to: '/supplier-contribution', label: 'Supplier Contribution', icon: Truck, featureKey: 'supplier_contribution', cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
   { to: '/vendor-balance-confirmation', label: 'Vendor Balance Confirmation', icon: FileSignature, featureKey: 'vendor_balance_confirmation', cat: 'menu', minImsRole: 'manager' },
 ]
 

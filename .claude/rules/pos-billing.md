@@ -262,3 +262,28 @@ Recorded so they aren't rediscovered from scratch:
   screen or the KDS needs `Modal`'s `zIndex` prop, because those are `position: fixed` layers at
   1000 and therefore their own stacking contexts — that single fact is why POS grew nine
   hand-rolled overlays instead of using the component.
+
+## One bill-math primitive, however the report slices it (S580)
+
+`computeCategoryAmounts` and `computeItemAmounts` in `posBillingMath.js` were byte-for-byte the
+same proportional-discount allocation differing only in the grouping key, and the Product Type tab
+would have made a third. Both are now delegates of
+`computeGroupAmounts(order, items, vatReg, keyOf, seedOf)` — signatures unchanged, so no call site
+moved. **A new way to slice a bill is a new `keyOf`, never a new copy of the arithmetic**: this is
+money math on the bill, and the rule that keeps COGS in one place (`imsFormulas.js`, S551) applies
+here for the same reason. The proof the refactor was exact is that the pre-existing reconciliation
+tests passed untouched; the invariant they assert — buckets sum back to `computeOrderAmounts` —
+now covers any key.
+
+One level up, `SalesReport.jsx`'s `buildGroupedRows(keyOf, labelOf)` is the same consolidation for
+the row builders, **including the credit-note branch**: a credit-noted bill contributes returned
+quantity only and never revenue, because the reversal posts on the day the note is issued. That
+branch is part of the rule, not incidental — three hand-written copies of it is how the tabs would
+come to disagree about a return.
+
+**The Product Type tab's axes come from data that already existed and nothing was reading:**
+`settings.pos_bot_categories` (Kitchen/Bar — the same set `sendTicket()` routes BOT by, same
+`['Beverage']` fallback, so the report and the tickets cannot disagree), `pos_order_items.vat_rate`
+(as billed), and `recipes.is_veg`. An axis that could only ever produce one row is **hidden, not
+rendered empty**. When verifying that, note a hidden axis and a broken lookup look identical on
+screen — confirm the fetch returned 200 before concluding the client simply has no data.

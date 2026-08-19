@@ -158,6 +158,116 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S580 — 2026-08-19 — The last two competitor reports, and why neither could be built as asked
+
+`POS_TODO.md` section C had exactly two reports left, and both had sat there since the 2026-07-04
+competitor audit marked ⚪ *needs clarification before scoping* rather than merely unbuilt. The
+clarification, in both cases, was that **the report the competitor ships cannot exist in Crest's
+data model** — and that saying so precisely is what made each of them buildable as something
+better than a copy.
+
+**Product Type Wise — the competitor has two menu axes and Crest has one.** Their Masters menu
+carries Product Category *and* Product Group/Item Type; `recipes.category` is Crest's only menu
+axis, and `/pos/sales-report`'s Category Wise tab already reports it. A second tab keyed off the
+same column would have been the same report with a different heading. But three genuine axes were
+already sitting in the data with nothing reading them: **`settings.pos_bot_categories`** (the
+Kitchen/Bar split configured in Table Management → Ticket Routing), **`pos_order_items.vat_rate`**
+(taxable vs non-taxable, as billed), and **`recipes.is_veg`**. The Kitchen/Bar one is the standard
+F&B food-vs-beverage revenue split and no report in the product showed it.
+
+So Product Type is one tab with a **Group by** switch over those three. It needed no migration and
+no new round trip — `pos_bot_categories` joined the settings select the page already makes, and
+`is_veg` rides along with the once-per-client letterhead fetch. An axis that could only ever
+produce one row is **hidden rather than rendered empty**: VAT Mode disappears for a client that
+is not VAT-registered, Veg/Non-Veg until someone has actually set the flag on a recipe.
+
+**Three copies of one function became one.** `computeCategoryAmounts` and `computeItemAmounts` in
+`posBillingMath.js` were byte-for-byte identical apart from the grouping key, and Product Type
+would have made a third — of proportional-discount allocation, on the bill, which is money math
+the codebase's own rule (`imsFormulas.js`, S551) says lives in one place. Both are now delegates
+of `computeGroupAmounts(order, items, vatReg, keyOf, seedOf)`, signatures unchanged so no call
+site moved, and the existing reconciliation tests passed untouched. The same duplication one level
+up — `categoryRows` and `itemRows` differing only in key and label, credit-note return branch
+included — collapsed into one `buildGroupedRows`.
+
+**Supplier Wise — `items` has no vendor column at all.** A supplier exists in Crest only on a
+purchase line, so no sale can name one. "Sales by supplier" is a trading-ERP concept: it works
+when you resell what you buy. What can be answered, and is the better question for a restaurant,
+is **which suppliers the food you sold actually came from** — so the report shipped as
+**Supplier Contribution** (`/supplier-contribution`, Pro), a cost-attribution report rather than a
+sales one:
+
+1. what sold — `sales_entries` through `selectDepletingSales()`, so a client running POS *and*
+   manual bulk entry does not count the same dish twice;
+2. what that consumed — `explodeRecipeIngredients()`, valued at `items.per_uom_rate`;
+3. who supplied it — each item's consumed value split across the vendors that supplied it this
+   period, in proportion to net spend with each.
+
+Every one of those three steps reuses a helper that already existed. The only new arithmetic is
+`supplierAttribution.js` (11 tests), and its net-purchase figure is deliberately **the same
+definition Vendor Report uses** — gross less bill discounts less returns, with the bill discount
+deduped by `purchase_group_id` exactly as `VendorReport.js` does it. The one extension is
+allocating that bill discount across the bill's own lines proportionally, since attribution is
+per item where Vendor Report only ever needed per vendor; the vendor totals still sum to Vendor
+Report's number, which is the point. Two figures for the same thing that disagree by a discount
+rule is the S551 defect class.
+
+**An item nothing can be attributed to is named, not dropped.** Stock consumed this period but
+last bought in an earlier one is entirely ordinary, and a rollup that silently fails to claim a
+row produces a believable wrong total rather than an error (S567). It gets a **Not attributed**
+row and its own stat card, so attributed + unattributed is always the whole consumed value —
+asserted in the tests, not just intended.
+
+The column the report exists for is **Δ**: how far a supplier's share of your sales cost runs
+ahead of its share of your spend. Vendor Report already shows concentration in what you *buy*;
+nothing showed concentration in what you *depend on*. The drill-down names the menu items behind
+each supplier — what comes off the board if a delivery fails.
+
+**Deliberately excluded and said so on the page:** wastage and staff meals (this is the cost of
+what was *sold*), and the figure is recipe-theoretical consumption rather than the count-based
+COGS — the same distinction Variance draws. It needs no closed period, since nothing here
+subtracts a closing count, so the Variance-style closed-period default does not apply.
+
+**Observed, not changed:** `Variance.js` sums `sales_entries.qty_sold` without
+`selectDepletingSales`, so on a client running POS *and* manual bulk entry its theoretical usage
+can exceed this page's consumption figure for the same period. Left alone — it is a separate
+call on a shipped figure, not part of this task.
+
+**Smoke-tested live** (2026-08-19, BHATTI CHOILA, Playwright against the dev server, which points
+at the live Supabase project):
+
+- **The two tabs tie exactly.** Ashadh 1 → Bhadra 3 2083: Category Wise TOTAL `91 | 1 | NPR 18,900`
+  and Product Type TOTAL `91 | 1 | NPR 18,900`, with Bar (BOT) `82 / 16,400` picking up exactly the
+  Beverage row and Kitchen (KOT) `9 sales, 1 return / 2,500` the Food + Snack rows.
+- **Both hidden axes were hidden for the right reason, which is the part worth checking.** A broken
+  lookup and a client with no data look identical on screen. Confirmed by REST that
+  `is_vat_registered` is `false` (so VAT Mode correctly collapses) and that 0 of 7 recipes have
+  `is_veg` set — then confirmed in the network log that `recipes?select=id,is_veg` returned **200**,
+  i.e. the fetch ran and the axis is hidden by data rather than by failure.
+- `pos_bot_categories` is NULL on this client, so the `['Beverage']` fallback fired — the same
+  fallback `PosOrders.jsx` uses, which is why the tab agrees with the tickets.
+- **Supplier Contribution reconciles to Vendor Report to the rupee.** Ashadh 2083: attributed cost
+  of sales NPR 7,875 to DILMAYA STORE against **NPR 250,000** net purchases — and Vendor Report,
+  same period, shows Net Spend **NPR 250,000**. Drill-down named the ingredient (COKE) and the menu
+  item depending on it.
+- **The Not-attributed path is real, not theoretical.** Bhadra and Shrawan have sales and *zero*
+  purchases, so both periods report their whole consumption (NPR 105 / NPR 315) as Not attributed
+  with NPR 0 traced — verified against the raw tables rather than assumed from the screen.
+- Checked on **Rosé Dawn**, the worst light preset: all text legible, drill-down panel included.
+**Files:** `src/utils/posBillingMath.js` (+`.test.js`), `src/modules/pos/reports/SalesReport.jsx`,
+`src/modules/ims/reports/{SupplierContribution.js, supplierAttribution.js, supplierAttribution.test.js}` (new),
+`src/{App.js, components/Layout.js, context/AuthContext.js, context/SettingsContext.js, pages/Help.js,
+pages/adminClients/FeatureAccessModal.js, data/pricingPlans.js}`,
+`supabase/migrations/20260819150000_feature_flags_supplier_contribution.sql` (new),
+`public/service-worker.js` (v97 → v98), `POS_TODO.md`, `README.md`
+
+**Manual step cleared same session.** Migration `20260819150000` applied in the SQL Editor and
+verified end to end: the column exists (`boolean`, default `false`), Supplier Contribution renders
+in the modal's Pro column, and pressing **Save** on a client returned `204` — which is the check
+that matters, since the failure this migration prevents is the whole-object `PATCH` being rejected
+by one missing column, taking down every feature-flag save for every client and naming a feature
+the admin never touched (S547). Read back after: 45 columns, `supplier_contribution` present, the
+client's three existing overrides untouched. Nothing pending.
 ### S579 — 2026-08-19 — Item-level comp, the last of the enforce-it-server-side family — and a fail-open in my own guard
 
 S577 closed the discount cap and the void permission. This is the same shape one table down, and

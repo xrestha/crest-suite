@@ -1,4 +1,4 @@
-import { computeOrderAmounts, computeCategoryAmounts, computeItemAmounts } from './posBillingMath'
+import { computeOrderAmounts, computeCategoryAmounts, computeItemAmounts, computeGroupAmounts } from './posBillingMath'
 
 describe('computeOrderAmounts', () => {
   test('no discount, uniform VAT rate', () => {
@@ -84,5 +84,47 @@ describe('computeItemAmounts reconciles to computeOrderAmounts', () => {
     expect(sums.gross).toBeCloseTo(orderTotals.grossAmt, 6)
     expect(sums.discount).toBeCloseTo(orderTotals.discount, 6)
     expect(sums.vat).toBeCloseTo(orderTotals.vatAmt, 6)
+  })
+})
+
+// computeGroupAmounts is the primitive the two above delegate to, so the Product Type tab's own
+// axes (Kitchen/Bar, VAT mode, Veg) inherit the discount allocation rather than re-deriving it.
+// The invariant that matters is the same one: whatever the key, the buckets must sum back to the
+// order total, or a tab silently disagrees with the bill it came from.
+describe('computeGroupAmounts with an arbitrary key', () => {
+  const order = { discount_amount: 120 }
+  const items = [
+    { recipe_id: 'r1', name: 'Momo',  category: 'Food',     qty: 2, unit_price: 300, vat_rate: 0.13 },
+    { recipe_id: 'r2', name: 'Beer',  category: 'Beverage', qty: 3, unit_price: 400, vat_rate: 0.13 },
+    { recipe_id: 'r3', name: 'Water', category: 'Beverage', qty: 1, unit_price: 50,  vat_rate: 0 },
+  ]
+  const bar = new Set(['Beverage'])
+  const stationOf = i => (bar.has(i.category || 'Other') ? 'Bar (BOT)' : 'Kitchen (KOT)')
+
+  test('station subtotals sum to the same order-level totals', () => {
+    const byStation = computeGroupAmounts(order, items, true, stationOf)
+    const totals = computeOrderAmounts(order, items, true)
+    const sum = f => Object.values(byStation).reduce((s, v) => s + v[f], 0)
+
+    expect(Object.keys(byStation).sort()).toEqual(['Bar (BOT)', 'Kitchen (KOT)'])
+    expect(sum('gross')).toBeCloseTo(totals.grossAmt, 6)
+    expect(sum('discount')).toBeCloseTo(totals.discount, 6)
+    expect(sum('vat')).toBeCloseTo(totals.vatAmt, 6)
+    expect(sum('taxable')).toBeCloseTo(totals.taxableBase, 6)
+    expect(sum('nonTaxable')).toBeCloseTo(totals.nonTaxableBase, 6)
+    expect(sum('qty')).toBe(totals.totalQty)
+  })
+
+  test('a zero-rated line lands in nonTaxable, so a VAT-mode split cannot double-count it', () => {
+    const byVat = computeGroupAmounts(order, items, true, i => ((i.vat_rate ?? 0) > 0 ? 'Taxable' : 'Non-Taxable'))
+    expect(byVat['Taxable'].nonTaxable).toBe(0)
+    expect(byVat['Non-Taxable'].taxable).toBe(0)
+    expect(byVat['Non-Taxable'].vat).toBe(0)
+  })
+
+  test('seedOf stamps extra fields on a bucket the first time it is created', () => {
+    const byItem = computeGroupAmounts(order, items, true, i => i.recipe_id, i => ({ name: i.name }))
+    expect(byItem['r1'].name).toBe('Momo')
+    expect(byItem['r3'].name).toBe('Water')
   })
 })

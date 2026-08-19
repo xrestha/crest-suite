@@ -49,6 +49,10 @@ const PRO_KEYS = new Set([
   'menu_engineering', 'fifo_report', 'vendor_report',
   'price_tracker', 'theoretical_variance',
   'period_comparison', 'shrinkage_report',
+  // Strategy altitude (supplier concentration risk), and it could not sit lower anyway: its
+  // figure comes from recipe explosion, and recipe_costing is Growth — the same defect S551
+  // corrected on reorder_report/stock_movement_log.
+  'supplier_contribution',
 ])
 // Crest Suite Pro (clients.suite_plan) — NOT an IMS tier. These must never be added to the three
 // sets above: SuiteGate passes on `tierOk || overridden` where overridden is hasFeature(key), so a
