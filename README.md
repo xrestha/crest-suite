@@ -222,9 +222,11 @@ no featureKey/minPlan), Help entry, pricing feature list (moved from "roadmap" t
 v98 → v99.
 
 **Verified:** single-outlet statement live on BHATTI CHOILA (dark + Rosé Dawn, ties to Monthly
-Summary), build clean, 238 tests pass. **Pending:** migration `20260819170000` (the RPC — the
-group view errors gracefully until it runs; the `consolidated_pnl` flag migration `20260819160000`
-is already applied and Feature Access Save confirmed at 204), and a live pass on the group matrix,
+Summary), build clean, 238 tests pass. **Both migrations applied and verified same session**:
+`20260819160000` (flag column — Feature Access Save confirmed at 204) and `20260819170000` (the
+RPC — `has_function_privilege('authenticated', …)` true, and an anonymous REST probe against the
+live endpoint returned `42501 permission denied`, which proves both that the S532 PUBLIC revoke
+took and that the function exists). **Still pending:** a live pass on the group matrix itself,
 which needs an owner login of a real outlet group — admin cannot exercise it, since
 `my_group_id()` reads the caller's own profile row. Scheduled report delivery remains the one
 advertised-but-unbuilt Suite feature.
