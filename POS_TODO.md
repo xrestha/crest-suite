@@ -82,7 +82,15 @@ by design, so an admin session proves nothing about them.
   to get a named **Not attributed** row rather than being dropped (S567).
 - [ ] 🟡 Item Wise tab: add Product Code + UoM columns (found via competitor screenshot comparison,
   2026-07-04 — `recipes.recipe_code`/`yield_uom` already exist, just not pulled into the report
-  query; no migration needed). Now the smallest open item on this list.
+  query; no migration needed). **Re-checked S580 and the note above is misleading: the COLUMNS
+  exist, the DATA does not.** `recipe_code` has no editable input anywhere in the app (only the
+  auto-generated `SRC-nnn` for sub-recipes), and `yield_uom` is only editable inside the recipe
+  form's `isSubRecipeForm` branch — so for menu items, the only rows Item Wise shows, one is NULL
+  and the other is the `'portion'` default. Building it as written adds a column of '—' and a
+  column of 'portion'. **Measured on the live book the same day: 136 menu recipes, 0 with a code,
+  1 distinct yield_uom.** Real scope is two items: make Product Code a real field on menu recipes
+  (master data), THEN the report column is the one-hour job. Worth confirming what the code is for
+  first — recognisability for a migrating client, or staff lookup — since that decides the first half.
 - [x] ~~Printed letterhead baked into Excel exports~~ — shipped S238, 2026-07-04. All 7 `/pos/sales-report` tabs now export Company Name/VAT No./Address + `@As On Dated : ... To : ...` date-range line (or `@Fiscal Year :` for 1L+ Report) above the data, matching the statutory-report look of competitor exports.
 - [x] ~~KOT Log: Bill Trail tab~~ — shipped S239, 2026-07-04 (not originally on this list — requested after seeing Reconciliation only surfaces exceptions). 3rd tab in `/pos/kot-log`: every paid/voided bill, expandable to its full KOT/BOT send history, with an amber "No KOT" badge for bills that never sent anything to the kitchen. No migration needed.
 - [x] ~~Payment Summary Report~~ — shipped S245, 2026-07-05 (not originally on this list). One of 8 tabs in `/pos/sales-report`: payment-method breakdown (Cash/Card/eSewa/Khalti/FonePay/Credit) over a BS date range.
