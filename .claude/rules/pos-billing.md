@@ -160,6 +160,36 @@ name against it.
   both would make every 2-arg call ambiguous (`function is not unique`) — dropping it is what lets
   a stale bundle keep working via the parameter default.
 
+## PosOrders.jsx has TWO returns, and a modal put in the wrong one is invisible
+
+Worth its own heading because it cost a real bug (S578) and nothing static catches it. The file
+early-returns the **order screen** (`if (view === 'order') return (...)`) and then falls through to
+the **floor view** (`return (<>...</>)`). They render completely different trees.
+
+The KOT-pull prompt was placed beside the credit-note modal at the tail of the file — i.e. in the
+floor view — while `setQty` only ever runs on the order screen. Pressing × on an already-fired item
+therefore did **nothing visible at all**: the state was set, the removal was correctly blocked, and
+no dialog appeared anywhere. It compiled, passed the label/colour/duplicate-id detectors, and read
+correctly in review. Only pressing the button in a browser found it.
+
+Before adding a modal here, check which return the handler that opens it lives in. Nothing about a
+misplaced one fails loudly, and the failure mode — a button that silently does nothing — is the one
+a cashier reports as "the till is broken" rather than as a bug you can search for.
+
+Note also that neither branch needs an explicit `zIndex` on a child dialog: the order screen is
+`position: fixed` at 1000 and therefore its own stacking context, so a nested overlay at the default
+100 already paints above it. The billing modal's 1100 is belt-and-braces, not a requirement.
+
+## Verified live (S578 smoke test)
+
+Driven from a real POS PIN session on a dummy client — **admin and Owner are exempt from
+`guard_pos_order_close()` by design, so an admin session proves nothing about it**. The definitive
+check is a direct `PATCH /rest/v1/pos_orders?id=eq.<uuid>` from the page's own session, which is the
+attack the guard exists to stop: `{"close_type":"void"}` → 403, a 30% discount → 403 naming the cap,
+a 10% discount → 200. An ordinary close still assigns an invoice, stamps `ims_posted_at`, and leaves
+`pos_order_items` matching the `sales_entries` row — the divergence `closeOrder`'s save-before-billing
+step closes.
+
 ## Still open from the phase 6 critique
 
 Recorded so they aren't rediscovered from scratch:

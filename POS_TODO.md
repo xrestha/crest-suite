@@ -4,7 +4,7 @@ Living checklist compiled from: the competitor "IMS" ERP report-menu audit, the 
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-08-19 (S576)
+Last updated: 2026-08-19 (S578)
 
 ---
 
@@ -21,6 +21,27 @@ Last updated: 2026-08-19 (S576)
 - [x] ~~Purchase-side One Lakh Above / Annexure 13 (vendor-wise)~~ — shipped S235, 2026-07-04. `src/pages/PurchaseOneLakhAboveReport.js`, `/purchase-one-lakh-report`. Reuses `buildVendorSummary` (now exported from `VatReport.js`) across a full BS fiscal year's `periodIds`, same missing-PAN/Annexure-13 badge convention as the POS-side report. Gated on the existing `vat_report` feature flag — no new flag/migration.
 - [ ] 🟡 `sales_entries`/`purchase_entries` hard-delete on edit (accepted risk — only matters near the NRs 5 crore certification tier; `pos_orders` itself never hard-deletes once billed, verified)
 - [ ] ⚪ Tier-1 software-certification legal question (needs an accountant's answer, not code)
+
+## B2. Till controls — enforced server-side (added S577)
+
+Not from a competitor audit; these came out of the phase-6 critique of our own code, and both were
+the same shape: a rule the browser applied and the database did not.
+
+- [x] ~~Discount cap + void permission enforced only in React~~ — shipped S577. `pos_orders_client`
+  is a plain same-client `FOR ALL` policy, so a Staff-rank till JWT held UPDATE on every one of its
+  own client's orders; one PATCH walked past both checks. Now `guard_pos_order_close()`, a BEFORE
+  UPDATE trigger (chosen over the RPC the critique proposed — an RPC protects only the callers that
+  choose to call it). Smoke-tested live: a direct PATCH from a till session gets 403 on a void and
+  on an over-cap discount, 200 on an at-cap one. `paid_amount` is deliberately NOT enforced — a
+  second copy of the VAT/rounding maths would reject real bills mid-service if it ever drifted.
+- [x] ~~An already-fired KOT item could be pulled with no permission, reason or record~~ — shipped
+  S577. `pos_kot_removals`, written **inside** `save_pos_order_items` from its own before/after
+  diff, so no caller can remove a fired line without producing the record. Deliberately a record,
+  not a block: pulling a fired item is routine, and rank-gating it would stall a live service.
+  Surfaced as KOT Log → **Pulled Items**.
+- [ ] 🟡 **Item-level comp is still browser-only.** `apply_pos_item_comps` has its own caller check,
+  but nothing stops a direct PATCH of `pos_order_items.comped`. Same trigger shape would close it —
+  the one remaining member of this family.
 
 ## C. Reports — analytics / competitor parity (confirmed non-mandatory, pure business intelligence)
 
