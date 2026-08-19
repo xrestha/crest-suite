@@ -166,16 +166,20 @@ export default function PosExceptionReport() {
     if (r.type === 'writeoff') totals.writeoff.potential += r.potentialValue || 0
   }
 
-  // Per-staff rollup — the "spot the outlier" view
+  // Per-staff rollup — the "spot the outlier" view. The ranking figure must be ONE unit:
+  // r.amount mixes discount NPR, void menu value (incl. VAT) and comp FOOD COST, so summing it
+  // ranked staff by a number that wasn't a quantity of anything. Revenue impact normalises the
+  // comp term to its potential sales value (already computed per row), so all three terms are
+  // "revenue given away" and the total is coherent. Food cost stays visible in the Comps column.
   const byStaff = {}
   for (const r of rows) {
     const key = r.closed_by || 'unknown'
-    byStaff[key] = byStaff[key] || { discount: { n: 0, amt: 0 }, void: { n: 0, amt: 0 }, writeoff: { n: 0, amt: 0 }, total: 0 }
+    byStaff[key] = byStaff[key] || { discount: { n: 0, amt: 0 }, void: { n: 0, amt: 0 }, writeoff: { n: 0, amt: 0 }, revenue: 0 }
     byStaff[key][r.type].n++
     byStaff[key][r.type].amt += r.amount
-    byStaff[key].total += r.amount
+    byStaff[key].revenue += r.type === 'writeoff' ? (r.potentialValue || 0) : r.amount
   }
-  const staffRows = Object.entries(byStaff).sort((a, b) => b[1].total - a[1].total)
+  const staffRows = Object.entries(byStaff).sort((a, b) => b[1].revenue - a[1].revenue)
 
   const staffOptions = [...new Set(rows.map(r => r.closed_by).filter(Boolean))]
 
@@ -280,7 +284,9 @@ export default function PosExceptionReport() {
                 <Tip text="A quiet report is a healthy one — lots of exceptions usually signal training gaps or permission creep" width={240}>Total Exceptions</Tip>
               </div>
               <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{rows.length}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{fmtNpr(totals.discount.amt + totals.void.amt + totals.writeoff.amt)} total</div>
+              {/* Revenue-equivalent sum (comps at potential sales value) — never add comp food
+                  COST to discount/void revenue figures; that total is not a quantity of anything. */}
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{fmtNpr(totals.discount.amt + totals.void.amt + totals.writeoff.potential)} revenue impact</div>
             </div>
           </div>
 
@@ -288,17 +294,25 @@ export default function PosExceptionReport() {
           {staffRows.length > 0 && (
             <>
               <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
-                By Staff Member <Tip text="Who is closing the exceptions — one cashier discounting far more than everyone else is worth a conversation">ⓘ</Tip>
+                By Staff Member <Tip text="Who is closing the exceptions — one cashier discounting far more than everyone else is worth a conversation. Attribution records whoever was signed in on the till when the bill closed, so on a shared till treat this as a starting point, not proof." width={280}>ⓘ</Tip>
               </p>
               <div className="table-wrap" style={{ marginBottom: 24 }}>
                 <table className="data-table">
                   <thead>
                     <tr>
                       <th>Staff</th>
-                      <th style={{ textAlign: 'right' }}>Discounts</th>
-                      <th style={{ textAlign: 'right' }}>Voids</th>
-                      <th style={{ textAlign: 'right' }}>Comps</th>
-                      <th style={{ textAlign: 'right' }}>Total</th>
+                      <th style={{ textAlign: 'right' }}>
+                        <Tip text="Count · NPR knocked off bills" width={200}>Discounts</Tip>
+                      </th>
+                      <th style={{ textAlign: 'right' }}>
+                        <Tip text="Count · menu value forgone (incl. VAT)" width={220}>Voids</Tip>
+                      </th>
+                      <th style={{ textAlign: 'right' }}>
+                        <Tip text="Count · food cost of what was served (the Revenue Impact column values these at menu price instead)" width={260}>Comps</Tip>
+                      </th>
+                      <th style={{ textAlign: 'right' }}>
+                        <Tip text="Discounts + voided menu value + what comps would have sold for — all at sales value, so this total is one coherent number rather than a mix of cost and revenue" width={280}>Revenue Impact</Tip>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -308,7 +322,7 @@ export default function PosExceptionReport() {
                         <td style={{ textAlign: 'right' }}>{s.discount.n > 0 ? `${s.discount.n} · ${fmtNpr(s.discount.amt)}` : '—'}</td>
                         <td style={{ textAlign: 'right' }}>{s.void.n > 0 ? `${s.void.n} · ${fmtNpr(s.void.amt)}` : '—'}</td>
                         <td style={{ textAlign: 'right' }}>{s.writeoff.n > 0 ? `${s.writeoff.n} · ${fmtNpr(s.writeoff.amt)}` : '—'}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(s.total)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(s.revenue)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -361,7 +375,7 @@ export default function PosExceptionReport() {
                           )}
                         </td>
                         <td>{r.table_name || 'Takeaway'}</td>
-                        <td><span className={TYPE_META[r.type].badge} style={{ fontSize: 11 }}>{TYPE_META[r.type].label}</span></td>
+                        <td><span className={`badge ${TYPE_META[r.type].badge}`}>{TYPE_META[r.type].label}</span></td>
                         <td>{r.reason}</td>
                         <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(r.amount)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{r.type === 'writeoff' ? fmtNpr(r.potentialValue) : '—'}</td>

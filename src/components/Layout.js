@@ -10,6 +10,7 @@ import CommandPalette from './CommandPalette'
 // Aliased — `Calculator` is already taken in this file by the lucide icon used for the HR
 // Calculation nav entry.
 import QuickCalculator from './Calculator'
+import { usePosIdleLock } from '../modules/pos/usePosIdleLock'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS } from '../utils/bsCalendar'
@@ -333,6 +334,19 @@ export default function Layout() {
     await signOut()
     navigate(isPosDevice && posRole ? '/pos/login' : '/login')
   }
+
+  // ── POS idle lock ────────────────────────────────────────────────────────────────────────────
+  // A shared till signs staff in by PIN, and every closed_by/comped_by/sent_by attribution —
+  // plus Sales Exceptions' whole "By Staff Member" table — records whoever last typed one.
+  // Without a lock that is only as accurate as a habit, so PIN-staff sessions on a bound POS
+  // device return to the PIN screen after 3 idle minutes (see usePosIdleLock for the timing
+  // rationale). Deliberately NOT enabled for Owner/admin sessions (no pos_role — they sign in
+  // with email/password, not a PIN, even on the till) and not on the KDS, a screen meant to sit
+  // untouched on a kitchen wall. handleSignOut already routes a bound device to /pos/login.
+  const [idleLockSecs, setIdleLockSecs] = useState(null)
+  const idleLockEnabled = !!posRole && !!localStorage.getItem('pos_device_client_id') &&
+    !location.pathname.startsWith('/pos/kds')
+  usePosIdleLock(idleLockEnabled, setIdleLockSecs, handleSignOut)
 
   // Single source of truth for "can this user see this destination" — used by the rendered nav,
   // the command palette's search index, and pinned favorites, so gating can never drift between
@@ -1131,6 +1145,21 @@ export default function Layout() {
       />
 
       <QuickCalculator open={calcOpen} onClose={() => setCalcOpen(false)} />
+
+      {/* POS idle-lock warning — any deliberate input (pointerdown/keydown/touch/wheel) resets
+          the timer, which is why the toast needs no button of its own. role="alert" so a screen
+          reader hears the countdown start, not just the sudden return to the PIN screen. */}
+      {idleLockSecs != null && (
+        <div role="alert" className="no-print" style={{
+          position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 400,
+          background: 'var(--theme-card)', border: '1px solid var(--theme-amber)',
+          borderRadius: 'var(--radius-md)', padding: '10px 18px', boxShadow: '0 6px 24px rgba(0,0,0,0.25)',
+          fontSize: 13, color: 'var(--theme-text1)', maxWidth: 'calc(100vw - 32px)',
+        }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>Locking in {idleLockSecs}s</strong>
+          {' '}— touch the screen or press any key to stay signed in.
+        </div>
+      )}
     </div>
   )
 }
