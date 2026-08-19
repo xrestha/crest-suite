@@ -190,13 +190,44 @@ a 10% discount → 200. An ordinary close still assigns an invoice, stamps `ims_
 `pos_order_items` matching the `sales_entries` row — the divergence `closeOrder`'s save-before-billing
 step closes.
 
+## Item-level comp is enforced server-side too (S579)
+
+The last member of the family, and the one with the most to lose: a comp is the single action whose
+purpose is to make revenue disappear on purpose. Three holes, all in the same act:
+
+- **Nothing guarded the columns.** A till JWT could PATCH `comped = true` onto any of its client's
+  lines — the line leaves the bill (`payableOrderItems`, SalesReport, demandForecastData and both
+  Credit Note files all filter on it) with no NC number, no reason, no attribution, no slip.
+- **The RPC checked client, not rank.** `apply_pos_item_comps`' guard was `is_admin() OR same
+  client`, while the UI gates the comp panel on `hasPosAccess('supervisor')`. A Staff-rank account
+  that never sees the control could call the function directly.
+- **`p_comped_by` was caller-supplied**, and it feeds the column the Sales Exception Report ranks
+  staff by. A caller could comp under a colleague's name. **Attribution the subject can choose is
+  not attribution** — same lesson `save_pos_order_items` already applies to `client_id`.
+
+`guard_pos_item_comp()` (migration `20260819140000`) fences the six comp columns on INSERT and
+UPDATE; `apply_pos_item_comps` stays `SECURITY DEFINER`, so `current_user` inside it is the owner
+and the guard waves it through — the only write path, the same mechanism as `set_active_outlet()`.
+The RPC now checks Supervisor rank and derives `comped_by` from `auth.uid()`.
+
+Two things to preserve if this is ever touched:
+
+- **The cheap test must stay first in the trigger.** It fires per row on the busiest table in POS —
+  `save_pos_order_items` replaces a whole line set per save — and `is_admin()` is
+  `SECURITY DEFINER`, which Postgres will not inline. Comparing six columns before reaching for
+  identity keeps an ordinary line at a few boolean tests.
+- **`COALESCE(..., false)` around every authorisation condition.** `pos_role` is NULL for any
+  account with no POS access, `NULL IN ('supervisor','manager')` is NULL, and `IF NOT NULL THEN`
+  never fires — so the unwrapped form falls open for precisely the accounts with no rank. The
+  pre-existing client check had the same shape and was wrapped at the same time.
+
 ## Still open from the phase 6 critique
 
 Recorded so they aren't rediscovered from scratch:
 
-- **Comp is still browser-only.** S576 covered the two the critique named (discount cap, void);
-  item-level comp goes through `apply_pos_item_comps`, which has its own caller check, but nothing
-  stops a direct PATCH of `pos_order_items.comped`. Same trigger shape would close it.
+- Nothing. The three server-side items (discount cap, void, item comp) are all closed; what remains
+  on this page's beat is the offline/QR work blocked on merchant onboarding, tracked in
+  `POS_TODO.md`.
 - ~~**The mechanical sweep.**~~ **Closed across S576–S578.** Labels: 0 bare `<label>` vs 54
   `htmlFor`, every `<select>` named. Colour: 117 base-signal-token `color:` sites converted, 0
   remain, 128 contrast-variant references now. Modals: all 9 hand-rolled overlays are on the

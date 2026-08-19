@@ -4,7 +4,7 @@ Living checklist compiled from: the competitor "IMS" ERP report-menu audit, the 
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-08-19 (S578)
+Last updated: 2026-08-19 (S579)
 
 ---
 
@@ -39,9 +39,14 @@ the same shape: a rule the browser applied and the database did not.
   diff, so no caller can remove a fired line without producing the record. Deliberately a record,
   not a block: pulling a fired item is routine, and rank-gating it would stall a live service.
   Surfaced as KOT Log → **Pulled Items**.
-- [ ] 🟡 **Item-level comp is still browser-only.** `apply_pos_item_comps` has its own caller check,
-  but nothing stops a direct PATCH of `pos_order_items.comped`. Same trigger shape would close it —
-  the one remaining member of this family.
+- [x] ~~Item-level comp was browser-only~~ — shipped S579, closing the family. Three holes in one
+  act: nothing guarded the comp columns (a till JWT could PATCH `comped = true` and the line left
+  the bill with no NC number, reason, attribution or slip); `apply_pos_item_comps` checked client
+  but not **rank**, while the UI gates the panel on Supervisor+; and `p_comped_by` was
+  caller-supplied, so a comp could be recorded under a colleague's name — the column the Sales
+  Exception Report ranks staff by. Now `guard_pos_item_comp()` fences the six columns while
+  `apply_pos_item_comps` (SECURITY DEFINER, so `current_user` is the owner) remains the only write
+  path, checks Supervisor rank, and derives `comped_by` from `auth.uid()`.
 
 ## C. Reports — analytics / competitor parity (confirmed non-mandatory, pure business intelligence)
 

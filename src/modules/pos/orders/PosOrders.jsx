@@ -1546,6 +1546,11 @@ export default function PosOrders() {
             unit_price: i.unit_price, vat_rate: i.vat_rate, sent_to_kot: i.sent_to_kot,
           })
         }
+        // p_comped_by is IGNORED by the server as of migration 20260819140000 — it derives
+        // comped_by from auth.uid() instead, because that column is what the Sales Exception Report
+        // ranks staff by and a caller able to choose it could comp under a colleague's name. It
+        // stays in the call only so the argument list keeps matching the function's signature for
+        // any device still on an older bundle; do not start relying on it again.
         const { data: newCompNo, error: compErr } = await supabase.rpc('apply_pos_item_comps', {
           p_order_id: orderId, p_client_id: clientId, p_fy: compFy,
           p_comp_reason: itemCompReason, p_comped_by: profile?.id || null,

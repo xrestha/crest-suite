@@ -158,6 +158,77 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S579 — 2026-08-19 — Item-level comp, the last of the enforce-it-server-side family — and a fail-open in my own guard
+
+S577 closed the discount cap and the void permission. This is the same shape one table down, and
+arguably the worst of the three: a comp is the single action whose entire purpose is to make
+revenue disappear on purpose, so it is the one that most needs a name against it.
+
+**Three separate holes, all in the same act.**
+
+- **Nothing guarded the columns.** `pos_order_items` carries a plain same-client policy, so a
+  Staff-rank till JWT could PATCH `comped = true` onto any of its client's order lines directly.
+  That takes the line off the bill — `payableOrderItems`, `SalesReport`, `demandForecastData` and
+  both Credit Note files all filter on it — with **no NC slip number, no reason, no attribution and
+  no printed Complimentary Slip**. Food served, revenue gone, nothing anywhere recording that a
+  comp happened at all.
+- **The RPC checked client, not rank.** `apply_pos_item_comps`' guard was `is_admin() OR
+  p_client_id = my client`, while the Charge screen gates the whole comp panel on
+  `hasPosAccess('supervisor')`. A Staff-rank account that never sees the control could call the
+  function directly and comp anything. Privilege invariant #3 again — a check the browser performs
+  and the server does not is not a check.
+- **`p_comped_by` was caller-supplied.** The parameter was written straight into
+  `pos_order_items.comped_by`, which is the column the Sales Exception Report ranks staff by. Any
+  caller could pass a colleague's uuid and comp items under their name. **Attribution the subject
+  of the attribution can choose is not attribution** — the record was forgeable by design. Same
+  lesson `save_pos_order_items` already applies to `client_id` ("derived from the order, never
+  taken as a parameter"), applied one column over.
+
+**`guard_pos_item_comp()`** (migration `20260819140000`) fences the six comp columns on INSERT and
+UPDATE. `apply_pos_item_comps` stays `SECURITY DEFINER`, so `current_user` inside it is the function
+owner and the guard waves it straight through — it becomes the *only* write path, the same
+mechanism that makes `set_active_outlet()` the only writer of `profiles.active_client_id`. The RPC
+itself now checks Supervisor rank and derives `comped_by` from `auth.uid()`; `p_comped_by` is kept
+in the signature and ignored, because dropping it would orphan the EXECUTE grant (grants are
+per-signature) and break any device still on a cache-first bundle.
+
+**The fail-open I wrote and then caught before it shipped.** The rank check started as
+`IF NOT (... OR v_pos_role IN ('supervisor','manager')) THEN RAISE`. `pos_role` is NULL for every
+account with no POS access; `NULL IN (...)` is NULL, not false; `false OR NULL` is NULL; and
+`IF NOT NULL THEN` **never fires**. So the check would have waved through precisely the accounts
+that have no POS rank at all — a guard that reads as strict and enforces nothing against its most
+likely abuser. Every authorisation condition here is now `COALESCE(..., false)`-wrapped, including
+the *pre-existing* client check, which had the identical shape: a caller with no `profiles` row made
+both its operands NULL and fell straight through. This is the `is_admin()`-returns-NULL trap in a
+second guise, and the lesson is now in CLAUDE.md: **assume any three-valued expression in a guard is
+a fail-open until it is wrapped.**
+
+**One performance decision worth keeping.** The trigger fires per row on the busiest table in POS —
+`save_pos_order_items` replaces an order's entire line set on every save, so a 20-line bill is 20
+invocations. `is_admin()` is `LANGUAGE sql STABLE SECURITY DEFINER`, which Postgres refuses to
+inline (`inline_function()` bails on `prosecdef`), so reaching for identity first would add a real
+function call per row for the overwhelmingly common case of an ordinary, non-comp line. The six
+column comparisons come first and return; only an actual attempt to write a comp pays for the
+lookup. `guard_pos_order_close()` is ordered the same way for the same reason.
+
+**Verification:** `scripts/verify_s579.sql` asserts the trigger is BEFORE INSERT OR UPDATE, that the
+guard is `SECURITY INVOKER` (under DEFINER it would look installed and enforce nothing) *and* that
+`apply_pos_item_comps` is still `SECURITY DEFINER` (the inverse failure — the guard would block the
+one legitimate path and comp would stop working), that the signature and grants survived, that the
+deployed body actually contains the rank check and the derived attribution (read back with
+`pg_get_functiondef`, not assumed), and that both authorisation conditions are COALESCE-wrapped.
+
+**PENDING MANUAL STEP:** apply `20260819140000_pos_item_comp_server_guard.sql` in the Supabase SQL
+Editor, then run `scripts/verify_s579.sql`. No Edge Function deploy needed this time, and no
+ordering constraint — the frontend is unaffected either way, since it already routes every comp
+through the RPC and sends the now-ignored parameter harmlessly.
+
+**Files:** `supabase/migrations/20260819140000_pos_item_comp_server_guard.sql (new)`,
+`scripts/verify_s579.sql (new)`, `src/modules/pos/orders/PosOrders.jsx` (comment only — the call
+site now says `p_comped_by` is ignored so nobody starts relying on it again),
+`public/service-worker.js` (v96 → v97), `CLAUDE.md`, `.claude/rules/pos-billing.md`, `POS_TODO.md`,
+`README.md`
+
 ### S578 — 2026-08-19 — POS rejoins the design system: 117 colour sites, and the nine overlays that existed because of one z-index
 
 The last of the critique campaign's mechanical work, and both halves turned out to have the same
