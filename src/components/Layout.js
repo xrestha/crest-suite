@@ -18,7 +18,7 @@ import {
   LayoutDashboard, CalendarRange, Package, Truck, ShoppingCart, ClipboardList, ClipboardCheck,
   ArrowRightLeft, TrendingUp, ChefHat, Tag, PieChart, Receipt,
   FileBarChart, CalendarDays, GitCompare, Target, Boxes, RefreshCw, LineChart, Trash2, PackageX,
-  ArrowUpDown, CalendarClock, Sigma, PackageMinus, Percent, ReceiptText, Wallet, HandCoins, Banknote,
+  ArrowUpDown, CalendarClock, Hourglass, Sigma, PackageMinus, Percent, ReceiptText, Wallet, HandCoins, Banknote,
   Trophy, PiggyBank, Combine, Tags, Building2, FileSignature,
   Settings2, Utensils, LayoutGrid, Users, Clock, TriangleAlert, Undo2, BarChart3, ScrollText, Scale,
   UtensilsCrossed, Users2,
@@ -76,6 +76,7 @@ const REPORTS = [
   { to: '/dead-stock',           label: 'Dead Stock',           icon: PackageX, featureKey: 'dead_stock',           cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/variance',             label: 'Variance Report',      icon: ArrowUpDown, featureKey: 'variance_report',      cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/fifo',                 label: 'FIFO / Expiry',        icon: CalendarClock, featureKey: 'fifo_report',           cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
+  { to: '/stock-ageing',         label: 'Stock Ageing',         icon: Hourglass, featureKey: 'stock_ageing',          cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
   { to: '/theoretical-variance', label: 'Theoretical Variance', icon: Sigma, featureKey: 'theoretical_variance', cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
   { to: '/shrinkage',            label: 'Shrinkage Report',     icon: PackageMinus, featureKey: 'shrinkage_report',     cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
   // Money & tax

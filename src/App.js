@@ -33,6 +33,7 @@ const Sales = lazy(() => import('./modules/ims/sales/Sales'))
 const Variance = lazy(() => import('./modules/ims/variance/Variance'))
 const MonthlySummary = lazy(() => import('./modules/ims/reports/MonthlySummary'))
 const FifoReport = lazy(() => import('./modules/ims/reports/FifoReport'))
+const StockAgeing = lazy(() => import('./modules/ims/reports/StockAgeing'))
 const PaymentReport = lazy(() => import('./modules/ims/reports/PaymentReport'))
 const Help = lazy(() => import('./pages/Help'))
 const VendorReport = lazy(() => import('./modules/ims/reports/VendorReport'))
@@ -216,6 +217,8 @@ export default function App() {
                 element={<ModuleGate module="ims"><PremiumGate featureKey="menu_engineering" minPlan="pro"><MenuEngineering /></PremiumGate></ModuleGate>} />
               <Route path="/fifo"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="fifo_report" minPlan="pro"><FifoReport /></PremiumGate></ModuleGate>} />
+              <Route path="/stock-ageing"
+                element={<ModuleGate module="ims"><PremiumGate featureKey="stock_ageing" minPlan="pro"><StockAgeing /></PremiumGate></ModuleGate>} />
               <Route path="/vendors-report"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="vendor_report" minPlan="pro"><VendorReport /></PremiumGate></ModuleGate>} />
               {/* Vendor Report answers what you SPENT with each supplier; this one answers

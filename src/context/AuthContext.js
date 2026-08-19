@@ -49,6 +49,10 @@ const PRO_KEYS = new Set([
   'menu_engineering', 'fifo_report', 'vendor_report',
   'price_tracker', 'theoretical_variance',
   'period_comparison', 'shrinkage_report',
+  // Strategy altitude (working capital sitting on the shelf), and it could not sit lower anyway:
+  // knowing what is still on hand means netting consumption off the batches, and that consumption
+  // comes from recipe explosion — same constraint that put reorder_report/stock_movement_log here.
+  'stock_ageing',
   // Strategy altitude (supplier concentration risk), and it could not sit lower anyway: its
   // figure comes from recipe explosion, and recipe_costing is Growth — the same defect S551
   // corrected on reorder_report/stock_movement_log.

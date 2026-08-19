@@ -158,6 +158,56 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S591 — 2026-08-19 — Stock Ageing report — and a LIVE feature-flag save breakage found with it
+
+**⚠ Two migrations must be applied by hand before deploying this** (see below — one of them fixes
+a bug that is live right now).
+
+**Stock Ageing** (`/stock-ageing`, Pro, IMS) — the last 🔴 report on `POS_TODO.md`'s
+competitor-parity list. How long the stock still on hand has been sitting, bucketed 0–30 / 31–60 /
+61–90 / 90+ days across a BS fiscal year, valued at what was actually paid for each surviving
+batch; the headline figure is the working capital sitting in 90+ day stock. Distinct from FIFO /
+Expiry, which is single-period and only covers items carrying an expiry date — this covers every
+item and answers "what is my money doing on the shelf" rather than "what is about to go off".
+
+The arithmetic is a pure, tested module (`stockAgeingCalc.js`, 15 tests) rather than page code —
+same reasoning as `supplierAttribution.js`: a stock valuation's wrong number reads as a plausible
+one. Tests assert the invariant the page reports on (bands always sum back to the total), that
+consumption clears the oldest band first, and that a mis-dated row still lands in a band rather
+than vanishing. Two honesty rules are built in: consumption is **not** tracked per batch anywhere
+in this schema, so this is the standard FIFO assumption and says so on the page (the same basis
+FIFO / Expiry already uses); and stock carried in from before the window is aged from the window
+start, badged `c/f`, and disclosed as "age ≥ FY start" instead of being given precision it does
+not have. Sales go through `selectDepletingSales` (S588) so a POS + manual client cannot
+over-consume its own batches and make real stock disappear off the shelf.
+
+**The find:** checking deploy order for the new flag column revealed `feature_flags.consolidated_pnl`
+was **committed as a migration and never applied to the live DB** — so **Feature Access → Save has
+been broken in production for every client**, exactly the S547 failure class (the modal upserts
+every flag key in one request, so one missing column rejects the whole save). Proven, not
+inferred: a simulated Save against the live DB returned `PGRST204` naming that column. This also
+exposes the limit of the S589 drift test — it compares the modal against migration **files**, so
+it proves a migration was *written*, never that it was *applied*. That limitation is now written
+into the test itself, with the check that does close it (`select=<flag>&limit=1` must return 200).
+
+**Apply both, in the SQL Editor, before deploying:** `20260819160000_feature_flags_consolidated_pnl.sql`
+(fixes the live breakage) and `20260819170000_feature_flags_stock_ageing.sql`.
+
+Both migrations were applied and **verified against the live API** on 2026-08-19, not trusted to
+the SQL Editor's "Success. No rows returned": all 43 flags the modal upserts now answer, and a
+simulated Feature Access Save (the exact payload shape the button sends, written back with the
+values already stored so no entitlement changed) returned **HTTP 200** where it had returned
+PGRST204. Standing rule reinforced — verify a migration by asking the API for the column, never by
+the editor's success message.
+
+**Files:** `src/modules/ims/reports/StockAgeing.js` (new), `.../stockAgeingCalc.js` (new),
+`.../stockAgeingCalc.test.js` (new), `supabase/migrations/20260819170000_feature_flags_stock_ageing.sql`
+(new), `src/App.js`, `src/components/Layout.js`, `src/context/AuthContext.js`,
+`src/context/SettingsContext.js`, `src/pages/adminClients/FeatureAccessModal.js`,
+`src/pages/adminClients/featureFlagsSchema.test.js`, `src/pages/Help.js`,
+`src/pages/settings/imsGuideData.js`, `POS_TODO.md`,
+`public/service-worker.js` (v110 → v111), `README.md`
+
 ### S590 — 2026-08-19 — Menu-item Product Code: reports + POS quick-lookup
 
 Closes the long-open "Item Wise: Product Code column" item, but as its real scope (the column

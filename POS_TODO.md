@@ -61,7 +61,21 @@ by design, so an admin session proves nothing about them.
 - [x] ~~KOT Register Report~~ — shipped S236, 2026-07-04. `/pos/kot-log` (Register tab). Required a new `pos_kot_log` table — no historical send log existed before this (`sent_to_kot` was a live boolean, overwritten in place, no timestamp/sender).
 - [x] ~~KOT vs Prebill vs Sales reconciliation~~ — shipped S236, 2026-07-04. `/pos/kot-log` (Reconciliation tab). Flags items whose total sent-to-kitchen qty exceeds their current order qty, and any KOT/BOT send on an order that ends up Voided. Only shows flagged rows.
 - [x] ~~Bill Register / Voucher Wise Sales Report~~ — shipped S237, 2026-07-04 (added after comparing against a competitor's "Sales Book Report" screenshot, not originally on this list). 7th tab in `/pos/sales-report`. One row per bill — Voucher#, Invoice#, Customer, Payment Mode, Order Mode, amounts, Remarks, Entered By. No migration needed — every column already existed on `pos_orders`.
-- [ ] 🔴 Stock Ageing Report (FIFO/Expiry shows dates, not aging buckets)
+- [x] ~~Stock Ageing Report (FIFO/Expiry shows dates, not aging buckets)~~ — **shipped S591
+  (2026-08-19)**, the last 🔴 on this list. `/stock-ageing` (Pro, IMS): how long the stock still
+  on hand has been sitting, bucketed 0-30 / 31-60 / 61-90 / 90+ days across a BS fiscal year,
+  valued at what was actually paid for each surviving batch. Headline figure is the working
+  capital sitting in 90+ day stock. Distinct from FIFO / Expiry, which is single-period and covers
+  only items carrying an expiry date — this covers every item and answers "what is my money doing
+  on the shelf" rather than "what is about to go off". The arithmetic is a pure, tested module
+  (`stockAgeingCalc.js` + 15 tests) rather than page code, same reasoning as
+  `supplierAttribution.js`: it is a stock valuation, so a wrong figure reads as a plausible one.
+  Two honesty rules baked in — consumption is **not** tracked per batch anywhere in the schema, so
+  this is the standard FIFO assumption (stated on the page, same basis FIFO / Expiry uses), and
+  stock carried in from before the window is aged from the window start, flagged `c/f`, and
+  disclosed as "age ≥ FY start" rather than being given a precision it does not have. Sales run
+  through `selectDepletingSales` (S588), so a POS + manual client cannot over-consume its own
+  batches and make real stock vanish off the shelf.
 - [x] ~~"Supplier Wise" / "Product Type Wise" sales reports~~ — **shipped S580, 2026-08-19**, and
   neither as the competitor ships it, because neither can exist in Crest's model as written.
   **Product Type Wise:** their Masters menu has two menu axes (Product Category *and* Product

@@ -247,6 +247,11 @@ const IMS_FEATURE_TIERS = [
         tips: ['Check FIFO weekly for perishables — don\'t wait until month end', 'Set expiry dates in the Purchases entry for accurate FIFO tracking']
       },
       {
+        icon: '◷', name: 'Stock Ageing',
+        guide: 'Shows how long the stock you are still holding has been sitting, bucketed into 0–30, 31–60, 61–90 and 90+ days across a fiscal year. Everything sold, wasted or served as staff meals is taken off the oldest batches first, and whatever survives is aged from the day it was bought and valued at what you actually paid for it. The headline figure is the money tied up in stock older than 90 days.',
+        tips: ['Unlike FIFO / Expiry this covers every item, not just ones with an expiry date', 'A big 90+ day figure is working capital sitting on a shelf — review those items for over-ordering or a dish that stopped selling', 'Stock already on hand when the year began is marked "c/f" — its true age is at least what is shown']
+      },
+      {
         icon: '⊙', name: 'Vendor Report',
         guide: 'Net spend per vendor with columns for Gross, Returns, Net, % of total, average per day, and payment method breakdown (Cash / Credit / FonePay). Search by vendor name or code. Click a vendor name to drill down into every bill for that vendor this period — payment status (Paid / Partial / aging), and click any bill row to expand its line items, returns, and payment history. Searching down to a single vendor also switches the Daily Breakdown tab to show only that vendor\'s active days (no blank rows) — click any day to jump straight to that day\'s bill.',
         tips: ['Sort by Net to find your top suppliers — good candidates for negotiating credit terms', '% of Net shows vendor concentration risk', 'Click the vendor name for a bill-by-bill breakdown with payment status', 'Select a vendor in the search box, then click a day in Daily Breakdown to open that day\'s bill directly']

@@ -11,6 +11,15 @@
 // It reads source and SQL as text rather than importing them, so it needs no DB connection and
 // drags in no React/Supabase deps. The migration scan is additive (CREATE TABLE + ADD COLUMN) —
 // this codebase never drops a flag column; if that ever changes, teach this parser about DROP.
+//
+// KNOWN LIMIT, and it has already bitten once: this compares the modal against the migration
+// FILES, so it proves a migration was WRITTEN — never that it was APPLIED. Migrations here are
+// pasted into the Supabase SQL Editor by hand, so a written-but-unapplied migration passes this
+// test while Save is broken in production for every client. Found live 2026-08-19:
+// `consolidated_pnl` had its migration committed and never run, and a simulated Save against the
+// live DB returned PGRST204 naming that column. Nothing in Jest can close this (no DB creds, and
+// a unit test must not need them) — the check that does is running the migration, then confirming
+// the column answers: `select=<flag>&limit=1` on feature_flags returns 200, not 400/42703.
 import fs from 'fs'
 import path from 'path'
 

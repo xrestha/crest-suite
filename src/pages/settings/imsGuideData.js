@@ -776,6 +776,36 @@ export const IMS_GUIDE_GROUPS = [
         connections: 'Shares consumption logic with Variance and Stock Report. The expiry-risk leg of the "three risks" trio alongside Dead Stock (idle capital) and Reorder Report (understocking).',
       },
       {
+        id: 'stock-ageing',
+        title: 'Stock Ageing',
+        route: '/stock-ageing',
+        plan: 'Pro',
+        summary:
+          'How long the stock you are still holding has been sitting, bucketed 0–30 / 31–60 / 61–90 / 90+ days across a whole BS fiscal year and valued at what was actually paid for each surviving batch. The headline figure is the working capital tied up in stock older than 90 days. Sibling to FIFO / Expiry and built on the same batch-allocation machinery, but answering a different question — FIFO asks what is about to go off, this asks what your money is doing on the shelf.',
+        workflow: [
+          'Pick a fiscal year (Shrawan → Ashadh). Every purchase in that year is a batch; everything sold, wasted or served as staff meals that year is taken off the OLDEST batches first, and whatever survives is aged from the day it was bought.',
+          'Filter by age band or category. The band columns show quantity; the TOTAL row shows each band\'s value, so you can see where the money sits rather than just where the units are.',
+          'Print or export to Excel — the export carries qty and value for every band per item.',
+        ],
+        fields: [
+          { label: 'Capital in 90+ Day Stock', desc: 'The report\'s reason to exist: money committed to stock that has not moved in three months. It is not a loss — the stock is still good — but it is cash on a shelf instead of in the bank, and it usually points at over-ordering or a dish that quietly stopped selling.' },
+          { label: 'c/f badge and "Carried Into This FY"', desc: 'Stock that was already on hand when the fiscal year began (the first period\'s opening count). Its TRUE age is unknown and is at LEAST the figure shown, so it is aged from the window start and labelled rather than given a precision the data does not support. Because consumption eats oldest-first, ordinary turnover clears it before touching real purchases — so anything still sitting in it is genuinely stale.' },
+          { label: 'Oldest', desc: 'Age of the oldest batch of that item still on hand. Turns amber past 90 days.' },
+        ],
+        formulas: [
+          'Per item: consumption over the year (recipe-exploded sales + wastage + staff meals, plus any return that names no purchase line) is allocated against that item\'s own batches oldest-first; each surviving batch is aged from its purchase date and banded.',
+          'Batch value = remaining qty × that batch\'s OWN purchase rate — not the current master rate. Ageing is about capital already committed, so it is valued at what was actually paid.',
+          'Bands always sum back to the item total and to the grand total; that invariant is asserted in stockAgeingCalc.test.js.',
+        ],
+        gotchas: [
+          'Consumption is NOT tracked per batch anywhere in this schema — sales, wastage and staff meals record item-level totals only. So this is the standard FIFO assumption, not a batch-precise trace, exactly like FIFO / Expiry. The page states this on screen rather than leaving it to be discovered.',
+          'Unlike FIFO / Expiry this covers EVERY item, not just ones carrying an expiry date — so it is the right page for dry goods, packaging and consumables where nothing ever "expires" but capital still sits.',
+          'Sales are deduplicated through the shared POS-supersedes-manual rule. Without it, a client running POS and manual bulk entry would over-consume its own batches and real stock would appear to vanish off the shelf — a worse failure here than the variance skew the same bug causes elsewhere.',
+          'A future-dated or mis-converted purchase row still lands in the youngest band rather than falling out of the report — the bands must keep summing to the total, or the page would silently under-report what is on hand.',
+        ],
+        connections: 'Same batch-allocation basis as FIFO / Expiry and the same consumption inputs as Variance and Stock Report. Completes the idle-capital picture with Dead Stock (which asks what has not moved at all) — this one asks how long what you still hold has been there.',
+      },
+      {
         id: 'theoretical-variance',
         title: 'Theoretical Variance',
         route: '/theoretical-variance',
