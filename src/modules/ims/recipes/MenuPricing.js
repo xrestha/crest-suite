@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcBand, fcThresholds } from '../../../shared/imsFormulas'
+import { printWithTitle } from '../../../utils/printTitle'
 
 
 function vatOf(r) {
@@ -484,7 +485,14 @@ export default function MenuPricing() {
             Review food cost and update menu prices. Toggle <strong>On POS</strong> to control which items appear on the POS order screen.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        <div className="no-print" style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          {/* Prints the table as filtered on screen — the active category tab goes into the print
+              title (same convention as Stock Movements), since the tab bar itself is no-print. */}
+          <Tip text="Prints the price list exactly as filtered on screen — the current category tab, with current prices and FC%." width={280}>
+            <button className="btn btn-ghost" onClick={() => printWithTitle(`Menu Pricing${catTab !== 'All' ? ' - ' + catTab : ''}`)}>
+              🖨 Print
+            </button>
+          </Tip>
           <button className="btn btn-ghost" onClick={refreshCosts} disabled={refreshing}>
             {refreshing ? 'Refreshing…' : '↻ Refresh Costs'}
           </button>
@@ -509,7 +517,7 @@ export default function MenuPricing() {
       )}
 
       {/* Category tabs */}
-      <div className="tab-bar" style={{ marginBottom: 16 }}>
+      <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
         {tabs.map(t => {
           const count = t === 'All' ? recipes.length : recipes.filter(r => r.category === t).length
           return (
