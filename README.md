@@ -158,6 +158,15 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S582 — 2026-08-19 — Menu Pricing gets a print button
+
+🖨 Print on Menu Pricing's full food-cost view (the IMS branch — the POS-only price-list branch
+deliberately untouched per this file's standing ask-which-branch rule). Prints the table exactly
+as filtered on screen; the active category tab goes into the print title (`printWithTitle`, the
+Stock Movements convention) since the tab bar and header buttons are `no-print`. SW v99 → v100.
+
+**Files:** `src/modules/ims/recipes/MenuPricing.js`, `src/pages/Help.js`,
+`public/service-worker.js`, `README.md`
 ### S581 — 2026-08-19 — Consolidated P&L: the sixth Suite feature ships, in two phases
 
 Crest Suite Pro's advertised list carried two features that did not exist — Consolidated P&L and
