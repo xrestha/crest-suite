@@ -167,12 +167,14 @@ Recorded so they aren't rediscovered from scratch:
 - **Comp is still browser-only.** S576 covered the two the critique named (discount cap, void);
   item-level comp goes through `apply_pos_item_comps`, which has its own caller check, but nothing
   stops a direct PATCH of `pos_order_items.comped`. Same trigger shape would close it.
-- **The mechanical sweep**, partly done. **Labels are closed (S576)**: POS now measures 0 bare
-  `<label>` vs 53 `htmlFor`, and every `<select>` in the module carries an accessible name. Two
-  shapes recur here and are worth copying rather than rediscovering — a caption over a button
-  group or a read-only figure must be a `<span>` plus `role="group"`/`aria-labelledby` (a
-  `<label>` naming no labelable element announces a name the browser never binds), and a label
-  for a conditionally-rendered control still pairs by `id` since `SearchableSelect` and
-  `BsCalendarPicker` both forward one. **Still open**: 9 hand-rolled modals, and ~104
-  base-signal-token text sites vs 10 contrast-variant adoptions — the S549–S551 colour sweep has
-  still never reached this module.
+- ~~**The mechanical sweep.**~~ **Closed across S576–S578.** Labels: 0 bare `<label>` vs 54
+  `htmlFor`, every `<select>` named. Colour: 117 base-signal-token `color:` sites converted, 0
+  remain, 128 contrast-variant references now. Modals: all 9 hand-rolled overlays are on the
+  shared `Modal`. Three shapes recur here and are worth copying rather than rediscovering — a
+  caption over a button group or a read-only figure must be a `<span>` plus
+  `role="group"`/`aria-labelledby` (a `<label>` naming no labelable element announces a name the
+  browser never binds); a label for a conditionally-rendered control still pairs by `id`, since
+  `SearchableSelect` and `BsCalendarPicker` both forward one; and a dialog opened from the order
+  screen or the KDS needs `Modal`'s `zIndex` prop, because those are `position: fixed` layers at
+  1000 and therefore their own stacking contexts — that single fact is why POS grew nine
+  hand-rolled overlays instead of using the component.

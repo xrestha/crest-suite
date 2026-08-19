@@ -453,7 +453,7 @@ export default function GuestMenu() {
           >
             <h2 style={{
               fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
-              color: 'var(--theme-accent)', margin: '0 0 12px', paddingBottom: 6,
+              color: 'var(--theme-accent-ink)', margin: '0 0 12px', paddingBottom: 6,
               borderBottom: '1px solid var(--theme-border)',
             }}>{cat}</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -506,7 +506,7 @@ export default function GuestMenu() {
                         padding: '6px 12px', borderRadius: 20, fontSize: 12.5, textTransform: 'capitalize', cursor: 'pointer',
                         border: `1px solid ${excludedAllergens.includes(a) ? 'var(--theme-red)' : 'var(--theme-border)'}`,
                         background: excludedAllergens.includes(a) ? 'rgba(248,113,113,0.12)' : 'var(--theme-input-bg)',
-                        color: excludedAllergens.includes(a) ? 'var(--theme-red)' : 'var(--theme-text2)',
+                        color: excludedAllergens.includes(a) ? 'var(--theme-red-text)' : 'var(--theme-text2)',
                       }}
                     >
                       {a}
@@ -558,7 +558,7 @@ export default function GuestMenu() {
                     color: 'var(--theme-text1)', padding: '8px 10px', fontSize: 13, boxSizing: 'border-box',
                   }}
                 />
-                {submitError && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 12.5, margin: 0 }}>{submitError}</p>}
+                {submitError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12.5, margin: 0 }}>{submitError}</p>}
                 <button
                   className="btn btn-primary" disabled={submitting} onClick={placeOrder}
                   style={{ marginTop: 4 }}
@@ -578,7 +578,7 @@ function OrderStatusCard({ requestStatus, kotStatus, remainingMinutes, items, co
   if (requestStatus === 'dismissed') {
     return (
       <div className="card" style={{ padding: 16, marginBottom: 24, borderColor: 'var(--theme-red)' }}>
-        <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--theme-red)' }}>
+        <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--theme-red-text)' }}>
           Staff couldn't take this order
         </p>
         <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--theme-text2)' }}>
@@ -685,7 +685,7 @@ function MenuItemCard({ item, nutritionEnabled, orderingEnabled, qty, onQtyChang
             )}
             <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--theme-text1)' }}>{item.name}</span>
           </div>
-          <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-accent)', whiteSpace: 'nowrap' }}>{fmtNpr(priceInc)}</span>
+          <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{fmtNpr(priceInc)}</span>
         </div>
         {item.description && (
           <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--theme-text2)', lineHeight: 1.4 }}>{item.description}</p>
@@ -700,7 +700,7 @@ function MenuItemCard({ item, nutritionEnabled, orderingEnabled, qty, onQtyChang
           </div>
         )}
         {nutritionEnabled && item.has_nutrition && item.allergens?.length > 0 && (
-          <p style={{ margin: '4px 0 0', fontSize: 10.5, color: 'var(--theme-amber)', textTransform: 'capitalize' }}>
+          <p style={{ margin: '4px 0 0', fontSize: 10.5, color: 'var(--theme-amber-text)', textTransform: 'capitalize' }}>
             Allergens: {item.allergens.join(', ')}
           </p>
         )}

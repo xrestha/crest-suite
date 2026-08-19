@@ -262,21 +262,21 @@ export default function PosExceptionReport() {
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                 <Tip text="Menu value (incl. VAT) of voided orders — orders treated as if they never happened. High void rates usually mean training gaps or entry mistakes" width={260}>Voided Value</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-red)' }}>{fmtNpr(totals.void.amt)}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-red-text)' }}>{fmtNpr(totals.void.amt)}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{totals.void.n} order{totals.void.n !== 1 ? 's' : ''}</div>
             </div>
             <div className="card" style={{ padding: '14px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                 <Tip text="Food cost of complimentary orders and individually-comped items — valued at ingredient cost (not menu price), matching the Complimentary Slip" width={250}>Comp Food Cost</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-amber)' }}>{fmtNpr(totals.writeoff.amt)}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-amber-text)' }}>{fmtNpr(totals.writeoff.amt)}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{totals.writeoff.n} comp{totals.writeoff.n !== 1 ? 's' : ''}</div>
             </div>
             <div className="card" style={{ padding: '14px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                 <Tip text="What every comped order/item would have sold for at menu price (incl. VAT) had it not been comped — the revenue given away, not just its ingredient cost" width={280}>Comp Potential Sales Value</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-amber)' }}>{fmtNpr(totals.writeoff.potential)}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-amber-text)' }}>{fmtNpr(totals.writeoff.potential)}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{totals.writeoff.n} comp{totals.writeoff.n !== 1 ? 's' : ''}</div>
             </div>
             <div className="card" style={{ padding: '14px 18px' }}>

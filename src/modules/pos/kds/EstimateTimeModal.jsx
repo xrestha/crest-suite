@@ -53,7 +53,7 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
             <button
               key={p}
               className="btn btn-ghost"
-              style={{ fontSize: 14, padding: '7px 16px', borderColor: minutes === p ? 'var(--theme-accent)' : undefined, color: minutes === p ? 'var(--theme-accent)' : undefined }}
+              style={{ fontSize: 14, padding: '7px 16px', borderColor: minutes === p ? 'var(--theme-accent)' : undefined, color: minutes === p ? 'var(--theme-accent-ink)' : undefined }}
               onClick={() => setValue(String(p))}
             >
               {p}m

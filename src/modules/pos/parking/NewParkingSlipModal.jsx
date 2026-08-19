@@ -151,7 +151,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
           />
         </div>
       </div>
-      {error && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
+      {error && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
       <div className="form-actions" style={{ justifyContent: 'flex-end' }}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>

@@ -319,7 +319,7 @@ export default function CoversReport() {
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                 <Tip text="Net sales ÷ covers served — the standard restaurant 'average check per guest' metric" width={260}>Revenue / Cover</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent)' }}>{fmtNpr(totals.revPerCover)}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{fmtNpr(totals.revPerCover)}</div>
             </div>
             <div className="card" style={{ padding: '14px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
@@ -351,7 +351,7 @@ export default function CoversReport() {
               </button>
             </div>
             {hoursMsg && (
-              <p style={{ margin: '10px 0 0', fontSize: 12, color: hoursMsg.startsWith('error') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+              <p style={{ margin: '10px 0 0', fontSize: 12, color: hoursMsg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                 {hoursMsg.slice(hoursMsg.indexOf(':') + 1)}
               </p>
             )}

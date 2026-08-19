@@ -158,6 +158,98 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S578 — 2026-08-19 — POS rejoins the design system: 117 colour sites, and the nine overlays that existed because of one z-index
+
+The last of the critique campaign's mechanical work, and both halves turned out to have the same
+root cause: POS had been building its own version of things the shared layer already did.
+
+**1 — 117 base-signal-token `color:` sites → 0.** The S549–S551 sweep that gave every signal colour
+a darkened, hue-preserving `*-text` variant reached IMS, HR and the dashboards and **never reached
+POS at all** — the module with the till, the kitchen display and the guest-facing menu. A signal
+colour used as *text* needs the variant; used as a *fill* it keeps the base token, because on a
+light preset one value cannot do both jobs (measured across the five light presets, 23 of 25
+signal-colour/surface combinations failed AA). Every one of the 117 was text.
+
+Two things made this safe to do mechanically, and both were checked first rather than assumed:
+
+- **Not one site was text on a solid signal fill.** Every background in the neighbourhood was a
+  `color-mix()` tint, `transparent`, `none`, or `--theme-input-bg`, so the tint-plus-full-opacity-
+  text pattern applies uniformly and no site needed the accent-text pairing rule instead. The
+  transform edits only the `color:` **value expression**, so `background: color-mix(in srgb,
+  var(--theme-amber) 10%, transparent)` on the same element correctly keeps the base token — the
+  fill and the label now differ, which is the entire point.
+- **Accent maps to `--theme-accent-ink`, not `--theme-accent-text`.** They are not the same token:
+  `accent-ink` is the accent used *as* text on a normal surface, `accent-text` is the foreground
+  that sits *on* an accent fill. Getting that backwards would have been invisible on dark presets
+  and wrong on every light one.
+
+The value-expression extractor spans lines and honours nesting, which matters more than it sounds:
+about a third of these are ternaries (`msg.startsWith('error:') ? red : green`, the shift
+variance's three-way `green : red : amber`), and S550 recorded that a property-level regex silently
+skips a ternary that wraps — reporting success having fixed under half. Verified by re-running the
+detector to 0 rather than by trusting the count.
+
+Deliberately left on base tokens: KDS stage colours were *considered* an exception (a board read
+from across a room wants maximum punch) and then converted anyway — the variants are darker on
+light presets, so they raise contrast rather than lower it, and fall back to the base value on dark
+presets where the board actually lives.
+
+**2 — all 9 hand-rolled modals converted, once the reason they existed was fixed.** POS's order
+screen and the Kitchen Display are `position: fixed` full-screen layers at `zIndex: 1000` — each
+therefore its own stacking context — and the shared `Modal` is hard-coded at 100. **A dialog opened
+from the order screen rendered underneath the screen that opened it.** That is the whole reason nine
+overlays were hand-rolled at 1000/1100 instead, and every one of them shipped without a focus trap,
+without Escape, without focus restore and without `role="dialog"` — on the payment dialog, the
+shift-close counting sheet, and the Add Staff / Reset PIN forms.
+
+`Modal` gained two props:
+
+- **`zIndex`** (default 100). Kept as a default rather than raised globally — a page-level dialog at
+  1100 would sit over the command palette and the toast rail. `ConfirmModal` forwards it too.
+- **`unstyled`**, which hands the panel to the caller: no `.card`, no title bar, no padding, just
+  the overlay and the behaviour that actually matters. It exists for the one dialog whose shape
+  genuinely is not a card — the billing modal, a live bill preview down the left and the payment
+  form down the right, sized to the viewport with each pane scrolling independently. Forcing that
+  into a card would have meant restructuring the payment screen, which is exactly the change S573's
+  own rule says not to make on this file. `title` becomes the accessible name instead of a rendered
+  heading, so a dialog cannot go unnamed either way.
+
+Converted: POS Staff's Manage Roles / Add Staff / Reset PIN, Issue Credit Note (both its main form
+and its no-access branch, which had been a bare card with no dialog semantics at all), Order
+Taking's Covers numpad and Recent Bills, the billing modal (`unstyled`, `zIndex 1100`), and the
+shift Open/Close sheet (`zIndex 1100`). Two `position: fixed` layers remain in POS and both are
+correct: the order screen and the KDS board are full-screen *views*, not dialogs.
+
+Three details worth keeping:
+
+- Issue Credit Note's own `useEffect` Escape listener is gone — it had no in-progress guard and no
+  stack, so with a nested dialog open Escape closed both. `Modal`'s stack has handled that since
+  S574.
+- The shift-close `ConfirmModal` stays rendered *inside* its parent dialog rather than beside it.
+  The parent is `position: fixed` with `zIndex 1100` and therefore its own stacking context, so a
+  child overlay stacks above the panel for free while a sibling at the default 100 would render
+  underneath. The `zIndex` prop now exists if it ever needs to move out.
+- Backdrop, Escape and `×` all route through one `onClose`, so a guard written once
+  (`if (!closing)`, `if (!saving)`, `if (!adding)`) covers all three. The hand-rolled versions
+  guarded only the backdrop.
+
+**Also:** `btn-danger` and `btn-danger--strong` were missing from CLAUDE.md's class list despite 23
+call sites — the same shape as the `badge-gold` entry that named a class which did not exist, in
+reverse. Noted there along with *why* the destructive variant is a tint rather than a solid
+`--theme-red` fill: red ranges from `#f87171` to `#dc2626` across the ten presets, so no single
+foreground contrasts on all of them.
+
+**Verified:** `CI=true npm run build` clean after every step; the colour detector re-run to 0; POS
+still at 0 bare labels / 54 `htmlFor`; no new duplicate ids.
+
+**Files:** `src/components/{Modal.js, ConfirmModal.js}`, `src/modules/pos/orders/{PosOrders.jsx,
+posOrdersConstants.js}`, `src/modules/pos/{staff/PosStaff.jsx, shifts/PosShifts.jsx,
+creditnotes/IssueCreditNoteModal.jsx, tables/PosTableManagement.jsx, customers/PosCustomers.jsx,
+guestmenu/GuestMenu.jsx, kds/{KitchenDisplay.jsx, EstimateTimeModal.jsx}, login/PosLogin.jsx,
+parking/{PosParkingSlips.jsx, NewParkingSlipModal.jsx}, Pos.js,
+reports/{SalesReport.jsx, CoversReport.jsx, KotLog.jsx, PosExceptionReport.jsx}}`,
+`public/service-worker.js` (v94 → v95), `CLAUDE.md`, `.claude/rules/pos-billing.md`, `README.md`
+
 ### S577 — 2026-08-19 — The two POS server-side items, and the badge class that did half a job
 
 Closes the phase-6 critique's standing server-side pair and the last of the phase-8 report's

@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
+import Modal from '../../../components/Modal'
 
 const PERMISSION_LEVELS = [
   { value: 'staff',      label: 'Staff',      desc: 'Take orders, view floor' },
@@ -353,7 +354,7 @@ export default function PosStaff() {
         ))}
       </div>
 
-      {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red)', marginBottom: 16 }}>{msg}</p>}
+      {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red-text)', marginBottom: 16 }}>{msg}</p>}
 
       {loading ? (
         <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
@@ -476,7 +477,7 @@ export default function PosStaff() {
                         </button>
                         <button
                           className="btn btn-ghost"
-                          style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red)', borderColor: 'var(--theme-red)' }}
+                          style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
                           onClick={() => deleteStaff(p)}
                         >
                           Delete
@@ -493,15 +494,12 @@ export default function PosStaff() {
 
       {/* ── Manage Roles modal ───────────────────────────────────────────────── */}
       {rolesModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-          onClick={e => { if (e.target === e.currentTarget) setRolesModal(false) }}>
-          <div className="card" style={{ width: 480, padding: 28, maxHeight: '80vh', overflowY: 'auto' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--theme-text1)' }}>Manage POS Roles</h3>
+        <Modal title="Manage POS Roles" onClose={() => setRolesModal(false)} maxWidth={480}>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)' }}>
               Define custom role names for your team. Each maps to a permission level.
             </p>
 
-            {rolesError && <p role="alert" style={{ color: 'var(--theme-red)', fontSize: 12, margin: '-8px 0 12px' }}>{rolesError}</p>}
+            {rolesError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: '-8px 0 12px' }}>{rolesError}</p>}
 
             {customRoles.length === 0 ? (
               <p style={{ fontSize: 13, color: 'var(--theme-text3)', fontStyle: 'italic', marginBottom: 16 }}>
@@ -525,7 +523,7 @@ export default function PosStaff() {
                     </select>
                     <button
                       className="btn btn-ghost"
-                      style={{ fontSize: 12, padding: '3px 8px', color: 'var(--theme-red)', borderColor: 'var(--theme-red)' }}
+                      style={{ fontSize: 12, padding: '3px 8px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
                       onClick={() => deleteCustomRole(i)}
                       disabled={rolesSaving}
                     >
@@ -586,16 +584,12 @@ export default function PosStaff() {
                 Done
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ── Add Staff modal ──────────────────────────────────────────────────── */}
       {addModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-          onClick={e => { if (e.target === e.currentTarget && !adding) setAddModal(false) }}>
-          <div className="card" style={{ width: 380, padding: 28 }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--theme-text1)' }}>Add Staff Member</h3>
+        <Modal title="Add Staff Member" onClose={() => { if (!adding) setAddModal(false) }} maxWidth={380}>
 
             {hrEnabled && (
               <div className="tab-bar" style={{ marginBottom: 16 }}>
@@ -685,7 +679,7 @@ export default function PosStaff() {
               </select>
             </div>
 
-            {addMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red)', marginBottom: 12 }}>{addMsg}</p>}
+            {addMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginBottom: 12 }}>{addMsg}</p>}
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setAddModal(false)} disabled={adding}>Cancel</button>
@@ -693,16 +687,12 @@ export default function PosStaff() {
                 {adding ? 'Creating…' : 'Add Staff'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ── Reset PIN modal ──────────────────────────────────────────────────── */}
       {pinTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-          onClick={e => { if (e.target === e.currentTarget && !resetting) setPinTarget(null) }}>
-          <div className="card" style={{ width: 340, padding: 28 }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--theme-text1)' }}>Reset PIN</h3>
+        <Modal title="Reset PIN" onClose={() => { if (!resetting) setPinTarget(null) }} maxWidth={340}>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)' }}>
               New PIN for <strong style={{ color: 'var(--theme-text1)' }}>{pinTarget.full_name}</strong>
             </p>
@@ -720,15 +710,14 @@ export default function PosStaff() {
                 onChange={e => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
               />
             </div>
-            {pinMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red)', marginBottom: 12 }}>{pinMsg}</p>}
+            {pinMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginBottom: 12 }}>{pinMsg}</p>}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setPinTarget(null)} disabled={resetting}>Cancel</button>
               <button className="btn btn-primary" onClick={resetPin} disabled={resetting}>
                 {resetting ? 'Saving…' : 'Save PIN'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

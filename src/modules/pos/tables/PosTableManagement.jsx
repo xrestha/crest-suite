@@ -600,7 +600,7 @@ export default function PosTableManagement() {
                   {routingSaving ? 'Saving…' : 'Save Routing'}
                 </button>
                 {routingMsg && (
-                  <span style={{ fontSize: 12, color: routingMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                  <span style={{ fontSize: 12, color: routingMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                     {routingMsg.replace(/^(error|ok):/, '')}
                   </span>
                 )}
@@ -664,7 +664,7 @@ export default function PosTableManagement() {
                   {notesSaving ? 'Saving…' : 'Save Quick Notes'}
                 </button>
                 {notesMsg && (
-                  <span style={{ fontSize: 12, color: notesMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                  <span style={{ fontSize: 12, color: notesMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                     {notesMsg.replace(/^(error|ok):/, '')}
                   </span>
                 )}
@@ -780,7 +780,7 @@ export default function PosTableManagement() {
                   {discSaving ? 'Saving…' : 'Save Discount Reasons'}
                 </button>
                 {discMsg && (
-                  <span style={{ fontSize: 12, color: discMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                  <span style={{ fontSize: 12, color: discMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                     {discMsg.replace(/^(error|ok):/, '')}
                   </span>
                 )}
@@ -859,7 +859,7 @@ export default function PosTableManagement() {
                   {deliverySaving ? 'Saving…' : 'Save Delivery Partner Settings'}
                 </button>
                 {deliveryMsg && (
-                  <span style={{ fontSize: 12, color: deliveryMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                  <span style={{ fontSize: 12, color: deliveryMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                     {deliveryMsg.replace(/^(error|ok):/, '')}
                   </span>
                 )}
@@ -927,7 +927,7 @@ export default function PosTableManagement() {
               <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 14px', fontStyle: 'italic' }}>
                 Will create: <span style={{ color: 'var(--theme-text2)', fontStyle: 'normal' }}>{qsPreview()}</span>
                 {parseInt(qs.count, 10) > 0 && (
-                  <span style={{ color: 'var(--theme-accent)', marginLeft: 6 }}>({parseInt(qs.count, 10)} tables)</span>
+                  <span style={{ color: 'var(--theme-accent-ink)', marginLeft: 6 }}>({parseInt(qs.count, 10)} tables)</span>
                 )}
               </p>
 
@@ -936,7 +936,7 @@ export default function PosTableManagement() {
                   {qsSaving ? 'Creating…' : `Generate ${parseInt(qs.count, 10) || 0} Tables`}
                 </button>
                 {qsMsg && (
-                  <span style={{ fontSize: 12, color: qsMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                  <span style={{ fontSize: 12, color: qsMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                     {qsMsg.replace(/^(error|ok):/, '')}
                   </span>
                 )}
@@ -949,9 +949,9 @@ export default function PosTableManagement() {
             <div className="stat-grid" style={{ marginBottom: 20 }}>
               {[
                 { label: 'Total Tables', value: tables.length,    color: 'var(--theme-text1)', tip: null },
-                { label: 'Available',    value: counts.available, color: 'var(--theme-green)',  tip: 'Tables ready to seat a new party right now' },
-                { label: 'Occupied',     value: counts.occupied,  color: 'var(--theme-red)',    tip: 'Tables with an active order currently open' },
-                { label: 'Reserved',     value: counts.reserved,  color: 'var(--theme-amber)',  tip: 'Tables held for an upcoming booking or walk-in queue' },
+                { label: 'Available',    value: counts.available, color: 'var(--theme-green-text)',  tip: 'Tables ready to seat a new party right now' },
+                { label: 'Occupied',     value: counts.occupied,  color: 'var(--theme-red-text)',    tip: 'Tables with an active order currently open' },
+                { label: 'Reserved',     value: counts.reserved,  color: 'var(--theme-amber-text)',  tip: 'Tables held for an upcoming booking or walk-in queue' },
               ].map(s => (
                 <div key={s.label} className="card" style={{ padding: '12px 18px' }}>
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
@@ -977,7 +977,7 @@ export default function PosTableManagement() {
               background: floorMsg.startsWith('error:') ? 'rgba(248,113,113,0.08)' : 'rgba(52,211,153,0.08)',
               border: `1px solid ${floorMsg.startsWith('error:') ? 'rgba(248,113,113,0.25)' : 'rgba(52,211,153,0.25)'}`,
               borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
-              color: floorMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)',
+              color: floorMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
               cursor: 'pointer',
             }} onClick={() => setFloorMsg('')}>
               {floorMsg.replace(/^(error|ok):/, '')} <span style={{ opacity: 0.7 }}>(tap to dismiss)</span>
@@ -1044,7 +1044,7 @@ export default function PosTableManagement() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
               <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="pos-table-management-table-name">
-                Table Name <span style={{ color: 'var(--theme-red)' }}>*</span>{' '}
+                Table Name <span style={{ color: 'var(--theme-red-text)' }}>*</span>{' '}
                 <Tip text="Displayed on the floor plan and on bills — e.g. Table 1, Bar 3, Patio A" />
               </label>
               <input id="pos-table-management-table-name"
@@ -1099,7 +1099,7 @@ export default function PosTableManagement() {
             )}
 
             {msg && (
-              <p role="alert" style={{ margin: 0, fontSize: 12, color: msg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+              <p role="alert" style={{ margin: 0, fontSize: 12, color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                 {msg.replace(/^(error|ok):/, '')}
               </p>
             )}
@@ -1107,7 +1107,7 @@ export default function PosTableManagement() {
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
               {target && (
                 <button className="btn btn-ghost"
-                  style={{ color: 'var(--theme-red)', borderColor: 'var(--theme-red)', marginRight: 'auto' }}
+                  style={{ color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)', marginRight: 'auto' }}
                   onClick={handleDelete}>Delete</button>
               )}
               <button className="btn btn-ghost" onClick={closeModal}>Cancel</button>

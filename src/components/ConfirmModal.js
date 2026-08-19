@@ -19,9 +19,14 @@ export default function ConfirmModal({
   busyLabel = 'Working…',
   onConfirm,
   onCancel,
+  // Passed straight through to Modal. A confirm raised from inside another raised dialog — POS's
+  // shift-close sheet sits at 1100 — has to clear it, or the confirm renders underneath the thing
+  // it is confirming. Modal nests correctly (only the top of its stack answers Escape/Tab); this
+  // is purely about paint order, which CSS decides separately.
+  zIndex,
 }) {
   return (
-    <Modal title={title} onClose={busy ? () => {} : onCancel} maxWidth={480}>
+    <Modal title={title} onClose={busy ? () => {} : onCancel} maxWidth={480} zIndex={zIndex}>
       <div style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{children}</div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
         <button className="btn" onClick={onCancel} disabled={busy}>{cancelLabel}</button>

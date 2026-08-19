@@ -60,7 +60,7 @@ export default function Pos() {
         activated ? (
           <div className="card" style={{ padding: 24, marginBottom: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-              <span style={{ fontSize: 22, color: 'var(--theme-green)' }}>✓</span>
+              <span style={{ fontSize: 22, color: 'var(--theme-green-text)' }}>✓</span>
               <div>
                 <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>Device activated</div>
                 <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
@@ -69,7 +69,7 @@ export default function Pos() {
               </div>
             </div>
             {boundToOther && (
-              <p style={{ fontSize: 12, color: 'var(--theme-amber)', marginBottom: 16 }}>
+              <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginBottom: 16 }}>
                 This device is bound to a different client. Deactivate first to rebind.
               </p>
             )}
@@ -79,7 +79,7 @@ export default function Pos() {
               </button>
               <button
                 className="btn btn-ghost"
-                style={{ color: 'var(--theme-red)' }}
+                style={{ color: 'var(--theme-red-text)' }}
                 onClick={deactivate}
               >
                 Deactivate Device

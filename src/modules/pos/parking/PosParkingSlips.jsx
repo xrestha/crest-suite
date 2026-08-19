@@ -118,7 +118,7 @@ export default function PosParkingSlips() {
                     {s.bill_invoice_no ? (
                       <button
                         onClick={() => viewPosBill(clientId, { id: s.order_id })}
-                        style={{ background: 'none', border: 'none', color: 'var(--theme-accent)', cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}
+                        style={{ background: 'none', border: 'none', color: 'var(--theme-accent-ink)', cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}
                       >
                         #{s.bill_invoice_no}
                       </button>

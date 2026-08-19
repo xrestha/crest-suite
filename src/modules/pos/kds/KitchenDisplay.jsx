@@ -205,7 +205,7 @@ export default function KitchenDisplay() {
         <div role="alert" style={{
           background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)',
           borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
-          color: 'var(--theme-red)', cursor: 'pointer',
+          color: 'var(--theme-red-text)', cursor: 'pointer',
         }} onClick={() => setKdsError('')}>
           {kdsError} <span style={{ opacity: 0.7 }}>(tap to dismiss)</span>
         </div>
@@ -267,7 +267,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
     const remainingMin = Math.round((startedMs + ticket.estimated_prep_minutes * 60000 - now) / 60000)
     const over = remainingMin < 0
     etaNode = (
-      <span style={{ fontSize: 12, color: over ? 'var(--theme-red)' : 'var(--theme-text3)', fontWeight: over ? 700 : 400 }}>
+      <span style={{ fontSize: 12, color: over ? 'var(--theme-red-text)' : 'var(--theme-text3)', fontWeight: over ? 700 : 400 }}>
         {over ? `${Math.abs(remainingMin)} min over est.` : `~${remainingMin} min left`}
       </span>
     )
@@ -275,7 +275,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
     const actualMin = Math.round((new Date(ticket.ready_at).getTime() - new Date(ticket.started_at).getTime()) / 60000)
     const overEst = actualMin > ticket.estimated_prep_minutes
     etaNode = (
-      <span style={{ fontSize: 12, color: overEst ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+      <span style={{ fontSize: 12, color: overEst ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
         Done in {actualMin}m (est. {ticket.estimated_prep_minutes}m)
       </span>
     )
@@ -296,7 +296,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <Tip text="Time since this ticket was sent">
-            <span style={{ fontSize: 13, color: isLate ? 'var(--theme-red)' : isWarn ? 'var(--theme-amber)' : 'var(--theme-text3)', fontWeight: isLate || isWarn ? 700 : 400 }}>
+            <span style={{ fontSize: 13, color: isLate ? 'var(--theme-red-text)' : isWarn ? 'var(--theme-amber-text)' : 'var(--theme-text3)', fontWeight: isLate || isWarn ? 700 : 400 }}>
               {elapsedMin} min ago
             </span>
           </Tip>

@@ -12,7 +12,23 @@ const modalStack = []
 // Centered modal overlay — hosts a create/edit form so it pops up in front of the
 // user instead of rendering at the top of the page (no scrolling to reach it).
 // Backdrop click and the × button both call onClose; the panel itself stops propagation.
-export default function Modal({ onClose, title, headerExtra, children, maxWidth = 960 }) {
+//
+// `zIndex` (default 100) exists because POS's order screen is a `position: fixed` full-screen
+// layer at 1000 and therefore its own stacking context: a dialog opened from it needs a higher
+// value or it renders *underneath* the screen that opened it. That is precisely why POS grew nine
+// hand-rolled overlays instead of using this component, so raising it is what lets them come back.
+// Keep the default — a page-level dialog at 1100 would sit over the command palette and toasts.
+//
+// `unstyled` hands the panel to the caller: no `.card`, no title bar, no padding, just the
+// overlay plus the behaviour that actually matters (focus capture and restore, the Tab trap, the
+// Escape stack, `role="dialog"`). It is for a dialog whose shape genuinely is not a card — POS's
+// two-column billing modal with a live bill preview down one side, and its shift-close counting
+// sheet. `title` is then the accessible name rather than a rendered heading, so a dialog can never
+// go unnamed either way. Reach for it only when the standard card shape would have to be undone.
+export default function Modal({
+  onClose, title, headerExtra, children, maxWidth = 960,
+  zIndex = 100, unstyled = false, panelStyle,
+}) {
   const titleId = useId()
   const panelRef = useRef(null)
   const triggerRef = useRef(null)
@@ -62,34 +78,38 @@ export default function Modal({ onClose, title, headerExtra, children, maxWidth 
       onClick={onClose}
       className="no-print"
       style={{
-        position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.6)',
-        overflowY: 'auto', padding: '40px 16px',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        position: 'fixed', inset: 0, zIndex, background: 'rgba(0,0,0,0.6)',
+        overflowY: 'auto', padding: unstyled ? 16 : '40px 16px',
+        display: 'flex', alignItems: unstyled ? 'center' : 'flex-start', justifyContent: 'center',
       }}
     >
       <div
         ref={panelRef}
         onClick={e => e.stopPropagation()}
-        className="card"
+        className={unstyled ? undefined : 'card'}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={titleId}
+        {...(unstyled ? { 'aria-label': title } : { 'aria-labelledby': titleId })}
         tabIndex={-1}
-        style={{ width: '100%', maxWidth, margin: 'auto', outline: 'none' }}
+        style={unstyled
+          ? { outline: 'none', ...panelStyle }
+          : { width: '100%', maxWidth, margin: 'auto', outline: 'none' }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 id={titleId} style={{ margin: '0 0 16px', fontSize: 15, color: 'var(--theme-text1)' }}>{title}</h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: -4 }}>
-            {headerExtra}
-            <button
-              className="btn btn-ghost"
-              style={{ fontSize: 18, lineHeight: 1, padding: '2px 10px' }}
-              onClick={onClose}
-              title="Close"
-              aria-label="Close"
-            >×</button>
+        {!unstyled && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 id={titleId} style={{ margin: '0 0 16px', fontSize: 15, color: 'var(--theme-text1)' }}>{title}</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: -4 }}>
+              {headerExtra}
+              <button
+                className="btn btn-ghost"
+                style={{ fontSize: 18, lineHeight: 1, padding: '2px 10px' }}
+                onClick={onClose}
+                title="Close"
+                aria-label="Close"
+              >×</button>
+            </div>
           </div>
-        </div>
+        )}
         {children}
       </div>
     </div>

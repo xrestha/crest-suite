@@ -370,7 +370,7 @@ export default function KotLog() {
                     <td><span className={r.station === 'BOT' ? 'badge-yellow' : 'badge-green'} style={{ fontSize: 11 }}>{r.station}</span></td>
                     <td>{(r.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}</td>
                     <td>{staffNames[r.sent_by] || '—'}</td>
-                    <td style={{ textAlign: 'right', color: overEst ? 'var(--theme-red)' : undefined }}>
+                    <td style={{ textAlign: 'right', color: overEst ? 'var(--theme-red-text)' : undefined }}>
                       {est == null && actual == null ? '—' : `${est ?? '—'}m / ${actual ?? '—'}m`}
                     </td>
                   </tr>
@@ -468,7 +468,7 @@ export default function KotLog() {
                             </table>
                           )}
                           {flagged && (
-                            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--theme-red)' }}>
+                            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--theme-red-text)' }}>
                               ⚠ {row.reasons.join('; ')}
                             </div>
                           )}

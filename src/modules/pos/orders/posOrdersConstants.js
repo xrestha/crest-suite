@@ -47,17 +47,17 @@ export function kotTimerLabel(ticket, now) {
   if (ticket.status === 'ready') {
     if (ticket.started_at && ticket.ready_at) {
       const actualMin = Math.round((new Date(ticket.ready_at).getTime() - new Date(ticket.started_at).getTime()) / 60000)
-      return { text: `Ready (${actualMin}m)`, color: 'var(--theme-green)' }
+      return { text: `Ready (${actualMin}m)`, color: 'var(--theme-green-text)' }
     }
-    return { text: 'Ready', color: 'var(--theme-green)' }
+    return { text: 'Ready', color: 'var(--theme-green-text)' }
   }
   if (ticket.status === 'in_progress') {
     if (ticket.started_at && ticket.estimated_prep_minutes) {
       const remainingMin = Math.round((new Date(ticket.started_at).getTime() + ticket.estimated_prep_minutes * 60000 - now) / 60000)
       const over = remainingMin < 0
-      return { text: over ? `${Math.abs(remainingMin)}m over` : `~${remainingMin}m left`, color: over ? 'var(--theme-red)' : 'var(--theme-amber)' }
+      return { text: over ? `${Math.abs(remainingMin)}m over` : `~${remainingMin}m left`, color: over ? 'var(--theme-red-text)' : 'var(--theme-amber-text)' }
     }
-    return { text: 'Cooking', color: 'var(--theme-amber)' }
+    return { text: 'Cooking', color: 'var(--theme-amber-text)' }
   }
   // 'new' — sent but not yet started
   const sentMin = Math.max(0, Math.round((now - new Date(ticket.sent_at).getTime()) / 60000))

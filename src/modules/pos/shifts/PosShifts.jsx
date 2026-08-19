@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import { scopedFrom as scopedFromRaw } from '../../../shared/scopedDb'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
@@ -253,11 +254,11 @@ function ReportBody({ report, opening, closing, variance }) {
         </div>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Voided Value</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-red)' }}>{fmtNpr(report.voidTotal)}</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-red-text)' }}>{fmtNpr(report.voidTotal)}</div>
         </div>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Comp Food Cost</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-amber)' }}>{fmtNpr(report.compTotal)}</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-amber-text)' }}>{fmtNpr(report.compTotal)}</div>
         </div>
       </div>
 
@@ -300,7 +301,7 @@ function ReportBody({ report, opening, closing, variance }) {
                 <tr><td>Counted Cash</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(closing)}</td></tr>
                 <tr>
                   <td style={{ fontWeight: 700 }}>Variance</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: Math.abs(variance) < 1 ? 'var(--theme-green)' : variance < 0 ? 'var(--theme-red)' : 'var(--theme-amber)' }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: Math.abs(variance) < 1 ? 'var(--theme-green-text)' : variance < 0 ? 'var(--theme-red-text)' : 'var(--theme-amber-text)' }}>
                     {Math.abs(variance) < 1 ? 'Balanced' : `${variance > 0 ? '+' : ''}${fmtNpr(variance)} ${variance > 0 ? '(over)' : '(short)'}`}
                   </td>
                 </tr>
@@ -759,12 +760,12 @@ export default function PosShifts() {
 
       {/* ══ OPEN / CLOSE MODAL ══ */}
       {modal && (
-        <div onClick={e => { if (e.target === e.currentTarget && !saving) setModal(null) }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, width: 'min(480px, 96vw)', maxHeight: '90vh', overflowY: 'auto', padding: '24px 28px' }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: 18, color: 'var(--theme-text1)' }}>
-              {modal === 'open' ? 'Open Shift' : 'Close Shift — Z-Report'}
-            </h3>
+        <Modal
+          title={modal === 'open' ? 'Open Shift' : 'Close Shift — Z-Report'}
+          onClose={() => { if (!saving) setModal(null) }}
+          maxWidth={480}
+          zIndex={1100}
+        >
             <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-text3)' }}>
               Count the drawer and enter the quantity of each note/coin.
             </p>
@@ -812,7 +813,7 @@ export default function PosShifts() {
               )
             })()}
 
-            {msg && <p role="alert" style={{ margin: '14px 0 0', fontSize: 12, color: msg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{msg.replace(/^(error|ok):/, '')}</p>}
+            {msg && <p role="alert" style={{ margin: '14px 0 0', fontSize: 12, color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{msg.replace(/^(error|ok):/, '')}</p>}
 
             <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
               <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setModal(null)} disabled={saving}>Cancel</button>
@@ -822,8 +823,11 @@ export default function PosShifts() {
               </button>
             </div>
 
-            {/* Rendered INSIDE this overlay's stacking context (zIndex 1100) so it stacks above
-                the close modal — a sibling Modal (zIndex 100) would render underneath it. */}
+            {/* Still rendered INSIDE this dialog rather than beside it. The parent Modal is
+                position:fixed with zIndex 1100 and therefore its own stacking context, so a child
+                overlay stacks above the panel for free; a sibling at the default 100 would render
+                underneath. Modal nests properly since S574 — only the topmost answers Escape and
+                Tab — and ConfirmModal takes a zIndex prop now if this ever needs to move out. */}
             {confirmShort && (
               <ConfirmModal
                 title={`Drawer is ${confirmShort.diff > 0 ? 'over' : 'short'} by ${fmtNpr(Math.abs(confirmShort.diff))}`}
@@ -842,8 +846,7 @@ export default function PosShifts() {
                 </p>
               </ConfirmModal>
             )}
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

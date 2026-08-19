@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { getBsToday, getBsFiscalYear, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { printCreditNote } from './creditNoteHtml'
+import Modal from '../../../components/Modal'
 
 // A credit note here always credits the WHOLE bill (decision 2026-08-18 — partial credits are not
 // supported). 'Price correction' and 'Billing error' were removed from these chips because both
@@ -26,14 +27,6 @@ function invoiceLabel(order, vatReg, prefix) {
 export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   const { clientId, profile, hasPosAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
-
-  // Escape-to-close — matches the existing backdrop-click behavior below (no in-progress guard,
-  // since neither render path below guards its own backdrop-click on `submitting` either).
-  useEffect(() => {
-    function onKeyDown(e) { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
 
   const [items, setItems] = useState([])
   const [settings, setSettings] = useState({ is_vat_registered: true, invoice_prefix: '', vat_number: '', property_address: '', property_phone: '' })
@@ -77,12 +70,9 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
 
   if (!hasPosAccess('manager')) {
     return (
-      <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-        <div style={cardStyle}>
-          <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Issuing a Credit Note requires Manager access or above.</p>
-          <button className="btn btn-ghost" onClick={onClose}>Close</button>
-        </div>
-      </div>
+      <Modal title="Issue Credit Note" onClose={onClose} maxWidth={420}>
+        <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Issuing a Credit Note requires Manager access or above.</p>
+      </Modal>
     )
   }
 
@@ -171,9 +161,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   }
 
   return (
-    <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={{ ...cardStyle, width: 'min(520px, 96vw)' }}>
-        <h3 style={{ margin: '0 0 4px', fontSize: 16, color: 'var(--theme-text1)' }}>Issue Credit Note</h3>
+    <Modal title="Issue Credit Note" onClose={onClose} maxWidth={520}>
         <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
           Corrects {order.invoice_no != null ? invoiceLabel(order, vatReg, settings.invoice_prefix) : `Order #${order.order_no}`}. This is a formal VAT-Rules Credit Note — it reduces revenue for this fiscal month but does not touch stock.
         </p>
@@ -190,11 +178,11 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
                 </tbody>
               </table>
             </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-accent)', marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', marginBottom: 14 }}>
               Net amount to credit: {fmtNpr(amounts.net)}
             </div>
 
-            <label style={labelStyle} htmlFor="icn-reason">Reason <span style={{ color: 'var(--theme-red)' }}>*</span></label>
+            <label style={labelStyle} htmlFor="icn-reason">Reason <span style={{ color: 'var(--theme-red-text)' }}>*</span></label>
             <div role="group" aria-label="Common reasons" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
               {REASON_CHIPS.map(r => (
                 <button key={r} type="button" className="tab-btn" onClick={() => setReason(r)}
@@ -212,7 +200,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
               <div><label style={labelStyle} htmlFor="issue-credit-note-modal-phone">Phone</label><input id="issue-credit-note-modal-phone" style={inputStyle} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} /></div>
             </div>
 
-            {msg && <p role="alert" style={{ color: msg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)', fontSize: 12, marginBottom: 8 }}>{msg.replace('error:', '')}</p>}
+            {msg && <p role="alert" style={{ color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)', fontSize: 12, marginBottom: 8 }}>{msg.replace('error:', '')}</p>}
 
             {/* The irreversibility warning was previously only inside a Tip on the button — and
                 this page runs on a tablet, where hover does not exist, so it was invisible at the
@@ -230,12 +218,9 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
             </div>
           </>
         )}
-      </div>
-    </div>
+    </Modal>
   )
 }
 
-const overlayStyle = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 400 }
-const cardStyle = { background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, maxHeight: '86vh', overflowY: 'auto', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }
 const labelStyle = { display: 'block', fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }
 const inputStyle = { background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }

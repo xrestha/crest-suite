@@ -1871,7 +1871,7 @@ export default function PosOrders() {
         {orderNo && (
           <Tip text="Order number — printed on every KOT/BOT ticket so the kitchen, bar and bill all reference the same order">
             <span style={{
-              fontSize: 12, fontWeight: 700, color: 'var(--theme-accent)',
+              fontSize: 12, fontWeight: 700, color: 'var(--theme-accent-ink)',
               border: '1px solid var(--theme-accent)', borderRadius: 5,
               padding: '2px 7px', cursor: 'default',
             }}>#{orderNo}</span>
@@ -1881,7 +1881,7 @@ export default function PosOrders() {
         {!orderNo && orderId && (
           <Tip text="This order was saved offline — it will get a real order number once this device reconnects and syncs">
             <span style={{
-              fontSize: 12, fontWeight: 700, color: 'var(--theme-amber)',
+              fontSize: 12, fontWeight: 700, color: 'var(--theme-amber-text)',
               border: '1px solid var(--theme-amber)', borderRadius: 5,
               padding: '2px 7px', cursor: 'default',
             }}>#— (pending)</span>
@@ -1891,7 +1891,7 @@ export default function PosOrders() {
         {!isOnline && (
           <Tip text="Offline — this order is saved on this device and will sync when you reconnect">
             <span style={{
-              fontSize: 12, fontWeight: 700, color: 'var(--theme-amber)',
+              fontSize: 12, fontWeight: 700, color: 'var(--theme-amber-text)',
               background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)', borderRadius: 5,
               padding: '2px 7px', cursor: 'default',
             }}>📵 Offline</span>
@@ -1909,7 +1909,7 @@ export default function PosOrders() {
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
           {msg && (
-            <span role="alert" style={{ fontSize: 12, color: msg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+            <span role="alert" style={{ fontSize: 12, color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
               {msg.replace(/^(error|ok):/, '')}
             </span>
           )}
@@ -2017,7 +2017,7 @@ export default function PosOrders() {
                         fontWeight: 600, fontSize: 13, color: 'var(--theme-text1)',
                         lineHeight: 1.3, paddingRight: inOrd ? 28 : 0,
                       }}>{r.name}</span>
-                      <span style={{ fontSize: 12, color: 'var(--theme-accent)', fontWeight: 600 }}>
+                      <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
                         NPR {price}
                       </span>
                       {kotTimer && (
@@ -2171,13 +2171,13 @@ export default function PosOrders() {
                       }}
                     >
                       {r._manual && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--theme-accent)', letterSpacing: 0.5 }}>PAIRED</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--theme-accent-ink)', letterSpacing: 0.5 }}>PAIRED</span>
                       )}
                       {isChefsPick && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--theme-amber)', letterSpacing: 0.5 }}>CHEF'S PICK</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--theme-amber-text)', letterSpacing: 0.5 }}>CHEF'S PICK</span>
                       )}
                       <span>{r.name}</span>
-                      <span style={{ fontSize: 10, color: 'var(--theme-accent)' }}>+NPR {price}</span>
+                      <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)' }}>+NPR {price}</span>
                     </button>
                   )
                 })}
@@ -2199,7 +2199,7 @@ export default function PosOrders() {
               paddingTop: 10, borderTop: '1px solid var(--theme-border)', marginBottom: 14,
             }}>
               <span>TOTAL</span>
-              <span style={{ color: 'var(--theme-accent)' }}>{fmtNpr(total)}</span>
+              <span style={{ color: 'var(--theme-accent-ink)' }}>{fmtNpr(total)}</span>
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -2291,11 +2291,13 @@ export default function PosOrders() {
 
       {/* ── Billing modal ── */}
       {billingOpen && (
-        <div
-          onClick={e => { if (e.target === e.currentTarget && !closing) setBillingOpen(false) }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
+        <Modal
+          title={billingTab === 'writeoff' ? 'Complimentary slip' : billingTab === 'void' ? 'Void this bill' : 'Take payment'}
+          onClose={() => { if (!closing) setBillingOpen(false) }}
+          zIndex={1100}
+          unstyled
+          panelStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, width: 'min(1060px, 96vw)', maxHeight: '92vh', boxShadow: '0 16px 48px rgba(0,0,0,0.4)', display: 'flex', overflow: 'hidden' }}
         >
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, width: 'min(1060px, 96vw)', maxHeight: '92vh', boxShadow: '0 16px 48px rgba(0,0,0,0.4)', display: 'flex', overflow: 'hidden' }}>
           <div style={{ width: 418, flexShrink: 0, background: 'var(--theme-sidebar)', borderRight: '1px solid var(--theme-border)', padding: '24px 20px', overflowY: 'auto' }}>
             <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 10px' }}>
               {billingTab === 'writeoff' ? 'Complimentary slip preview' : 'Bill preview'} <Tip text="Live preview built from the same layout that actually prints — updates as you fill in the fields to the right. The invoice/NC number shown here is a placeholder; the real one is assigned when you confirm.">(live)</Tip>
@@ -2319,7 +2321,7 @@ export default function PosOrders() {
               <h3 style={{ margin: 0, fontSize: 18, color: 'var(--theme-text1)' }}>
                 {activeTable ? activeTable.name : 'Takeaway'}
               </h3>
-              <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--theme-accent)', textAlign: 'right' }}>
+              <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)', textAlign: 'right' }}>
                 {fmtNpr(billingTab === 'writeoff' ? compTotal : billingTab === 'pay' ? payTotal : total)}
                 {billingTab === 'writeoff' && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>(food cost, not menu price)</span>}
                 {billingTab === 'pay' && discountAmt > 0 && (
@@ -2331,7 +2333,7 @@ export default function PosOrders() {
             </div>
 
             {(kotCount + botCount) > 0 && (
-              <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 6, padding: '8px 10px' }}>
+              <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 6, padding: '8px 10px' }}>
                 ⚠ {kotCount + botCount} item{kotCount + botCount !== 1 ? 's' : ''} not yet sent to the kitchen/bar.
               </p>
             )}
@@ -2350,7 +2352,7 @@ export default function PosOrders() {
               <div style={{ marginBottom: 16 }}>
                 {requireBuyerId ? (
                   <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
-                    Buyer details <span style={{ color: 'var(--theme-red)', textTransform: 'none', letterSpacing: 'normal' }}>
+                    Buyer details <span style={{ color: 'var(--theme-red-text)', textTransform: 'none', letterSpacing: 'normal' }}>
                       <Tip text="Name and Phone are required whenever a discount is applied or the bill goes on Credit, so there's an identifiable record.">
                         {payMethod === 'Credit' ? '(Name + Phone required for Credit)' : '(Name + Phone required for this discount)'}
                       </Tip>
@@ -2399,13 +2401,13 @@ export default function PosOrders() {
                     {itemsExpanded ? '▾' : '▸'} Items <Tip text="Comp an individual item — including just part of its quantity, e.g. 1 of 3 — it's removed from this bill and printed on its own internal Complimentary Slip instead, while the rest of the table (and the rest of that line's qty, if any) bills normally. Supervisor+ only.">(tap to comp)</Tip>
                   </span>
                   {hasItemComp && (
-                    <span style={{ fontSize: 11, color: 'var(--theme-amber)', fontWeight: 600 }}>
+                    <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 600 }}>
                       · {itemCompCount} comped
                     </span>
                   )}
                 </button>
                 {allItemsComped && (
-                  <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-amber)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 6, padding: '8px 10px' }}>
+                  <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 6, padding: '8px 10px' }}>
                     ⚠ Every item is comped — nothing left to bill. Switch to the Complimentary tab to close this table instead of issuing a ₨0 Tax Invoice/PAN Bill.
                   </p>
                 )}
@@ -2420,7 +2422,7 @@ export default function PosOrders() {
                       <div key={i.recipe_id} style={{
                         display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '5px 8px', borderRadius: 6,
                         background: comped ? 'var(--theme-input-bg)' : 'transparent',
-                        color: comped ? 'var(--theme-amber)' : 'var(--theme-text2)',
+                        color: comped ? 'var(--theme-amber-text)' : 'var(--theme-text2)',
                         fontWeight: comped ? 600 : 400,
                       }}>
                         <span style={{ flex: 1 }}>{i.qty} x {i.name}</span>
@@ -2543,7 +2545,7 @@ export default function PosOrders() {
                   )}
                 </div>
                 {discountClamped && (
-                  <p style={{ fontSize: 11, color: 'var(--theme-amber)', margin: '2px 0 8px' }}>
+                  <p style={{ fontSize: 11, color: 'var(--theme-amber-text)', margin: '2px 0 8px' }}>
                     Capped at your {discountCapPct}% discount limit ({fmtNpr(discountAmt)}).
                   </p>
                 )}
@@ -2593,7 +2595,7 @@ export default function PosOrders() {
                     <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                         <span style={{ color: 'var(--theme-text2)' }}>Remaining</span>
-                        <span style={{ fontWeight: 700, color: remaining > 0 ? 'var(--theme-amber)' : 'var(--theme-green)' }}>{fmtNpr(remaining)}</span>
+                        <span style={{ fontWeight: 700, color: remaining > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{fmtNpr(remaining)}</span>
                       </div>
                       {tenders.map((t, i) => (
                         <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0 0', marginTop: 5, borderTop: '1px solid var(--theme-border-lt)' }}>
@@ -2668,7 +2670,7 @@ export default function PosOrders() {
                   {VOID_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
                 {orderItems.some(i => i.sent_to_kot) && (
-                  <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber)' }}>
+                  <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
                     ⚠ Some items were already sent to the kitchen/bar — consider Complimentary instead so food cost isn't lost.
                   </p>
                 )}
@@ -2694,7 +2696,7 @@ export default function PosOrders() {
           {/* Sticky footer — primary action + Cancel always reachable, independent of how tall the
               scrollable content above gets (e.g. a long list of split-payment tenders). */}
           <div style={{ flexShrink: 0, padding: '14px 28px 20px', borderTop: '1px solid var(--theme-border)' }}>
-            {closeMsg && <p role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
+            {closeMsg && <p role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
             {billingTab === 'pay' && (
               <button className="btn btn-primary" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
                 onClick={() => closeOrder('paid')}
@@ -2723,8 +2725,7 @@ export default function PosOrders() {
             </button>
           </div>
           </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   )
@@ -2735,13 +2736,12 @@ export default function PosOrders() {
     <>
     {/* ── Covers modal ── */}
     {coversModal && pendingTable && (
-      <div
-        onClick={e => { if (e.target === e.currentTarget) { setCoversModal(false); setPendingTable(null) } }}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}
+      <Modal
+        title={pendingTable.name}
+        onClose={() => { setCoversModal(false); setPendingTable(null) }}
+        maxWidth={320}
       >
-        <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, padding: '28px 32px', width: 300, boxShadow: '0 16px 48px rgba(0,0,0,0.35)', textAlign: 'center' }}>
-
-          <h3 style={{ margin: '0 0 4px', fontSize: 18, color: 'var(--theme-text1)' }}>{pendingTable.name}</h3>
+        <div style={{ textAlign: 'center' }}>
           {pendingTable.section && (
             <p style={{ margin: '0 0 4px', fontSize: 12, color: 'var(--theme-text3)' }}>{pendingTable.section}</p>
           )}
@@ -2762,7 +2762,7 @@ export default function PosOrders() {
                 {[1,2,3,4,5,6,7,8,9].map(d => (
                   <button key={d} onClick={() => numpadPress(String(d))} style={pad}>{d}</button>
                 ))}
-                <button onClick={numpadClear} style={{ ...pad, color: 'var(--theme-red)', fontSize: 14, fontWeight: 700 }}>CLR</button>
+                <button onClick={numpadClear} style={{ ...pad, color: 'var(--theme-red-text)', fontSize: 14, fontWeight: 700 }}>CLR</button>
                 <button onClick={() => numpadPress('0')} style={pad}>0</button>
                 <button onClick={numpadBackspace} style={{ ...pad, fontSize: 18 }}>⌫</button>
               </div>
@@ -2784,7 +2784,7 @@ export default function PosOrders() {
             Cancel
           </button>
         </div>
-      </div>
+      </Modal>
     )}
 
     <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
@@ -2803,7 +2803,7 @@ export default function PosOrders() {
                 <button
                   onClick={clearAllOccupiedTables}
                   className="btn btn-ghost"
-                  style={{ fontSize: 13, flexShrink: 0, color: 'var(--theme-red)', borderColor: 'color-mix(in srgb, var(--theme-red) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)' }}
+                  style={{ fontSize: 13, flexShrink: 0, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)' }}
                 >⚠ Clear Occupied</button>
               </Tip>
             )}
@@ -2844,7 +2844,7 @@ export default function PosOrders() {
               display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
               background: 'color-mix(in srgb, var(--theme-accent) 16%, transparent)', border: '1px solid var(--theme-accent)',
               borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13.5, fontWeight: 700,
-              color: 'var(--theme-accent)',
+              color: 'var(--theme-accent-ink)',
             }}
           >
             <span style={{ fontSize: 18 }}>🔔</span>
@@ -2855,7 +2855,7 @@ export default function PosOrders() {
       })()}
 
       {!isOnline && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber-text)' }}>
           <span>📵</span>
           <span><strong>Offline</strong> — orders are saved on this device and will sync when you reconnect. Billing stays disabled until then.</span>
           {pendingOrderIds.size > 0 && (
@@ -2866,7 +2866,7 @@ export default function PosOrders() {
         </div>
       )}
       {syncingOffline && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green-text)' }}>
           ⟳ Syncing {pendingOrderIds.size} {pendingOrderIds.size === 1 ? 'order' : 'orders'}…
         </div>
       )}
@@ -2875,7 +2875,7 @@ export default function PosOrders() {
           background: floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 8%, transparent)' : 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
           border: `1px solid ${floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 25%, transparent)' : 'color-mix(in srgb, var(--theme-green) 25%, transparent)'}`,
           borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
-          color: floorMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)',
+          color: floorMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
         }}>
           {floorMsg.replace(/^(error|ok):/, '')}
         </div>
@@ -2902,13 +2902,13 @@ export default function PosOrders() {
         </div>
       )}
       {conflictOrders.map(c => (
-        <div key={c.order_id} style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red)' }}>
+        <div key={c.order_id} style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           <span>⚠</span>
           <span>
             <strong>{c.table_name}</strong>'s bill was closed on another device while you were offline —
             your queued changes ({c.items.length} item{c.items.length !== 1 ? 's' : ''}) were NOT applied.
           </span>
-          <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--theme-red)', flexShrink: 0 }}
+          <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--theme-red-text)', flexShrink: 0 }}
             onClick={() => discardConflictOrder(c.order_id)}>Discard</button>
         </div>
       ))}
@@ -2927,7 +2927,7 @@ export default function PosOrders() {
       ) : tables.length === 0 ? (
         <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text3)' }}>
           No tables set up yet.{' '}
-          <a href="/pos/tables" style={{ color: 'var(--theme-accent)' }}>Go to Table Management →</a>
+          <a href="/pos/tables" style={{ color: 'var(--theme-accent-ink)' }}>Go to Table Management →</a>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14 }}>
@@ -3011,7 +3011,7 @@ export default function PosOrders() {
                     <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                       {ord.itemCount} item{ord.itemCount !== 1 ? 's' : ''} · {ord.covers} cover{ord.covers !== 1 ? 's' : ''}
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-accent)', marginTop: 3 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-accent-ink)', marginTop: 3 }}>
                       {fmtNpr(ord.total)}
                     </div>
                   </div>
@@ -3027,14 +3027,9 @@ export default function PosOrders() {
 
     {/* ── Recent Bills / Reprint modal ── */}
     {recentBillsOpen && (
-      <div
-        onClick={e => { if (e.target === e.currentTarget) setRecentBillsOpen(false) }}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}
-      >
-        <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, width: 'min(480px, 96vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
-          <h3 style={{ margin: '0 0 4px', fontSize: 16, color: 'var(--theme-text1)' }}>Recent Bills — Today</h3>
+      <Modal title="Recent Bills — Today" onClose={() => setRecentBillsOpen(false)} maxWidth={480}>
           <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>Reprint a bill closed earlier today.</p>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
+          <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
             {recentBillsLoad ? (
               <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
             ) : recentBills.length === 0 ? (
@@ -3043,8 +3038,8 @@ export default function PosOrders() {
               <div key={o.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid var(--theme-border)' }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>
-                    {o.table_name || 'Takeaway'} {o.close_type === 'void' && <span style={{ color: 'var(--theme-red)', fontSize: 11 }}>(Void)</span>}
-                    {o.close_type === 'writeoff' && <span style={{ color: 'var(--theme-amber)', fontSize: 11 }}>(Complimentary)</span>}
+                    {o.table_name || 'Takeaway'} {o.close_type === 'void' && <span style={{ color: 'var(--theme-red-text)', fontSize: 11 }}>(Void)</span>}
+                    {o.close_type === 'writeoff' && <span style={{ color: 'var(--theme-amber-text)', fontSize: 11 }}>(Complimentary)</span>}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
                     {o.invoice_no ? `Inv #${o.invoice_no}` : `Order #${o.order_no}`} · {new Date(o.closed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
@@ -3073,8 +3068,7 @@ export default function PosOrders() {
             onClick={() => setRecentBillsOpen(false)}>
             Close
           </button>
-        </div>
-      </div>
+      </Modal>
     )}
 
     {/* Pulling an already-fired line. Not a ConfirmModal: this asks for an input, and the input

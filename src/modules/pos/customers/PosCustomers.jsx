@@ -309,7 +309,7 @@ export default function PosCustomers() {
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                     <Tip text="Total amount owed across all unsettled Credit bills" width={220}>Outstanding</Tip>
                   </div>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: unsettled.length > 0 ? 'var(--theme-amber)' : 'var(--theme-green)' }}>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: unsettled.length > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>
                     {fmtNpr(outstandingTotal)}
                   </div>
                 </div>
@@ -320,7 +320,7 @@ export default function PosCustomers() {
               </div>
 
               {settleMsg && (
-                <p style={{ margin: '0 0 14px', fontSize: 13, color: settleMsg.startsWith('error:') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+                <p style={{ margin: '0 0 14px', fontSize: 13, color: settleMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                   {settleMsg.replace(/^(error|ok):/, '')}
                 </p>
               )}
@@ -352,11 +352,11 @@ export default function PosCustomers() {
                           <td>
                             {b.buyer_name && b.buyer_name !== b.delivery_partner ? `${b.buyer_name} ` : ''}
                             {b.delivery_partner
-                              ? <span style={{ color: 'var(--theme-amber)', fontWeight: 600 }}>{b.delivery_partner}</span>
+                              ? <span style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>{b.delivery_partner}</span>
                               : (b.buyer_name || '—')}
                           </td>
                           <td>{b.buyer_phone || '—'}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-amber)' }}>{fmtNpr(b.paid_amount || 0)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-amber-text)' }}>{fmtNpr(b.paid_amount || 0)}</td>
                           <td>{b.closed_at ? daysAgo(b.closed_at) : '—'}</td>
                           <td style={{ textAlign: 'right' }}>
                             {settlingId === b.id ? (
@@ -439,7 +439,7 @@ export default function PosCustomers() {
                             <td>
                               {b.buyer_name && b.buyer_name !== b.delivery_partner ? `${b.buyer_name} ` : ''}
                               {b.delivery_partner
-                                ? <span style={{ color: 'var(--theme-amber)', fontWeight: 600 }}>{b.delivery_partner}</span>
+                                ? <span style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>{b.delivery_partner}</span>
                                 : (b.buyer_name || '—')}
                             </td>
                             <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(b.paid_amount || 0)}</td>

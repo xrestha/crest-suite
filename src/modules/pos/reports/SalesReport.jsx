@@ -702,11 +702,11 @@ export default function SalesReport() {
             <span style={{
               display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600,
               padding: '3px 6px 3px 10px', borderRadius: 12, background: 'var(--theme-input-bg)',
-              border: '1px solid var(--theme-accent)', color: 'var(--theme-accent)',
+              border: '1px solid var(--theme-accent)', color: 'var(--theme-accent-ink)',
             }}>
               Filtered: {paymentFilter}
               <button onClick={() => setPaymentFilter(null)} title="Clear filter" style={{
-                background: 'none', border: 'none', color: 'var(--theme-accent)', cursor: 'pointer', fontSize: 13, padding: 0, lineHeight: 1,
+                background: 'none', border: 'none', color: 'var(--theme-accent-ink)', cursor: 'pointer', fontSize: 13, padding: 0, lineHeight: 1,
               }}>×</button>
             </span>
           )}
@@ -796,7 +796,7 @@ export default function SalesReport() {
                   <tr key={c.key} onClick={() => viewPosBill(clientId, { isItemComp: true, parentOrderId: c.orderId, compNo: c.compNo })} style={{ cursor: 'pointer' }}>
                     <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{c.invoiceNo != null ? `#${c.invoiceNo}` : `Order #${c.orderNo}`}</td>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-amber)' }}>NC-{String(c.compNo).padStart(2, '0')}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-amber-text)' }}>NC-{String(c.compNo).padStart(2, '0')}</td>
                     <td>{c.tableName || 'Takeaway'}</td>
                     <td>{c.itemNames}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(c.foodCost)}</td>
@@ -878,7 +878,7 @@ export default function SalesReport() {
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
               <Tip text="Bills not yet settled from Customers → Outstanding Credit" width={220}>Outstanding</Tip>
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: deliveryPartnerTotals.outstanding > 0 ? 'var(--theme-amber)' : 'var(--theme-green)' }}>{fmtNpr(deliveryPartnerTotals.outstanding)}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: deliveryPartnerTotals.outstanding > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{fmtNpr(deliveryPartnerTotals.outstanding)}</div>
           </div>
           <div className="card" style={{ padding: '14px 18px' }}>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Commission (settled)</div>
@@ -886,7 +886,7 @@ export default function SalesReport() {
           </div>
           <div className="card" style={{ padding: '14px 18px' }}>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Net Received (settled)</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-green)' }}>{fmtNpr(deliveryPartnerTotals.netReceived)}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-green-text)' }}>{fmtNpr(deliveryPartnerTotals.netReceived)}</div>
           </div>
         </div>
         <div className="table-wrap">
