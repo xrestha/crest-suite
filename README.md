@@ -163,10 +163,26 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 🖨 Print on Menu Pricing's full food-cost view (the IMS branch — the POS-only price-list branch
 deliberately untouched per this file's standing ask-which-branch rule). Prints the table exactly
 as filtered on screen; the active category tab goes into the print title (`printWithTitle`, the
-Stock Movements convention) since the tab bar and header buttons are `no-print`. SW v99 → v100.
+Stock Movements convention) since the tab bar and header buttons are `no-print`.
 
-**Files:** `src/modules/ims/recipes/MenuPricing.js`, `src/pages/Help.js`,
-`public/service-worker.js`, `README.md`
+Two same-day follow-ups from using it for real (a printed PDF came back within the hour):
+
+- **The New Price boxes now print BLANK** — the sheet's whole use is hand-it-over-and-price-with-
+  a-pen, and the boxes were printing the input's *placeholder* (Chrome prints placeholder text as
+  if it were a value, so hiding the value alone would not have fixed it). New `.print-blank-input`
+  utility in the global `@media print` block blanks value and placeholder while the box border
+  still prints — reusable, same idea as Reorder Report's Print Par Sheet blank column. On screen
+  nothing changes, and the printed Current Price column keeps the reference beside the blank box.
+- **⬇ Excel** exports the same filtered list (active tab in the filename) with a deliberately
+  blank New Price column — the sheet's job is the same as the printed one's, over email. `xlsx`
+  stays a click-time dynamic import (S522). No import-back path yet; repriced sheets are typed in
+  row by row — an Import Excel that reads the filled column back (match by name, preview FC%,
+  save all) is the natural follow-up if the workflow sticks.
+
+SW v99 → v102 across the three steps.
+
+**Files:** `src/modules/ims/recipes/MenuPricing.js`, `src/components/Layout.css`,
+`src/pages/Help.js`, `public/service-worker.js`, `CLAUDE.md`, `README.md`
 ### S581 — 2026-08-19 — Consolidated P&L: the sixth Suite feature ships, in two phases
 
 Crest Suite Pro's advertised list carried two features that did not exist — Consolidated P&L and
