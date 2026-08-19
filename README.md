@@ -158,6 +158,35 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S592 — 2026-08-19 — Product Codes are issued automatically from the category
+
+S590 added the Product Code field but left it blank for someone to type. It is now **auto-issued
+from the recipe's own category** as the dish is written: pick Beverage and the field fills with
+`BEV-001`, the next one `BEV-002`, and changing the category before saving re-issues it under the
+new prefix. Type your own code over it — the case a migrating client actually needs, carrying a
+code already printed on their menu — and it is never touched again. Editing an existing recipe
+never re-issues its code.
+
+**Settings gains a "Product Codes" tab**, next to Item / Vendor / Sub-Recipe Codes, holding one
+action: **Generate Missing Product Codes**, for the ~136 recipes created before the field existed.
+It is the one code action here that **fills gaps only and never renumbers** — the opposite of the
+three Regenerate All buttons beside it, deliberately, for the same reason: reassigning a code the
+client already prints would destroy the recognisability the field exists for. Sub-recipes are
+skipped; they keep their own `SRC-nnn` series.
+
+The generator is a pure, tested module (`src/shared/productCode.js`, 18 tests) because it is
+shared by both places that issue codes and a duplicate lands straight in a per-client unique index.
+Tests cover prefix derivation (punctuation stripped, so "Veg & Fruits" → VEG), that a deletion
+leaves a gap rather than reissuing a live code, that two categories sharing a prefix
+(Dessert/Desserts) share one sequence and still stay unique, and a 200-recipe batch with zero
+collisions. The save path retries an **auto-issued** code on a 23505 race (two tabs) rather than
+blaming the user, while a hand-typed duplicate still gets the plain "already used" message.
+
+**Files:** `src/shared/productCode.js` (new), `src/shared/productCode.test.js` (new),
+`src/modules/ims/recipes/Recipes.js`, `src/pages/Settings.js`, `src/pages/Help.js`,
+`src/pages/settings/imsGuideData.js`, `POS_TODO.md`,
+`public/service-worker.js` (v111 → v112), `README.md`
+
 ### S591 — 2026-08-19 — Stock Ageing report — and a LIVE feature-flag save breakage found with it
 
 **⚠ Two migrations must be applied by hand before deploying this** (see below — one of them fixes

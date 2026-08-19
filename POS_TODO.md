@@ -105,7 +105,11 @@ by design, so an admin session proves nothing about them.
   (`MOM-03` jumps to the dish); uniqueness is DB-enforced by the pre-existing partial per-client
   unique index `recipes_client_recipe_code_key` (verified live: menu recipe accepts a code, a
   duplicate → 23505, surfaced as a friendly "Product Code already used" message). No migration —
-  the column and index already existed. **UoM column deliberately NOT added** — `yield_uom` is
+  the column and index already existed. **Extended S592**: codes are now **auto-issued from the
+  recipe's category** as it is written (Beverage → BEV-001, BEV-002 …), still overridable by typing
+  your own, plus a **Settings → Product Codes → Generate Missing Product Codes** action for recipes
+  that predate the feature — gap-fill only, never a renumber, because a Product Code is often the
+  one a client already prints on their menu. **UoM column deliberately NOT added** — `yield_uom` is
   `'portion'` for effectively every menu item (1 distinct value across 136 recipes measured S580),
   so a column of 'portion' is noise; it stays a sub-recipe-only field.
 - [x] ~~Printed letterhead baked into Excel exports~~ — shipped S238, 2026-07-04. All 7 `/pos/sales-report` tabs now export Company Name/VAT No./Address + `@As On Dated : ... To : ...` date-range line (or `@Fiscal Year :` for 1L+ Report) above the data, matching the statutory-report look of competitor exports.

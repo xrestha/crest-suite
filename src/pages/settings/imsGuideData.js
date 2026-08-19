@@ -347,13 +347,14 @@ export const IMS_GUIDE_GROUPS = [
         summary:
           'Builds and costs every recipe (dishes and reusable sub-recipes/batches) from Item Master ingredients, sets a target food-cost %, and shows true cost including allocated overhead and nutrition facts. The recursive ingredient-cost engine here (src/utils/recipeCost.js) is shared by Menu Pricing, Menu Engineering, Best Sellers, Recipe Margin, and Menu Repricing — a change here ripples everywhere.',
         workflow: [
-          '"+ New Recipe": Name, Category (a normal category, or the special "Sub-Recipe" category), Selling Price (ex-VAT), VAT Rate, Yield Qty + Yield UOM, Target FC %, optional Description/Image/Veg-NonVeg for the guest QR menu.',
+          '"+ New Recipe": Name, Category (a normal category, or the special "Sub-Recipe" category), Product Code (issued automatically, see below), Selling Price (ex-VAT), VAT Rate, Yield Qty + Yield UOM, Target FC %, optional Description/Image/Veg-NonVeg for the guest QR menu.',
           'Ingredient rows are each either an Item or another recipe tagged Sub-Recipe. A sub-recipe can\'t directly list itself; indirect cycles are checked at save time and rejected.',
           'A live cost/FC%/suggested-price preview updates as ingredients are typed, before saving.',
           'Saving a recipe with category = "Sub-Recipe" auto-creates/updates a mirror row in items (is_sub_recipe=true) so it can be referenced as an ingredient elsewhere. Changing a recipe away from "Sub-Recipe" deactivates and unlinks its mirror item.',
           'Nutrition auto-fill: a one-click bulk match against a local regional library (DFTQC Nepal / IFCT 2017 / USDA seed data); a separate, explicit live USDA FoodData Central lookup is available only for ingredients the local library couldn\'t match.',
         ],
         fields: [
+          { label: 'Product Code', desc: 'Issued automatically from the chosen category as the recipe is written — Beverage gives BEV-001, then BEV-002, and changing the category before saving re-issues it under the new prefix. Type your own code over it (e.g. one carried across from a previous menu or POS) and it is left alone from then on. Editing an existing recipe never re-issues its code. Staff can search this code on the POS order screen, and it prints as the Code column on the Item Wise sales report. Unique per client, enforced by the database.' },
           { label: 'Target FC %', desc: 'Per-recipe target food cost percentage (default 30) — drives the Suggested Price figure and Menu Repricing/Dashboard\'s "underpriced" flagging.' },
           { label: 'Yield Qty / Yield UOM', desc: 'For a normal dish, almost always "1 portion." For a sub-recipe, this is the batch size the ingredient list produces (e.g. a sauce recipe yields "5000 GM") — cost per unit divides the batch cost by this yield.' },
           { label: 'VAT Rate', desc: 'Stored as a fraction (0.13 = 13%). 0 is a valid, distinct value from "unset" — the app explicitly guards against treating an intentional 0% as falsy and silently defaulting back to 13%.' },
@@ -1210,18 +1211,20 @@ export const IMS_GUIDE_GROUPS = [
         title: 'IMS-relevant Settings tabs',
         route: '/settings',
         plan: 'Client-facing tabs (not shown to admin)',
-        summary: 'Five tabs in Settings configure IMS-specific behavior. All are client-facing only — they don\'t appear in the admin\'s own Settings view, which shows a different tab set (Branding/Property/Contact/Plan Pricing/Theme/Data).',
+        summary: 'Six tabs in Settings configure IMS-specific behavior. All are client-facing only — they don\'t appear in the admin\'s own Settings view, which shows a different tab set (Branding/Property/Contact/Plan Pricing/Theme/Data).',
         workflow: [],
         fields: [
           { label: 'Item Codes', desc: 'Sets item_code_prefix (default ITM). New items get the next sequential number automatically. "Regenerate All" renumbers every item alphabetically from {prefix}-001 — used to close gaps after deletions. Surfaces on Price Tracker, purchase entries, stock sheets, audit trails.' },
           { label: 'Vendor Codes', desc: 'Same pattern for vendor_code_prefix (default VND). Shown as a badge in Vendor Report and used as a secondary search field there.' },
           { label: 'Sub-Recipe Codes', desc: 'Same pattern for sub_recipe_code_prefix (default SRC), scoped to recipes where category = "Sub-Recipe." Gated behind the recipe_costing feature flag.' },
+          { label: 'Product Codes', desc: 'Codes for MENU items, and the one tab here with no prefix to configure — the prefix is derived from each recipe\'s own category (Beverage → BEV-001, BEV-002). New recipes are issued one automatically as they are written in Recipe Costing, so this tab holds a single action: "Generate Missing Product Codes", for items created before the feature existed. It ONLY fills blanks and never renumbers — the opposite of the three Regenerate All buttons above it, deliberately, because a Product Code is often the code a client already prints on their own menu.' },
           { label: 'Recipe Categories', desc: 'Free-form list feeding the recipe-form category dropdown and the category filter tabs on Best Sellers, Recipe Margin, and Menu Repricing. "Sub-Recipe / Prep Item" is a protected, system-managed category that can\'t be added/removed here — it\'s the sentinel value every cost report explicitly excludes. Removing a category from this list does NOT retag existing recipes; they keep showing under their now-orphaned category name.' },
           { label: 'Thresholds', desc: 'fc_warning_pct (35) / fc_critical_pct (45) now colour EVERY food-cost figure in the product: the Dashboard card, Recipe Costing\'s filter pills AND its FC% column, Menu Pricing, Menu Repricing, Recipe Margin, Annual Summary and Period Comparison. Those pages each carried their own hardcoded 30/38 scale until 2026-08-13, so a dish could be returned by the pill labelled "⚠ 35–45%" and painted red at the same time. expiry_warning_days (7) sets FIFO/Expiry Report\'s "expiring soon" window. variance_flag_pct (10) is the Variance Report\'s Over/Under flag threshold — wired 2026-08-13, before which the report ignored the setting and always used 10.' },
         ],
         formulas: [],
         gotchas: [
-          'Regenerating codes (Item/Vendor/Sub-Recipe) is a bulk renumber — always confirms before running since it changes every existing code, not just new ones going forward.',
+          'Regenerating codes (Item/Vendor/Sub-Recipe) is a bulk renumber — always confirms before running since it changes every existing code, not just new ones going forward. Product Codes is the exception: it fills gaps only and leaves existing codes alone.',
+          'Two categories sharing their first three letters (Dessert / Desserts) share one Product Code sequence. Codes stay unique because the counter is per PREFIX rather than per category — DES-001 then DES-002 across both — so this is harmless, just worth knowing before someone reports "my two categories are mixed together".',
         ],
         connections: 'See each field above for exactly which downstream pages consume that setting.',
       },

@@ -6,6 +6,7 @@ import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { useTheme, PRESETS } from '../context/ThemeContext'
 import Tip from '../components/Tip'
 import { MODULE_COLORS, DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
+import { assignMissingProductCodes } from '../shared/productCode'
 import { Navigate } from 'react-router-dom'
 
 // Lazy so the three module guides' prose (several thousand lines of admin-only strings) lives in
@@ -13,7 +14,7 @@ import { Navigate } from 'react-router-dom'
 // tab is admin-only, so a client can never render it.
 const GuidesTab = lazy(() => import('./settings/GuidesTab'))
 
-const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Recipe Categories', 'Contact', 'Plan Pricing', 'Data', 'Theme', 'Guides']
+const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Product Codes', 'Recipe Categories', 'Contact', 'Plan Pricing', 'Data', 'Theme', 'Guides']
 
 // Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
 function deriveInvoicePrefix(name) {
@@ -47,6 +48,8 @@ export default function Settings() {
   const [regenerateMsgVnd, setRegenerateMsgVnd] = useState('')
   const [regeneratingSrc, setRegeneratingSrc] = useState(false)
   const [regenerateMsgSrc, setRegenerateMsgSrc] = useState('')
+  const [generatingPrd, setGeneratingPrd] = useState(false)
+  const [generateMsgPrd, setGenerateMsgPrd] = useState('')
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoMsg, setLogoMsg] = useState('')
   const [cats, setCats] = useState([])
@@ -218,6 +221,45 @@ export default function Settings() {
       setRegenerateMsgSrc(`Error: ${e.message}`)
     }
     setRegeneratingSrc(false)
+  }
+
+  // Fills in Product Codes for menu recipes that have none — the ones that predate auto-issuing.
+  //
+  // Unlike the three "Regenerate All" actions above, this ONLY fills blanks and never renumbers a
+  // code that already exists. That difference is deliberate: a Product Code is frequently the code
+  // a client already prints on their own menu or carried across from an old POS, so reassigning it
+  // would destroy the recognisability the field exists for. New recipes get their code
+  // automatically as they are written, in Recipe Costing.
+  async function generateMissingProductCodes() {
+    setGeneratingPrd(true)
+    setGenerateMsgPrd('')
+    try {
+      const { data: recipes, error: fetchErr } = await scopedFrom('recipes', 'id, name, category, recipe_code')
+      if (fetchErr) throw fetchErr
+
+      const pending = assignMissingProductCodes(recipes || [])
+      if (pending.length === 0) {
+        setGenerateMsgPrd('✓ Every menu recipe already has a Product Code — nothing to do.')
+        setGeneratingPrd(false)
+        return
+      }
+      if (!window.confirm(
+        `Assign a Product Code to ${pending.length} recipe${pending.length === 1 ? '' : 's'} that ` +
+        `currently have none?\n\nCodes come from each recipe's category (Beverage → BEV-001, ` +
+        `BEV-002, …). Recipes that already have a code are left untouched.`
+      )) { setGeneratingPrd(false); return }
+
+      let done = 0
+      for (const row of pending) {
+        const { error } = await scopedUpdate('recipes', { recipe_code: row.recipe_code }).eq('id', row.id)
+        if (error) throw error
+        done++
+      }
+      setGenerateMsgPrd(`✓ Assigned ${done} Product Code${done === 1 ? '' : 's'}. Existing codes were left as they were.`)
+    } catch (e) {
+      setGenerateMsgPrd(`Error: ${e.message}`)
+    }
+    setGeneratingPrd(false)
   }
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
@@ -530,6 +572,37 @@ export default function Settings() {
             {regenerateMsgSrc && (
               <p style={{ fontSize: 12, color: regenerateMsgSrc.startsWith('Error') ? 'var(--theme-red)' : 'var(--theme-green)', margin: '12px 0 0' }}>
                 {regenerateMsgSrc}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'Product Codes' && (
+        <div className="card">
+          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Product Codes</h3>
+          <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
+            Short codes for menu items, taken from the first three letters of the recipe's category —
+            Beverage becomes <strong>BEV-001</strong>, <strong>BEV-002</strong> and so on. New recipes
+            are given the next code automatically as you write them in Recipe Costing; staff can search
+            the code on the POS order screen, and it prints on the Item Wise sales report.
+          </p>
+
+          <div style={{ padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--theme-border)' }}>
+            <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Generate Missing Product Codes</h4>
+            <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px', lineHeight: 1.6 }}>
+              Gives a code to every menu item that does not have one yet — use this once for recipes
+              created before codes existed. <strong>Codes already in place are never changed</strong>,
+              so anything you carried across from your old menu stays exactly as it is. Sub-recipes are
+              skipped; they have their own {(form.sub_recipe_code_prefix || 'SRC').toUpperCase()} series
+              on the tab before this one.
+            </p>
+            <button className="btn btn-ghost" onClick={generateMissingProductCodes} disabled={generatingPrd}>
+              {generatingPrd ? 'Assigning…' : '＋ Generate Missing Product Codes'}
+            </button>
+            {generateMsgPrd && (
+              <p style={{ fontSize: 12, color: generateMsgPrd.startsWith('Error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)', margin: '12px 0 0' }}>
+                {generateMsgPrd}
               </p>
             )}
           </div>

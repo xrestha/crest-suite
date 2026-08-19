@@ -13,6 +13,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { suggestSeeds } from '../../../data/nutritionSeed'
 import { fetchUsdaNutrition } from '../../../utils/usdaNutrition'
 import { EMPTY_RECIPE, fmtNutrient, vatOf, calcSubRecipeCostPerUnit, calcRecipeCost, calcLiveCost, recipeHasIngredient, allocateOverhead } from './recipeCostCalc'
+import { productCodePrefix, nextProductCode, SUB_RECIPE_CATEGORY } from '../../../shared/productCode'
 import RecipeCostCardPrint from './RecipeCostCardPrint'
 import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
@@ -63,6 +64,9 @@ export default function Recipes() {
   // only) — "Back" pops one level instead of always returning to the list.
   const [detailStack, setDetailStack] = useState([])
   const [recipeForm, setRecipeForm] = useState(EMPTY_RECIPE)
+  // The last Product Code auto-issued for a new recipe. Comparing against it is how the auto-fill
+  // tells "still ours to update" from "the user typed their own" — see the effect below.
+  const autoCodeRef = useRef('')
   const [ingredients, setIngredients] = useState([{ _key: Date.now(), item_id: '', sub_recipe_id: '', qty_per_portion: '', type: 'item' }])
   const [saving, setSaving] = useState(false)
   const [fcPctSaved, setFcPctSaved] = useState(null) // null = new recipe; string = DB value
@@ -187,6 +191,7 @@ export default function Recipes() {
   // ── Form helpers ──────────────────────────────────────────────
   function openNew() {
     setSelectedRecipe(null)
+    autoCodeRef.current = ''   // a fresh form re-issues its own code
     setRecipeForm(EMPTY_RECIPE)
     setIngredients([{ _key: Date.now(), item_id: '', sub_recipe_id: '', qty_per_portion: '', type: 'item' }])
     setFcPctSaved(null)
@@ -197,6 +202,7 @@ export default function Recipes() {
 
   function openEdit(recipe) {
     setSelectedRecipe(recipe)
+    autoCodeRef.current = ''   // editing never auto-issues; don't let a stale value match
     const fcVal = recipe.target_fc_pct ? String(recipe.target_fc_pct) : '30'
     setRecipeForm({
       name: recipe.name,
@@ -411,6 +417,26 @@ export default function Recipes() {
 
   function dismissUsdaCandidates() { setUsdaCandidates([]) }
 
+  // Auto-issue a Product Code from the chosen category while a NEW recipe is being written, so
+  // the code is visible and editable before it is saved rather than appearing afterwards.
+  //
+  // Two rules keep it from being annoying: it only ever touches a field that is blank or that
+  // holds the code THIS effect last generated (so a code the user typed themselves — the whole
+  // point for a client migrating their old menu codes — is never overwritten), and it never runs
+  // while editing an existing recipe, whose code is already part of that client's data. Existing
+  // recipes with no code are filled from Settings → Product Codes instead.
+  useEffect(() => {
+    if (selectedRecipe) return                                  // editing: leave the stored code alone
+    if (recipeForm.category === SUB_RECIPE_CATEGORY) return      // owns the separate SRC series
+    const next = nextProductCode(productCodePrefix(recipeForm.category), recipes.map(r => r.recipe_code))
+    setRecipeForm(f => {
+      const current = String(f.recipe_code || '').trim()
+      if (current && current !== autoCodeRef.current) return f   // user typed their own — respect it
+      autoCodeRef.current = next
+      return { ...f, recipe_code: next }
+    })
+  }, [recipeForm.category, selectedRecipe, recipes])
+
   function getNextSubRecipeCode() {
     const SRC_PREFIX = (settings?.sub_recipe_code_prefix || 'SRC').toUpperCase()
     let maxNum = 0
@@ -510,7 +536,19 @@ export default function Recipes() {
         if (error) throw new Error(error.message)
         recipeId = data.id
       } else {
-        const { data, error } = await withTimeout(scopedInsert('recipes', payload, { single: true }), SAVE_TIMEOUT_MS, 'Save')
+        // Same shape as the sub-recipe branch above: an AUTO-issued code is computed from
+        // in-memory state, so a second tab (or a fast double-save) can genuinely take the number
+        // first. That is not the user's mistake and must not be reported as one — recompute and
+        // retry a few times, and only surface DUP_CODE_MSG for a code they typed themselves.
+        const wasAutoIssued = payload.recipe_code && payload.recipe_code === autoCodeRef.current
+        let data, error
+        for (let attempt = 0; attempt < 3; attempt++) {
+          ;({ data, error } = await withTimeout(scopedInsert('recipes', payload, { single: true }), SAVE_TIMEOUT_MS, 'Save'))
+          if (!error || error.code !== '23505' || !wasAutoIssued) break
+          const { data: fresh } = await scopedFrom('recipes', 'recipe_code')
+          payload.recipe_code = nextProductCode(
+            productCodePrefix(payload.category), (fresh || []).map(r => r.recipe_code))
+        }
         if (error) throw new Error(error.code === '23505' ? DUP_CODE_MSG : error.message)
         recipeId = data.id
       }
@@ -1100,7 +1138,7 @@ export default function Recipes() {
               ) : (
                 <>
                   <div className="form-field">
-                    <label htmlFor="recipe-fcode"><Tip text="Optional short code for this dish — carry over your old POS/menu code so reports stay recognisable, and staff can search it on the POS order screen. Must be unique; upper-cased on save." width={300}>Product Code</Tip></label>
+                    <label htmlFor="recipe-fcode"><Tip text="Issued automatically from the category — Beverage becomes BEV-001, BEV-002 and so on. Type over it to keep your own code (e.g. one carried across from your old menu) and it will be left alone. Staff can search this code on the POS order screen, and it prints on the Item Wise sales report. Must be unique; upper-cased on save." width={320}>Product Code</Tip></label>
                     <input id="recipe-fcode" value={recipeForm.recipe_code} onChange={e => setRecipeForm(f => ({ ...f, recipe_code: e.target.value }))} placeholder="e.g. MOM-03" style={{ fontFamily: 'monospace' }} />
                   </div>
                   <div className="form-field">
