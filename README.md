@@ -254,6 +254,22 @@ at the live Supabase project):
   purchases, so both periods report their whole consumption (NPR 105 / NPR 315) as Not attributed
   with NPR 0 traced — verified against the raw tables rather than assumed from the screen.
 - Checked on **Rosé Dawn**, the worst light preset: all text legible, drill-down panel included.
+**A third item on that list turned out not to be a report change at all.** `POS_TODO.md` still
+carried "Item Wise tab: add Product Code + UoM columns — `recipes.recipe_code`/`yield_uom` already
+exist, just not pulled into the report query." The columns exist; **the data does not, for exactly
+the rows Item Wise shows.** `recipe_code` has no editable input anywhere in the app — the only code
+field in `src/` is the `sub_recipe_code_prefix` *setting*, and the value is auto-generated as
+`SRC-nnn` for sub-recipes only; the Excel recipe import never sets it either. `yield_uom` is
+editable only inside the recipe form's `isSubRecipeForm` branch, so a menu item keeps
+`EMPTY_RECIPE`'s `'portion'` default forever. Item Wise lists menu items sold and never
+sub-recipes, so both columns would be empty on every row.
+
+Measured on the live book rather than left as an inference from the write paths: **136 menu
+recipes, 0 with a code, 1 distinct `yield_uom`.** The item is really two — make Product Code a real
+field on menu recipes (master data, plausibly auto-numbered the way sub-recipes already are), and
+only then is the report column the one-hour job the note promised. Re-scoped in `POS_TODO.md`
+rather than built, since what the code is *for* (recognisability for a client migrating off the
+competitor, or staff lookup) decides how the first half is designed.
 **Files:** `src/utils/posBillingMath.js` (+`.test.js`), `src/modules/pos/reports/SalesReport.jsx`,
 `src/modules/ims/reports/{SupplierContribution.js, supplierAttribution.js, supplierAttribution.test.js}` (new),
 `src/{App.js, components/Layout.js, context/AuthContext.js, context/SettingsContext.js, pages/Help.js,
