@@ -1847,6 +1847,12 @@ textarea:focus-visible {
 
 @media print {
   .print-only { display: block !important; }
+  /* A fill-in-by-hand box: the input's border prints, its value AND placeholder do not
+     (Chrome prints placeholder text as if it were a value). Menu Pricing's New Price boxes
+     use this so a printed sheet can be handed over and priced with a pen — same idea as
+     Reorder Report's Print Par Sheet blank column. */
+  .print-blank-input { color: transparent !important; }
+  .print-blank-input::placeholder { color: transparent !important; }
   .sidebar-wrap { display: none !important; }
   .main-content { margin-left: 0 !important; padding: 0 !important; }
   .btn, button { display: none !important; }

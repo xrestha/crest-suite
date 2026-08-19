@@ -593,6 +593,7 @@ export default function MenuPricing() {
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <input
+                        className="print-blank-input"
                         type="number" min="0" step="any"
                         value={draft !== undefined ? draft : ''}
                         placeholder={r.inclVat > 0 ? r.inclVat.toFixed(0) : '0'}
