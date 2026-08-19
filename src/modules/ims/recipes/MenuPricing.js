@@ -475,6 +475,28 @@ export default function MenuPricing() {
     setRefreshing(false)
   }
 
+  // Exports the table as filtered on screen — the active category tab, same convention as the
+  // Print button. The New Price column is exported BLANK on purpose: this sheet's job is the
+  // same as the printed one's (send it out, get prices back), just over email instead of paper.
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
+    const rows = display.map((r, i) => ({
+      '#': i + 1,
+      'On POS': r.pos_enabled ? 'Yes' : 'No',
+      'Item': r.name,
+      'Category': r.category || '',
+      'VAT': r.vat > 0 ? '13%' : 'No VAT',
+      'Food Cost (NPR)': r.cost > 0 ? Math.round(r.cost * 100) / 100 : '',
+      'Current Price incl VAT (NPR)': r.inclVat > 0 ? Math.round(r.inclVat) : '',
+      'FC %': r.exVat > 0 ? `${r.fcPct.toFixed(1)}%` : '',
+      'New Price (incl VAT)': '',
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Menu Pricing')
+    XLSX.writeFile(wb, `menu-pricing${catTab !== 'All' ? '-' + catTab.toLowerCase() : ''}.xlsx`)
+  }
+
   /* ── IMS view (full food-cost table) ─────────────────────────────────────── */
   return (
     <div className="page-container">
@@ -491,6 +513,11 @@ export default function MenuPricing() {
           <Tip text="Prints the price list exactly as filtered on screen — the current category tab, with current prices and FC%." width={280}>
             <button className="btn btn-ghost" onClick={() => printWithTitle(`Menu Pricing${catTab !== 'All' ? ' - ' + catTab : ''}`)}>
               🖨 Print
+            </button>
+          </Tip>
+          <Tip text="Downloads the list as filtered on screen, with a blank New Price column to fill in and send back." width={280}>
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || display.length === 0}>
+              ⬇ Excel
             </button>
           </Tip>
           <button className="btn btn-ghost" onClick={refreshCosts} disabled={refreshing}>
