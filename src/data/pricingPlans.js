@@ -149,7 +149,7 @@ export const SUITE_ADDON = {
     'Multi-Outlet Group Console — every branch on one screen',
     'Demand Forecast (7/30-Day Covers & Revenue Prediction)',
     'Fixed Assets — depreciation, valuation & Nepal statutory tax pools',
-    'Consolidated P&L — the full statement, revenue to net profit',
+    'Consolidated P&L — the full statement, revenue to net profit, per outlet and consolidated',
   ],
 }
 

@@ -143,8 +143,8 @@ them (changed S548). It was three tiers priced at ~20% off the sum of all three 
 Suite Pro added nothing over Suite Growth on its own axis. `suite_plan` is now `NULL | 'pro'`.
 
 It carries seven features: Owner Dashboard, Monthly Owner/Manager Report, Multi-Outlet Group
-Console, Demand Forecast, Fixed Assets — plus Consolidated P&L and scheduled report delivery on
-the roadmap. Sold **per outlet**, including inside a group: the Group Console rolls up exactly
+Console, Demand Forecast, Fixed Assets, Consolidated P&L (`/pnl`, S581 — per outlet and
+consolidated) — plus scheduled report delivery, the one still on the roadmap. Sold **per outlet**, including inside a group: the Group Console rolls up exactly
 those outlets whose `suite_plan = 'pro'` and names the ones it excluded.
 
 Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
@@ -158,6 +158,82 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S581 — 2026-08-19 — Consolidated P&L: the sixth Suite feature ships, in two phases
+
+Crest Suite Pro's advertised list carried two features that did not exist — Consolidated P&L and
+scheduled report delivery, both "on the roadmap" since the section was written. This closes the
+first: `/pnl`, a formal statement — Revenue → Cost of Goods Sold → **Gross Profit** → Wastage →
+Staff Meals → Labour → Overheads → Tax & Fees → **Net Profit**, each line with its share of
+revenue — for any one BS month. "Consolidated" lands in both senses: phase 1 consolidates the
+**modules** into one statement; phase 2 consolidates the **outlets** — a grouped owner gets one
+column per Suite Pro outlet plus a consolidated total from a new `get_group_pnl()` RPC.
+
+**The page computes nothing of its own — every line reuses its figure's canonical source**, which
+is the entire design: Owner Dashboard is a live MTD *estimate* and the Monthly Owner Report a
+*frozen snapshot*; neither is a statement, and a statement that invented its own arithmetic would
+be a fourth definition of figures S551 spent a session consolidating.
+
+- **Revenue and COGS are byte-for-byte Monthly Summary's rules** — price-at-sale with
+  current-price fallback net of per-row discounts, comps excluded; `computeUsed()` valued at
+  `per_uom_rate` over active non-sub-recipe items. Verified live on Shrawan 2083: both pages show
+  revenue 3,900 / COGS 4,200 / 107.7%, to the rupee.
+- **`computeUsed()` subtracts wastage and staff meals, so the statement shows them as their own
+  expense lines** — Opening + Net Purchases − Closing = COGS + Wastage + Staff Meals, nothing
+  double-counted, spoiled stock and staff feeding visible instead of hiding inside food cost.
+- **Labour is finalized payroll (gross + employer SSF, `get_group_summary`'s definition) or the
+  Overheads `labor` bucket — never both.** The two labour sources are never meant to be summed
+  (the S526 double-count), so the rule applies per outlet before consolidating, and when both
+  exist the ignored figure is named on screen with its amount rather than silently dropped.
+  `labour_payroll` comes back NULL (not 0) from the RPC precisely so "ran payroll at zero" and
+  "no run" stay distinguishable.
+- **Defaults to the most recent CLOSED period** — COGS subtracts a closing count an open period
+  does not have (the Variance/Shrinkage rule). An open period renders flagged provisional; a
+  period closed without a count carries its own warning, which fired correctly on the live test
+  data (Shrawan 2083 was closed with no count — Monthly Summary confirms Closing NPR 0).
+
+**`get_group_pnl()` (migration `20260819170000`) follows `get_group_summary`'s contract clause
+for clause**: SECURITY DEFINER with its own `my_group_id()` check, `suite_plan = 'pro'` filtered
+server-side with excluded outlets returned by name, aligned on `(bs_year, bs_month)` never
+`period_id`, and **returns raw component aggregates only** — the page applies `computeUsed()`, so
+the COGS formula stays where it lives. Its revenue SQL uses `source <> 'pos_comp'` deliberately:
+that reproduces PostgREST `.neq` semantics (NULL-source legacy rows excluded) so the figure is
+byte-compatible with Monthly Summary — worth noting that this means all three surfaces exclude
+pre-column NULL-source rows from revenue, a shipped convention this work matches rather than
+relitigates. Grants follow the S532 rule: revoke from PUBLIC (a new signature carries a fresh
+implicit PUBLIC grant), then grant `authenticated` + `service_role` explicitly.
+
+The statement's lines are defined ONCE (`LINES` in `ConsolidatedPnl.jsx`) and drive the
+single-outlet table, the group matrix and the Excel export — labels and tooltips cannot drift
+between renderings. A failed RPC renders as an error, never as the no-Suite-Pro empty state —
+"nothing to show" and "could not load" are different facts and only one should send someone
+to billing.
+
+**Caught live in the first smoke test:** with effect deps `[clientId]` alone, a hard load lands
+while auth is still resolving, the guard fails once and never re-fires — the page sits on
+Loading… forever. `authLoading` is a real dependency. (`StockMovements.js` and its siblings share
+this shape and survive only because in-app navigation reaches them after auth resolves — noted,
+not swept.)
+
+Registration: `consolidated_pnl` in `SUITE_KEYS` (deliberately NOT a tier set — `hasFeature()`
+would then be true for every IMS Pro client and SuiteGate's `tierOk || overridden` would give the
+SKU away), `DEFAULT_FLAGS`, FeatureAccessModal's Suite band, lazy route `/pnl` with no route-level
+gates (SuiteGate upsells in place, so the nav entry — owner dashboard row, `Scale` icon — carries
+no featureKey/minPlan), Help entry, pricing feature list (moved from "roadmap" to shipped), SW
+v98 → v99.
+
+**Verified:** single-outlet statement live on BHATTI CHOILA (dark + Rosé Dawn, ties to Monthly
+Summary), build clean, 238 tests pass. **Pending:** migration `20260819170000` (the RPC — the
+group view errors gracefully until it runs; the `consolidated_pnl` flag migration `20260819160000`
+is already applied and Feature Access Save confirmed at 204), and a live pass on the group matrix,
+which needs an owner login of a real outlet group — admin cannot exercise it, since
+`my_group_id()` reads the caller's own profile row. Scheduled report delivery remains the one
+advertised-but-unbuilt Suite feature.
+
+**Files:** `src/pages/dashboard/ConsolidatedPnl.jsx` (new), `supabase/migrations/
+{20260819160000_feature_flags_consolidated_pnl.sql, 20260819170000_get_group_pnl.sql}` (new),
+`src/{App.js, components/Layout.js, context/AuthContext.js, context/SettingsContext.js,
+pages/Help.js, pages/adminClients/FeatureAccessModal.js, data/pricingPlans.js}`,
+`public/service-worker.js` (v98 → v99), `CLAUDE.md`, `README.md`
 ### S580 — 2026-08-19 — The last two competitor reports, and why neither could be built as asked
 
 `POS_TODO.md` section C had exactly two reports left, and both had sat there since the 2026-07-04
