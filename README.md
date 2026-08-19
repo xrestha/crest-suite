@@ -218,10 +218,22 @@ one legitimate path and comp would stop working), that the signature and grants 
 deployed body actually contains the rank check and the derived attribution (read back with
 `pg_get_functiondef`, not assumed), and that both authorisation conditions are COALESCE-wrapped.
 
-**PENDING MANUAL STEP:** apply `20260819140000_pos_item_comp_server_guard.sql` in the Supabase SQL
-Editor, then run `scripts/verify_s579.sql`. No Edge Function deploy needed this time, and no
-ordering constraint — the frontend is unaffected either way, since it already routes every comp
-through the RPC and sends the now-ignored parameter harmlessly.
+**Applied and verified the same session — 6/6 structural checks PASS, then smoke-tested live** on
+the BHATTI CHOILA dummy client from a real POS PIN session (`tulki`), driving requests straight at
+PostgREST with the till's own token so the UI is bypassed entirely:
+
+| Attempt | Result |
+| --- | --- |
+| `PATCH pos_order_items {comped:true}` | **403** — refused |
+| Same, dressed with a forged `comp_no`, `comp_reason`, `comped_by`, `comped_at` | **403** — refused |
+| `POST` a new line that arrives already comped | **403** — refused |
+| `PATCH {notes:'extra spicy'}` on the same row | **200** — ordinary edits unaffected, so the guard is scoped rather than a blanket lock |
+| RPC with `p_comped_by` set to a **colleague's real uuid** | **200**, and the stored `comped_by` is the *caller's* id — the forged attribution is discarded |
+| Same RPC after demoting the account to Staff | **403** — *"complimentary items require Supervisor access or above"* |
+
+The fifth row is the one worth keeping: before this, that call would have recorded the comp against
+the colleague named in the parameter. The account was restored to Supervisor / 10% cap / Allow Void
+off afterwards, and the test order was voided and its table freed.
 
 **Files:** `supabase/migrations/20260819140000_pos_item_comp_server_guard.sql (new)`,
 `scripts/verify_s579.sql (new)`, `src/modules/pos/orders/PosOrders.jsx` (comment only — the call
