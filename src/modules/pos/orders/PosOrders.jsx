@@ -795,7 +795,7 @@ export default function PosOrders() {
     }
 
     const [{ data }, { data: suggData }] = await Promise.all([
-      scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, me_class')
+      scopedFrom('recipes', 'id, name, category, recipe_code, selling_price, vat_rate, me_class')
         .eq('is_active', true)
         .eq('pos_enabled', true)
         .neq('category', 'Sub-Recipe')
@@ -1843,8 +1843,10 @@ export default function PosOrders() {
   const sections  = ['All', ...Array.from(new Set(tables.map(t => t.section).filter(Boolean)))]
   const visTables = secFilter === 'All' ? tables : tables.filter(t => t.section === secFilter)
   const menuCats  = ['All', ...Array.from(new Set(menu.map(r => r.category))).sort()]
+  const menuQuery = menuSearch.trim().toLowerCase()
   const visMenu   = (catTab === 'All' ? menu : menu.filter(r => r.category === catTab))
-    .filter(r => r.name.toLowerCase().includes(menuSearch.trim().toLowerCase()))
+    // Match on name OR Product Code so staff can ring an item by its code (e.g. "MOM-03").
+    .filter(r => r.name.toLowerCase().includes(menuQuery) || (r.recipe_code || '').toLowerCase().includes(menuQuery))
 
   /* ══════════════════════════════════════════ ORDER SCREEN */
 
@@ -1966,7 +1968,7 @@ export default function PosOrders() {
             </div>
             <input
               type="text"
-              placeholder="🔍 Search menu…"
+              placeholder="🔍 Search name or code…"
               value={menuSearch}
               onChange={e => setMenuSearch(e.target.value)}
               style={{

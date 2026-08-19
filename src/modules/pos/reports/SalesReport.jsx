@@ -59,15 +59,19 @@ export default function SalesReport() {
   // the letterhead fetch (once per client) rather than the date-range one, and needs no paging —
   // no client's menu comes close to PostgREST's 1000-row cap.
   const [vegById, setVegById] = useState({})
+  // recipe_code → shown as the Product Code column on the Item Wise tab. Rides the same once-per-
+  // client master-data fetch as is_veg.
+  const [codeById, setCodeById] = useState({})
   useEffect(() => {
     if (!clientId) return
     Promise.all([
       supabase.from('clients').select('name').eq('id', clientId).single(),
       supabase.from('settings').select('vat_number, property_address').eq('client_id', clientId).maybeSingle(),
-      scopedFrom('recipes', 'id, is_veg'),
+      scopedFrom('recipes', 'id, is_veg, recipe_code'),
     ]).then(([{ data: client }, { data: settings }, { data: recipeRows }]) => {
       setBizInfo({ name: client?.name || '', vat: settings?.vat_number || '', address: settings?.property_address || '' })
       setVegById(Object.fromEntries((recipeRows || []).map(r => [r.id, r.is_veg])))
+      setCodeById(Object.fromEntries((recipeRows || []).map(r => [r.id, r.recipe_code])))
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId])
@@ -570,7 +574,7 @@ export default function SalesReport() {
       XLSX.writeFile(wb, `product-type-sales-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'item') {
       const ws = withLetterhead(XLSX, 'Sales Report - Item Wise', dateRangeLine, itemRows.map(i => ({
-        'Item': i.name, 'Qty Sales': i.qtySales, 'Qty Return': i.qtyReturn, 'Qty Net': i.qtySales - i.qtyReturn,
+        'Product Code': codeById[i.key] || '', 'Item': i.name, 'Qty Sales': i.qtySales, 'Qty Return': i.qtyReturn, 'Qty Net': i.qtySales - i.qtyReturn,
         'Gross (NPR)': Math.round(i.gross * 100) / 100, 'Discount (NPR)': Math.round(i.discount * 100) / 100,
         'Non-Taxable (NPR)': Math.round(i.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(i.taxable * 100) / 100,
         'VAT (NPR)': Math.round(i.vat * 100) / 100, 'Net (NPR)': Math.round(itemNetOf(i) * 100) / 100,
@@ -1105,7 +1109,7 @@ export default function SalesReport() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Item</th>
+                <th>Code</th><th>Item</th>
                 <th style={{ textAlign: 'right' }}>Qty Sales</th><th style={{ textAlign: 'right' }}>Qty Return</th><th style={{ textAlign: 'right' }}>Qty Net</th>
                 <th style={{ textAlign: 'right' }}>Gross</th><th style={{ textAlign: 'right' }}>Discount</th>
                 <th style={{ textAlign: 'right' }}>Non-Taxable</th><th style={{ textAlign: 'right' }}>Taxable</th>
@@ -1115,6 +1119,7 @@ export default function SalesReport() {
             <tbody>
               {itemRows.map(i => (
                 <tr key={i.key}>
+                  <td style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--theme-text2)' }}>{codeById[i.key] || '—'}</td>
                   <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{i.name}</td>
                   <td style={{ textAlign: 'right' }}>{i.qtySales}</td>
                   <td style={{ textAlign: 'right' }}>{i.qtyReturn}</td>
@@ -1130,6 +1135,7 @@ export default function SalesReport() {
             </tbody>
             <tfoot>
               <tr style={{ fontWeight: 700 }}>
+                <td></td>
                 <td>TOTAL</td>
                 <td style={{ textAlign: 'right' }}>{itemTotals.qtySales}</td>
                 <td style={{ textAlign: 'right' }}>{itemTotals.qtyReturn}</td>

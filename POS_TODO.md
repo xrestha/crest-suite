@@ -80,17 +80,20 @@ by design, so an admin session proves nothing about them.
   supplied it this period, in proportion to net spend with each. Net spend means exactly what
   Vendor Report means by it, so the two pages can never disagree. Items nothing can be attributed
   to get a named **Not attributed** row rather than being dropped (S567).
-- [ ] 🟡 Item Wise tab: add Product Code + UoM columns (found via competitor screenshot comparison,
-  2026-07-04 — `recipes.recipe_code`/`yield_uom` already exist, just not pulled into the report
-  query; no migration needed). **Re-checked S580 and the note above is misleading: the COLUMNS
-  exist, the DATA does not.** `recipe_code` has no editable input anywhere in the app (only the
-  auto-generated `SRC-nnn` for sub-recipes), and `yield_uom` is only editable inside the recipe
-  form's `isSubRecipeForm` branch — so for menu items, the only rows Item Wise shows, one is NULL
-  and the other is the `'portion'` default. Building it as written adds a column of '—' and a
-  column of 'portion'. **Measured on the live book the same day: 136 menu recipes, 0 with a code,
-  1 distinct yield_uom.** Real scope is two items: make Product Code a real field on menu recipes
-  (master data), THEN the report column is the one-hour job. Worth confirming what the code is for
-  first — recognisability for a migrating client, or staff lookup — since that decides the first half.
+- [x] ~~Item Wise tab: add Product Code column~~ — **shipped S590 (2026-08-19).** The 2026-07-04
+  note was misleading: the `recipes.recipe_code` COLUMN existed but the DATA didn't — no editable
+  input for menu items (only the auto-generated `SRC-nnn` for sub-recipes), so building the column
+  as first scoped would have added a column of '—'. Decision confirmed with the user: Product Code
+  is for BOTH recognisability (carry a migrating client's old menu code) AND staff quick-lookup on
+  the POS order screen. Shipped all of it: an editable **Product Code** field on the menu-item
+  recipe form (uppercased on save, sub-recipes keep their SRC code untouched); the **Item Wise**
+  report gains a Code column + Excel column; the POS **order-screen search matches name OR code**
+  (`MOM-03` jumps to the dish); uniqueness is DB-enforced by the pre-existing partial per-client
+  unique index `recipes_client_recipe_code_key` (verified live: menu recipe accepts a code, a
+  duplicate → 23505, surfaced as a friendly "Product Code already used" message). No migration —
+  the column and index already existed. **UoM column deliberately NOT added** — `yield_uom` is
+  `'portion'` for effectively every menu item (1 distinct value across 136 recipes measured S580),
+  so a column of 'portion' is noise; it stays a sub-recipe-only field.
 - [x] ~~Printed letterhead baked into Excel exports~~ — shipped S238, 2026-07-04. All 7 `/pos/sales-report` tabs now export Company Name/VAT No./Address + `@As On Dated : ... To : ...` date-range line (or `@Fiscal Year :` for 1L+ Report) above the data, matching the statutory-report look of competitor exports.
 - [x] ~~KOT Log: Bill Trail tab~~ — shipped S239, 2026-07-04 (not originally on this list — requested after seeing Reconciliation only surfaces exceptions). 3rd tab in `/pos/kot-log`: every paid/voided bill, expandable to its full KOT/BOT send history, with an amber "No KOT" badge for bills that never sent anything to the kitchen. No migration needed.
 - [x] ~~Payment Summary Report~~ — shipped S245, 2026-07-05 (not originally on this list). One of 8 tabs in `/pos/sales-report`: payment-method breakdown (Cash/Card/eSewa/Khalti/FonePay/Credit) over a BS date range.

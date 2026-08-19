@@ -158,6 +158,25 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S590 — 2026-08-19 — Menu-item Product Code: reports + POS quick-lookup
+
+Closes the long-open "Item Wise: Product Code column" item, but as its real scope (the column
+existed, the *data* didn't). Confirmed with the user that the code is for BOTH recognisability
+(carry a migrating client's old menu code) AND staff quick-lookup on the till, and shipped all of
+it: an editable **Product Code** field on the menu-item recipe form (uppercased on save, optional;
+sub-recipes keep their auto-generated `SRC-nnn`); the **Item Wise** sales report gains a Code
+column + Excel column; the POS **order-screen search matches name OR code** (`MOM-03` jumps to the
+dish). Uniqueness was already DB-enforced by the pre-existing partial per-client unique index
+`recipes_client_recipe_code_key` — so no migration; a duplicate raises 23505, surfaced as a
+friendly "Product Code already used" message. Verified live on the dummy client: menu recipe
+accepts a code, duplicate rejected, reverted. **UoM column deliberately skipped** — `yield_uom` is
+`'portion'` for effectively every menu item (1 distinct value across 136 recipes), so it'd be a
+column of noise.
+
+**Files:** `src/modules/ims/recipes/Recipes.js`, `.../recipeCostCalc.js`,
+`src/modules/pos/reports/SalesReport.jsx`, `src/modules/pos/orders/PosOrders.jsx`, `POS_TODO.md`,
+`public/service-worker.js` (v109 → v110), `README.md`
+
 ### S589 — 2026-08-19 — Schema-drift test for feature_flags (guards the S547 class)
 
 A Jest test that makes the S547 failure impossible to ship again: FeatureAccessModal's Save

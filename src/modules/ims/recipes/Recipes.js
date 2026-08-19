@@ -201,6 +201,7 @@ export default function Recipes() {
     setRecipeForm({
       name: recipe.name,
       category: recipe.category || 'Food',
+      recipe_code: recipe.recipe_code || '',
       selling_price: recipe.selling_price || '',
       vat_rate: (recipe.vat_rate === null || recipe.vat_rate === undefined) ? '0.13' : String(recipe.vat_rate),
       yield_qty: recipe.yield_qty || '1',
@@ -477,10 +478,23 @@ export default function Recipes() {
         is_veg: recipeForm.is_veg === 'veg' ? true : recipeForm.is_veg === 'non_veg' ? false : null
       }
 
+      // Menu items now carry a free-text Product Code (recognisability for a migrating client +
+      // staff lookup on the POS order screen). Uppercased so BEV-01 and bev-01 can't become two
+      // codes under the per-client unique index (recipes_client_recipe_code_key, partial WHERE
+      // recipe_code IS NOT NULL). Sub-recipes keep their auto-generated SRC-nnn code, set in the
+      // insert branch below — so recipe_code is deliberately NOT added to the payload for them.
+      if (!isSubRecipe) {
+        payload.recipe_code = recipeForm.recipe_code?.trim().toUpperCase() || null
+      }
+
+      // A 23505 on this table is the per-client recipe_code unique index — the only unique
+      // constraint a menu item's payload can violate. Name it so the operator fixes the code,
+      // rather than surfacing a raw Postgres constraint string.
+      const DUP_CODE_MSG = 'That Product Code is already used by another item on this menu. Codes must be unique.'
       let recipeId
       if (selectedRecipe) {
         const { error } = await withTimeout(scopedUpdate('recipes', payload).eq('id', selectedRecipe.id), SAVE_TIMEOUT_MS, 'Save')
-        if (error) throw new Error(error.message)
+        if (error) throw new Error(error.code === '23505' ? DUP_CODE_MSG : error.message)
         recipeId = selectedRecipe.id
       } else if (isSubRecipe) {
         // getNextSubRecipeCode() computes from in-memory state, not a DB sequence — a genuine
@@ -497,7 +511,7 @@ export default function Recipes() {
         recipeId = data.id
       } else {
         const { data, error } = await withTimeout(scopedInsert('recipes', payload, { single: true }), SAVE_TIMEOUT_MS, 'Save')
-        if (error) throw new Error(error.message)
+        if (error) throw new Error(error.code === '23505' ? DUP_CODE_MSG : error.message)
         recipeId = data.id
       }
 
@@ -1085,6 +1099,10 @@ export default function Recipes() {
                 </>
               ) : (
                 <>
+                  <div className="form-field">
+                    <label htmlFor="recipe-fcode"><Tip text="Optional short code for this dish — carry over your old POS/menu code so reports stay recognisable, and staff can search it on the POS order screen. Must be unique; upper-cased on save." width={300}>Product Code</Tip></label>
+                    <input id="recipe-fcode" value={recipeForm.recipe_code} onChange={e => setRecipeForm(f => ({ ...f, recipe_code: e.target.value }))} placeholder="e.g. MOM-03" style={{ fontFamily: 'monospace' }} />
+                  </div>
                   <div className="form-field">
                     <label htmlFor="recipe-f9"><Tip text="Enter the menu price. The system strips VAT and stores the ex-VAT price for accurate food cost calculation." width={280}>Menu Price (NPR{liveVat > 0 ? `, incl. ${(liveVat * 100).toFixed(0)}% VAT` : ', no VAT'})</Tip></label>
                     <div style={{ position: 'relative' }}>
