@@ -102,7 +102,11 @@ export default function SupplierPriceTracker() {
         rate: parseFloat(pe.rate) * cf,
         perUomRate: parseFloat(pe.rate),
         qty: parseFloat(pe.qty),
-        bs_day: pe.bs_day || 1,
+        // Keep null distinct from a real Day 1: the bill form has always required a day, so null
+        // only exists on legacy rows — and coercing it to 1 forced the display to hide "Day 1",
+        // which also hid every GENUINE day-1 purchase (reported live: Bhadra's opening-day bills
+        // showed no day while Shrawan's mid-month ones did).
+        bs_day: pe.bs_day ?? null,
         period_label: `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
         sort_key: period.bs_year * 100 + period.bs_month,
         vendor_id: pe.vendor_id,
@@ -112,7 +116,7 @@ export default function SupplierPriceTracker() {
       byItem[key].push(entry)
     })
     Object.keys(byItem).forEach(k => {
-      byItem[k].sort((a, b) => a.sort_key - b.sort_key || a.bs_day - b.bs_day)
+      byItem[k].sort((a, b) => a.sort_key - b.sort_key || (a.bs_day || 1) - (b.bs_day || 1))
     })
     return byItem
   }
@@ -208,7 +212,7 @@ export default function SupplierPriceTracker() {
           'Item': item?.name || key,
           'UOM': item?.uom || '',
           'Period': entry.period_label,
-          'Day': entry.bs_day,
+          'Day': entry.bs_day ?? '',
           'Rate (per pack)': entry.rate,
           'Rate (per UOM)': entry.perUomRate?.toFixed(4),
           'Qty': entry.qty
@@ -484,7 +488,7 @@ export default function SupplierPriceTracker() {
                           {selectedVendorId === 'all' && <td></td>}
                           <td colSpan={3} style={{ paddingLeft: 32, fontSize: 12, color: 'var(--theme-text3)' }}>
                             {entry.period_label}
-                            {entry.bs_day > 1 && <span style={{ marginLeft: 6, color: 'var(--theme-text3)' }}>Day {entry.bs_day}</span>}
+                            {entry.bs_day != null && <span style={{ marginLeft: 6, color: 'var(--theme-text3)' }}>Day {entry.bs_day}</span>}
                           </td>
                           <td colSpan={2}></td>
                           <td className="no-print"></td>

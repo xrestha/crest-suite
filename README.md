@@ -158,6 +158,20 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S586 — 2026-08-19 — Price Tracker: a Day-1 purchase showed no day
+
+Reported live off the new month view: Bhadra's expanded history rows had no day label while
+Shrawan's did. The Bhadra bills were genuine **Day 1** purchases (the month had just started),
+and the expanded row rendered the day only when `bs_day > 1` — a condition meant to hide the fake
+"Day 1" that legacy bills (saved before the day column existed) acquired via a `pe.bs_day || 1`
+coercion. The fix separates the two cases: null stays null (the bill form has always required a
+real day, so null only ever means legacy), the row prints `Day N` for every entry that has one —
+Day 1 included — and stays blank only when the day was genuinely never recorded. Excel's Day
+column follows the same rule; the within-month sort treats unknown days as day 1.
+
+**Files:** `src/modules/ims/purchases/SupplierPriceTracker.js`,
+`public/service-worker.js` (v106 → v107), `README.md`
+
 ### S585 — 2026-08-19 — Price Tracker gets a month selector
 
 A Month filter on `/supplier-prices`, defaulting to **All Months** so the page's original
