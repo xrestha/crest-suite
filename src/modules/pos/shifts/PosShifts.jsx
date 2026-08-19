@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import { scopedFrom as scopedFromRaw } from '../../../shared/scopedDb'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import ConfirmModal from '../../../components/ConfirmModal'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
@@ -334,6 +335,10 @@ export default function PosShifts() {
   const [label, setLabel] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  // A material drawer discrepancy pending explicit confirmation: { freshReport, closing_cash,
+  // expected, diff } — set by submitClose, committed by commitClose. Held as state (not a
+  // window.confirm) so the ask renders in the product's own dialog, on top of the close modal.
+  const [confirmShort, setConfirmShort] = useState(null)
 
   const [staffNames, setStaffNames] = useState({})
   const [history, setHistory] = useState([])
@@ -512,22 +517,25 @@ export default function PosShifts() {
     // this shift's figures. This is the snapshot that gets frozen and signed.
     const freshReport = await loadShiftReport(clientId, openShift.id)
     const closing_cash = sumDenoms(denomCounts)
-    const closedAt = new Date()
     const expected = expectedCashOf(openShift, freshReport)
 
     // A material discrepancy gets an explicit confirmation naming the amount. Closing NPR 5,000
     // short should not be the same single tap as closing balanced — and the recount has to be
-    // offered while the drawer is still open, not after the slip prints.
+    // offered while the drawer is still open, not after the slip prints. The ask is the
+    // ConfirmModal below; commitClose is the write it guards.
     const diff = closing_cash - expected
     if (Math.abs(diff) >= 100) {
-      const ok = window.confirm(
-        `The drawer is ${diff > 0 ? 'OVER' : 'SHORT'} by ${fmtNpr(Math.abs(diff))}.\n\n` +
-        `Expected ${fmtNpr(expected)} · Counted ${fmtNpr(closing_cash)}\n\n` +
-        'Recount before closing if that looks wrong — this figure is printed on the Z-report and kept as the shift record.\n\n' +
-        `Close the shift ${diff > 0 ? 'over' : 'short'} by ${fmtNpr(Math.abs(diff))}?`
-      )
-      if (!ok) { setSaving(false); return }
+      setSaving(false)
+      setConfirmShort({ freshReport, closing_cash, expected, diff })
+      return
     }
+    await commitClose(freshReport, closing_cash, expected)
+  }
+
+  async function commitClose(freshReport, closing_cash, expected) {
+    setSaving(true)
+    setConfirmShort(null)
+    const closedAt = new Date()
     // .eq('status', 'open') + .select() together detect a double-close: the DB's only relevant
     // constraint (pos_shifts_one_open_per_client) guards concurrent opens, not closes, so without
     // this a second supervisor closing the same shift on another terminal would silently overwrite
@@ -813,6 +821,27 @@ export default function PosShifts() {
                 {saving ? 'Saving…' : modal === 'open' ? 'Open Shift' : 'Close Shift'}
               </button>
             </div>
+
+            {/* Rendered INSIDE this overlay's stacking context (zIndex 1100) so it stacks above
+                the close modal — a sibling Modal (zIndex 100) would render underneath it. */}
+            {confirmShort && (
+              <ConfirmModal
+                title={`Drawer is ${confirmShort.diff > 0 ? 'over' : 'short'} by ${fmtNpr(Math.abs(confirmShort.diff))}`}
+                confirmLabel={`Close shift ${confirmShort.diff > 0 ? 'over' : 'short'} by ${fmtNpr(Math.abs(confirmShort.diff))}`}
+                danger
+                busy={saving} busyLabel="Closing…"
+                onConfirm={() => commitClose(confirmShort.freshReport, confirmShort.closing_cash, confirmShort.expected)}
+                onCancel={() => setConfirmShort(null)}
+              >
+                <p style={{ margin: '0 0 10px' }}>
+                  Expected <strong>{fmtNpr(confirmShort.expected)}</strong> · Counted <strong>{fmtNpr(confirmShort.closing_cash)}</strong>
+                </p>
+                <p style={{ margin: 0 }}>
+                  Recount before closing if that looks wrong — the drawer is still open. This figure
+                  is printed on the Z-report and kept as the shift record.
+                </p>
+              </ConfirmModal>
+            )}
           </div>
         </div>
       )}

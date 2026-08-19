@@ -15,6 +15,7 @@ import { ArrowDown, ArrowUp, Percent, Receipt, Target, Lock, TriangleAlert, Cloc
 import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
+import ConfirmModal from '../../components/ConfirmModal'
 import { getBsToday, BS_MONTHS, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
@@ -197,6 +198,7 @@ export default function ClientDashboard() {
   const loadIdRef = useRef(0)
   const [advancingPeriod, setAdvancingPeriod] = useState(false)
   const [periodCloseError, setPeriodCloseError] = useState('')
+  const [confirmPeriodClose, setConfirmPeriodClose] = useState(false)
   // Every load function used to destructure only { data } from each Supabase call and silently
   // discard { error } — a failed query either zeroed out a KPI (indistinguishable from "this
   // client genuinely has none") or, for the period fetch specifically, showed the misleading
@@ -737,13 +739,13 @@ export default function ClientDashboard() {
     setAndCache(setPosStats, 'posStats', { kitchen: true, station: kdsStation, openNow, lateCount, readyWaiting, avgPrepMin, completedToday })
   }
 
+  // The commit half of period close — the ConfirmModal below (rendered next to the button) is
+  // the ask, with the consequences spelled out; window.confirm's OS chrome used to carry this
+  // sentence and stated none of them (S575).
   async function closeAndAdvancePeriod() {
     if (!activePeriod || !effectiveClientId || advancingPeriod) return
     const nextMonth = activePeriod.bs_month === 12 ? 1 : activePeriod.bs_month + 1
     const nextYear  = activePeriod.bs_month === 12 ? activePeriod.bs_year + 1 : activePeriod.bs_year
-    if (!window.confirm(
-      `Close ${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year} and open ${BS_MONTHS[nextMonth - 1]} ${nextYear}?`
-    )) return
     setAdvancingPeriod(true)
     setPeriodCloseError('')
     try {
@@ -763,6 +765,7 @@ export default function ClientDashboard() {
       setPeriodCloseError(err?.message || 'Something went wrong closing the period. Please try again.')
     } finally {
       setAdvancingPeriod(false)
+      setConfirmPeriodClose(false)
     }
   }
 
@@ -2246,7 +2249,7 @@ export default function ClientDashboard() {
                 Go to Periods →
               </button>
             ) : (
-              <button className="amber-action-btn" onClick={closeAndAdvancePeriod} disabled={advancingPeriod}>
+              <button className="amber-action-btn" onClick={() => setConfirmPeriodClose(true)} disabled={advancingPeriod}>
                 {advancingPeriod ? 'Closing…' : `End ${BS_MONTHS[activePeriod.bs_month - 1]} & Start ${BS_MONTHS[nextAdvMonth - 1]} →`}
               </button>
             )}
@@ -2255,6 +2258,26 @@ export default function ClientDashboard() {
             <p role="alert" style={{ color: 'var(--theme-red-text)', margin: '10px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
               <TriangleAlert size={13} aria-hidden="true" /> {periodCloseError}
             </p>
+          )}
+          {confirmPeriodClose && (
+            <ConfirmModal
+              title={`Close ${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year} and open ${BS_MONTHS[nextAdvMonth - 1]} ${nextAdvMonth === 1 ? activePeriod.bs_year + 1 : activePeriod.bs_year}?`}
+              confirmLabel={`Close ${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}`}
+              busy={advancingPeriod}
+              busyLabel="Closing…"
+              onConfirm={closeAndAdvancePeriod}
+              onCancel={() => setConfirmPeriodClose(false)}
+            >
+              <p style={{ margin: '0 0 10px' }}>Closing the month is how its figures become final:</p>
+              <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
+                <li>Entry pages for {BS_MONTHS[activePeriod.bs_month - 1]} become read-only for your team (Crest admin can still correct figures later).</li>
+                <li>Closing stock carries forward as {BS_MONTHS[nextAdvMonth - 1]}&apos;s opening stock.</li>
+                <li>The Monthly Owner Report snapshot is captured from the figures as they stand now.</li>
+              </ul>
+              <p style={{ margin: 0 }}>
+                Make sure the month-end stock count is saved first — COGS, Variance and the frozen report all read it.
+              </p>
+            </ConfirmModal>
           )}
         </div>
       )}

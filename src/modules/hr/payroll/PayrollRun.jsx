@@ -6,6 +6,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
+import ConfirmModal from '../../../components/ConfirmModal'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { computePayslip } from './payrollCompute'
 import { computeMonthlyTds } from './tds'
@@ -36,6 +37,10 @@ export default function PayrollRun() {
   const [loading,    setLoading]    = useState(true)
   const [busy,       setBusy]       = useState(false)
   const [msg,        setMsg]        = useState('')
+  // Which consequential action is awaiting its ConfirmModal: null | 'regenerate' | 'finalize'
+  // | 'reopen'. These three all write to other ledgers (payslips, advance repayments, TADA), so
+  // their confirms carry consequence copy in the product's own Modal, not window.confirm (S575).
+  const [confirmAction, setConfirmAction] = useState(null)
   // Loaded on every page load, not just inside generate()/regenerate(), so the draft on screen can
   // be compared against a live recomputation. Without them this page could only ever show what was
   // stored at Generate time and had no way to know it had since gone stale.
@@ -208,7 +213,7 @@ export default function PayrollRun() {
 
   async function regenerate() {
     if (!run || run.status === 'finalized') return
-    if (!window.confirm('Recompute all payslips from current salary, attendance & tax? Manual TDS and TADA overrides will be reset (TADA re-fills from currently Approved claims for this period).')) return
+    setConfirmAction(null)
     setBusy(true); setMsg('')
     const ytdMap = await fetchYtdMap(scopedFrom, period)
     const tadaMap = await fetchApprovedTadaMap(scopedFrom, period)
@@ -237,6 +242,15 @@ export default function PayrollRun() {
     await scopedUpdate('hr_payslips', { tada_amount: tada, net_pay: net }).eq('id', slip.id)
   }
 
+  // The ask half of Finalize. When the draft is stale, finalize()'s own refusal path runs
+  // immediately (it alerts with the named employees and returns before any write); otherwise the
+  // ConfirmModal opens with the consequence summary and its onConfirm calls finalize().
+  function requestFinalize() {
+    if (!run) return
+    if (!freshness.ok) { finalize(); return }
+    setConfirmAction('finalize')
+  }
+
   async function finalize() {
     if (!run) return
 
@@ -260,22 +274,11 @@ export default function PayrollRun() {
       return
     }
 
-    // A summary of what finalizing actually does, rather than "are you sure?" — the advance
-    // repayments and TADA claim closures below are real writes to other ledgers, and until now
-    // nothing named them before they happened.
-    const netTotal   = payslips.reduce((s, p) => s + (p.net_pay || 0), 0)
-    const tadaCount  = payslips.reduce((n, p) => n + ((p.tada_amount || 0) > 0 && Array.isArray(p.tada_claim_ids) ? p.tada_claim_ids.length : 0), 0)
-    const advCount   = payslips.filter(p => (p.advance_deduction || 0) > 0).length
-    const summary = [
-      `Finalize ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} payroll?`,
-      '',
-      `• ${payslips.length} payslip${payslips.length === 1 ? '' : 's'}, NPR ${fmt(netTotal)} total net pay`,
-      advCount  ? `• ${advCount} advance/loan recover${advCount === 1 ? 'y' : 'ies'} will be recorded in Advances & Loans` : '',
-      tadaCount ? `• ${tadaCount} TADA claim${tadaCount === 1 ? '' : 's'} will be marked Paid` : '',
-      '',
-      'Payslips are locked as a permanent record. This can be undone with Reopen.',
-    ].filter(Boolean).join('\n')
-    if (!window.confirm(summary)) return
+    // The consequence summary (payslip count, net total, ledger side-effects) lives in the
+    // ConfirmModal rendered below — those are real writes to other ledgers, so the ask is a
+    // proper dialog, not window.confirm. This function is only ever reached from its onConfirm
+    // (requestFinalize gates the button), so it commits directly.
+    setConfirmAction(null)
     setBusy(true)
 
     // Build per-advance repaid totals, excluding any prior auto-entries for this run
@@ -346,7 +349,7 @@ export default function PayrollRun() {
 
   async function reopen() {
     if (!run) return
-    if (!window.confirm('Reopen this payroll for editing? It will return to draft, advance repayments auto-recorded by this run will be reversed, and TADA claims auto-marked Paid by this run will revert to Approved.')) return
+    setConfirmAction(null)
     setBusy(true)
 
     // Reverse auto-repayments created by this run
@@ -441,9 +444,9 @@ export default function PayrollRun() {
             {run && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>⬇ Export</button>
-                {!finalized && <button className="btn btn-ghost" onClick={regenerate} disabled={busy} style={{ fontSize: 12 }}>↻ Regenerate</button>}
-                {!finalized && <button className="btn btn-primary" onClick={finalize} disabled={busy} style={{ fontSize: 12 }}>Finalize</button>}
-                {finalized && isAdmin && <button className="btn btn-ghost" onClick={reopen} disabled={busy} style={{ fontSize: 12 }}>Reopen</button>}
+                {!finalized && <button className="btn btn-ghost" onClick={() => setConfirmAction('regenerate')} disabled={busy} style={{ fontSize: 12 }}>↻ Regenerate</button>}
+                {!finalized && <button className="btn btn-primary" onClick={requestFinalize} disabled={busy} style={{ fontSize: 12 }}>Finalize</button>}
+                {finalized && isAdmin && <button className="btn btn-ghost" onClick={() => setConfirmAction('reopen')} disabled={busy} style={{ fontSize: 12 }}>Reopen</button>}
               </div>
             )}
             {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
@@ -640,6 +643,60 @@ export default function PayrollRun() {
             <PayslipBody slip={printSlip.slip} emp={printSlip.emp} periodLabel={periodLabel} bizInfo={bizInfo} forPrint />
           </div>
         </div>
+      )}
+
+      {confirmAction === 'regenerate' && (
+        <ConfirmModal
+          title="Regenerate this payroll draft?"
+          confirmLabel="Regenerate"
+          busy={busy} busyLabel="Recomputing…"
+          onConfirm={regenerate}
+          onCancel={() => setConfirmAction(null)}
+        >
+          <p style={{ margin: 0 }}>
+            Every payslip is recomputed from current salary, attendance, overtime and tax data.
+            Manual TDS and TADA overrides are reset — TADA re-fills from the claims currently
+            Approved for this period. Nothing is finalized by this step.
+          </p>
+        </ConfirmModal>
+      )}
+      {confirmAction === 'finalize' && period && (() => {
+        const netTotal  = payslips.reduce((s, p) => s + (p.net_pay || 0), 0)
+        const tadaCount = payslips.reduce((n, p) => n + ((p.tada_amount || 0) > 0 && Array.isArray(p.tada_claim_ids) ? p.tada_claim_ids.length : 0), 0)
+        const advCount  = payslips.filter(p => (p.advance_deduction || 0) > 0).length
+        return (
+          <ConfirmModal
+            title={`Finalize ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} payroll?`}
+            confirmLabel="Finalize Payroll"
+            busy={busy} busyLabel="Finalizing…"
+            onConfirm={finalize}
+            onCancel={() => setConfirmAction(null)}
+          >
+            {/* A summary of what finalizing actually does, rather than "are you sure?" — the
+                advance recoveries and TADA closures are real writes to other ledgers. */}
+            <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
+              <li><strong>{payslips.length}</strong> payslip{payslips.length === 1 ? '' : 's'}, NPR <strong>{fmt(netTotal)}</strong> total net pay</li>
+              {advCount > 0 && <li>{advCount} advance/loan recover{advCount === 1 ? 'y' : 'ies'} will be recorded in Advances &amp; Loans</li>}
+              {tadaCount > 0 && <li>{tadaCount} TADA claim{tadaCount === 1 ? '' : 's'} will be marked Paid</li>}
+            </ul>
+            <p style={{ margin: 0 }}>Payslips are locked as a permanent record. This can be undone with Reopen.</p>
+          </ConfirmModal>
+        )
+      })()}
+      {confirmAction === 'reopen' && (
+        <ConfirmModal
+          title="Reopen this payroll for editing?"
+          confirmLabel="Reopen Payroll"
+          busy={busy} busyLabel="Reopening…"
+          onConfirm={reopen}
+          onCancel={() => setConfirmAction(null)}
+        >
+          <p style={{ margin: 0 }}>
+            The run returns to draft: advance repayments auto-recorded by this run are reversed,
+            and TADA claims it auto-marked Paid revert to Approved. Payslips already handed to
+            staff will no longer match until you finalize again.
+          </p>
+        </ConfirmModal>
       )}
     </div>
   )

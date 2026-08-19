@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
+import ConfirmModal from '../../../components/ConfirmModal'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday } from '../../../utils/bsCalendar'
 import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 import { buildAttendanceFromRoster } from './attendanceFromRoster'
@@ -68,6 +69,10 @@ export default function AttendanceSheet() {
   const [defaultBreakMin, setDefaultBreakMin] = useState(45) // editable default fed to both "Apply Break" bulk buttons
   const [saving,    setSaving]    = useState(false)
   const [savedMsg,  setSavedMsg]  = useState('')
+  // Pending destructive clear awaiting its ConfirmModal: { kind: 'day', count } or
+  // { kind: 'employee', empId, name, count }. A cleared day/month changes pay for daily/hourly
+  // staff, so the ask is a real dialog with that consequence named, not window.confirm.
+  const [confirmClear, setConfirmClear] = useState(null)
   const [generating, setGenerating] = useState(false)
   // Shift types (client-wide) + this period's roster assignments — used to auto-calc OT when an
   // admin enters a Start/End time: worked hours beyond the employee's roster-assigned shift for
@@ -376,16 +381,20 @@ export default function AttendanceSheet() {
 
   // Deletes every employee's record for the selected day — reverts the whole day back to
   // genuinely blank, e.g. to clean up a day that was wrongly bulk-marked before the save-behavior
-  // fix. Destructive, so it asks first.
-  async function clearDay() {
+  // fix. Destructive, so it asks first — via ConfirmModal (see render), since a cleared day
+  // changes pay for daily/hourly staff and window.confirm's OS chrome undersold that.
+  function requestClearDay() {
     if (!period) return
     const touched = employees.filter(emp => cellFor(emp.id, selectedDay))
     if (touched.length === 0) {
       setSavedMsg('ok:Nothing to clear — Day ' + selectedDay + ' has no records.')
       return
     }
-    const ok = window.confirm(`Delete all ${touched.length} record(s) for Day ${selectedDay}? This can't be undone.`)
-    if (!ok) return
+    setConfirmClear({ kind: 'day', count: touched.length })
+  }
+  async function clearDay() {
+    if (!period) return
+    setConfirmClear(null)
     setSaving(true); setSavedMsg('')
     const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).eq('bs_day', selectedDay)
     if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
@@ -464,8 +473,9 @@ export default function AttendanceSheet() {
   }
 
   // Deletes every record for this employee, this whole period — e.g. to wipe a month that was
-  // wrongly bulk-marked before the save-behavior fix and re-enter it clean. Destructive, asks first.
-  async function clearEmployeeMonth(empId) {
+  // wrongly bulk-marked before the save-behavior fix and re-enter it clean. Destructive, asks
+  // first — via ConfirmModal, same reasoning as requestClearDay.
+  function requestClearEmployeeMonth(empId) {
     if (!period || !empId) return
     const name = employees.find(e => e.id === empId)?.full_name || 'employee'
     const touchedCount = days.filter(d => cellFor(empId, d)).length
@@ -473,8 +483,12 @@ export default function AttendanceSheet() {
       setSavedMsg(`ok:Nothing to clear — no records for ${name}.`)
       return
     }
-    const ok = window.confirm(`Delete all ${touchedCount} record(s) for ${name} this month? This can't be undone.`)
-    if (!ok) return
+    setConfirmClear({ kind: 'employee', empId, name, count: touchedCount })
+  }
+  async function clearEmployeeMonth(empId) {
+    if (!period || !empId) return
+    const name = employees.find(e => e.id === empId)?.full_name || 'employee'
+    setConfirmClear(null)
     setSaving(true); setSavedMsg('')
     const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id)
     if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
@@ -645,7 +659,7 @@ export default function AttendanceSheet() {
             </button>
             <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
               <Tip text="Deletes every employee's saved record for this day — reverts the whole day back to genuinely blank. Can't be undone.">
-                <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={clearDay} disabled={saving}>
+                <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={requestClearDay} disabled={saving}>
                   🗑 Clear Day
                 </button>
               </Tip>
@@ -817,7 +831,7 @@ export default function AttendanceSheet() {
             </button>
             <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
               <Tip text="Deletes every saved record for this employee, this whole month — reverts it back to genuinely blank. Can't be undone.">
-                <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={() => clearEmployeeMonth(selectedEmployeeId)} disabled={saving}>
+                <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={() => requestClearEmployeeMonth(selectedEmployeeId)} disabled={saving}>
                   🗑 Clear Month
                 </button>
               </Tip>
@@ -1037,6 +1051,32 @@ export default function AttendanceSheet() {
             P column counts present days (half-days as 0.5). O counts explicit Off days. Nothing is marked off automatically — mark each staff member's off days directly, or via Generate from Roster. Hours and overtime feed the future Payroll module, which computes actual pay for daily/hourly staff.
           </div>
         </div>
+      )}
+
+      {confirmClear && (
+        <ConfirmModal
+          title={confirmClear.kind === 'day'
+            ? `Clear every record for Day ${selectedDay}?`
+            : `Clear ${confirmClear.name}'s whole month?`}
+          confirmLabel={confirmClear.kind === 'day'
+            ? `Clear Day ${selectedDay} (${confirmClear.count})`
+            : `Clear ${confirmClear.count} record${confirmClear.count === 1 ? '' : 's'}`}
+          danger
+          busy={saving} busyLabel="Clearing…"
+          onConfirm={() => confirmClear.kind === 'day' ? clearDay() : clearEmployeeMonth(confirmClear.empId)}
+          onCancel={() => setConfirmClear(null)}
+        >
+          <p style={{ margin: '0 0 10px' }}>
+            {confirmClear.kind === 'day'
+              ? <>All <strong>{confirmClear.count}</strong> attendance record{confirmClear.count === 1 ? '' : 's'} for Day {selectedDay} will be deleted — the day reverts to blank for every employee.</>
+              : <>All <strong>{confirmClear.count}</strong> of {confirmClear.name}&apos;s attendance record{confirmClear.count === 1 ? '' : 's'} this month will be deleted.</>}
+          </p>
+          <p style={{ margin: 0 }}>
+            A blank day pays <strong>zero</strong> for daily/hourly staff and counts as unpaid for
+            monthly staff — re-enter the days (or Generate from Roster) before running payroll.
+            This can&apos;t be undone.
+          </p>
+        </ConfirmModal>
       )}
     </div>
   )
