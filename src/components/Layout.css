@@ -1519,6 +1519,12 @@ textarea:focus-visible {
   box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 
+/* A standalone text input that is NOT inside a .form-field wrapper. Until this existed the only
+   themed input rule was `.form-field input`, so an input placed in a plain flex row got no
+   treatment at all and rendered as a native white box on the five dark presets — and the three
+   call sites that noticed either hand-copied these declarations inline or borrowed .form-select,
+   which carries `cursor: pointer` and so reads as a menu rather than an edit box (S593). */
+.form-input,
 .form-field input,
 .form-field select,
 .form-field textarea {
@@ -1533,6 +1539,7 @@ textarea:focus-visible {
   width: 100%;
 }
 
+.form-input:focus,
 .form-field input:focus,
 .form-field select:focus,
 .form-field textarea:focus {
@@ -1540,6 +1547,17 @@ textarea:focus-visible {
   box-shadow: 0 0 0 3px var(--theme-focus-ring);
 }
 
+/* Keyboard focus keeps the solid indicator on top of the soft ring above — same pairing, and for
+   the same reason, as .form-select:focus-visible. Without it the :focus rule's specificity would
+   shadow the bare input:focus-visible backstop and leave a keyboard user only the 1.15:1 tint. */
+.form-input:focus-visible,
+.form-field input:focus-visible,
+.form-field select:focus-visible,
+.form-field textarea:focus-visible {
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+
+.form-input::placeholder,
 .form-field input::placeholder {
   color: var(--theme-text3);
 }

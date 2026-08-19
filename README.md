@@ -158,6 +158,42 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S593 — 2026-08-19 — The app had no class for a standalone input, so some fields were never themed
+
+Asked whether two field boxes in the admin Client drawer followed the design system. Neither did,
+and the reason was structural rather than a slip on those two elements.
+
+**The only themed input rule was the descendant selector `.form-field input`.** An input placed
+outside that wrapper — the natural shape whenever a field sits inline beside a button — had
+nothing to reach for and rendered as the **browser's native white box**. On the five dark presets
+that is unmissable; on the light ones it is nearly invisible, which is how the Outlet Group tab's
+"or create a new group…" box sat beside a properly themed `<select>` through several reviews.
+
+The tell that the gap was real is what the sites which *did* notice reached for: the Webhook
+Secret field hand-copied all six declarations inline, and the password-reset and Danger-Zone
+confirm fields borrowed **`.form-select`** — which carries `cursor: pointer`, so a text field
+announced itself as a menu. `Layout.css` now has **`.form-input`**, sharing one declaration block
+with `.form-field input` so the two cannot drift, and all four sites point at it.
+
+That same edit closed a second gap it exposed: **`.form-field` inputs never had the
+`:focus-visible` solid outline** S574 established for `.form-select`. The `:focus` rule's
+specificity shadowed the bare `input:focus-visible` backstop, so a keyboard user got only the soft
+ring — measured at 1.15:1 on Rosé Dawn, 2.6× below WCAG 2.2's 3:1 focus floor. Every `.form-field`
+input, select and textarea in the product gains the pairing.
+
+**The Restore box was a raw `<input type="file">`** — its "Choose File / No file chosen" chrome is
+drawn by the browser, reaches no token, and renders in the *OS* language rather than the app's. It
+is now a `.visually-hidden` input behind a real `.btn`, which is the pattern the **Logo upload 300
+lines above in the same file already used**; `visually-hidden` rather than `display:none` so the
+control keeps a keyboard path. Checked app-wide: that was the last raw file input of five.
+
+Not swept: ~40 files style an input inline via `--theme-input-bg`, but most are custom controls
+(`SearchableSelect`, `Calculator`, `BsCalendarPicker`) that legitimately build their own chrome.
+Now that `.form-input` exists that sweep is possible; it was not done here.
+
+**Files:** `src/components/Layout.css`, `src/pages/adminClients/ClientDrawer.js`, `DESIGN.md`,
+`CLAUDE.md`, `public/service-worker.js` (v112 → v113), `README.md`
+
 ### S592 — 2026-08-19 — Product Codes are issued automatically from the category
 
 S590 added the Product Code field but left it blank for someone to type. It is now **auto-issued

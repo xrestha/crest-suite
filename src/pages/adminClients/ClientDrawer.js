@@ -144,6 +144,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   // Logo upload state (Settings tab)
   const logoInputRef = useRef(null)
+  const restoreInputRef = useRef(null)
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoMsg, setLogoMsg] = useState('')
 
@@ -1279,8 +1280,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                   </select>
                   <label htmlFor="new-group-name" className="sr-only">New group name</label>
+                  {/* Was a bare <input> with no class and no .form-field ancestor, so it picked up
+                      none of the theme and rendered as a native white box beside the themed
+                      <select> next to it — the mismatch is only visible on the dark presets, which
+                      is why it survived review. */}
                   <input
                     id="new-group-name"
+                    className="form-input"
                     value={newGroupName}
                     onChange={e => setNewGroupName(e.target.value)}
                     placeholder="or create a new group…"
@@ -1719,10 +1725,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       id={fid('qr-webhook')}
                       type="text"
                       autoComplete="off"
+                      className="form-input"
                       value={webhookSecret}
                       onChange={e => setWebhookSecret(e.target.value)}
                       placeholder="blank = auto-confirmation disabled for this client"
-                      style={{ flex: 1, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', padding: '8px 12px', fontSize: 12, fontFamily: 'monospace', color: 'var(--theme-text1)', outline: 'none' }}
+                      style={{ flex: 1, fontSize: 12, fontFamily: 'monospace' }}
                     />
                     <button
                       type="button"
@@ -1821,13 +1828,29 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   login is a real email the backup deliberately does not carry. Attribution ("who did it") is
                   cleared on restore, though the names stay readable in the backup files themselves.
                 </p>
+                {/* A native file input renders the browser's own "Choose File / No file chosen"
+                    chrome, which no token reaches and which appears in the OS language rather than
+                    the app's. Same hidden-but-focusable input behind a real button that the Logo
+                    upload above already uses — `visually-hidden` rather than display:none so the
+                    control keeps a keyboard path, and the button carries the accessible name. */}
                 <input
+                  ref={restoreInputRef}
                   id={fid('restore-file')}
                   type="file" accept=".json"
+                  className="visually-hidden"
+                  tabIndex={-1}
                   disabled={restoreBusy}
                   onChange={e => { handleRestoreFile(e.target.files?.[0]); e.target.value = '' }}
-                  style={{ fontSize: 12, color: 'var(--theme-text2)' }}
                 />
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ fontSize: 12 }}
+                  disabled={restoreBusy}
+                  onClick={() => restoreInputRef.current?.click()}
+                >
+                  {restoreBusy ? 'Restoring…' : '↑ Choose backup file…'}
+                </button>
                 {restoreMsg && (
                   <p role={restoreMsg.startsWith('error:') ? 'alert' : 'status'}
                     style={{ fontSize: 12, margin: '10px 0 0', color: restoreMsg.startsWith('ok:') ? 'var(--theme-green)' : restoreMsg.startsWith('info:') ? 'var(--theme-text2)' : 'var(--theme-red)' }}>
@@ -1984,7 +2007,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
             id="admin-reset-pw"
             type="text"
             autoComplete="new-password"
-            className="form-select"
+            className="form-input"
             value={resetPw}
             onChange={e => setResetPw(e.target.value)}
             placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`}
@@ -2056,7 +2079,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
             <input
               id="danger-confirm-name"
               type="text"
-              className="form-select"
+              className="form-input"
               value={confirmName}
               onChange={e => setConfirmName(e.target.value)}
               autoComplete="off"
