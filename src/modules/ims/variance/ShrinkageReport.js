@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { selectDepletingSales } from '../sales/salesDepletion'
 import Tip from '../../../components/Tip'
 import { Navigate } from 'react-router-dom'
 
@@ -73,7 +74,9 @@ export default function ShrinkageReport() {
       scopedFrom('vendor_returns', 'period_id, item_id, qty').in('period_id', periodIds),
       supabase.from('wastages').select('period_id, item_id, qty').in('period_id', periodIds),
       supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', periodIds),
-      supabase.from('sales_entries').select('period_id, recipe_id, qty_sold').in('period_id', periodIds),
+      // source + bs_day feed the per-period POS-supersedes-manual dedup below; paged because a
+      // multi-period sales_entries read crosses the silent 1000-row cap readily.
+      fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, source').in('period_id', periodIds).order('id')),
       scopedFrom('recipes', 'id'),
     ])
 
@@ -122,11 +125,23 @@ export default function ShrinkageReport() {
       purchMap[r.period_id][r.item_id] = (purchMap[r.period_id][r.item_id] || 0) - parseFloat(r.qty)
     })
 
-    // Theoretical usage: sold × qty_per_portion, per period per item
-    const soldMap = {}
+    // Theoretical usage: sold × qty_per_portion, per period per item. Sales are deduplicated with
+    // the shared POS-supersedes-manual rule PER PERIOD — the rule is scoped by bs_day within a
+    // period, so mixing periods would let one period's POS sale supersede another's bulk row.
+    // Without the dedup a client running POS *and* manual bulk entry double-counts a dish,
+    // inflating theoretical usage and UNDER-reporting shrinkage — backwards on the report used to
+    // judge whether staff are stealing. Kept consistent with Variance.js / TheoreticalVariance.js.
+    const salesByPeriod = {}
     ;(sales || []).forEach(s => {
-      if (!soldMap[s.period_id]) soldMap[s.period_id] = {}
-      soldMap[s.period_id][s.recipe_id] = (soldMap[s.period_id][s.recipe_id] || 0) + parseFloat(s.qty_sold)
+      if (!salesByPeriod[s.period_id]) salesByPeriod[s.period_id] = []
+      salesByPeriod[s.period_id].push(s)
+    })
+    const soldMap = {}
+    Object.entries(salesByPeriod).forEach(([pid, rows]) => {
+      soldMap[pid] = {}
+      selectDepletingSales(rows).forEach(s => {
+        soldMap[pid][s.recipe_id] = (soldMap[pid][s.recipe_id] || 0) + parseFloat(s.qty_sold)
+      })
     })
     // breakdown[recipeId] is already yield_pct-adjusted, per-one-portion raw-ingredient qty
     const theorMap = {}

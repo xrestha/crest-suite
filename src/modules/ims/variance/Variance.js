@@ -7,6 +7,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { selectDepletingSales } from '../sales/salesDepletion'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 
@@ -86,7 +87,10 @@ export default function Variance() {
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
+      // source + bs_day are needed for selectDepletingSales' POS-supersedes-manual dedup below.
+      // Paged: a POS-heavy period's sales_entries crosses PostgREST's silent 1000-row cap, which
+      // would truncate theoretical usage into a believable-but-low figure (S528/S529 class).
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
       scopedFrom('recipes', 'id')
     ])
 
@@ -112,8 +116,17 @@ export default function Variance() {
     const staffMealMap = {}
     ;(staffMealsData || []).forEach(r => { staffMealMap[r.item_id] = (staffMealMap[r.item_id] || 0) + parseFloat(r.qty) })
 
+    // Deduplicate POS-synced and manual bulk sales before summing — a client running POS *and*
+    // manual Sales Entry can carry the same dish as both a 'pos' row and a 'manual'/bulk row for
+    // the same period, and summing both double-counts qty_sold. That inflates theoretical usage,
+    // which pushes variance downward and MASKS real over-consumption (shrinkage) — the opposite of
+    // what this "money report" is for. selectDepletingSales applies the one shared
+    // POS-supersedes-manual rule (same as Stock Movements' Sub-Recipes tab and Supplier
+    // Contribution): every POS sale counts (comps included — they consumed stock), a manual row
+    // counts only where POS didn't already sell that recipe that day, and credit-note reversals
+    // never add usage.
     const soldMap = {}
-    ;(sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold) })
+    selectDepletingSales(sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold) })
 
     // breakdown[recipeId] is already yield_pct-adjusted, per-one-portion raw-ingredient qty
     // (recursed through any sub-recipe nesting) — just scale by how many portions actually sold.

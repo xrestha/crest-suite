@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { COGS_FORMULA } from '../../../shared/imsFormulas'
+import { selectDepletingSales } from '../sales/salesDepletion'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 
@@ -125,7 +126,9 @@ export default function TheoreticalVariance() {
 
   async function computeVariance(periodId, itemList, allRecipes) {
     const [{ data: sales }, { data: opening }, { data: closing }, { data: purch }, { data: rets }, { data: wast }, { data: staffMeals }] = await Promise.all([
-      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
+      // source + bs_day feed selectDepletingSales' POS-supersedes-manual dedup; paged so a busy
+      // POS period's sales_entries can't truncate theoretical usage at 1000 rows.
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
@@ -134,9 +137,12 @@ export default function TheoreticalVariance() {
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
     ])
 
-    // Sales map: recipe_id → total qty sold
+    // Sales map: recipe_id → total qty sold. Deduplicated via the shared POS-supersedes-manual
+    // rule so a client running POS *and* manual bulk entry doesn't double-count the same dish and
+    // inflate theoretical usage (which masks real over-consumption). Kept identical to Variance.js,
+    // which this page must agree with.
     const salesMap = {}
-    ;(sales || []).forEach(e => { salesMap[e.recipe_id] = (salesMap[e.recipe_id] || 0) + parseFloat(e.qty_sold || 0) })
+    selectDepletingSales(sales || []).forEach(e => { salesMap[e.recipe_id] = (salesMap[e.recipe_id] || 0) + parseFloat(e.qty_sold || 0) })
 
     // Theoretical consumption: item_id → qty
     const theoretical = {}

@@ -158,6 +158,25 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S588 — 2026-08-19 — Variance stops double-counting POS + manual sales
+
+The Variance Report ("the money report"), Theoretical Variance and Shrinkage Report all summed
+`sales_entries.qty_sold` raw. For a client running Crest POS **and** manual bulk Sales Entry, the
+same dish can appear as both a `pos` row (auto-synced) and a `manual`/bulk row (typed) — summing
+both double-counts qty_sold, which inflates theoretical usage, pushes variance *down*, and MASKS
+real over-consumption (shrinkage) — exactly backwards on the reports used to judge whether stock
+is walking out. All three now run sales through the shared `selectDepletingSales` (the one
+POS-supersedes-manual rule already behind Stock Movements' Sub-Recipes tab and Supplier
+Contribution), so the same dish counts once; comps still count (they consumed stock), credit-note
+reversals never add usage. Shrinkage applies the dedup **per period** because the rule is
+bs_day-scoped. Same pass: all three sales reads were unpaged and are now `fetchAllRows`-paged (a
+busy POS period's `sales_entries` crosses the silent 1000-row cap). Verified no-op where a client
+doesn't mix entry methods (dedup returns an all-POS set unchanged); full suite green.
+
+**Files:** `src/modules/ims/variance/Variance.js`, `.../TheoreticalVariance.js`,
+`.../ShrinkageReport.js`, `.claude/rules/vendor-payables.md`,
+`public/service-worker.js` (v108 → v109), `README.md`
+
 ### S587 — 2026-08-19 — Payment QR "Plan A" confirmed live: store the FonePay Business QR
 
 The rail-coverage item deferred since 2026-07-03 is closed. A real FonePay Business QR payload

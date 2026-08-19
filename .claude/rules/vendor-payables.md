@@ -51,7 +51,10 @@ Three rules if this is ever touched:
   closed period, since nothing here subtracts a closing count — so the Variance-style
   closed-period default deliberately does not apply.
 
-Related observation, deliberately not acted on: **`Variance.js` sums `sales_entries.qty_sold`
-without `selectDepletingSales`**, so for a client running POS *and* manual bulk entry its
-theoretical usage can exceed this page's consumption for the same period. That is a call on a
-shipped figure, not a bug fix to make in passing.
+Acted on S588 (2026-08-19): **`Variance.js`, `TheoreticalVariance.js` and `ShrinkageReport.js` now
+run `sales_entries` through `selectDepletingSales`** before summing `qty_sold`, so a client running
+POS *and* manual bulk entry no longer double-counts a dish into theoretical usage (which inflated
+theoretical, pushed variance down, and MASKED real over-consumption — backwards on the money
+report). All four consumers of that figure — these three plus Supplier Contribution — now agree.
+The dedup is applied per-period on Shrinkage (the POS-supersedes-manual rule is bs_day-scoped), and
+the same pass added `fetchAllRows` paging to all three previously-unpaged sales reads.
