@@ -62,7 +62,7 @@ const PRO_KEYS = new Set([
 // demand_forecast_daily to overlay forecast covers on the HR roster.
 export const SUITE_KEYS = new Set([
   'owner_dashboard', 'monthly_owner_report', 'multi_outlet',
-  'demand_forecast', 'fixed_asset_register',
+  'demand_forecast', 'fixed_asset_register', 'consolidated_pnl',
 ])
 // POS module features. POS is deliberately flat (no tiers), so these unlock with the module
 // itself rather than with any plan rank. guest_ordering used to live in PRO_KEYS, which gated a

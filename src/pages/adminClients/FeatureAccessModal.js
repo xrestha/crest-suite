@@ -15,6 +15,7 @@ const DEFAULT_FLAGS = {
   sales_entry: null, monthly_summary: null, payment_summary: null,
   vendor_report: null, vendor_balance_confirmation: null, variance_report: null, fifo_report: null,
   supplier_contribution: null,
+  consolidated_pnl: null,
   reorder_report: null, price_tracker: null, recipe_costing: null,
   menu_engineering: null, overheads: null, budget_vs_actual: null,
   best_sellers: null, vat_report: null, non_vat_report: null,
@@ -263,6 +264,7 @@ export default function FeatureAccessModal({ client, onClose }) {
           { key: 'multi_outlet', label: 'Multi-Outlet Group Console' },
           { key: 'demand_forecast', label: 'Demand Forecast' },
           { key: 'fixed_asset_register', label: 'Fixed Assets' },
+          { key: 'consolidated_pnl', label: 'Consolidated P&L' },
         ]
         return (
           <div style={{ marginBottom: 14 }}>

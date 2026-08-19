@@ -20,7 +20,7 @@ import {
   FileBarChart, CalendarDays, GitCompare, Target, Boxes, RefreshCw, LineChart, Trash2, PackageX,
   ArrowUpDown, CalendarClock, Sigma, PackageMinus, Percent, ReceiptText, Wallet, HandCoins, Banknote,
   Trophy, PiggyBank, Combine, Tags, Building2, FileSignature,
-  Settings2, Utensils, LayoutGrid, Users, Clock, TriangleAlert, Undo2, BarChart3, ScrollText,
+  Settings2, Utensils, LayoutGrid, Users, Clock, TriangleAlert, Undo2, BarChart3, ScrollText, Scale,
   UtensilsCrossed, Users2,
   Settings, Palmtree, Calculator, PartyPopper, Gift, CreditCard, Briefcase, Coins, FileCheck2,
   ShieldCheck, Warehouse, Store,
@@ -424,6 +424,8 @@ export default function Layout() {
           renderNavItem({ to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown }, { pinnable: false })}
         {(isAdmin || isOwner) &&
           renderNavItem({ to: '/owner-report', label: 'Owner Report', icon: ScrollText }, { pinnable: false })}
+        {(isAdmin || isOwner) &&
+          renderNavItem({ to: '/pnl', label: 'Profit & Loss', icon: Scale }, { pinnable: false })}
         {renderNavItem(dashNavItem, { pinnable: false })}
         {(isAdmin || isOwner) && outlets.length > 1 &&
           renderNavItem({ to: '/group-dashboard', label: 'Group Console', icon: Building2 }, { pinnable: false })}

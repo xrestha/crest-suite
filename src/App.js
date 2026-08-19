@@ -20,6 +20,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'))
 const OwnerDashboard = lazy(() => import('./pages/dashboard/OwnerDashboard'))
 const GroupDashboard = lazy(() => import('./pages/dashboard/GroupDashboard'))
 const MonthlyOwnerReport = lazy(() => import('./pages/dashboard/MonthlyOwnerReport'))
+const ConsolidatedPnl = lazy(() => import('./pages/dashboard/ConsolidatedPnl'))
 const Periods = lazy(() => import('./pages/Periods'))
 const Items = lazy(() => import('./modules/ims/items/Items'))
 const Vendors = lazy(() => import('./modules/ims/vendors/Vendors'))
@@ -134,6 +135,7 @@ export default function App() {
                   visible and an ineligible viewer gets an inline upsell, not a redirect. */}
               <Route path="/group-dashboard"  element={<GroupDashboard />} />
               <Route path="/owner-report"     element={<MonthlyOwnerReport />} />
+              <Route path="/pnl"              element={<ConsolidatedPnl />} />
               <Route path="/periods"          element={<Periods />} />
               <Route path="/help"       element={<Help />} />
 
