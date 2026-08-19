@@ -2727,6 +2727,42 @@ export default function PosOrders() {
           </div>
         </Modal>
       )}
+
+      {/* Pulling an already-fired line. Not a ConfirmModal: this asks for an input, and the input
+          is the entire point — a yes/no dialog would add friction and record nothing. */}
+      {pullPrompt && (
+        <Modal onClose={() => setPullPrompt(null)} title="Remove an item the kitchen already has" maxWidth={440}>
+          <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 14px', lineHeight: 1.5 }}>
+            <strong style={{ color: 'var(--theme-text1)' }}>{pullPrompt.pulled} × {pullPrompt.name}</strong>{' '}
+            {pullPrompt.pulled === 1 ? 'has' : 'have'} already been sent to the kitchen or bar. Taking{' '}
+            {pullPrompt.pulled === 1 ? 'it' : 'them'} off this bill is recorded against your login with the
+            reason you give here, and shows on POS Reports → KOT Log → Pulled Items.
+          </p>
+          <div className="form-field" style={{ marginBottom: 12 }}>
+            <label htmlFor="kot-pull-reason">Reason</label>
+            <select id="kot-pull-reason" className="form-select" value={pullReason}
+              onChange={e => setPullReason(e.target.value)}>
+              <option value="">— Select —</option>
+              {KOT_PULL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost" onClick={() => setPullPrompt(null)}>Keep the item</button>
+            <button
+              className="btn btn-primary"
+              disabled={!pullReason}
+              onClick={() => {
+                setKotPullReason(pullReason)
+                applyQty(pullPrompt.idx, pullPrompt.qty)
+                setPullPrompt(null)
+                setMsg('ok:Removed — save the order to record it.')
+              }}
+            >
+              Remove it
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 
@@ -3071,41 +3107,6 @@ export default function PosOrders() {
       </Modal>
     )}
 
-    {/* Pulling an already-fired line. Not a ConfirmModal: this asks for an input, and the input
-        is the entire point — a yes/no dialog would add friction and record nothing. */}
-    {pullPrompt && (
-      <Modal onClose={() => setPullPrompt(null)} title="Remove an item the kitchen already has" maxWidth={440}>
-        <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 14px', lineHeight: 1.5 }}>
-          <strong style={{ color: 'var(--theme-text1)' }}>{pullPrompt.pulled} × {pullPrompt.name}</strong>{' '}
-          {pullPrompt.pulled === 1 ? 'has' : 'have'} already been sent to the kitchen or bar. Taking{' '}
-          {pullPrompt.pulled === 1 ? 'it' : 'them'} off this bill is recorded against your login with the
-          reason you give here, and shows on POS Reports → KOT Log → Pulled Items.
-        </p>
-        <div className="form-field" style={{ marginBottom: 12 }}>
-          <label htmlFor="kot-pull-reason">Reason</label>
-          <select id="kot-pull-reason" className="form-select" value={pullReason}
-            onChange={e => setPullReason(e.target.value)}>
-            <option value="">— Select —</option>
-            {KOT_PULL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-        </div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn btn-ghost" onClick={() => setPullPrompt(null)}>Keep the item</button>
-          <button
-            className="btn btn-primary"
-            disabled={!pullReason}
-            onClick={() => {
-              setKotPullReason(pullReason)
-              applyQty(pullPrompt.idx, pullPrompt.qty)
-              setPullPrompt(null)
-              setMsg('ok:Removed — save the order to record it.')
-            }}
-          >
-            Remove it
-          </button>
-        </div>
-      </Modal>
-    )}
 
     {creditNoteOrder && (
       <IssueCreditNoteModal
