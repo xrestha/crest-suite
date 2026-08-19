@@ -38,13 +38,44 @@ function serialize(tags) {
 }
 
 /**
- * Validate a pasted merchant QR payload. Returns { ok, merchantName, error }.
+ * Best-effort network identification from the merchant-account-information tags (02–51), whose
+ * values carry the scheme's GUID (e.g. "fonepay.com", "np.com.esewa", NCHL/NepalPay identifiers).
+ * Informational only — phrased as "looks like" in the UI, never used to accept or reject a
+ * payload. The reason it exists: eSewa's app refuses NepalPay/NCHL QRs ("scan Fonepay Business
+ * QR") while bank apps accept both (verified live 2026-07-03), so which network a client's stored
+ * QR belongs to decides who can actually pay at the till — and two valid payloads are otherwise
+ * indistinguishable in the admin UI. Scan order matters: 'npi' is the loosest match, so the
+ * specific GUIDs go first.
+ */
+function detectQrNetwork(tags) {
+  const haystack = tags
+    .filter(t => { const n = parseInt(t.id, 10); return n >= 2 && n <= 51 })
+    .map(t => t.value.toLowerCase())
+    .join('|')
+  if (haystack.includes('fonepay')) return 'FonePay'
+  if (haystack.includes('esewa')) return 'eSewa'
+  if (haystack.includes('khalti')) return 'Khalti'
+  if (haystack.includes('nchl') || haystack.includes('nepalpay') || haystack.includes('npi')) return 'NepalPay/NCHL'
+  return null
+}
+
+/**
+ * Validate a pasted merchant QR payload. Returns { ok, merchantName, network, error }.
  * Checks TLV structure, the CRC checksum, and that it looks like a payment QR
- * (payload format indicator + merchant name present).
+ * (payload format indicator + merchant name present). `network` is best-effort
+ * (see detectQrNetwork) and may be null.
  */
 export function validateEmvQr(str) {
   const s = (str || '').trim()
   if (!s) return { ok: false, error: 'Empty' }
+  // A personal "receive money" QR (eSewa/Khalti P2P) decodes to a JSON blob, not EMVCo TLV.
+  // Name the real problem instead of the generic parse error — an operator who pastes one is
+  // holding the wrong KIND of QR, not a mangled copy of the right one: only that wallet's own app
+  // can scan it, no amount can be locked into it, and it pays a personal wallet rather than the
+  // business. (Found live 2026-08-19 pasting a personal eSewa QR during the Plan A rail test.)
+  if (s.startsWith('{')) {
+    return { ok: false, error: 'This is a personal wallet QR (an eSewa/Khalti "receive money" code), not a merchant payment QR — bank apps can\'t scan it and no bill amount can be locked in. Paste the business\'s FonePay Business QR (or EMVCo merchant QR) instead.' }
+  }
   const tags = parseEmvQr(s)
   if (!tags) return { ok: false, error: 'Not a valid EMVCo QR payload — check for missing characters.' }
   const crcTag = tags.find(t => t.id === '63')
@@ -59,7 +90,7 @@ export function validateEmvQr(str) {
   // don't reject it for the bank's own spec deviation.
   const merchantName = tags.find(t => t.id === '59')?.value || ''
   if (!merchantName) return { ok: false, error: 'No merchant name (tag 59) found in this QR.' }
-  return { ok: true, merchantName }
+  return { ok: true, merchantName, network: detectQrNetwork(tags) }
 }
 
 /**

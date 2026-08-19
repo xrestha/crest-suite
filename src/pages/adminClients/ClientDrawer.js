@@ -1682,6 +1682,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         {qrPreview && <img src={qrPreview} alt={`Payment QR code for ${qrCheck.merchantName || client.name} — scan to verify`} style={{ width: 120, height: 120, /* literal white, not a token: a QR needs a light quiet zone to scan */ borderRadius: 'var(--radius-md)', background: '#fff', padding: 4 }} />}
                         <div>
                           <p id={fid('qr-status')} role="status" style={{ fontSize: 12, color: 'var(--theme-green-text)', margin: '0 0 4px', fontWeight: 600 }}>✓ Valid payment QR — merchant: {qrCheck.merchantName}</p>
+                          {qrCheck.network && (
+                            <p style={{ fontSize: 11, color: qrCheck.network === 'NepalPay/NCHL' ? 'var(--theme-amber-text)' : 'var(--theme-text2)', margin: '0 0 4px', fontWeight: 600 }}>
+                              {qrCheck.network === 'NepalPay/NCHL'
+                                ? '⚠ Looks like a NepalPay/NCHL QR — eSewa\'s app refuses these ("scan Fonepay Business QR"), though bank apps accept them. For wider coverage, paste the merchant\'s FonePay Business QR here instead.'
+                                : `Looks like a ${qrCheck.network} QR.`}
+                            </p>
+                          )}
                           <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0, maxWidth: 420, lineHeight: 1.6 }}>
                             Scan this preview with a banking app to test it before saving. Once saved, every POS bill shows a dynamic
                             version of this QR with that bill's exact amount pre-filled.

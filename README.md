@@ -158,6 +158,30 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S587 — 2026-08-19 — Payment QR "Plan A" confirmed live: store the FonePay Business QR
+
+The rail-coverage item deferred since 2026-07-03 is closed. A real FonePay Business QR payload
+(tag-26 GUID `fonepay.com`, lowercase CRC — both handled) was pasted into Manage Clients → QR on
+the BHATTI CHOILA dummy client, and the dynamic per-bill QR Crest builds from it was scanned
+successfully by **eSewa** — the app that refuses NepalPay/NCHL payloads — **and a bank app
+(Nabil)**, both with the bill amount pre-filled. `buildDynamicQr` needed no change (generic
+EMVCo). Standing rule for onboarding: **store the merchant's FonePay Business QR, never their
+NCHL one**; no second QR field (Plan B) needed.
+
+Engineering shipped with the test, because the two payloads were indistinguishable in the UI:
+`validateEmvQr` now detects the **network** from the merchant-account GUID (tags 02-51 only —
+never the merchant name) and the QR tab labels it; an NCHL paste gets an amber warning
+recommending the FonePay QR. And pasting a personal eSewa/Khalti "receive money" QR — tried live,
+it decodes to a JSON wallet blob — now gets an error naming the real problem (wrong KIND of QR:
+bank apps can't scan it, no amount can be locked, pays a personal wallet) instead of "check for
+missing characters". `emvQr.js` gained its first test file: 9 tests including a FonePay-shaped
+fixture round-tripped through the dynamic build and the real (anonymized) wallet payload. Full
+suite 246/246.
+
+**Files:** `src/utils/emvQr.js`, `src/utils/emvQr.test.js` (new),
+`src/pages/adminClients/ClientDrawer.js`, `POS_TODO.md`,
+`public/service-worker.js` (v107 → v108), `README.md`
+
 ### S586 — 2026-08-19 — Price Tracker: a Day-1 purchase showed no day
 
 Reported live off the new month view: Bhadra's expanded history rows had no day label while
