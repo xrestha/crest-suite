@@ -256,14 +256,25 @@ staff deliberately *not* excluded since they are the accounts whose removals it 
 RPC runs as INVOKER. `authenticated` gets SELECT and INSERT only: an audit record a till session
 can rewrite is not an audit record.
 
-**PENDING MANUAL STEPS — the order matters.** Apply
-`20260819120000_pos_order_close_server_guard.sql` then `20260819130000_pos_kot_removal_record.sql`
-in the Supabase SQL Editor, **then** `supabase functions deploy admin-user-ops`. The function's new
-`pos_kot_removals` delete throws if the table does not exist yet, and `del()` aborts the whole
-Danger Zone sequence on a throw — so deploying the function first breaks Clear POS Transactions
-until the migration lands. The frontend is safe in either order: `save_pos_order_items` falls back
-to delete-then-insert on `PGRST202` (recording no removal, which is today's behaviour), and the
-close guard simply does not exist until the trigger does.
+**All manual steps cleared the same session.** Both migrations applied in the Supabase SQL Editor
+and `admin-user-ops` deployed, in that order — which was the one thing that mattered here, since
+the function's new `pos_kot_removals` delete throws if the table does not exist and `del()` aborts
+the whole Danger Zone sequence on a throw, so a function-first deploy would have broken Clear POS
+Transactions until the migration landed. The frontend was safe in either order regardless:
+`save_pos_order_items` falls back to delete-then-insert on `PGRST202` (recording no removal, i.e.
+the old behaviour), and the close guard simply does not exist until the trigger does.
+
+**"Success. No rows returned" is not verification** — the standing lesson from the anon revokes
+that reported success and changed nothing. A check script lives at
+`scratchpad/verify_s577.sql`: it asserts the trigger is BEFORE (an AFTER trigger cannot refuse a
+write), that the guard is SECURITY INVOKER (under DEFINER `current_user` is the owner every time
+and the guard silently allows everything), that `save_pos_order_items` has **exactly one**
+signature (two would make every 2-arg call ambiguous and break saving on every device), that
+`pos_kot_removals` has RLS on with all four policies, that `authenticated` holds SELECT+INSERT but
+not UPDATE/DELETE, that `anon` cannot execute the new arity (the per-signature grant trap), and
+that both indexes lead on the column their queries filter by. **Not yet exercised against a real
+bill** — the SQL is applied, but nothing has driven an over-cap discount or a void from a capped
+account through it.
 
 **Files:** `supabase/migrations/{20260819120000_pos_order_close_server_guard.sql (new),
 20260819130000_pos_kot_removal_record.sql (new)}`, `supabase/functions/admin-user-ops/index.ts`,
