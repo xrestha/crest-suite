@@ -333,7 +333,7 @@ export default function Layout() {
   async function handleSignOut() {
     const isPosDevice = !!localStorage.getItem('pos_device_client_id')
     await signOut()
-    navigate(isPosDevice && posRole ? '/pos/login' : '/login')
+    navigate(isPosDevice && isPinStaff ? '/pos/login' : '/login')
   }
 
   // ── POS idle lock ────────────────────────────────────────────────────────────────────────────
@@ -344,8 +344,13 @@ export default function Layout() {
   // rationale). Deliberately NOT enabled for Owner/admin sessions (no pos_role — they sign in
   // with email/password, not a PIN, even on the till) and not on the KDS, a screen meant to sit
   // untouched on a kitchen wall. handleSignOut already routes a bound device to /pos/login.
+  // PIN till session = the RAW pos_role column, never the resolved posRole rank — that rank is
+  // 'manager' for every admin/Owner, which is exactly who the idle lock, the Lock-POS button
+  // label and the sign-out routing must exempt. Reading the rank here signed an admin out
+  // after 3 idle minutes on any machine that had ever completed POS device binding (S583).
+  const isPinStaff = !!profile?.pos_role
   const [idleLockSecs, setIdleLockSecs] = useState(null)
-  const idleLockEnabled = !!posRole && !!localStorage.getItem('pos_device_client_id') &&
+  const idleLockEnabled = isPinStaff && !!localStorage.getItem('pos_device_client_id') &&
     !location.pathname.startsWith('/pos/kds')
   usePosIdleLock(idleLockEnabled, setIdleLockSecs, handleSignOut)
 
@@ -1020,8 +1025,8 @@ export default function Layout() {
               {collapsed ? <PanelLeftOpen size={18} strokeWidth={1.75} /> : <PanelLeftClose size={18} strokeWidth={1.75} />}
             </button>
           </RailTip>
-          <RailTip label={posRole ? 'Lock POS' : 'Sign out'}>
-            <button className="rail-btn rail-btn--signout" title={posRole ? 'Lock POS' : 'Sign out'}
+          <RailTip label={isPinStaff ? 'Lock POS' : 'Sign out'}>
+            <button className="rail-btn rail-btn--signout" title={isPinStaff ? 'Lock POS' : 'Sign out'}
               onClick={handleSignOut}><LogOut size={18} strokeWidth={1.75} /></button>
           </RailTip>
         </nav>

@@ -91,10 +91,17 @@ enforced, and derives `client_id` from the order rather than taking it as a para
 - **Short cash tender**: single-payment Cash now blocks Confirm Payment when tendered < bill
   total (`cashShortfall` in `PosOrders.jsx` — guard in `closeOrder` too, covering the QR-poll
   path; the Change field flips to a red "Short by"). Split mode always guarded this.
-- **Idle lock is WIRED** — `usePosIdleLock` runs from `Layout.js`: PIN-staff sessions
-  (`posRole` set) on a bound device (`pos_device_client_id` in localStorage) lock to
-  `/pos/login` after 3 idle minutes, 20s `role="alert"` countdown first. `/pos/kds` and
-  owner/admin sessions are deliberately exempt. Don't add a second lock per page.
+- **Idle lock is WIRED** — `usePosIdleLock` runs from `Layout.js`: PIN-staff sessions on a
+  bound device (`pos_device_client_id` in localStorage) lock to `/pos/login` after 3 idle
+  minutes, 20s `role="alert"` countdown first. `/pos/kds` and owner/admin sessions are
+  deliberately exempt. Don't add a second lock per page. **The exemption must key off the RAW
+  `profile.pos_role` column (`isPinStaff` in Layout.js), never the resolved `posRole` rank** —
+  that rank is 'manager' for every admin and Owner, so gating on it enables the lock for
+  exactly the people it must exempt. This shipped broken (S575→S583): any admin or Owner on a
+  machine that had ever completed POS device binding was silently signed out after 3 idle
+  minutes, reported as "why does the app sign me out when I leave for a while". The same raw
+  test drives the rail button's Lock-POS-vs-Sign-out label and the sign-out routing to
+  `/pos/login` vs `/login`.
 - **Sales Exceptions ranks by Revenue Impact** (discount + void menu value + comp *potential
   sales value*) — one coherent unit. Comp food cost stays in its own column. Never reintroduce a
   total that adds comp COST to revenue figures.

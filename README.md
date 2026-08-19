@@ -158,6 +158,31 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S583 — 2026-08-19 — "Why does the app sign me out when I leave for a while?" — the POS idle lock was firing for admins
+
+Reported as a session mystery; the Supabase Auth settings were clean (single-session off,
+time-box and inactivity both never — and Pro-gated anyway), the client config is built to keep a
+session alive indefinitely (1-hour tokens, auto-refresh, `sessionKeepAlive`'s wake-up refresh),
+so it had to be a revocation. It was ours.
+
+**`AuthContext.posRole` is the RESOLVED rank — 'manager' for every admin and Owner — and
+`Layout.js` gated the 3-minute POS idle lock on it.** The comment beside the gate said
+"deliberately NOT enabled for Owner/admin sessions (no pos_role)", written against the raw
+column while the code read the rank. So on any machine that had ever completed POS device
+binding (`pos_device_client_id` in localStorage — the owner's own laptop qualifies the moment
+it is used to set up a till), an admin or Owner session was idle-signed-out every 3 minutes and
+dumped at the PIN screen. It also explains this session's own five Playwright sign-outs, and the
+admin sidebar showing **"Lock POS"** instead of "Sign out" — same resolved-rank leak on the
+rail button label.
+
+Fix: `isPinStaff = !!profile?.pos_role` (the raw staff marker, the same negative-marker
+convention `isOwner` uses) now drives all three till-session behaviours — the idle lock, the
+Lock-POS/Sign-out label, and whether sign-out routes to `/pos/login` or `/login`. The resolved
+rank stays where rank is the question (nav visibility, `hasPosAccess`). Real PIN staff behaviour
+is unchanged.
+
+**Files:** `src/components/Layout.js`, `.claude/rules/pos-billing.md`,
+`public/service-worker.js` (v102 → v103), `README.md`
 ### S582 — 2026-08-19 — Menu Pricing gets a print button
 
 🖨 Print on Menu Pricing's full food-cost view (the IMS branch — the POS-only price-list branch
