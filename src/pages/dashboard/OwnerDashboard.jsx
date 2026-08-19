@@ -11,6 +11,8 @@ import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { getBsToday, BS_MONTHS, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
+import { useSettings } from '../../context/SettingsContext'
+import { fcBand } from '../../shared/imsFormulas'
 import Tip from '../../components/Tip'
 import SuiteGate from '../../components/SuiteGate'
 import ChartCard from '../../components/ChartCard'
@@ -54,6 +56,10 @@ export default function OwnerDashboard() {
   const { scopedFrom } = useScopedDb()
   const navigate = useNavigate()
   const { colors } = useTheme()
+  // The FC verdict colour comes from the client's OWN Settings thresholds via fcBand(), the same
+  // source Variance/Recipes/MenuPricing use — a hardcoded 35/45 here could colour the same month
+  // differently from the Variance page this card links to whenever a client customised them.
+  const { settings } = useSettings()
 
   const [loading, setLoading] = useState(true)
   const [activePeriod, setActivePeriod] = useState(null)
@@ -474,12 +480,12 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/variance'))}>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
-              <Tip text="Net purchases ÷ revenue × 100. Healthy range: 28–35% for Nepal F&B." width={240}>Food Cost % (MTD)</Tip>
+              <Tip text={`Net purchases ÷ revenue × 100. Coloured against your own Settings thresholds — watch above ${fcBand(fcPct, settings).warn}%, too high above ${fcBand(fcPct, settings).critical}% — the same scale Variance and Recipes use. Nepal F&B benchmark: 28–35%.`} width={260}>Food Cost % (MTD)</Tip>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: fcPct == null ? 'var(--theme-text2)' : fcPct <= 35 ? 'var(--theme-green-text)' : fcPct <= 45 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
+            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: fcBand(fcPct, settings).color }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Target 28–35% →</div>
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Your target ≤{fcBand(fcPct, settings).warn}% →</div>
           </div>
 
           <div {...kpiCard(() => navigate('/hr/payroll'))}>

@@ -661,6 +661,14 @@ export default function Stock() {
               const tdStyle = (color) => ({ textAlign: 'right', color: color || 'var(--theme-text1)', whiteSpace: 'nowrap' })
               return (
                 <div className="card" style={{ marginBottom: 24 }}>
+                  {/* The sub-recipe disclosure exists for the accountant reconciling this page
+                      against Monthly Summary: the two COGS figures differ by exactly the
+                      sub-recipe amount, deliberately, and neither page said so before S575. */}
+                  <p style={{ margin: '0 0 10px', fontSize: 11, color: 'var(--theme-text3)' }}>
+                    These figures <strong>include sub-recipes</strong> — prep counted as stock. Monthly
+                    Summary&apos;s COGS excludes them, so the two pages differ by exactly the sub-recipe
+                    amount; both are correct for what they count.
+                  </p>
                   <div className="table-wrap">
                     <table className="data-table">
                       <thead>

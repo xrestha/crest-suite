@@ -347,6 +347,15 @@ export default function MonthlySummary() {
             <div style={{ marginTop: 20, padding: '12px 16px', background: 'var(--theme-bg)', borderRadius: 'var(--radius-sm)', fontSize: 12, color: 'var(--theme-text3)' }}>
               COGS = {COGS_FORMULA} &nbsp;·&nbsp;
               Food Cost % = COGS ÷ Net Sales Revenue × 100
+              {/* Sub-recipe disclosure — Stock Count's Summary counts prep as stock, this page
+                  deliberately excludes it (is_sub_recipe = false), so the two COGS figures differ
+                  by exactly the sub-recipe amount. Stating it here saves the reconciler an
+                  afternoon (S575). */}
+              <div style={{ marginTop: 6 }}>
+                Excludes <strong>sub-recipes</strong> (prep items). Stock Count&apos;s Summary includes
+                them, so its COGS differs from this page by exactly the sub-recipe amount; both are
+                correct for what they count.
+              </div>
             </div>
           </div>
         </>
