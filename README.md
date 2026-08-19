@@ -272,9 +272,16 @@ and the guard silently allows everything), that `save_pos_order_items` has **exa
 signature (two would make every 2-arg call ambiguous and break saving on every device), that
 `pos_kot_removals` has RLS on with all four policies, that `authenticated` holds SELECT+INSERT but
 not UPDATE/DELETE, that `anon` cannot execute the new arity (the per-signature grant trap), and
-that both indexes lead on the column their queries filter by. **Not yet exercised against a real
-bill** — the SQL is applied, but nothing has driven an over-cap discount or a void from a capped
-account through it.
+that both indexes lead on the column their queries filter by. **All 8 returned PASS** against the
+live DB the same session, so the deployed objects match what the migrations describe — not merely
+that the statements ran.
+
+What that does *not* cover, and is the honest remaining gap: **no bill has been driven through the
+guard.** The structural checks prove the trigger is attached, fires BEFORE, and runs as INVOKER;
+they say nothing about whether an over-cap discount or a void from an account without Allow Void
+actually gets refused, or whether an ordinary bill still closes now that `closeOrder` persists the
+cart first. That is a two-minute smoke test on a test client (set a staff Discount Limit to 10%
+with Allow Void off, then try 30% and a void from that login), and it has not been done.
 
 **Files:** `supabase/migrations/{20260819120000_pos_order_close_server_guard.sql (new),
 20260819130000_pos_kot_removal_record.sql (new)}`, `supabase/functions/admin-user-ops/index.ts`,
