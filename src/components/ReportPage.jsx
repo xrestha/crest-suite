@@ -1,0 +1,97 @@
+import NoPeriodState from './NoPeriodState'
+
+/**
+ * The shell every IMS/Suite report page renders inside — header, KPI strip, and the six states a
+ * report can be in: no period, loading, could-not-load, empty, filtered-to-nothing, and content.
+ *
+ * WHY (S594 `/impeccable critique`): three report pages shipped in three days and each invented
+ * its own answer to two questions the design system does not govern. Empty result was
+ * `.empty-state` + icon on one page and a bare `<p>` on the other two. The totals row was an
+ * inline `fontWeight: 700` on two and a 2px border on the third. Two of the three had no error
+ * branch at all, so a failed read rendered as a finished report of zeros. The token layer is
+ * enforced rigorously and this product consists almost entirely of report grammar, which nothing
+ * enforced at all.
+ *
+ * The one rule worth stating, because it is the defect this shell exists to make unrepeatable:
+ * **the KPI strip does not render while loading or after a failure.** Both pages painted four
+ * confident stat cards above their `loading` guard, so a multi-second fiscal-year read showed
+ * "Capital in 90+ Day Stock: NPR 0" in green until the real number arrived — and on a failed read
+ * it stayed there. A number a page has not computed yet is not a number.
+ *
+ * Slots, in render order: `banners` (provisional/warning callouts, always shown — they qualify
+ * the whole page), `stats`, `note` (the page's own basis/caveat prose), `filters`, body,
+ * `footnote`. `children` is the content body and is reached only when the page has loaded, has
+ * not failed, and is not empty.
+ */
+export default function ReportPage({
+  title,
+  subtitle,
+  actions,
+  noPeriod = false,
+  noPeriodWhat = 'this report',
+  loading = false,
+  error = null,
+  empty = false,
+  emptyIcon = '◷',
+  emptyText = 'Nothing to show for this selection.',
+  loadingText = 'Building report…',
+  banners = null,
+  stats = null,
+  note = null,
+  filters = null,
+  footnote = null,
+  children,
+}) {
+  if (noPeriod) return <NoPeriodState what={noPeriodWhat} />
+
+  // A number the page has not computed — or could not compute — is not shown as a number.
+  const figuresAreReal = !loading && !error
+
+  return (
+    <div>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <h1 className="page-title">{title}</h1>
+          {subtitle && <p className="page-subtitle">{subtitle}</p>}
+        </div>
+        {actions && (
+          <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            {actions}
+          </div>
+        )}
+      </div>
+
+      {banners}
+
+      {figuresAreReal && stats}
+      {figuresAreReal && note}
+      {figuresAreReal && filters}
+
+      {loading ? (
+        <p role="status" aria-live="polite" style={{ color: 'var(--theme-text2)', fontSize: 13, padding: '16px 0' }}>
+          {loadingText}
+        </p>
+      ) : error ? (
+        <div className="card report-error" role="alert">
+          <div className="report-error-title">Could not load this report</div>
+          <p className="report-error-body">{error}</p>
+          <p className="report-error-hint">
+            Nothing here is a real figure — this is a failed read, not an empty period. Reload the
+            page, and if it keeps happening send this message to support.
+          </p>
+        </div>
+      ) : empty ? (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="empty-state" style={{ padding: 32 }}>
+            <div className="empty-state-icon">{emptyIcon}</div>
+            <p className="empty-state-text">{emptyText}</p>
+          </div>
+        </div>
+      ) : (
+        children
+      )}
+
+      {figuresAreReal && footnote}
+    </div>
+  )
+}

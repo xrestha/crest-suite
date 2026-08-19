@@ -51,6 +51,27 @@ Three rules if this is ever touched:
   closed period, since nothing here subtracts a closing count — so the Variance-style
   closed-period default deliberately does not apply.
 
+S594 (2026-08-19, `/impeccable critique`) added a fourth rule and renamed a column:
+
+- **The KPI and the table's TOTAL are different figures on purpose, and both must say so.** The
+  `Attributed Cost of Sales` card excludes the `Not attributed` row; the footer's `Cost of Sales`
+  total includes it. Both were labelled with the same words in the same units about 200px apart,
+  so an accountant reconciling against Vendor Report found the vendor rows tie exactly and the
+  total not at all — which is worse than a missing total, because it discredits the rows that were
+  right. The footer now reads **TOTAL (incl. not attributed)** and carries a `Tip` naming the gap.
+- **The `% of Purchases` total is computed, never asserted.** It was a hardcoded `100.0%` over a
+  column whose denominator (`purchaseTotal`) filters `v > 0` while the footer's Net Purchases cell
+  (`purchaseGrandTotal`) sums negatives too. A vendor whose returns exceeded that period's
+  purchases — routine — therefore made the column genuinely sum past 100 while the footer swore it
+  did not. It is now `pct(purchaseGrandTotal, purchaseShareBase)`, so a real divergence shows.
+- **`Δ` / `pp` became `Reliance Gap` / `pts`.** Bare mathematical notation is the wrong register
+  for a page an owner scans between rushes; the `Tip` was good and a `Tip` is a hover.
+- The `+ N more` truncation in an expanded row was a dead end in the UI *and* in the export (which
+  shipped `itemRows.length`, a count, rather than the rows). There is now a Show-all control and a
+  second **Ingredient Detail** sheet in the workbook. The expandable `<tr>` also became keyboard-
+  reachable (`tabIndex`/`role="button"`/`aria-expanded`/`onKeyDown`) — it is the page's only
+  interaction and was mouse-only.
+
 Acted on S588 (2026-08-19): **`Variance.js`, `TheoreticalVariance.js` and `ShrinkageReport.js` now
 run `sales_entries` through `selectDepletingSales`** before summing `qty_sold`, so a client running
 POS *and* manual bulk entry no longer double-counts a dish into theoretical usage (which inflated

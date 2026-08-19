@@ -1361,6 +1361,82 @@ table.data-table tr.detail-row .data-table td {
   background: transparent;
 }
 
+/* Totals row. Added S594: `.data-table tfoot` had NO rule at all, so every totals row in the
+   product was hand-styled at its call site — three report pages written in one week produced
+   three different treatments (inline font-weight on two, a 2px border on the third). The rule
+   below is the third one, which was the correct answer; the pages now inherit it instead of each
+   restating it. `tr:hover td` is a descendant selector and would otherwise tint the totals row on
+   hover as if it were a data row, which it is not. */
+table.data-table tfoot td {
+  border-top: 2px solid var(--theme-border);
+  border-bottom: none;
+  font-weight: 700;
+  color: var(--theme-text1);
+  padding-top: 12px;
+}
+
+table.data-table tfoot tr:hover td {
+  background: transparent;
+}
+
+/* Lining figures in every numeric cell. Poppins' default figures are PROPORTIONAL, so a right-
+   aligned currency column does not line up digit-for-digit — a 1 is narrower than a 7, and a
+   column of money reads ragged. ConsolidatedPnl.jsx found this independently and set it inline on
+   its own cells; a repo-wide grep found zero other occurrences, so every other currency column in
+   the product had the problem. It belongs here, once, where every table gets it. Only digits are
+   affected, so text cells are unchanged. */
+table.data-table td,
+table.data-table tfoot td,
+.stat-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A wide matrix whose first column is the row LABEL — Consolidated P&L with one column per outlet
+   is the case this was built for. Inside `.table-wrap` (which scrolls horizontally), scrolling
+   right to reach the last column scrolls the labels off screen, so the reader ends up matching
+   numbers to remembered row order. Opt in with `.data-table--sticky-first`; the background is
+   required or the scrolling cells show through underneath. */
+table.data-table--sticky-first th:first-child,
+table.data-table--sticky-first td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--theme-card);
+}
+
+table.data-table--sticky-first tr:hover td:first-child {
+  background: var(--theme-table-hover);
+}
+
+/* A report that could not load. This is deliberately NOT the empty state: "nothing to show" and
+   "could not load" are different facts and only one of them means the figures on screen are real.
+   See ReportPage.jsx for why every report renders one or the other and never a page of zeros. */
+.report-error {
+  padding: 20px 24px;
+  border-color: var(--theme-red);
+  background: color-mix(in srgb, var(--theme-red) 8%, var(--theme-card));
+}
+
+.report-error-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--theme-red-text);
+  margin-bottom: 6px;
+}
+
+.report-error-body {
+  font-size: 13px;
+  color: var(--theme-text1);
+  margin: 0 0 8px;
+}
+
+.report-error-hint {
+  font-size: 12px;
+  color: var(--theme-text2);
+  margin: 0;
+  line-height: 1.6;
+}
+
 table.data-table td select,
 table.data-table td input[type="number"],
 table.data-table td input[type="text"],

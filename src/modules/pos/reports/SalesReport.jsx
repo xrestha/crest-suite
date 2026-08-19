@@ -713,8 +713,10 @@ export default function SalesReport() {
           <ChartCard
             title="Net Sales by Hour"
             cardStyle={{ marginBottom: 24 }}
+            // MUTED is the documented `chart-tick` token: correct inside the SVG, a chart colour
+            // worn as UI chrome out here (the S540 role mismatch), so the footer takes text2.
             footer={hourlyTotalNet > 0 && (
-              <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 8 }}>
                 Total <strong style={{ color: 'var(--theme-text1)' }}>{fmtNpr(hourlyTotalNet)}</strong>
                 {hourlyPeak && hourlyPeak.net > 0 && <> · peak hour <span style={{ color: GOLD, fontWeight: 600 }}>{hourLabel(hourlyPeak.hour)}</span> ({fmtNpr(hourlyPeak.net)})</>}
               </div>
@@ -725,8 +727,12 @@ export default function SalesReport() {
                   <XAxis dataKey="name" tick={{ fill: MUTED, fontSize: 11 }} angle={-45} textAnchor="end" interval={1} />
                   <YAxis tick={{ fill: MUTED, fontSize: 11 }} tickFormatter={v => `${Math.round(v / 1000)}k`} />
                   <Tooltip
-                    contentStyle={{ background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 8, fontSize: 12, color: '#e8e0d0' }}
-                    labelStyle={{ color: '#e8e0d0' }} itemStyle={{ color: '#e8e0d0' }}
+                    // Recharts renders its tooltip as an HTML <div>, NOT an SVG node, so these are
+                    // real React style objects and var() resolves fine here — the SVG-attribute
+                    // exemption that covers `fill`/`stroke`/`tick` does not apply. They were the
+                    // DARK preset's literals, so the tooltip stayed dark on all five light presets.
+                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 12, color: 'var(--theme-text1)' }}
+                    labelStyle={{ color: 'var(--theme-text1)' }} itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={v => [fmtNpr(v), 'Net Sales']}
                   />
                   <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={GOLD} {...chartMotion()} />
@@ -763,7 +769,7 @@ export default function SalesReport() {
           {paymentFilter && (
             <span style={{
               display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600,
-              padding: '3px 6px 3px 10px', borderRadius: 12, background: 'var(--theme-input-bg)',
+              padding: '3px 6px 3px 10px', borderRadius: 'var(--radius-md)', background: 'var(--theme-input-bg)',
               border: '1px solid var(--theme-accent)', color: 'var(--theme-accent-ink)',
             }}>
               Filtered: {paymentFilter}

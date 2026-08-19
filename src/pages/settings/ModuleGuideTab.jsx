@@ -4,7 +4,7 @@ import { escapeHtml } from '../../utils/escapeHtml'
 // Admin Settings → Guides. Static reference content (imsGuideData.js / hrGuideData.js /
 // posGuideData.js, selected by GuidesTab.jsx) driving a sidebar + content-pane layout — same
 // shape as Help.js's page-group nav, scaled to a much deeper per-page reference doc. Added S417
-// as ImsGuideTab, parameterized S584 when the HR and POS guides joined it; see CLAUDE.md decision
+// as ImsGuideTab, parameterized S594 when the HR and POS guides joined it; see CLAUDE.md decision
 // log for why this is a separate, admin-only doc rather than a rework of Help.js's client-facing
 // Module Guide tab. Every section object must define all 10 keys (id/title/route/plan/summary/
 // workflow/fields/formulas/gotchas/connections) — the render reads `.length` with no null guards.
@@ -45,15 +45,12 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
       {/* Sidebar */}
       <div style={{ width: 240, flexShrink: 0, position: 'sticky', top: 12 }}>
         <input
+          className="form-input"
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder="Search pages…"
           aria-label="Search guide pages"
-          style={{
-            width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)',
-            border: '1px solid var(--theme-border)', borderRadius: 6, padding: '7px 10px',
-            fontSize: 13, color: 'var(--theme-text1)', outline: 'none', marginBottom: 8,
-          }}
+          style={{ width: '100%', boxSizing: 'border-box', marginBottom: 8 }}
         />
         <button
           className="btn btn-ghost"
@@ -77,7 +74,7 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
                       onClick={() => setActiveId(s.id)}
                       style={{
                         textAlign: 'left', background: isActive ? 'var(--theme-accent)' : 'transparent',
-                        color: isActive ? 'var(--theme-accent-text)' : 'var(--theme-text2)', border: 'none', borderRadius: 6,
+                        color: isActive ? 'var(--theme-accent-text)' : 'var(--theme-text2)', border: 'none', borderRadius: 'var(--radius-sm)',
                         padding: '6px 10px', fontSize: 13, fontWeight: isActive ? 700 : 400, cursor: 'pointer',
                       }}
                     >
@@ -97,22 +94,22 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
       {/* Content */}
       <div className="card" style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-          <h3 style={{ margin: 0, fontSize: 17, color: 'var(--theme-text1)' }}>{active.title}</h3>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>{active.title}</h3>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {active.route && (
-              <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--theme-accent)', background: 'rgba(0,0,0,0.15)', border: '1px solid var(--theme-border)', borderRadius: 4, padding: '2px 8px' }}>
+              <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--theme-accent-ink)', background: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xs)', padding: '2px 8px' }}>
                 {active.route}
               </span>
             )}
             {active.plan && (
-              <span style={{ fontSize: 11, color: 'var(--theme-text3)', border: '1px solid var(--theme-border)', borderRadius: 4, padding: '2px 8px' }}>
+              <span style={{ fontSize: 11, color: 'var(--theme-text2)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xs)', padding: '2px 8px' }}>
                 {active.plan}
               </span>
             )}
           </div>
         </div>
 
-        <p style={{ fontSize: 13.5, lineHeight: 1.6, color: 'var(--theme-text2)', margin: '0 0 20px' }}>{active.summary}</p>
+        <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--theme-text2)', margin: '0 0 20px' }}>{active.summary}</p>
 
         {active.workflow.length > 0 && (
           <GuideSection title="How to use it">
@@ -130,7 +127,7 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
               {active.fields.map((f, i) => (
                 <div key={i}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>{f.label}</div>
-                  <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--theme-text2)' }}>{f.desc}</div>
+                  <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)' }}>{f.desc}</div>
                 </div>
               ))}
             </div>
@@ -143,7 +140,7 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
               {active.formulas.map((f, i) => (
                 <div key={i} style={{
                   fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6, color: 'var(--theme-text1)',
-                  background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 10px',
+                  background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px',
                 }}>
                   {f}
                 </div>
@@ -156,7 +153,7 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
           <GuideSection title="Watch out for">
             <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
               {active.gotchas.map((g, i) => (
-                <li key={i} style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--theme-amber)' }}>{g}</li>
+                <li key={i} style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--theme-amber-text)' }}>{g}</li>
               ))}
             </ul>
           </GuideSection>
@@ -164,7 +161,7 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
 
         {active.connections && (
           <GuideSection title="Connects to">
-            <p style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--theme-text2)', margin: 0 }}>{active.connections}</p>
+            <p style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)', margin: 0 }}>{active.connections}</p>
           </GuideSection>
         )}
       </div>

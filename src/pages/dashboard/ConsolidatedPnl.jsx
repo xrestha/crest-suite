@@ -27,9 +27,12 @@ import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { supabase } from '../../supabaseClient'
 import { fetchAllRows } from '../../shared/fetchAllRows'
+import { firstError } from '../../shared/queryError'
+import { sheetWithLetterhead } from '../../shared/excelLetterhead'
+import { useBizInfo } from '../../shared/hooks/useBizInfo'
 import SuiteGate from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
-import NoPeriodState from '../../components/NoPeriodState'
+import ReportPage from '../../components/ReportPage'
 import { printWithTitle } from '../../utils/printTitle'
 import { computeUsed, COGS_FORMULA } from '../../shared/imsFormulas'
 
@@ -89,6 +92,7 @@ export default function ConsolidatedPnl() {
   const { clientId, profile, loading: authLoading, clientModules, outlets } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const biz = useBizInfo()
   // Grouped owners get the matrix; everyone else (single outlet, and admin — my_group_id() reads
   // the caller's own profile row, which an admin JWT doesn't have) gets the single statement.
   const grouped = (outlets || []).length > 1
@@ -98,7 +102,12 @@ export default function ConsolidatedPnl() {
   const [pnl, setPnl] = useState(null)             // single-outlet statement
   const [groupCols, setGroupCols] = useState(null) // [{ name, status, hasPeriod, stmt }] for included outlets
   const [excludedNames, setExcludedNames] = useState([])
-  const [groupError, setGroupError] = useState(null)
+  // ONE error state for both load paths. The group path always had this and said why — "'nothing
+  // to show' and 'could not load' are different facts, and only one of them should send someone to
+  // billing" — while the single-outlet path below it discarded `error` on all eleven of its reads
+  // and would have rendered a complete statement of NPR 0. S594 gave the reasoning the same reach
+  // as the reasoning's own page.
+  const [loadError, setLoadError] = useState(null)
   const [loading, setLoading] = useState(true)
 
   // authLoading is a real dependency: a hard load lands here while auth is still resolving, and
@@ -108,8 +117,10 @@ export default function ConsolidatedPnl() {
 
   async function init() {
     setLoading(true)
-    const { data: p } = await scopedFrom('monthly_periods')
+    setLoadError(null)
+    const { data: p, error } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+    if (error) { setLoadError(error.message); setPeriods([]); setLoading(false); return }
     setPeriods(p || [])
     // Closed-period default — COGS subtracts a closing count that an open period does not have.
     const target = (p || []).find(x => x.status === 'closed') || (p || [])[0]
@@ -132,13 +143,13 @@ export default function ConsolidatedPnl() {
 
   /* ── Grouped: one RPC, raw aggregates per outlet, derived here ─────────────────────────── */
   async function loadGroup(period) {
-    setGroupError(null)
+    setLoadError(null)
     const { data, error } = await supabase.rpc('get_group_pnl', {
       p_bs_year: period.bs_year, p_bs_month: period.bs_month,
     })
     // A failed RPC must not masquerade as the no-Suite-Pro empty state — 'nothing to show' and
     // 'could not load' are different facts, and only one of them should send someone to billing.
-    if (error) { console.error('get_group_pnl failed:', error); setGroupCols([]); setGroupError(error.message || 'Could not load the group statement.'); return }
+    if (error) { console.error('get_group_pnl failed:', error); setGroupCols([]); setLoadError(error.message || 'Could not load the group statement.'); return }
     const rows = data || []
     setExcludedNames(rows.filter(r => !r.is_included).map(r => r.client_name))
     setGroupCols(rows.filter(r => r.is_included).map(r => ({
@@ -164,11 +175,8 @@ export default function ConsolidatedPnl() {
 
   /* ── Single outlet: the same conventions, fetched from the browser ─────────────────────── */
   async function loadSingle(periodId) {
-    const [
-      { data: items }, { data: opening }, { data: closing },
-      { data: purchases }, { data: returns }, { data: wastages }, { data: staffMealsData },
-      { data: salesData }, { data: recipes }, { data: overheadRows }, { data: runs },
-    ] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       // MonthlySummary's exact conventions, so this statement's COGS ties to that page:
       // active items only (S436), sub-recipes excluded (prep is counted at the raw-item level).
       scopedFrom('items', 'id, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
@@ -185,6 +193,18 @@ export default function ConsolidatedPnl() {
       supabase.from('overheads').select('bucket, amount').eq('period_id', periodId),
       scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', periodId).eq('status', 'finalized'),
     ])
+
+    // The group path above already refused to let a failed RPC masquerade as an empty state. This
+    // path did not, and every result below flows through `|| []` — so an RLS rejection or a stalled
+    // token produced a complete P&L reading NPR 0 revenue, NPR 0 COGS, NPR 0 net profit.
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setPnl(null); return }
+
+    const [
+      { data: items }, { data: opening }, { data: closing },
+      { data: purchases }, { data: returns }, { data: wastages }, { data: staffMealsData },
+      { data: salesData }, { data: recipes }, { data: overheadRows }, { data: runs },
+    ] = results
 
     // Revenue — price-at-sale with current-price fallback, net of per-row discounts, comps
     // already excluded by the query. Byte-for-byte MonthlySummary's rule.
@@ -232,8 +252,12 @@ export default function ConsolidatedPnl() {
     let labourPayroll = null
     const runIds = (runs || []).map(r => r.id)
     if (runIds.length > 0) {
-      const { data: slips } = await supabase.from('hr_payslips')
+      const { data: slips, error: slipErr } = await supabase.from('hr_payslips')
         .select('gross, ssf_employer').in('run_id', runIds)
+      // A finalized run exists but its payslips could not be read — falling through to the
+      // Overheads bucket here would quietly substitute a DIFFERENT labour source for the one this
+      // statement says it used, so refuse rather than print a plausible number.
+      if (slipErr) { setLoadError(slipErr.message); setPnl(null); return }
       labourPayroll = (slips || []).reduce((s, ps) => s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
     }
 
@@ -283,9 +307,17 @@ export default function ConsolidatedPnl() {
         '% of Revenue': l.key === 'revenue' ? '100.0%' : pctOf(pnl[l.key], pnl.revenue),
       }))
     } else return
-    const ws = XLSX.utils.json_to_sheet(rows)
+    const ws = sheetWithLetterhead(XLSX, {
+      title: 'Profit & Loss',
+      biz,
+      scopeLine: `Period : ${periodLabel}${anyOpen ? ' (PROVISIONAL — period still open, closing stock not counted)' : ''}`,
+      rows,
+      notes: grouped && excludedNames.length > 0
+        ? [`Not included (no Crest Suite Pro): ${excludedNames.join(', ')}`]
+        : [],
+    })
     XLSX.utils.book_append_sheet(wb, ws, 'P&L')
-    XLSX.writeFile(wb, `pnl-${periodLabel.replace(' ', '-')}.xlsx`)
+    XLSX.writeFile(wb, `pnl-${periodLabel.replace(/ /g, '-')}.xlsx`)
   }
 
   if (authLoading) return null
@@ -296,177 +328,222 @@ export default function ConsolidatedPnl() {
     padding: '10px 14px', marginBottom: 16, fontSize: 13, color: 'var(--theme-amber-text)',
   }
 
+  const stmt = grouped ? consolidated : pnl
+  const isEmpty = grouped ? cols.length === 0 : !pnl
+
+  const actions = (
+    <>
+      <button className="btn btn-ghost" style={{ fontSize: 12 }}
+        onClick={() => printWithTitle(`Profit & Loss - ${periodLabel}`)}>🖨 Print</button>
+      <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
+        disabled={loading || !!loadError || isEmpty}>↓ Export Excel</button>
+      <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''}
+        onChange={e => handlePeriodChange(e.target.value)}>
+        {periods.map(p => (
+          <option key={p.id} value={p.id}>
+            {BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}
+          </option>
+        ))}
+      </select>
+    </>
+  )
+
+  const banners = anyOpen ? (
+    <div style={warnStyle}>
+      <strong>Provisional — {grouped ? 'at least one outlet’s month is still open.' : 'this period is still open.'}</strong>{' '}
+      Closing stock has not been counted yet, so COGS treats closing stock as zero and
+      overstates the true figure. The statement is reliable once the period is closed.
+    </div>
+  ) : null
+
+  // The headline. WHY it exists (S594): this page dropped the KPI strip its sibling reports carry
+  // -- defensible for a formal statement -- but the consequence was that Net Profit, the reason an
+  // owner opens the page at all, rendered as the ninth row of a 13px table with no more weight
+  // than Staff Meals. The statement below is still the document; this is the answer.
+  const headline = stmt ? (
+    <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 20 }}>
+      <div className="stat-card">
+        <div className="stat-label">Revenue</div>
+        <div className="stat-value gold" style={{ fontSize: 18 }}>{npr(stmt.revenue)}</div>
+        <div className="stat-sub">{grouped ? `${cols.length} outlet${cols.length === 1 ? '' : 's'}` : periodLabel}</div>
+      </div>
+      <div className="stat-card">
+        <div className="stat-label">
+          <Tip width={280} text="Revenue less cost of goods sold, before wastage, staff meals, labour, overheads and tax.">Gross Profit</Tip>
+        </div>
+        <div className="stat-value" style={{ fontSize: 18, color: stmt.grossProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+          {npr(stmt.grossProfit)}
+        </div>
+        <div className="stat-sub">{pctOf(stmt.grossProfit, stmt.revenue)} of revenue</div>
+      </div>
+      <div className="stat-card">
+        <div className="stat-label">
+          <Tip width={300} text="What is left after every cost on the statement below. This is the bottom line of the same table, not a second calculation.">Net Profit</Tip>
+        </div>
+        <div className="stat-value" style={{ fontSize: 18, color: stmt.netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+          {npr(stmt.netProfit)}
+        </div>
+        <div className="stat-sub">{pctOf(stmt.netProfit, stmt.revenue)} net margin</div>
+      </div>
+    </div>
+  ) : null
+
+  // Coverage first, not last. This one sentence establishes what every figure on the page does and
+  // does not include; below the table in --theme-text3 it was the quietest text on the screen.
+  const coverage = grouped && excludedNames.length > 0 ? (
+    <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 16px', maxWidth: 900 }}>
+      Covers <strong>{cols.length}</strong> outlet{cols.length === 1 ? '' : 's'}. Not included
+      (no Crest Suite Pro on that outlet): {excludedNames.join(', ')}. Suite Pro is per outlet — the
+      consolidated column is the total of the outlets shown, not of your whole group.
+    </p>
+  ) : null
+
+  const footnote = (
+    <>
+      {ignoredBuckets.map(b => (
+        <p key={b.name || 'single'} style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
+          {npr(b.amount)} of manually-entered Labour in Overheads{b.name ? ` at ${b.name}` : ''} was{' '}
+          <strong>not</strong> added to this statement — finalized payroll is the labour figure when
+          both exist, and summing the two would count the same people twice. Remove the manual entry
+          if it duplicates payroll.
+        </p>
+      ))}
+      {missingClosing.length > 0 && !anyOpen && (
+        <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
+          {grouped
+            ? `Closed without a closing stock count: ${missingClosing.join(', ')} — COGS there treats closing stock as zero and is overstated by whatever was actually on hand.`
+            : 'This period was closed without a closing stock count — COGS treats closing stock as zero and is overstated by whatever was actually on hand.'}
+        </p>
+      )}
+      {(pnl || cols.length > 0) && (
+        <p style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 12, maxWidth: 900 }}>
+          Figures come from each module&apos;s own canonical source: revenue and COGS tie to Monthly
+          Summary, labour to the finalized Payroll run, overheads to the Overheads page. Stock Count&apos;s
+          Summary includes sub-recipes in its COGS; this statement, like Monthly Summary, counts their
+          raw ingredients instead — the two differ by exactly the prep amount.
+        </p>
+      )}
+    </>
+  )
+
   return (
     <SuiteGate featureKey="consolidated_pnl" featureLabel="Consolidated P&L" requireModules={['ims']}>
-      {!loading && periods.length === 0 ? <NoPeriodState what="the P&L statement" /> : (
-        <div>
-          <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <h1 className="page-title">Profit &amp; Loss</h1>
-              <p className="page-subtitle">
-                {grouped ? `Every outlet side by side, one statement — ${periodLabel}` : `One statement across every module — ${periodLabel}`}
-              </p>
-            </div>
-            <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <button className="btn btn-ghost" style={{ fontSize: 12 }}
-                onClick={() => printWithTitle(`Profit & Loss - ${periodLabel}`)}>🖨 Print</button>
-              <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel} disabled={!pnl && cols.length === 0}>Export Excel</button>
-              <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''}
-                onChange={e => handlePeriodChange(e.target.value)}>
-                {periods.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {anyOpen && (
-            <div style={warnStyle}>
-              <strong>Provisional — {grouped ? 'at least one outlet’s month is still open.' : 'this period is still open.'}</strong>{' '}
-              Closing stock has not been counted yet, so COGS treats closing stock as zero and
-              overstates the true figure. The statement is reliable once the period is closed.
-            </div>
-          )}
-
-          {loading ? (
-            <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
-          ) : grouped ? (
-            groupError ? (
-              <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13 }}>
-                Could not load the group statement: {groupError}
-              </p>
-            ) : cols.length === 0 ? (
-              <p style={{ color: 'var(--theme-text3)' }}>
-                No outlet in your group has Crest Suite Pro for {periodLabel}.
-              </p>
-            ) : (
-              <>
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Line</th>
-                        {cols.map(c => (
-                          <th key={c.name} style={{ textAlign: 'right' }}>
-                            {c.name}
-                            {!c.hasPeriod ? <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--theme-text3)' }}>no period</span>
-                              : c.status === 'open' ? <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--theme-amber-text)' }}>open</span> : null}
-                          </th>
-                        ))}
-                        <th style={{ textAlign: 'right' }}>Consolidated</th>
-                        <th style={{ textAlign: 'right' }}>
-                          <Tip text="Each consolidated line as a share of consolidated revenue." width={260}>% of Rev.</Tip>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {LINES.map(l => (
-                        <tr key={l.key} style={l.strong ? { fontWeight: 700, borderTop: '2px solid var(--theme-border)' } : undefined}>
-                          <td style={{ fontWeight: l.strong ? 700 : 500, color: 'var(--theme-text1)' }}>
-                            {l.tip ? <Tip text={l.tip} width={300}>{l.label}</Tip> : l.label}
-                          </td>
-                          {cols.map(c => (
-                            <td key={c.name} style={{
-                              textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-                              color: c.hasPeriod ? lineColor(l, c.stmt[l.key]) : 'var(--theme-text3)',
-                            }}>
-                              {c.hasPeriod ? fmtLine(l, c.stmt[l.key]) : '—'}
-                            </td>
-                          ))}
-                          <td style={{
-                            textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700,
-                            color: lineColor({ ...l, strong: true }, consolidated[l.key]),
-                          }}>
-                            {fmtLine(l, consolidated[l.key])}
-                          </td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                            {l.key === 'revenue' ? '100.0%' : pctOf(consolidated[l.key], consolidated.revenue)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {excludedNames.length > 0 && (
-                  <p style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 12 }}>
-                    Not included (no Crest Suite Pro on that outlet): {excludedNames.join(', ')}. Suite Pro
-                    is per outlet — the consolidated figures cover only the outlets shown.
-                  </p>
-                )}
-              </>
-            )
-          ) : !pnl ? null : (
-            <div className="table-wrap" style={{ maxWidth: 760 }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Line</th>
-                    <th style={{ textAlign: 'right' }}>Amount</th>
-                    <th style={{ textAlign: 'right' }}>
-                      <Tip text="Each line as a share of revenue — the standard common-size P&L reading." width={260}>% of Rev.</Tip>
+      <ReportPage
+        title="Profit &amp; Loss"
+        subtitle={grouped ? `Every outlet side by side, one statement — ${periodLabel}` : `One statement across every module — ${periodLabel}`}
+        actions={actions}
+        noPeriod={!loading && !loadError && periods.length === 0}
+        noPeriodWhat="the P&L statement"
+        loading={loading}
+        loadingText="Building the statement…"
+        error={loadError}
+        empty={isEmpty}
+        emptyIcon="📄"
+        emptyText={grouped
+          ? `No outlet in your group has Crest Suite Pro for ${periodLabel}.`
+          : `No figures recorded for ${periodLabel} yet.`}
+        banners={banners}
+        stats={headline}
+        note={coverage}
+        footnote={footnote}
+      >
+        {grouped ? (
+          <div className="table-wrap">
+            {/* Sticky first column: with five outlets this matrix is eight currency columns wide,
+                so scrolling right to reach Consolidated used to scroll the line labels off screen
+                and leave the reader matching numbers to remembered row order. */}
+            <table className="data-table data-table--sticky-first">
+              <thead>
+                <tr>
+                  <th>Line</th>
+                  {cols.map(c => (
+                    <th key={c.name} style={{ textAlign: 'right' }}>
+                      {c.name}
+                      {!c.hasPeriod ? <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--theme-text3)' }}>no period</span>
+                        : c.status === 'open' ? <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--theme-amber-text)' }}>open</span> : null}
                     </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {LINES.map(l => (
-                    <tr key={l.key} style={l.strong ? { fontWeight: 700, borderTop: '2px solid var(--theme-border)' } : undefined}>
-                      <td style={{ color: 'var(--theme-text1)', fontWeight: l.strong ? 700 : 500 }}>
-                        {l.tip ? <Tip text={l.tip} width={300}>{l.label}</Tip> : l.label}
-                        {l.key === 'labour' && (
-                          <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--theme-text3)' }}>
-                            {pnl.labourSource === 'payroll' ? 'from finalized payroll'
-                              : pnl.labourSource === 'overheads' ? 'from Overheads entry'
-                              : hrOn ? 'no finalized payroll run' : ''}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{
-                        textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-                        fontWeight: l.strong ? 700 : 500, color: lineColor(l, pnl[l.key]),
-                      }}>
-                        {fmtLine(l, pnl[l.key])}
-                      </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                        {l.key === 'revenue' ? '100.0%' : pctOf(pnl[l.key], pnl.revenue)}
-                      </td>
-                    </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {!loading && (
-            <>
-              {ignoredBuckets.map(b => (
-                <p key={b.name || 'single'} style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
-                  {npr(b.amount)} of manually-entered Labour in Overheads{b.name ? ` at ${b.name}` : ''} was{' '}
-                  <strong>not</strong> added to this statement — finalized payroll is the labour figure when
-                  both exist, and summing the two would count the same people twice. Remove the manual entry
-                  if it duplicates payroll.
-                </p>
-              ))}
-              {missingClosing.length > 0 && !anyOpen && (
-                <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
-                  {grouped
-                    ? `Closed without a closing stock count: ${missingClosing.join(', ')} — COGS there treats closing stock as zero and is overstated by whatever was actually on hand.`
-                    : 'This period was closed without a closing stock count — COGS treats closing stock as zero and is overstated by whatever was actually on hand.'}
-                </p>
-              )}
-              {(pnl || cols.length > 0) && (
-                <p style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 12, maxWidth: 900 }}>
-                  Figures come from each module&apos;s own canonical source: revenue and COGS tie to Monthly
-                  Summary, labour to the finalized Payroll run, overheads to the Overheads page. Stock Count&apos;s
-                  Summary includes sub-recipes in its COGS; this statement, like Monthly Summary, counts their
-                  raw ingredients instead — the two differ by exactly the prep amount.
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      )}
+                  <th style={{ textAlign: 'right' }}>Consolidated</th>
+                  <th style={{ textAlign: 'right' }}>
+                    <Tip text="Each consolidated line as a share of consolidated revenue." width={260}>% of Rev.</Tip>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {LINES.map(l => (
+                  <tr key={l.key} style={l.strong ? { fontWeight: 700, borderTop: '2px solid var(--theme-border)' } : undefined}>
+                    <td style={{ fontWeight: l.strong ? 700 : 500, color: 'var(--theme-text1)' }}>
+                      {l.tip ? <Tip text={l.tip} width={300}>{l.label}</Tip> : l.label}
+                    </td>
+                    {cols.map(c => (
+                      <td key={c.name} style={{
+                        textAlign: 'right',
+                        color: c.hasPeriod ? lineColor(l, c.stmt[l.key]) : 'var(--theme-text3)',
+                      }}>
+                        {c.hasPeriod ? fmtLine(l, c.stmt[l.key]) : '—'}
+                      </td>
+                    ))}
+                    <td style={{
+                      // NOT `{ ...l, strong: true }`. lineColor tests `strong && amount > 0` BEFORE
+                      // `line.cost`, so forcing strong painted every positive consolidated figure
+                      // success-green -- COGS, Wastage, Labour, Overheads and Tax & Fees included,
+                      // rendered as `(NPR 1,240,000)` in green while the identical line sat grey in
+                      // the single-outlet table. To an accountant, parenthesised-and-green reads as
+                      // a credit. Weight is what was wanted here, and it is set on the next line.
+                      textAlign: 'right', fontWeight: 700,
+                      color: lineColor(l, consolidated[l.key]),
+                    }}>
+                      {fmtLine(l, consolidated[l.key])}
+                    </td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
+                      {l.key === 'revenue' ? '100.0%' : pctOf(consolidated[l.key], consolidated.revenue)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="table-wrap" style={{ maxWidth: 760 }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Line</th>
+                  <th style={{ textAlign: 'right' }}>Amount</th>
+                  <th style={{ textAlign: 'right' }}>
+                    <Tip text="Each line as a share of revenue — the standard common-size P&L reading." width={260}>% of Rev.</Tip>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {LINES.map(l => (
+                  <tr key={l.key} style={l.strong ? { fontWeight: 700, borderTop: '2px solid var(--theme-border)' } : undefined}>
+                    <td style={{ color: 'var(--theme-text1)', fontWeight: l.strong ? 700 : 500 }}>
+                      {l.tip ? <Tip text={l.tip} width={300}>{l.label}</Tip> : l.label}
+                      {l.key === 'labour' && (
+                        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--theme-text3)' }}>
+                          {pnl.labourSource === 'payroll' ? 'from finalized payroll'
+                            : pnl.labourSource === 'overheads' ? 'from Overheads entry'
+                            : hrOn ? 'no finalized payroll run' : ''}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{
+                      textAlign: 'right',
+                      fontWeight: l.strong ? 700 : 500, color: lineColor(l, pnl[l.key]),
+                    }}>
+                      {fmtLine(l, pnl[l.key])}
+                    </td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
+                      {l.key === 'revenue' ? '100.0%' : pctOf(pnl[l.key], pnl.revenue)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </ReportPage>
     </SuiteGate>
   )
 }

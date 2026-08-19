@@ -158,6 +158,61 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S594 — 2026-08-19 — `/impeccable critique` of everything built since Monday, and the five fixes it earned
+
+A dual-agent critique of the pages created 17–19 Aug: **Stock Ageing**, **Supplier Contribution**,
+**Consolidated P&L**, the admin **Guides** tab, and Sales Report's **Product Type Wise** view.
+Scored **26/40**. The interesting result is *where* the defects were. The bundled detector returned
+**0 findings across all 9 files**, and all eight structural greps were clean — every `<select>`
+named, every label associated, no broken `${x}22` tints, no top-level `xlsx` import, all 14
+transaction reads `fetchAllRows`-paged with `.order('id')` tiebreakers. The token and structural
+layer was perfect. Every real defect sat in a layer no detector covers: error handling, state
+honesty, and report grammar.
+
+**P0 — a failed read rendered as a confident report of zeros.** `grep -n "error"` returned *zero*
+matches in `StockAgeing.js` and one comment in `SupplierContribution.js`. Both pages (and
+`ConsolidatedPnl`'s single-outlet path) destructured `{ data }` and dropped `error`, then ran
+everything through `|| []`. An RLS rejection or a stalled token therefore produced a complete report
+of NPR 0 — indistinguishable from a genuinely quiet month, on the pages an accountant reconciles
+from. Fixed with `firstError()` (`src/shared/queryError.js`) and a real error state that renders
+*instead of* the KPI strip. `ConsolidatedPnl`'s group path already did this correctly and had the
+reasoning written out; it had simply not travelled 200 lines to its own siblings.
+
+**P1s.** Stock Ageing aged *every* fiscal year against `new Date()` while its selector accepted any
+past year — so picking a past FY put every surviving batch in the 90+ band, turned the headline
+amber and reported the entire stock value as stale, silently and in the alarming direction. It now
+ages a past year to the end of its last period, and the as-of date appears in the subtitle, the
+on-page note, the print header and the workbook. The group P&L's Consolidated column called
+`lineColor({ ...l, strong: true }, …)`, and `lineColor` tests `strong && amount > 0` *before*
+`line.cost`, so every cost line — COGS, Wastage, Labour, Overheads, Tax & Fees — rendered
+`(NPR 1,240,000)` in success-green while the identical line sat grey in the single-outlet table.
+Supplier Contribution showed two "cost of sales" totals differing by the untraced amount with
+nothing on screen saying so, above a hardcoded `100.0%` that a returns-heavy vendor makes false.
+
+**The structural answer, chosen over patching three pages.** Report grammar became a component:
+`ReportPage` (`src/components/ReportPage.jsx`) owns header, KPI gating, loading, error, empty and
+no-period. `.data-table tfoot` and `font-variant-numeric: tabular-nums` became `Layout.css` rules —
+the former had *no* rule at all so every totals row in the product was hand-styled, the latter
+existed on exactly one page while Poppins' proportional figures left every other currency column
+ragged. `sheetWithLetterhead()` + `useBizInfo()` replaced what would have been a fourth hand-written
+copy of the Excel letterhead, and its `scopeLine` is required rather than optional.
+
+**Also fixed.** The Guides tab's "Watch out for" list — the highest-value content in a 1,000-line
+reference — rendered in `--theme-amber` as body text, which measures 2.05:1 on Rosé Dawn; its
+`role="tablist"` had no panel, no `aria-controls` and no arrow keys, so the announced role promised
+behaviour the markup did not deliver. Supplier Contribution's expandable row was a bare
+`<tr onClick>` with no `tabIndex`, `role` or key handler — the page's only interaction, unreachable
+without a mouse — and its "+ 14 more" was a dead end in both the UI and the export (which shipped a
+count, not the rows); there is now a Show-all control and an Ingredient Detail sheet. Consolidated
+P&L gained a Revenue / Gross Profit / Net Profit headline, because Net Profit had been the ninth row
+of a 13px table, and a sticky Line column so a five-outlet matrix does not scroll its own row labels
+away. Three pre-existing `SalesReport.jsx` defects came along: a Recharts `<Tooltip>` styled with
+dark-preset literals (it renders as an HTML `div`, so `var()` resolves there — the SVG-attribute
+exemption does not apply, and it stayed dark on all five light presets), the `chart-tick` token worn
+as chrome text, and two untokenised radii.
+
+Snapshot: `.impeccable/critique/2026-08-19T15-46-00Z__ing-suppliercontribution-consolidatedpnl-guidestab.md`.
+
 ### S593 — 2026-08-19 — The app had no class for a standalone input, so some fields were never themed
 
 Asked whether two field boxes in the admin Client drawer followed the design system. Neither did,

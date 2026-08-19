@@ -31,14 +31,35 @@ export default function GuidesTab() {
   const [moduleKey, setModuleKey] = useState('ims')
   const mod = MODULES.find(m => m.key === moduleKey) || MODULES[0]
 
+  // Roving tabindex + arrow keys. `role="tab"` PROMISES this behaviour to a screen-reader user,
+  // and until S594 the markup delivered none of it: no aria-controls, no panel, no key handling,
+  // so the announced tab pointed at nothing and Tab landed on all three buttons separately.
+  // Incomplete ARIA is worse than none.
+  function onKeyDown(e) {
+    const i = MODULES.findIndex(m => m.key === moduleKey)
+    let next = null
+    if (e.key === 'ArrowRight') next = (i + 1) % MODULES.length
+    else if (e.key === 'ArrowLeft') next = (i - 1 + MODULES.length) % MODULES.length
+    else if (e.key === 'Home') next = 0
+    else if (e.key === 'End') next = MODULES.length - 1
+    if (next === null) return
+    e.preventDefault()
+    setModuleKey(MODULES[next].key)
+    document.getElementById(`guide-tab-${MODULES[next].key}`)?.focus()
+  }
+
   return (
     <div>
-      <div className="tab-bar" role="tablist" aria-label="Module guide" style={{ marginBottom: 16 }}>
+      <div className="tab-bar" role="tablist" aria-label="Module guide" style={{ marginBottom: 16 }}
+        onKeyDown={onKeyDown}>
         {MODULES.map(m => (
           <button
             key={m.key}
+            id={`guide-tab-${m.key}`}
             role="tab"
             aria-selected={m.key === mod.key}
+            aria-controls={`guide-panel-${m.key}`}
+            tabIndex={m.key === mod.key ? 0 : -1}
             className={`tab-btn${m.key === mod.key ? ' tab-btn--active' : ''}`}
             onClick={() => setModuleKey(m.key)}
           >
@@ -48,7 +69,9 @@ export default function GuidesTab() {
       </div>
       {/* key forces a remount per module: ModuleGuideTab seeds its active section once from
           groups[0], so reusing one instance across a switch would keep a stale activeId. */}
-      <ModuleGuideTab key={mod.key} groups={mod.groups} docTitle={mod.docTitle} docSubtitle={mod.docSubtitle} />
+      <div role="tabpanel" id={`guide-panel-${mod.key}`} aria-labelledby={`guide-tab-${mod.key}`} tabIndex={-1}>
+        <ModuleGuideTab key={mod.key} groups={mod.groups} docTitle={mod.docTitle} docSubtitle={mod.docSubtitle} />
+      </div>
     </div>
   )
 }
