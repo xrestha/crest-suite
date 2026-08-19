@@ -1,36 +1,40 @@
 import { useMemo, useState } from 'react'
-import { IMS_GUIDE_GROUPS } from './imsGuideData'
 import { escapeHtml } from '../../utils/escapeHtml'
 
-// Admin Settings → Guides → Crest IMS. Static reference content (imsGuideData.js) driving a
-// sidebar + content-pane layout — same shape as Help.js's page-group nav, scaled to a much
-// deeper per-page reference doc. Added S417; see CLAUDE.md decision log for why this is a
-// separate, admin-only doc rather than a rework of Help.js's client-facing Module Guide tab.
-export default function ImsGuideTab() {
+// Admin Settings → Guides. Static reference content (imsGuideData.js / hrGuideData.js /
+// posGuideData.js, selected by GuidesTab.jsx) driving a sidebar + content-pane layout — same
+// shape as Help.js's page-group nav, scaled to a much deeper per-page reference doc. Added S417
+// as ImsGuideTab, parameterized S584 when the HR and POS guides joined it; see CLAUDE.md decision
+// log for why this is a separate, admin-only doc rather than a rework of Help.js's client-facing
+// Module Guide tab. Every section object must define all 10 keys (id/title/route/plan/summary/
+// workflow/fields/formulas/gotchas/connections) — the render reads `.length` with no null guards.
+// Render with key={module} from the caller: activeId is init-once state, so reusing one instance
+// across a module switch would fall back to the first section instead of remounting cleanly.
+export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
   const [query, setQuery] = useState('')
-  const [activeId, setActiveId] = useState(IMS_GUIDE_GROUPS[0].sections[0].id)
+  const [activeId, setActiveId] = useState(groups[0].sections[0].id)
 
   const q = query.trim().toLowerCase()
   const filteredGroups = useMemo(() => {
-    if (!q) return IMS_GUIDE_GROUPS
-    return IMS_GUIDE_GROUPS
+    if (!q) return groups
+    return groups
       .map(g => ({ ...g, sections: g.sections.filter(s => s.title.toLowerCase().includes(q)) }))
       .filter(g => g.sections.length > 0)
-  }, [q])
+  }, [q, groups])
 
   const active = useMemo(() => {
-    for (const g of IMS_GUIDE_GROUPS) {
+    for (const g of groups) {
       const s = g.sections.find(s => s.id === activeId)
       if (s) return s
     }
-    return IMS_GUIDE_GROUPS[0].sections[0]
-  }, [activeId])
+    return groups[0].sections[0]
+  }, [activeId, groups])
 
   const printGuide = () => {
     const w = window.open('', '_blank')
     if (!w) return
     w.opener = null
-    w.document.write(buildGuidePrintHtml())
+    w.document.write(buildGuidePrintHtml(groups, docTitle, docSubtitle))
     w.document.close()
     w.focus()
     w.onload = () => { w.print() }
@@ -172,7 +176,7 @@ export default function ImsGuideTab() {
 // section), opened in a new window for the browser's native print dialog. Uses plain black-on-white
 // inline styles rather than the app's theme tokens — a print stylesheet should never depend on the
 // live theme, and a new window doesn't inherit Layout.css anyway.
-function buildGuidePrintHtml() {
+function buildGuidePrintHtml(guideGroups, docTitle, docSubtitle) {
   const esc = escapeHtml
 
   const block = (heading, inner) => inner
@@ -202,11 +206,11 @@ function buildGuidePrintHtml() {
     </section>`
   }
 
-  const groups = IMS_GUIDE_GROUPS.map(g =>
+  const groups = guideGroups.map(g =>
     `<div class="group"><h1>${esc(g.label)}</h1>${g.sections.map(sectionHtml).join('')}</div>`
   ).join('')
 
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Crest IMS — Module Guide</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(docTitle)}</title>
     <style>
       * { box-sizing: border-box; }
       body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #111; max-width: 760px; margin: 0 auto; padding: 24px; line-height: 1.5; orphans: 3; widows: 3; }
@@ -232,8 +236,8 @@ function buildGuidePrintHtml() {
       pre { font-size: 11px; background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 4px; padding: 7px 9px; white-space: pre-wrap; word-break: break-word; margin: 0 0 6px; break-inside: avoid; page-break-inside: avoid; }
       @media print { body { padding: 0; } }
     </style></head><body>
-    <div class="doc-title">Crest IMS — Module Guide</div>
-    <div class="doc-sub">Inventory & food-cost reference. Printed from Admin → Settings → Guides.</div>
+    <div class="doc-title">${esc(docTitle)}</div>
+    <div class="doc-sub">${esc(docSubtitle)}</div>
     ${groups}
   </body></html>`
 }

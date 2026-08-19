@@ -12,6 +12,24 @@
         "rule": "layout-transition",
         "value": "margin-left 0.22s ease",
         "createdAt": "2026-08-18T10:12:43.782Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#666",
+        "createdAt": "2026-08-19T10:10:41.841Z",
+        "reason": "print-only stylesheet in buildGuidePrintHtml; in-file comment: print doc never depends on live theme"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#96700a",
+        "createdAt": "2026-08-19T10:10:41.942Z",
+        "reason": "print-only stylesheet heading accent in buildGuidePrintHtml; theme-independent by design"
+      },
+      {
+        "rule": "design-system-radius",
+        "value": "3px",
+        "createdAt": "2026-08-19T10:10:42.042Z",
+        "reason": "print-only stylesheet meta chip in buildGuidePrintHtml; theme-independent by design"
       }
     ]
   }

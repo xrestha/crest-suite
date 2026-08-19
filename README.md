@@ -158,6 +158,45 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S584 — 2026-08-19 — HR and POS get their own deep guides; the IMS guide brought current
+
+Two pieces, same beat: the Admin Settings → Guides tab.
+
+**First, an audit of the existing IMS guide against the live code** (it hadn't been touched since
+S551) found and fixed seven staleness bugs — the worst being Item Master still documenting the
+old "Total (NPR)" divide-behaviour box that S566 replaced (i.e. the guide taught the bug), plus a
+wrong plan chip on Stock Report (Starter+ → Growth), a gotcha warning about a "− Returns" label
+mismatch S551 itself had already fixed, the missing S567 Uncategorised note on Stock Count, the
+missing closed-period default + settings-driven flag threshold on Variance, Menu Pricing's S582
+print/Excel features, a missing Supplier Contribution section (S580 — the only IMS route with no
+coverage), and an INVERTED billKeyOf gotcha on Vendor Balance Confirmation (the report USES the
+shared cross-period key; it's Vendor Report that keeps the local single-period copy).
+
+**Then the tab grew HR and POS guides at the same depth.** `ImsGuideTab.jsx` was renamed to
+`ModuleGuideTab.jsx` and parameterized (`groups`/`docTitle`/`docSubtitle` — it was already
+data-driven everywhere else), a new `GuidesTab.jsx` adds the Crest IMS | Crest HR | Crest POS
+pill switcher (`key={module}` forces a remount so the active-section state can't go stale across
+a switch), and two new data files carry the content: `hrGuideData.js` (21 sections — including a
+"How pay is calculated" engine reference with the three pay bases, SSF rules, and both FY tax
+slab tables) and `posGuideData.js` (16 sections). Both modules are flat, so their `plan` chips
+carry RANK gates ('Manager only', 'Supervisor+') instead of plan tiers — rank is the real access
+axis there. Content was authored from a code survey of every page plus the standing rules files
+(hr-payroll, pos-billing, auth-and-pins), so the gotchas are the real ones: status vs
+access_blocked, OT supersession, the stale-draft Finalize block, the IMS handoff, void-is-not-a-
+rank-power, whole-bill-only credit notes, Z-report freezing.
+
+**Bundle fix in the same change:** the guide prose was statically imported by `Settings.js`, so
+~1,200 lines (now ~3,600) of admin-only strings shipped inside the Settings chunk to every client
+login that opened Settings — a tab they can never render. `GuidesTab` is now `React.lazy`, so all
+three guides live in one on-demand chunk that only loads when an admin actually opens the tab.
+Per-module "Print full guide" works for all three (title/subtitle parameterized into the print
+doc).
+
+**Files:** `src/pages/settings/ModuleGuideTab.jsx` (renamed from ImsGuideTab.jsx),
+`src/pages/settings/GuidesTab.jsx` (new), `src/pages/settings/hrGuideData.js` (new),
+`src/pages/settings/posGuideData.js` (new), `src/pages/settings/imsGuideData.js`,
+`src/pages/Settings.js`, `public/service-worker.js` (v103 → v105), `README.md`
+
 ### S583 — 2026-08-19 — "Why does the app sign me out when I leave for a while?" — the POS idle lock was firing for admins
 
 Reported as a session mystery; the Supabase Auth settings were clean (single-session off,

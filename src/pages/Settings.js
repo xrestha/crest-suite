@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { useSettings } from '../context/SettingsContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
@@ -6,8 +6,12 @@ import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { useTheme, PRESETS } from '../context/ThemeContext'
 import Tip from '../components/Tip'
 import { MODULE_COLORS, DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
-import ImsGuideTab from './settings/ImsGuideTab'
 import { Navigate } from 'react-router-dom'
+
+// Lazy so the three module guides' prose (several thousand lines of admin-only strings) lives in
+// its own on-demand chunk instead of the Settings chunk every client login downloads — the Guides
+// tab is admin-only, so a client can never render it.
+const GuidesTab = lazy(() => import('./settings/GuidesTab'))
 
 const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Recipe Categories', 'Contact', 'Plan Pricing', 'Data', 'Theme', 'Guides']
 
@@ -911,7 +915,11 @@ export default function Settings() {
         </div>
       )}
 
-      {activeTab === 'Guides' && <ImsGuideTab />}
+      {activeTab === 'Guides' && (
+        <Suspense fallback={<p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading guides…</p>}>
+          <GuidesTab />
+        </Suspense>
+      )}
     </div>
   )
 }
