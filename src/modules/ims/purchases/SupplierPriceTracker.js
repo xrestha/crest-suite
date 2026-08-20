@@ -158,11 +158,12 @@ export default function SupplierPriceTracker() {
     const affected = (recipeIngs || []).filter(ri => ri.recipes).map(ri => ri.recipes.name).filter((v, i, a) => a.indexOf(v) === i)
 
     setSavingPrice(p => ({ ...p, [item.id]: true }))
-    const purchaseQty = parseFloat(item.purchase_qty) || 1
-    const newPackRate = newPerUomRate * purchaseQty
-    const { error } = await scopedUpdate('items', { rate: newPackRate }).eq('id', item.id)
+    // Items are stored in their smallest unit — purchase_qty is always 1, so `rate` IS the per-UOM
+    // price and needs no scaling. Multiplying by purchase_qty here was correct only while that
+    // column could hold a pack size; keeping it would silently re-introduce a pack price.
+    const { error } = await scopedUpdate('items', { rate: newPerUomRate }).eq('id', item.id)
     if (!error) {
-      setItems(prev => prev.map(i => i.id === item.id ? { ...i, rate: newPackRate, per_uom_rate: newPerUomRate } : i))
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, rate: newPerUomRate, per_uom_rate: newPerUomRate } : i))
       if (affected.length > 0) setAffectedRecipes({ itemName: item.name, recipes: affected, newRate: newPerUomRate, uom: item.uom })
     }
     setSavingPrice(p => { const n = { ...p }; delete n[item.id]; return n })

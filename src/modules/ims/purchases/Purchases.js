@@ -10,7 +10,7 @@ import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
-import { getCf, calcBillTotals } from './purchasesHelpers'
+import { getCf, calcBillTotals, fmtRate } from './purchasesHelpers'
 import PurchaseBillModal from './PurchaseBillModal'
 import PurchaseBillPrint from './PurchaseBillPrint'
 import ReturnsTab from './ReturnsTab'
@@ -167,12 +167,26 @@ export default function Purchases() {
     loadPurchases(selectedPeriod.id)
     if (wasNew) printPurchaseBill(header, validLines)
 
+    // Compare both sides in the SAME unit the bill's rate box uses — per base unit, or per purchase
+    // unit where the item has a conversion. Comparing against items.rate only worked while that
+    // column happened to hold a per-unit figure; it is now always per BASE unit (items are stored in
+    // their smallest unit), which a conversion item's rate box is not. An exact !== on floats also
+    // re-fired this prompt on rates that had not moved.
     const changed = []
     for (const l of validLines) {
       const capturedRate = parseFloat(l.rate)
-      const { data: fi } = await supabase.from('items').select('id, name, rate, purchase_qty').eq('id', l.item_id).single()
-      if (fi && capturedRate !== parseFloat(fi.rate)) {
-        changed.push({ itemId: fi.id, itemName: fi.name, oldRate: parseFloat(fi.rate), newRate: capturedRate, purchaseQty: parseFloat(fi.purchase_qty) })
+      const { data: fi } = await supabase.from('items')
+        .select('id, name, uom, per_uom_rate, purchase_unit, conversion_factor').eq('id', l.item_id).single()
+      if (!fi) continue
+      const cf = getCf(fi)
+      const masterRate = (parseFloat(fi.per_uom_rate) || 0) * cf
+      if (Math.abs(capturedRate - masterRate) > 0.000001) {
+        changed.push({
+          itemId: fi.id, itemName: fi.name, cf,
+          unit: cf > 1 ? (fi.purchase_unit || fi.uom) : fi.uom,
+          baseUom: fi.uom,
+          oldRate: masterRate, newRate: capturedRate,
+        })
       }
     }
     if (changed.length > 0) {
@@ -181,13 +195,18 @@ export default function Purchases() {
     }
   }
 
+  // items.rate is the price of ONE base unit (purchase_qty is always 1), so a rate typed against a
+  // purchase unit has to come back down by the conversion factor before it lands. Writing the
+  // entered figure raw put a per-CTN price in the column every valuation reads as per-BTL.
+  const toPerBase = r => parseFloat((r.newRate / (r.cf || 1)).toFixed(6))
+
   async function applyRateUpdates() {
     const toUpdate = rateUpdateItems.filter(i => rateUpdateSelected.has(i.itemId))
-    await Promise.all(toUpdate.map(i => supabase.from('items').update({ rate: i.newRate }).eq('id', i.itemId)))
+    await Promise.all(toUpdate.map(i => supabase.from('items').update({ rate: toPerBase(i) }).eq('id', i.itemId)))
     setItems(prev => {
       const next = prev.map(i => {
         const upd = toUpdate.find(r => r.itemId === i.id)
-        return upd ? { ...i, rate: upd.newRate } : i
+        return upd ? { ...i, rate: toPerBase(upd), per_uom_rate: toPerBase(upd) } : i
       })
       writePageCache('purchases', 'items', effectiveClientId, next)
       return next
@@ -346,12 +365,15 @@ export default function Purchases() {
                     }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.itemName}</div>
-                    <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>per-unit → NPR {(item.newRate / item.purchaseQty).toFixed(4)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
+                      Item Master will hold NPR {fmtRate(toPerBase(item))} per {item.baseUom}
+                    </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, fontSize: 13 }}>
-                    <span style={{ color: 'var(--theme-red-text)', fontWeight: 600 }}>NPR {item.oldRate.toLocaleString()}</span>
+                    <span style={{ color: 'var(--theme-red-text)', fontWeight: 600 }}>NPR {fmtRate(item.oldRate)}</span>
                     <span style={{ color: 'var(--theme-text2)' }}> → </span>
-                    <span style={{ color: 'var(--theme-green-text)', fontWeight: 600 }}>NPR {item.newRate.toLocaleString()}</span>
+                    <span style={{ color: 'var(--theme-green-text)', fontWeight: 600 }}>NPR {fmtRate(item.newRate)}</span>
+                    <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginTop: 1 }}>per {item.unit}</div>
                   </div>
                 </label>
               ))}

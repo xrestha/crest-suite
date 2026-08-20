@@ -8,7 +8,7 @@ import Modal from '../../../components/Modal'
 import SearchableSelect from '../../../components/SearchableSelect'
 import QtyInput from '../../../components/QtyInput'
 import QuickCalculator from '../../../components/Calculator'
-import { getCf, calcBillTotals } from './purchasesHelpers'
+import { getCf, calcBillTotals, fmtRate } from './purchasesHelpers'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false }
 const PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
@@ -74,7 +74,15 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
       const updated = { ...l, [field]: val }
       if (field === 'item_id') {
         const item = items.find(i => i.id === val)
-        if (item?.rate) updated.rate = String(item.rate)
+        // The rate box must match whatever unit the qty box is counting: base units normally, and
+        // purchase units when the item carries a conversion. `per_uom_rate` is the price of ONE base
+        // unit (items are stored in their smallest unit — see Items.js), so scaling it by cf gives
+        // the right prefill in both cases. Prefilling `items.rate` did too, right up until an item
+        // was saved with a pack size in `purchase_qty` — then a 500 GM bottle's NPR 388.50 landed in
+        // a row counting grams and billed 500 bottles. Purchase Orders has always done it this way.
+        const cf = getCf(item)
+        const per = parseFloat(item?.per_uom_rate)
+        if (per > 0) updated.rate = String(parseFloat((per * cf).toFixed(5)))
         updated._amtDraft = ''
       }
       if (field === 'rate' || field === 'vat_inclusive') updated._amtDraft = ''
@@ -242,7 +250,7 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
               </th>
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 118 }}>Qty *</th>
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 105 }}>
-                <Tip text="Enter the ex-VAT rate per unit. Check the VAT box on each line for items attracting 13% VAT." width={270}>Rate (NPR) *</Tip>
+                <Tip text="Ex-VAT price for ONE of whatever the Qty column is counting — the base unit (GM, PCS…), or the purchase unit where the item has a conversion set. Item Master's price for that same unit is shown under each box. Check the VAT box on each line for items attracting 13% VAT." width={300}>Rate (NPR) *</Tip>
               </th>
               <th style={{ textAlign: 'center', fontSize: 11, color: 'var(--theme-text2)', padding: '0 4px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 40 }}>
                 <Tip text="Check to apply 13% VAT to this line item only." width={210}>VAT</Tip>
@@ -267,6 +275,13 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
               const selItem = items.find(i => i.id === line.item_id)
               const cf = getCf(selItem)
               const inputUnit = cf > 1 ? selItem.purchase_unit : (selItem?.uom || '')
+              // Item Master's price for one of whatever the qty box is counting. Shown under the
+              // rate so a rate entered in the wrong unit is visible on the row itself rather than
+              // only in the grand total, where a 500× error still reads as a plausible number.
+              const masterRate = (parseFloat(selItem?.per_uom_rate) || 0) * cf
+              const rateEntered = parseFloat(line.rate) || 0
+              const rateOffBy = masterRate > 0 && rateEntered > 0 ? rateEntered / masterRate : 1
+              const rateSuspect = rateOffBy > 5 || rateOffBy < 0.2
               const lineBase = (parseFloat(line.qty) || 0) * (parseFloat(line.rate) || 0)
               const lineAmount = line.vat_inclusive ? lineBase * 1.13 : lineBase
               const cellInput = { background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', textAlign: 'right' }
@@ -299,6 +314,11 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
                         onChange={v => updateBillLine(line._key, 'rate', v)}
                         wrapperStyle={{ width: '100%' }}
                         style={{ ...cellInput, boxSizing: 'border-box', fontFamily: 'inherit' }} />
+                      {masterRate > 0 && (
+                        <div style={{ fontSize: 10, textAlign: 'right', marginTop: 2, color: rateSuspect ? 'var(--theme-amber-text)' : 'var(--theme-text3)' }}>
+                          {rateSuspect ? '⚠ ' : ''}Master: {fmtRate(masterRate)}/{inputUnit || selItem?.uom}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '6px 4px 4px', verticalAlign: 'middle', textAlign: 'center' }}>
                       <input

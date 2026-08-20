@@ -5,6 +5,15 @@ export function getCf(item) {
   return (cf > 1 && item?.purchase_unit) ? cf : 1
 }
 
+// A sub-paisa unit rate is legitimate (a PCS item bought by the 1000), so a flat toFixed(2) would
+// print "0.00" for exactly the entries these hints exist to expose. Mirrors Items.js's fmtPerUom.
+export function fmtRate(v) {
+  const n = parseFloat(v)
+  if (!isFinite(n) || n <= 0) return '—'
+  if (n < 0.01) return parseFloat(n.toFixed(6)).toString()
+  return n.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 // Bill-level totals: taxable/non-taxable base, discount, VAT, grand total. Discount is spread
 // proportionally across taxable/non-taxable before VAT — VAT applies only to the taxable portion
 // net of its share of the discount. Shared by PurchaseBillModal's live total and the auto-printed

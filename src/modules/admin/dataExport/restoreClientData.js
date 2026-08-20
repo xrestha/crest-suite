@@ -74,6 +74,15 @@ function prepareRow(table, row, clientId) {
     out[k] = isAttributionColumn(k) ? null : v
   }
   if ('client_id' in row) out.client_id = clientId
+  // Items are stored in their smallest unit — purchase_qty is always 1, so `rate` is the price of
+  // one base unit. A backup taken before that rule could carry a pack size, which would restore as
+  // a row whose `rate` means something different from every other item's (and trip the CHECK).
+  // Value-preserving: per_uom_rate is rate / purchase_qty either way, so no figure a restore
+  // rebuilds moves.
+  if (table === 'items' && parseFloat(out.purchase_qty) > 1 && out.rate != null) {
+    out.rate = parseFloat((parseFloat(out.rate) / parseFloat(out.purchase_qty)).toFixed(6))
+    out.purchase_qty = 1
+  }
   return out
 }
 

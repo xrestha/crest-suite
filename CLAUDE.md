@@ -440,11 +440,44 @@ See `.claude/rules/auth-and-pins.md` (auto-loads when editing Login/ResetPasswor
 
 All downstream calculations (Stock, Variance, FIFO, Reorder) read these base-unit values directly.
 
-### `items.rate` is a PACK price, and every valuation in IMS hangs off that (S566)
+### Every item is stored in its SMALLEST unit — `purchase_qty` is always 1 (S597, supersedes S566)
 
-`items.per_uom_rate` is a **generated column** — `rate / NULLIF(purchase_qty, 0)` — so `rate` means "the price of the whole `purchase_qty`", never the price of one base unit. A 1 KG bag counted as 1000 GM and costing NPR 500 is `purchase_qty 1000, rate 500`, giving `per_uom_rate 0.50`. Stock Count, Variance, COGS, Reorder and the Monthly Owner Report all value stock straight off `per_uom_rate`, so a wrong pair here misprices the item everywhere at once, with nothing anywhere to flag it.
+`items.per_uom_rate` is a **generated column** — `rate / NULLIF(purchase_qty, 0)` — and `purchase_qty`
+is now always **1**, so **`items.rate` is the price of ONE base unit and equals `per_uom_rate`**. A
+1 KG bag counted as 1000 GM and costing NPR 500 is stored as `purchase_qty 1, rate 0.50`. Stock
+Count, Variance, COGS, Reorder and the Monthly Owner Report all value stock straight off
+`per_uom_rate`, so a wrong pair here misprices the item everywhere at once with nothing to flag it.
 
-The Add/Edit Item form contradicted this for a long time: a fourth box labelled "Total (NPR)" did `rate = amount ÷ purchase_qty`, which the generated column then divided by `purchase_qty` **again** — so any item entered through it carried a per-unit rate `purchase_qty`× too small. Found live via a CUP HOLDER valuing 880 PCS at NPR 12 (per-unit NPR 0.014 instead of ~14). The box is now **"Price per unit (NPR)"** and multiplies instead (`rate = perUnit × purchase_qty`), and changing Purchase Qty afterwards re-scales `rate` from that entered per-unit price rather than leaving a stale one behind.
+The Add/Edit Item form still **accepts** a pack — "Purchase Qty 1000, Rate 500" is how an invoice
+line reads — and divides it out on save. Those two boxes are an **entry aid**; the green line under
+them states what will actually be stored. `enteredQty` defaults to 1, so a bare "Price per unit" is
+a complete entry on its own. Migration `20260820100000` backfilled the book (value-preserving:
+`per_uom_rate` is unchanged for every row) and a `CHECK (purchase_qty = 1)` holds the line.
+
+**Until S597 the same column meant two things and the product could not tell.** `per_uom_rate` came
+out right either way, so recipe costing and every report looked correct — but **Add Purchase Bill
+prefills `items.rate` into a rate box whose Qty is counted in BASE units**, so a 500 GM bottle
+stored as `(500, 388.50)` prefilled NPR 388.50 against a qty of 500 GM and billed **NPR 194,250 for
+a NPR 388.50 bottle**. 253 of the reference client's 254 items were already `(1, per-unit)`, which
+is exactly why it went unseen: `rate` meant "per GM" for all of them and "per bottle" for the one.
+Four consequences fell out of that, all now fixed and all worth not re-deriving:
+
+- **`purchase_qty` no longer mirrors `conversion_factor`.** Buy-in-CTN / count-in-BTL belongs to the
+  conversion columns alone — that is what the Purchase Bill reads to decide whether its Qty column
+  means cartons or bottles. Mirroring it put a per-CTN price in the column every valuation reads as
+  per-BTL. The Conversion tab's preview now shows cost **per purchase unit** (`rate × cf`), since
+  `rate` is already the per-base-unit figure.
+- **The bill prefills `per_uom_rate × cf`, never `items.rate`** (`PurchaseBillModal.jsx`) — the rate
+  that matches whichever unit the Qty box is counting, in both cases. Purchase Orders had always
+  done this (`PurchaseOrders.js:155`); the bill modal was the only holdout. Each row now also prints
+  the master rate for that same unit beneath the box, ambered past 5×/⅕, so a unit mix-up is visible
+  on the row rather than only in a grand total where a 500× error still reads as a plausible number.
+- **The "Rate changes detected" sync compares and writes in the box's unit** (`Purchases.js`): it
+  matched the entered per-unit rate against `items.rate` and wrote it back raw, so correcting a
+  conversion item's rate by hand would have stored a per-CTN price as per-BTL. It divides by `cf`
+  going in, and its epsilon compare stops the prompt re-firing on rates that never moved.
+- **A restore normalises on the way in** (`restoreClientData.js`) — a backup predating this rule
+  would otherwise come back carrying a pack size and trip the CHECK.
 
 Three things worth keeping in mind before touching this form again:
 
@@ -452,7 +485,7 @@ Three things worth keeping in mind before touching this form again:
 - **A sub-paisa `per_uom_rate` is legitimate** (a PCS item bought by the 1000), so the Item Master column's `.toFixed(2)` rendered exactly the mis-entries it existed to reveal as a flat `0.00`. Both the column and the form hint share `fmtPerUom()` now, which falls back to 6 decimals below 0.01.
 - **`Rate (NPR)` had no `Tip`** while every field around it did — and it is the one field whose meaning is genuinely ambiguous. Any new field in this form needs one from the start, per the tooltip rule below.
 
-This is distinct from the `purchase_entries` convention above: that one is about a *conversion factor* between purchase and base units on a transaction row, this one is about pack size on the item master. Both end in base units, but they are different columns with different arithmetic.
+This is distinct from the `purchase_entries` convention above: that one is about a *conversion factor* between purchase and base units on a transaction row, this one is about the item master. Both end in base units, but they are different columns with different arithmetic — and the S597 lesson is precisely that a column allowed two meanings will be read with the wrong one somewhere, silently, by code that looks correct.
 
 ### `billKeyOf`/`aging` are centralized in `purchasesHelpers.js` — but not everywhere
 

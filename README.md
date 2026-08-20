@@ -158,6 +158,69 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S597 — 2026-08-20 — One column meant two things, and the Purchase Bill read it the wrong way
+
+Two screenshots: Item Master showing BBQ SAUCE as **Purchase Qty 500, Rate 388.50, per-GM 0.78** —
+a 500 GM bottle, priced correctly — and Add Purchase Bill showing the same item at **qty 500, rate
+388.50, total NPR 194,250**. The bill was charging for 500 bottles of sauce.
+
+Nothing was wrong with the arithmetic on either screen. `items.per_uom_rate` is generated as
+`rate / purchase_qty`, so `(500, 388.50)` and `(1, 0.777)` describe the same bottle and value stock
+identically — every recipe cost, every report, correct either way. What differed was what
+**`items.rate` itself** means, and the Purchase Bill prefills that column straight into a rate box
+whose Qty is counted in **base units**. For 253 of the client's 254 items `rate` was a per-GM price
+and the prefill was right; for the one entered with a pack size it was a per-bottle price, and the
+bill was out by exactly the pack size.
+
+So the fix was not to teach the bill about pack sizes. It was to stop the column having two
+meanings.
+
+**Every item is now stored in its smallest unit** — `purchase_qty` is always 1, so `items.rate`
+**is** the price of one base unit and equals `per_uom_rate`. That is what the Item Master screenshot
+already showed for all 253 other items, and it is the form recipe costing wants: sauce per ML, salt
+per GM. The Add/Edit Item form still **accepts** a pack, because "1000 GM for NPR 500" is how an
+invoice line reads — it just divides it out before writing, and the green line under the form now
+states what will actually be saved rather than what was typed. Migration `20260820100000` backfills
+the book (`rate = rate / purchase_qty`, value-preserving — `per_uom_rate` is unchanged for every
+row, so no stock valuation, COGS, variance or frozen Owner Report figure moves) and a
+`CHECK (purchase_qty = 1)` stops a fourth write path reintroducing the ambiguity later.
+
+**`purchase_qty` no longer mirrors `conversion_factor`.** Buying in CTN and counting in BTL is
+described by the Conversion tab alone — which is what the Purchase Bill reads to decide whether its
+Qty column means cartons or bottles. Mirroring it into `purchase_qty` was what made a conversion
+item store a per-CTN price in the column every valuation reads as per-BTL. The Conversion tab's
+preview flipped accordingly: it now shows cost **per purchase unit** (`rate × cf`), since `rate` is
+already the per-base-unit figure.
+
+**Three more places had the same unit confusion, two of them writing.**
+
+- **The bill prefills `per_uom_rate × cf`, never `items.rate`** — the rate matching whichever unit
+  the Qty box is counting, in both cases. Purchase Orders had always done exactly this
+  (`PurchaseOrders.js:155`); the bill modal was the only holdout. Each row now also prints the
+  master rate for that same unit under the box, ambered past 5×/⅕ — a 500× error still reads as a
+  plausible number in a grand total, so it needs to be visible on the row that caused it.
+- **"Rate changes detected"** compared the entered per-unit rate against `items.rate` and wrote it
+  back raw. Correcting a rate by hand and accepting the prompt would have stored a per-CTN price as
+  per-BTL — the mirror image of the bug, in the item master itself. It now compares against
+  `per_uom_rate × cf`, divides by `cf` on the way in, states which unit each side of the arrow is
+  in, and uses an epsilon compare so the prompt stops re-firing on rates that never moved.
+- **Supplier Price Tracker** multiplied its per-UOM edit by `purchase_qty` before saving — correct
+  only while that column could hold a pack size, and a landmine afterwards.
+- **A restore normalises on the way in** (`restoreClientData.js`), or a backup predating this rule
+  would come back carrying a pack size and trip the CHECK.
+
+Item Master's three rate columns collapsed to one. `Purch. Qty` is structurally 1 now and `Rate`
+and `/ UOM` had become the same number printed twice; the surviving **Rate (NPR) / UOM** column
+carries the tooltip that says what it is. `fmtRate()` moved into `purchasesHelpers.js` so the bill
+row and the sync panel share the sub-paisa formatting Item Master already had — a PCS item bought
+by the thousand is legitimately worth less than a paisa, and `toFixed(2)` prints exactly those
+entries as `0.00`.
+
+**Not done, deliberately:** bills already entered at a pack rate are not auto-corrected. The right
+value per bill is a human reading the invoice, and a bulk repair that guesses wrong is worse than
+none. Query to find them (`pe.rate > i.per_uom_rate * 5`) is in the migration's companion notes;
+fix by editing the bill in Purchases.
+
 ### S596 — 2026-08-20 — The delivery platform was a tag on a bill, never a party you could hold to a number
 
 Sales Report → Delivery Partners listed every Foodmandu/Pathao bill and totalled all of them

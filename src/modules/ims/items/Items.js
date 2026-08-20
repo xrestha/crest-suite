@@ -24,7 +24,7 @@ const USAGE_LABELS = { OS: 'Opening Stock', CS: 'Closing Stock', R: 'Recipes', P
 
 const EMPTY_FORM = {
   name: '', category_id: '', uom: 'GM',
-  purchase_qty: '', rate: '', yield_pct: '100',
+  purchase_qty: '1', rate: '', yield_pct: '100',
   purchase_unit: '', base_unit: '', conversion_factor: ''
 }
 
@@ -196,21 +196,25 @@ export default function Items() {
     setInitingCats(false)
   }
 
-  // `items.rate` is the price of the WHOLE `purchase_qty` — the DB derives
-  // `per_uom_rate = rate / purchase_qty` as a generated column. So a per-unit price typed off an
-  // invoice line has to be scaled UP by the pack size to become `rate`, never divided.
+  // Purchase Qty and Rate are an ENTRY AID, not what gets stored. Every item is saved in its
+  // SMALLEST unit: `purchase_qty` is always 1, so `items.rate` is the price of one base unit and
+  // equals the generated `per_uom_rate`. Typing "1000 GM for NPR 500" is just a convenient way of
+  // saying "NPR 0.50 per GM" — doSave() divides it out. Storing the pack size instead is what let a
+  // 500 GM bottle prefill NPR 388.50 into a Purchase Bill row counting grams, billing 500 bottles.
   //
-  // This field used to be labelled "Total (NPR)" and did `rate = amount / qty`, which the generated
-  // column then divided by `qty` a SECOND time — so every item entered through it ended up with a
-  // per-unit rate `qty`× too small, and the form displayed the *correct* figure on screen while
-  // saving the wrong one. Found live (S566) via a CUP HOLDER valuing 880 PCS at NPR 12.
+  // scaleToRate keeps the two boxes in step WHILE editing: a per-unit price typed off an invoice
+  // line is scaled UP by the pack size to fill Rate, never divided (this field was once labelled
+  // "Total (NPR)" and did `rate = amount / qty`, which the generated column then divided by `qty` a
+  // SECOND time — S566, found via a CUP HOLDER valuing 880 PCS at NPR 12).
   const scaleToRate = (perUnit, qty) => String(parseFloat((perUnit * qty).toFixed(4)))
+
+  // A blank Purchase Qty means "one unit", so a per-unit price on its own is a complete entry.
+  const qtyOf = src => (parseFloat(src) > 0 ? parseFloat(src) : 1)
 
   function setPerUnitPrice(val) {
     setPerUnitDraft(val)
-    const qty = parseFloat(form.purchase_qty)
     const per = parseFloat(val)
-    if (qty > 0 && per > 0) setForm(prev => ({ ...prev, rate: scaleToRate(per, qty) }))
+    if (per > 0) setForm(prev => ({ ...prev, rate: scaleToRate(per, qtyOf(prev.purchase_qty)) }))
   }
 
   function openNew() {
@@ -262,7 +266,7 @@ export default function Items() {
   async function doSave() {
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return false }
     if (!form.name.trim()) { setError('Item name is required.'); return false }
-    if (!form.purchase_qty || !form.rate) { setError('Purchase qty and rate are required.'); return false }
+    if (!form.rate) { setError('Rate is required — either the price for the whole Purchase Qty, or the price per unit.'); return false }
 
     // Conversion validation
     const hasPurchaseUnit = form.purchase_unit.trim() !== ''
@@ -279,21 +283,21 @@ export default function Items() {
     setError('')
 
     const cf = hasFactor ? parseFloat(form.conversion_factor) : 1
+
+    // Normalise to the smallest unit before writing — see the note above scaleToRate. purchase_qty
+    // is deliberately NOT set from the conversion factor: a buy-in-CTN / count-in-BTL relationship
+    // belongs to the Conversion tab, which is what the Purchase Bill reads to pick its qty unit.
+    // Mirroring it here would store a per-CTN price in a column every valuation reads as per-BTL.
     const payload = {
       name: form.name.trim().toUpperCase(),
       category_id: form.category_id || null,
       uom: form.uom,
-      purchase_qty: parseFloat(form.purchase_qty),
-      rate: parseFloat(form.rate),
+      purchase_qty: 1,
+      rate: parseFloat((parseFloat(form.rate) / qtyOf(form.purchase_qty)).toFixed(6)),
       purchase_unit: hasPurchaseUnit ? form.purchase_unit.trim().toUpperCase() : null,
       base_unit: hasBaseUnit ? form.base_unit.trim().toUpperCase() : null,
       conversion_factor: cf,
       yield_pct: parseFloat(form.yield_pct) > 0 ? parseFloat(form.yield_pct) : 100,
-    }
-
-    // Auto-sync purchase_qty from conversion_factor when conversion is fully set
-    if (hasPurchaseUnit && hasBaseUnit && hasFactor) {
-      payload.purchase_qty = cf
     }
 
     if (editing) {
@@ -474,15 +478,14 @@ export default function Items() {
                 </div>
                 <div className="form-field">
                   <label htmlFor="items-f5">
-                    <Tip text={form.conversion_factor ? `Locked — derived from conversion factor (${form.conversion_factor}). Set on the Conversion tab.` : 'How many base units you typically buy at once. e.g. 1000 if you buy 1 KG bag = 1000 GM.'} width={240}>
+                    <Tip text={`Only used to work out the price of one ${form.uom} — it is never stored. Enter the pack you bought (1000 if a 1 KG bag counts as 1000 ${form.uom}) and put that pack's price in Rate. Leave at 1 if Rate is already the price of one ${form.uom}.`} width={280}>
                       Purchase Qty
                     </Tip>
                   </label>
                   <input id="items-f5"
                     type="number"
-                    value={form.conversion_factor ? form.conversion_factor : form.purchase_qty}
+                    value={form.purchase_qty}
                     onChange={e => {
-                      if (form.conversion_factor) return
                       const qty = e.target.value
                       const per = parseFloat(perUnitDraft)
                       // An entered per-unit price stays authoritative when the pack size changes —
@@ -492,19 +495,12 @@ export default function Items() {
                         ? { purchase_qty: qty, rate: scaleToRate(per, parseFloat(qty)) }
                         : { purchase_qty: qty }))
                     }}
-                    placeholder="1000"
-                    readOnly={!!form.conversion_factor}
-                    style={form.conversion_factor ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                    placeholder="1"
                   />
-                  {form.conversion_factor && (
-                    <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4, display: 'block' }}>
-                      Auto-set from conversion factor
-                    </span>
-                  )}
                 </div>
                 <div className="form-field">
                   <label htmlFor="items-f6">
-                    <Tip text={`Price for the WHOLE Purchase Qty above — not per ${form.uom}. e.g. a 1 KG bag counted as 1000 GM and costing NPR 500 → enter 500. If your invoice only shows the per-unit price, leave this and use "Price per unit" instead.`} width={280}>
+                    <Tip text={`Price for the WHOLE Purchase Qty above — not per ${form.uom}. e.g. a 1 KG bag counted as 1000 GM and costing NPR 500 → Purchase Qty 1000, Rate 500. The item is then saved as the price of ONE ${form.uom} (NPR 0.50 here). If your invoice only shows the per-unit price, leave this and use "Price per unit" instead.`} width={300}>
                       Rate (NPR)
                     </Tip>
                   </label>
@@ -524,14 +520,14 @@ export default function Items() {
                   <input id="items-f7"
                     type="number" min="0" step="any"
                     value={perUnitDraft}
-                    placeholder={perUom(form.purchase_qty, form.rate) === '—' ? '' : perUom(form.purchase_qty, form.rate)}
+                    placeholder={perUom(qtyOf(form.purchase_qty), form.rate) === '—' ? '' : perUom(qtyOf(form.purchase_qty), form.rate)}
                     onChange={e => setPerUnitPrice(e.target.value)}
                   />
                 </div>
               </div>
-              {form.purchase_qty && form.rate && (
+              {form.rate && (
                 <p style={{ fontSize: 12, color: 'var(--theme-accent-ink)', margin: '10px 0 0' }}>
-                  Per {form.uom} rate: NPR {perUom(form.purchase_qty, form.rate)}
+                  Saved as NPR {perUom(qtyOf(form.purchase_qty), form.rate)} per {form.uom} — Purchase Qty is only used to work this out.
                 </p>
               )}
             </>
@@ -596,7 +592,7 @@ export default function Items() {
                     </p>
                     {form.rate && form.conversion_factor && (
                       <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
-                        Per {form.base_unit?.toUpperCase()} cost: NPR {(parseFloat(form.rate) / parseFloat(form.conversion_factor)).toFixed(4)}
+                        NPR {perUom(qtyOf(form.purchase_qty), form.rate)} per {form.base_unit?.toUpperCase()} → NPR {((parseFloat(form.rate) / qtyOf(form.purchase_qty)) * parseFloat(form.conversion_factor)).toFixed(2)} per {form.purchase_unit?.toUpperCase()}
                       </p>
                     )}
                   </div>
@@ -746,13 +742,7 @@ export default function Items() {
                   {showCategoryCol && <th>Category</th>}
                   <th>UOM</th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="Quantity in base units per purchase order unit (e.g. 1 carton = 12 bottles → 12). Used to convert purchase-unit prices to per-base-unit rates." width={280}>Purch. Qty</Tip>
-                  </th>
-                  <th style={{ textAlign: 'right' }}>
-                    <Tip text="Purchase price per purchase unit (e.g. per carton). Divide by Purch. Qty to get the per-base-unit rate." width={260}>Rate (NPR)</Tip>
-                  </th>
-                  <th style={{ textAlign: 'right' }}>
-                    <Tip text="Rate per base unit = Rate ÷ Purch. Qty. This is the cost used in recipe costing and stock valuation." width={270}>/ UOM</Tip>
+                    <Tip text="Cost of ONE base unit — the figure recipe costing, stock valuation and every IMS report use. Items are always stored in their smallest unit, so a 1 KG bag counted in GM shows its per-GM price here, not the bag price." width={300}>Rate (NPR) / UOM</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip width={240} text="Usable % after trim/prep. Red = trim loss is factored into recipe costing. 100% = no loss (default).">
@@ -782,8 +772,6 @@ export default function Items() {
                         </td>
                       )}
                       <td>{item.uom}</td>
-                      <td style={{ textAlign: 'right' }}>{Number(item.purchase_qty).toLocaleString()}</td>
-                      <td style={{ textAlign: 'right' }}>{Number(item.rate).toLocaleString()}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
                         {fmtPerUom(item.per_uom_rate)}
                       </td>
