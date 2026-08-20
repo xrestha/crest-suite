@@ -197,6 +197,7 @@ export const POS_GUIDE_GROUPS = [
           'For a delivery partner, settlement is where the commission is computed and recorded — on the ex-VAT base the platforms themselves calculate on.',
         ],
         fields: [
+          { label: 'Who owes what', desc: 'The credit ledger totalled by counterparty — each delivery platform separately, plus one Direct customers row so the rollup still ties to the Outstanding figure above it. Covers every Credit bill ever, unlike the date-ranged report.' },
           { label: 'Settlement methods', desc: 'Cheque and Bank Transfer exist only here — they are settlement instruments, not till tenders, which is why the Charge screen never offers them.' },
         ],
         formulas: [
@@ -322,15 +323,18 @@ export const POS_GUIDE_GROUPS = [
           'The 1L+ tab lists buyers whose purchases cross NPR 100,000 — the IRD Annexure 13 disclosure threshold — which is one reason buyer names are mandatory on credit and discounted bills.',
         ],
         fields: [
+          { label: 'By Partner rollup (Delivery Partners tab)', desc: 'One row per delivery platform — outstanding balance, commission taken, net received — plus the effective commission rate measured against the agreed one. The rate is the point: without it the tab can say how much a platform withheld but never whether that was the agreed amount. Clicking a row filters the bills, the KPIs and the export to that platform.' },
           { label: 'Product Type tab', desc: 'Three axes the data already carries: Kitchen vs Bar (the same ticket-routing categories that drive the printers, so the report and the tickets cannot disagree), VAT vs non-VAT as billed, and Veg vs Non-veg from the recipe flag.' },
         ],
         formulas: [
           'Every tab derives from ONE bill-math primitive: a grouping key over the same proportional-discount arithmetic, so any slice — category, item, hour, customer — reconciles exactly back to bill totals. A new slice is a new grouping, never a second copy of the math.',
           'A credit-noted bill contributes returned quantity only, never revenue, on every tab identically.',
+          'Effective commission % = settled commission ÷ ex-VAT settled base — the same base Customers settles on, never the VAT-inclusive total (that would read about 13% low on every bill and accuse every platform of over-charging). Outstanding bills are excluded from both sides of it.',
         ],
         gotchas: [
           'A Product Type axis that could only produce a single row is hidden rather than rendered — so an axis you expected but don\'t see usually means the data can\'t split it (e.g. no bar categories configured), not a fault.',
           'All reads are paged — a busy month\'s line items far exceed the database\'s silent 1,000-row page, and the 1L+ tab in particular must never drop a party below a statutory disclosure line.',
+          'An off-rate flag needs BOTH a gap of half a percentage point AND a rupee gap bigger than per-bill rounding can explain. Commission is rounded to the rupee at settlement, so one tolerance alone flags honest platforms on small bills.',
         ],
         connections: 'Reads Orders\' bills and payments; the Kitchen/Bar axis reads Table Management\'s ticket routing; Comped Bills cross-references Exceptions; daily totals reconcile to Shifts\' frozen Z-reports.',
       },

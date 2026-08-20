@@ -486,7 +486,11 @@ delete-then-insert — which also means a line already fired to the kitchen vani
 something records it, so that RPC now writes `pos_kot_removals` from its own before/after diff and
 `closeOrder` persists the cart before billing it. Since S580 it also carries the bill-math rule: a
 new way to slice a bill is a new `keyOf` passed to `computeGroupAmounts`, never a fourth copy of
-the proportional-discount arithmetic.
+the proportional-discount arithmetic. S596 adds the delivery-partner rules: commission is measured
+against the ex-VAT, post-discount base and never `paid_amount` (off the VAT-inclusive total it reads
+~13 points low on every bill, so a report built that way accuses every platform of over-charging),
+an unsettled bill is excluded from both sides of the rate, and a rate-mismatch flag needs a
+percentage tolerance AND a rupee one or per-bill rounding raises false alarms.
 
 ### Sub-recipe mirror items
 

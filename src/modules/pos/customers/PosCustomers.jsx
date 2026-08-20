@@ -186,6 +186,44 @@ export default function PosCustomers() {
   const settled   = creditBills.filter(b => b.credit_settled_at)
   const outstandingTotal = unsettled.reduce((s, b) => s + (b.paid_amount || 0), 0)
 
+  // Both halves of this tab grouped by who actually owes the money — the same per-partner view
+  // Sales Report → Delivery Partners now gives, mirrored here because this is the screen someone
+  // is on when they chase Foodmandu for a remittance. Before it existed, neither screen grouped
+  // by partner at all: the platform was a tag on a bill everywhere and never a subject with its
+  // own total, so "what does Pathao owe me" meant reading down a column and adding it up.
+  //
+  // Non-partner Credit is kept as its own row rather than filtered out, so the Outstanding column
+  // still ties to the KPI card directly above it — a rollup that doesn't reconcile with the total
+  // beside it is worse than no rollup (S567).
+  //
+  // Deliberately NOT the same figures as the report's: this page is every Credit bill ever, that
+  // one is a date range. The note under the table says so, because two screens showing the same
+  // words and different numbers is a support call.
+  const creditByCounterparty = Object.values(creditBills.reduce((acc, b) => {
+    const key = b.delivery_partner || '__DIRECT__'
+    const g = acc[key] = acc[key] || {
+      key, label: b.delivery_partner || 'Direct customers', isPartner: !!b.delivery_partner,
+      unsettledBills: 0, outstanding: 0, settledBills: 0, commission: 0, netReceived: 0,
+    }
+    const amt = b.paid_amount || 0
+    if (b.credit_settled_at) {
+      const comm = parseFloat(b.commission_amount) || 0
+      g.settledBills += 1
+      g.commission += comm
+      g.netReceived += amt - comm
+    } else {
+      g.unsettledBills += 1
+      g.outstanding += amt
+    }
+    return acc
+  }, {})).sort((a, b) => (b.outstanding - a.outstanding) || (b.netReceived - a.netReceived))
+
+  const counterpartyTotals = creditByCounterparty.reduce((s, g) => ({
+    unsettledBills: s.unsettledBills + g.unsettledBills, outstanding: s.outstanding + g.outstanding,
+    settledBills: s.settledBills + g.settledBills, commission: s.commission + g.commission,
+    netReceived: s.netReceived + g.netReceived,
+  }), { unsettledBills: 0, outstanding: 0, settledBills: 0, commission: 0, netReceived: 0 })
+
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
 
@@ -318,6 +356,64 @@ export default function PosCustomers() {
                   <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{unsettled.length}</div>
                 </div>
               </div>
+
+              {creditBills.length > 0 && (
+                <>
+                  <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
+                    Who owes what
+                  </p>
+                  <div className="table-wrap" style={{ marginBottom: 8 }}>
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Counterparty</th>
+                          <th style={{ textAlign: 'right' }}>
+                            <Tip text="Bills this counterparty has not settled yet" width={220}>Unsettled</Tip>
+                          </th>
+                          <th style={{ textAlign: 'right' }}>Outstanding</th>
+                          <th style={{ textAlign: 'right' }}>
+                            <Tip text="Foodmandu/Pathao only — commission withheld across their settled bills, as entered from each remittance statement" width={280}>Commission</Tip>
+                          </th>
+                          <th style={{ textAlign: 'right' }}>
+                            <Tip text="What actually reached you on the bills already settled, after commission" width={250}>Net Received</Tip>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {creditByCounterparty.map(g => (
+                          <tr key={g.key}>
+                            <td>
+                              {g.isPartner
+                                ? <span className="badge-amber" style={{ fontSize: 10 }}>{g.label}</span>
+                                : <span style={{ color: 'var(--theme-text2)' }}>{g.label}</span>}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>{g.unsettledBills || '—'}</td>
+                            <td style={{ textAlign: 'right', fontWeight: g.outstanding > 0 ? 700 : 400, color: g.outstanding > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text3)' }}>
+                              {g.outstanding > 0 ? fmtNpr(g.outstanding) : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
+                              {g.isPartner && g.settledBills > 0 ? fmtNpr(g.commission) : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>{g.settledBills > 0 ? fmtNpr(g.netReceived) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ fontWeight: 700 }}>
+                          <td>TOTAL</td>
+                          <td style={{ textAlign: 'right' }}>{counterpartyTotals.unsettledBills}</td>
+                          <td style={{ textAlign: 'right' }}>{fmtNpr(counterpartyTotals.outstanding)}</td>
+                          <td style={{ textAlign: 'right' }}>{fmtNpr(counterpartyTotals.commission)}</td>
+                          <td style={{ textAlign: 'right' }}>{fmtNpr(counterpartyTotals.netReceived)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  <p style={{ margin: '0 0 22px', fontSize: 12, color: 'var(--theme-text3)' }}>
+                    Every Credit bill ever, settled and unsettled — not a date range. To check what a platform withheld against the rate you agreed with it, and to see the same figures for one month, use Sales Report → Delivery Partners.
+                  </p>
+                </>
+              )}
 
               {settleMsg && (
                 <p style={{ margin: '0 0 14px', fontSize: 13, color: settleMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>

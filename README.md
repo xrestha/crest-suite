@@ -158,6 +158,67 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S596 — 2026-08-20 — The delivery platform was a tag on a bill, never a party you could hold to a number
+
+Sales Report → Delivery Partners listed every Foodmandu/Pathao bill and totalled all of them
+together. Asked how an owner would check **which platform owes what, or what each has taken in
+commission**, the honest answer was: by eye, or by exporting to Excel and building a pivot. And the
+screen the tab points at for settlement — Customers → Outstanding Credit — is bill-by-bill too,
+so it was the same gap twice. Nowhere in the product did the platform exist as a party with its own
+total; it was a tag on a bill and nothing more.
+
+**Three additions, and only the second one is the actual verification.**
+
+**By Partner rollup** — one row per platform above the bill list: bills, gross, outstanding (with
+its unsettled count), commission, effective rate, agreed rate, net received. Clicking a row — or
+the new Partner dropdown — filters the bill table, the four KPI cards and the Excel export down to
+that platform. The rollup itself deliberately ignores the filter: it is the index the filter drills
+down *from*, and filtering it would remove the very comparison the filter exists to reach.
+
+**Effective % vs. agreed %.** How much a platform took is bookkeeping; whether that was the agreed
+amount is the question worth asking, and the data to answer it was already there and unused —
+`settings.pos_delivery_partners[].commission_pct` holds the contracted rate, and settlement lets
+whoever processes it override the pre-filled figure against the platform's real remittance. So the
+gap between the two was recordable and never surfaced. Effective % now sits next to Agreed %, and a
+platform withholding more than agreed turns amber with the gap stated **in rupees** — a percentage
+point means nothing to someone on the phone to an account manager. The per-bill **Comm. %** column
+does the same at bill level, so the individual bill responsible can be found rather than inferred.
+
+Three things had to be got right or the column would have lied in the alarming direction:
+
+- **The base is the bill's ex-VAT, post-discount value with comped lines excluded, not
+  `paid_amount`.** That is what `PosCustomers.jsx` settles on (both platforms calculate on it), so a
+  rate measured off the VAT-inclusive total would read ~13% low on **every** bill of a VAT-registered
+  client and report every partner as under-remitting. `SalesReport.jsx` already had the item data, so
+  it recomputes the base through the same `computeOrderAmounts` primitive rather than a second copy.
+- **Outstanding bills are excluded from both sides of the ratio.** A bill carries no commission until
+  it is settled — by design, not by omission — so letting its base into the denominator would drag
+  every platform's rate toward zero as the month filled up and manufacture a discrepancy out of
+  nothing.
+- **An off-rate flag needs two tolerances, not one.** Commission is rounded to the rupee per bill at
+  settlement, so an exactly-compliant platform still lands slightly off. The flag requires both a
+  ≥0.5 percentage-point gap **and** a rupee gap larger than rounding could produce
+  (`max(1, settledBills × 0.5)`). Either alone raises false alarms on small delivery bills — and a
+  report that cries wolf about a partner is worse than one that says nothing.
+
+**Who owes what, on Customers → Outstanding Credit** — the same rollup mirrored onto the screen
+someone is actually on when they chase a remittance: outstanding and collected totals per
+counterparty, each platform separately plus one **Direct customers** row. That row is not decoration:
+without it the rollup would not add up to the Outstanding KPI card directly above it, and a summary
+that does not reconcile with the total beside it is worse than no summary (S567's lesson, applied
+before it could bite). The two screens' figures differ on purpose — this page is every Credit bill
+ever, the report is a date range — which is stated in a line under the table, because two screens
+showing the same words and different numbers is a support call.
+
+The Excel export now writes **two sheets**: `By Partner` (always every platform, plus a *Variance vs
+Agreed* column and the ex-VAT commission base the percentages are built on) and `Bills` (whatever the
+filter is showing). Each states its own scope in the letterhead — `@Partner : All partners` or the
+selected name — per S594's rule that a filtered sheet with no record of its filter cannot be
+reconciled a month later.
+
+Effective rate = settled commission ÷ ex-VAT settled base. Files: `SalesReport.jsx`,
+`PosCustomers.jsx`, `Help.js`, `posGuideData.js`.
+
 ### S595 — 2026-08-19 — `/impeccable document`, and the rule that only existed where nobody reads
 
 Refreshed `DESIGN.md` + `.impeccable/design.json` (six days and ~10 sessions stale), then fixed

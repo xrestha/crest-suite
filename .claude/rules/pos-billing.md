@@ -294,3 +294,42 @@ come to disagree about a return.
 (as billed), and `recipes.is_veg`. An axis that could only ever produce one row is **hidden, not
 rendered empty**. When verifying that, note a hidden axis and a broken lookup look identical on
 screen — confirm the fetch returned 200 before concluding the client simply has no data.
+
+## A delivery platform is a party, not a tag on a bill (S596)
+
+Sales Report → Delivery Partners listed every Foodmandu/Pathao bill and totalled all of them
+together, and Customers → Outstanding Credit was bill-by-bill too. So **no screen in the product
+could say what one platform owed, or what one platform had taken** — the platform existed only as
+a badge on a row. Both screens now carry a per-partner rollup. Four rules came out of building it:
+
+**Commission is measured against the ex-VAT, post-discount base with comped lines excluded — never
+`paid_amount`.** That is the base `PosCustomers.jsx` settles on, because it is the base Foodmandu
+and Pathao themselves invoice on (confirmed with the client at S290, and the reason the very first
+version of the settle flow was wrong). An effective rate computed off the VAT-inclusive total reads
+about 13 percentage points low on **every** bill of a VAT-registered client, so a report built that
+way would accuse every platform of over-charging, every month, in the alarming direction. Recompute
+through `computeOrderAmounts` rather than storing a second copy of the base.
+
+**An unsettled bill is excluded from BOTH sides of the rate.** Commission is recorded at settlement,
+never at Charge — deliberately, so staff never see or estimate a platform's cut while billing. An
+outstanding bill therefore has a base and no commission, and letting it into the denominator drags
+every partner's measured rate toward zero as the month fills up. The absence of a number here is
+structural, not missing data; the same distinction the Outstanding column already makes.
+
+**A rate-mismatch flag needs two tolerances or it cries wolf.** Each bill's commission is
+`round(base × pct / 100)` at settlement, so a platform charging exactly the agreed rate still
+lands up to NPR 0.5 off per bill — a visible percentage swing across a handful of small delivery
+orders. The flag requires a gap of ≥0.5 percentage points **and** a rupee gap larger than
+rounding could produce (`max(1, settledBills × 0.5)` in aggregate, NPR 1 on a single bill). A
+report that raises a false alarm about a supplier relationship is worse than one that stays quiet.
+
+**A rollup must reconcile with the total printed beside it.** Customers' rollup keeps a
+**Direct customers** row for non-partner Credit precisely so its Outstanding column ties to the KPI
+card directly above it (S567's Stock Count lesson, applied before it could bite). Its figures
+legitimately differ from the report's — that page is every Credit bill ever, the report is a date
+range — which is stated in a line under the table, because two screens showing the same words and
+different numbers is a support call.
+
+Effective rate = settled commission ÷ ex-VAT settled base. The contracted rate it is checked
+against is `settings.pos_delivery_partners[].commission_pct`, which existed for a long time as a
+settle-time pre-fill and was read by nothing else.

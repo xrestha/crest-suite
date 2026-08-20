@@ -52,6 +52,12 @@ export default function SalesReport() {
   // Bill Register tab down to just that method's bills. Cleared on any direct tab-bar click so a
   // manual visit to Bill Register always starts unfiltered.
   const [paymentFilter, setPaymentFilter] = useState(null)
+  // Delivery Partners tab: 'all' or one partner name. Drives the KPI cards, the bill table and
+  // the Excel export together - and the export's scope line says which, since a filtered sheet
+  // that doesn't state its filter can't be reconciled later (S594). The per-partner rollup above
+  // them deliberately ignores it: that table IS the who-owes-what answer, and filtering it away
+  // would remove the comparison the filter exists to drill into.
+  const [partnerFilter, setPartnerFilter] = useState('all')
 
   /* ── Letterhead info for Excel exports — fetched once per client, independent of date range ── */
   const [bizInfo, setBizInfo] = useState({ name: '', vat: '', address: '' })
@@ -62,14 +68,22 @@ export default function SalesReport() {
   // recipe_code → shown as the Product Code column on the Item Wise tab. Rides the same once-per-
   // client master-data fetch as is_veg.
   const [codeById, setCodeById] = useState({})
+  // { partnerName: agreedCommissionPct | null } - see the settings fetch below.
+  const [partnerRates, setPartnerRates] = useState({})
   useEffect(() => {
     if (!clientId) return
     Promise.all([
       supabase.from('clients').select('name').eq('id', clientId).single(),
-      supabase.from('settings').select('vat_number, property_address').eq('client_id', clientId).maybeSingle(),
+      supabase.from('settings').select('vat_number, property_address, pos_delivery_partners').eq('client_id', clientId).maybeSingle(),
       scopedFrom('recipes', 'id, is_veg, recipe_code'),
     ]).then(([{ data: client }, { data: settings }, { data: recipeRows }]) => {
       setBizInfo({ name: client?.name || '', vat: settings?.vat_number || '', address: settings?.property_address || '' })
+      // The CONTRACTED commission rate per partner (Table Management -> Delivery Partners). It is
+      // the only thing a settled bill's actual commission can be checked against - without it the
+      // Delivery Partners tab can say how much a platform took but never whether that was right.
+      setPartnerRates(Object.fromEntries((settings?.pos_delivery_partners || [])
+        .filter(p => p?.name)
+        .map(p => [p.name, p.commission_pct === '' || p.commission_pct == null ? null : parseFloat(p.commission_pct)])))
       setVegById(Object.fromEntries((recipeRows || []).map(r => [r.id, r.is_veg])))
       setCodeById(Object.fromEntries((recipeRows || []).map(r => [r.id, r.recipe_code])))
     })
@@ -243,17 +257,96 @@ export default function SalesReport() {
   const deliveryPartnerRows = useMemo(() => (
     orders
       .filter(o => o.delivery_partner && !o.credit_note_id)
-      .map(o => ({
-        id: o.id, orderNo: o.order_no, invoiceNo: o.invoice_no, closedAt: o.closed_at,
-        deliveryPartner: o.delivery_partner, tableName: o.table_name,
-        amount: o.paid_amount || 0,
-        settled: !!o.credit_settled_at, settledAt: o.credit_settled_at, settledMethod: o.credit_settled_method,
-        commission: parseFloat(o.commission_amount) || 0,
-      }))
+      .map(o => {
+        // exVatBase is the basis commission is actually withheld on - the bill's ex-VAT,
+        // post-discount value with comped lines excluded - NOT paid_amount. That is what
+        // PosCustomers.jsx settles against (both platforms calculate on it), so an effective
+        // rate measured off the VAT-inclusive total would read ~13% low on every bill of a
+        // VAT-registered client and report every partner as under-remitting.
+        const a = computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg)
+        return {
+          id: o.id, orderNo: o.order_no, invoiceNo: o.invoice_no, closedAt: o.closed_at,
+          deliveryPartner: o.delivery_partner, tableName: o.table_name,
+          amount: o.paid_amount || 0,
+          exVatBase: a.taxableBase + a.nonTaxableBase,
+          settled: !!o.credit_settled_at, settledAt: o.credit_settled_at, settledMethod: o.credit_settled_method,
+          commission: parseFloat(o.commission_amount) || 0,
+        }
+      })
       .sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt))
-  ), [orders])
+  ), [orders, itemsByOrder, vatReg])
 
-  const deliveryPartnerTotals = deliveryPartnerRows.reduce((s, r) => ({
+  // One row per partner. Until this existed the tab could only answer "how much delivery business
+  // did we do" - "what does Foodmandu owe me, and what has Pathao taken" meant reading down the
+  // Partner column and adding it up by eye, and nowhere else in the product grouped by partner
+  // either (Customers -> Outstanding Credit is bill-by-bill too, so it was the same gap twice).
+  //
+  // Built from ALL delivery rows, never the filtered ones: this table is the index the partner
+  // filter drills down FROM.
+  //
+  // effectivePct is measured over SETTLED bills only, base and commission alike. An outstanding
+  // bill has no commission yet by design (it's recorded at settlement, not at Charge), so letting
+  // its base into the denominator would drag every partner's rate toward zero mid-month and
+  // manufacture a discrepancy out of nothing.
+  const deliveryPartnerSummary = useMemo(() => {
+    const grouped = {}
+    for (const r of deliveryPartnerRows) {
+      const g = grouped[r.deliveryPartner] = grouped[r.deliveryPartner] || {
+        partner: r.deliveryPartner, bills: 0, amount: 0, outstandingBills: 0, outstanding: 0,
+        settledBills: 0, settledBase: 0, commission: 0, netReceived: 0,
+      }
+      g.bills += 1
+      g.amount += r.amount
+      if (r.settled) {
+        g.settledBills += 1
+        g.settledBase += r.exVatBase
+        g.commission += r.commission
+        g.netReceived += r.amount - r.commission
+      } else {
+        g.outstandingBills += 1
+        g.outstanding += r.amount
+      }
+    }
+    return Object.values(grouped).map(g => {
+      const rate = partnerRates[g.partner]
+      const agreedPct = rate == null || Number.isNaN(rate) ? null : rate
+      const effectivePct = g.settledBase > 0 ? (g.commission / g.settledBase) * 100 : null
+      return {
+        ...g, agreedPct, effectivePct,
+        // Expected commission at the contracted rate, so the gap can be stated in rupees - a
+        // percentage point means nothing to someone chasing a platform's remittance statement.
+        expectedCommission: agreedPct != null ? g.settledBase * agreedPct / 100 : null,
+        // Two tolerances, because either one alone raises false alarms. Each bill's commission is
+        // rounded to the rupee at settlement (PosCustomers.jsx), so a partner charging exactly its
+        // agreed rate still lands up to NPR 0.5 off PER BILL - on a handful of small delivery bills
+        // that is a visible percentage swing. So: flag only when the gap is both worth more than
+        // rounding can explain AND at least half a point wide.
+        offRate: agreedPct != null && effectivePct != null
+          && Math.abs(effectivePct - agreedPct) >= 0.5
+          && Math.abs(g.commission - g.settledBase * agreedPct / 100) > Math.max(1, g.settledBills * 0.5),
+      }
+    }).sort((a, b) => b.amount - a.amount)
+  }, [deliveryPartnerRows, partnerRates])
+
+  const deliverySummaryTotals = deliveryPartnerSummary.reduce((s, g) => ({
+    bills: s.bills + g.bills, amount: s.amount + g.amount,
+    outstanding: s.outstanding + g.outstanding, settledBase: s.settledBase + g.settledBase,
+    commission: s.commission + g.commission, netReceived: s.netReceived + g.netReceived,
+  }), { bills: 0, amount: 0, outstanding: 0, settledBase: 0, commission: 0, netReceived: 0 })
+
+  const visibleDeliveryRows = partnerFilter === 'all'
+    ? deliveryPartnerRows
+    : deliveryPartnerRows.filter(r => r.deliveryPartner === partnerFilter)
+
+  // A partner selected under one date range can have no bills under the next one, which would
+  // leave the select showing a name that matches nothing and an empty table under it.
+  useEffect(() => {
+    if (partnerFilter !== 'all' && !deliveryPartnerRows.some(r => r.deliveryPartner === partnerFilter)) {
+      setPartnerFilter('all')
+    }
+  }, [deliveryPartnerRows, partnerFilter])
+
+  const deliveryPartnerTotals = visibleDeliveryRows.reduce((s, r) => ({
     bills: s.bills + 1,
     amount: s.amount + r.amount,
     outstanding: s.outstanding + (r.settled ? 0 : r.amount),
@@ -536,21 +629,44 @@ export default function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, 'Payment Summary')
       XLSX.writeFile(wb, `payment-summary-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'delivery') {
-      const ws = withLetterhead(XLSX, 'Sales Report - Delivery Partners', dateRangeLine, deliveryPartnerRows.map(r => {
+      // Two sheets, because they answer different questions and the second one can be filtered:
+      // By Partner is always every partner (it's the reconciliation), Bills follows whatever the
+      // screen is showing. Each states its own scope in the letterhead rather than relying on the
+      // reader to remember what was selected when they pressed the button.
+      const wsSummary = withLetterhead(XLSX, 'Sales Report - Delivery Partners (By Partner)', `${dateRangeLine}  @Partner : All partners`, deliveryPartnerSummary.map(g => ({
+        'Partner': g.partner, 'Bills': g.bills,
+        'Gross (NPR)': Math.round(g.amount * 100) / 100,
+        'Outstanding Bills': g.outstandingBills,
+        'Outstanding (NPR)': Math.round(g.outstanding * 100) / 100,
+        'Settled Bills': g.settledBills,
+        'Commission Base, ex-VAT (NPR)': Math.round(g.settledBase * 100) / 100,
+        'Commission (NPR)': Math.round(g.commission * 100) / 100,
+        'Effective %': g.effectivePct == null ? '' : `${g.effectivePct.toFixed(2)}%`,
+        'Agreed %': g.agreedPct == null ? '' : `${g.agreedPct}%`,
+        'Variance vs Agreed (NPR)': g.expectedCommission == null || g.settledBills === 0 ? '' : Math.round((g.commission - g.expectedCommission) * 100) / 100,
+        'Net Received (NPR)': Math.round(g.netReceived * 100) / 100,
+      })))
+      XLSX.utils.book_append_sheet(wb, wsSummary, 'By Partner')
+      const partnerScope = partnerFilter === 'all' ? 'All partners' : partnerFilter
+      const ws = withLetterhead(XLSX, 'Sales Report - Delivery Partners', `${dateRangeLine}  @Partner : ${partnerScope}`, visibleDeliveryRows.map(r => {
         const bs = adToBs(new Date(r.closedAt))
+        const billPct = r.settled && r.exVatBase > 0 ? (r.commission / r.exVatBase) * 100 : null
         return {
           'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
           'Bill No': r.invoiceNo != null ? `#${r.invoiceNo}` : `Order #${r.orderNo}`,
           'Partner': r.deliveryPartner, 'Table': r.tableName || 'Takeaway',
           'Amount (NPR)': Math.round(r.amount * 100) / 100,
+          'Commission Base, ex-VAT (NPR)': Math.round(r.exVatBase * 100) / 100,
           'Status': r.settled ? 'Settled' : 'Outstanding',
           'Commission (NPR)': r.settled ? Math.round(r.commission * 100) / 100 : '',
+          'Comm. %': billPct == null ? '' : `${billPct.toFixed(2)}%`,
           'Net Received (NPR)': r.settled ? Math.round((r.amount - r.commission) * 100) / 100 : '',
           'Settled Via': r.settled ? r.settledMethod : '',
         }
       }))
-      XLSX.utils.book_append_sheet(wb, ws, 'Delivery Partners')
-      XLSX.writeFile(wb, `delivery-partners-${fromIso}-to-${toIso}.xlsx`)
+      XLSX.utils.book_append_sheet(wb, ws, 'Bills')
+      const partnerSlug = partnerFilter === 'all' ? '' : `${partnerFilter.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-`
+      XLSX.writeFile(wb, `delivery-partners-${partnerSlug}${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'category') {
       const ws = withLetterhead(XLSX, 'Sales Report - Category Wise', dateRangeLine, categoryRows.map(c => ({
         'Category': c.name, 'Qty Sales': c.qtySales, 'Qty Return': c.qtyReturn, 'Qty Net': c.qtySales - c.qtyReturn,
@@ -621,7 +737,7 @@ export default function SalesReport() {
     <div style={{ padding: '24px 28px', maxWidth: 1150 }}>
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
-          Sales Report <Tip text="Ten views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Delivery Partners tracks Foodmandu/Pathao bills from Credit through settlement, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
+          Sales Report <Tip text="Ten views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Delivery Partners tracks Foodmandu/Pathao bills from Credit through settlement and checks what each platform withheld against the rate you agreed with it, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
         </h2>
         <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
           One report, eleven ways to slice it.
@@ -630,7 +746,7 @@ export default function SalesReport() {
 
       <div className="tab-bar" style={{ marginBottom: 16 }}>
         {TABS.map(t => (
-          <button key={t.key} className={`tab-btn${tab === t.key ? ' tab-btn--active' : ''}`} onClick={() => { setTab(t.key); setPaymentFilter(null) }}>{t.label}</button>
+          <button key={t.key} className={`tab-btn${tab === t.key ? ' tab-btn--active' : ''}`} onClick={() => { setTab(t.key); setPaymentFilter(null); setPartnerFilter('all') }}>{t.label}</button>
         ))}
       </div>
 
@@ -652,6 +768,15 @@ export default function SalesReport() {
               <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="sales-report-to-bs">To (BS)</label>
               <BsCalendarPicker id="sales-report-to-bs" value={toIso} onChange={setToIso} />
             </div>
+            {tab === 'delivery' && deliveryPartnerSummary.length > 1 && (
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="sales-report-delivery-partner">Partner</label>
+                <select id="sales-report-delivery-partner" className="form-select" value={partnerFilter} onChange={e => setPartnerFilter(e.target.value)}>
+                  <option value="all">All partners</option>
+                  {deliveryPartnerSummary.map(g => <option key={g.partner} value={g.partner}>{g.partner}</option>)}
+                </select>
+              </div>
+            )}
           </>
         )}
         <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
@@ -935,8 +1060,14 @@ export default function SalesReport() {
       ) : tab === 'delivery' ? (
         <div>
         <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
-          Foodmandu/Pathao bills close as Credit (the platform doesn't pay at the counter — it remits later, minus commission), so an outstanding row here has no commission/net yet. Settle it from Customers → Outstanding Credit to record the platform's actual remittance. Click any row to view the bill.
+          Foodmandu/Pathao bills close as Credit (the platform doesn't pay at the counter — it remits later, minus commission), so an outstanding row here has no commission/net yet. Settle it from Customers → Outstanding Credit to record the platform's actual remittance. Click a partner below to see only its bills; click any bill to view it.
         </p>
+        {partnerFilter !== 'all' && (
+          <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>
+            Totals and bills below are <strong style={{ color: 'var(--theme-text1)' }}>{partnerFilter}</strong> only.{' '}
+            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '2px 10px' }} onClick={() => setPartnerFilter('all')}>Show all partners</button>
+          </p>
+        )}
         <div className="stat-grid" style={{ marginBottom: 16 }}>
           <div className="card" style={{ padding: '14px 18px' }}>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Bills</div>
@@ -957,19 +1088,104 @@ export default function SalesReport() {
             <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-green-text)' }}>{fmtNpr(deliveryPartnerTotals.netReceived)}</div>
           </div>
         </div>
+
+        <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
+          By partner
+        </p>
+        <div className="table-wrap" style={{ marginBottom: 26 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Partner</th>
+                <th style={{ textAlign: 'right' }}>Bills</th>
+                <th style={{ textAlign: 'right' }}>Gross</th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="What this platform still owes you — bills it took the money for but hasn't remitted yet. The figure in brackets is how many bills that is. Record a remittance from Customers → Outstanding Credit." width={300}>Outstanding</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="Commission this platform withheld across its settled bills, as entered at settlement from its own remittance statement." width={280}>Commission</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="What that commission actually works out to, as a % of the ex-VAT, post-discount value of the settled bills — the basis Foodmandu and Pathao calculate on. Outstanding bills are left out: they carry no commission yet, so counting them would drag the rate down mid-month." width={330}>Effective %</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="The rate you agreed with this platform, from Table Management → Delivery Partners. Fill it in there and any partner withholding more than agreed turns amber in the column to the left." width={320}>Agreed %</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>Net Received</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deliveryPartnerSummary.map(g => {
+                const active = partnerFilter === g.partner
+                return (
+                  <tr key={g.partner} onClick={() => setPartnerFilter(active ? 'all' : g.partner)}
+                    style={{ cursor: 'pointer', background: active ? 'var(--theme-focus-ring)' : undefined }}>
+                    <td><span className="badge-amber" style={{ fontSize: 10 }}>{g.partner}</span></td>
+                    <td style={{ textAlign: 'right' }}>{g.bills}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtNpr(g.amount)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: g.outstanding > 0 ? 700 : 400, color: g.outstanding > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text3)' }}>
+                      {g.outstanding > 0
+                        ? <>{fmtNpr(g.outstanding)} <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)' }}>({g.outstandingBills})</span></>
+                        : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{g.settledBills > 0 ? fmtNpr(g.commission) : '—'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: g.offRate ? 700 : 400, color: g.offRate ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>
+                      {g.effectivePct == null ? '—' : g.offRate ? (
+                        <Tip width={330} text={`Commission on ${g.settledBills} settled bill${g.settledBills === 1 ? '' : 's'} works out to ${g.effectivePct.toFixed(1)}% of ex-VAT sales against the ${g.agreedPct}% agreed — ${fmtNpr(Math.abs(g.commission - g.expectedCommission))} ${g.commission > g.expectedCommission ? 'more' : 'less'} than the agreed rate. Check it against the platform's remittance statement.`}>
+                          {g.effectivePct.toFixed(1)}% ⚠
+                        </Tip>
+                      ) : `${g.effectivePct.toFixed(1)}%`}
+                    </td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{g.agreedPct == null ? '—' : `${g.agreedPct}%`}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{g.settledBills > 0 ? fmtNpr(g.netReceived) : '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ fontWeight: 700 }}>
+                <td>TOTAL</td>
+                <td style={{ textAlign: 'right' }}>{deliverySummaryTotals.bills}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(deliverySummaryTotals.amount)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(deliverySummaryTotals.outstanding)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(deliverySummaryTotals.commission)}</td>
+                <td style={{ textAlign: 'right' }}>
+                  {deliverySummaryTotals.settledBase > 0 ? `${((deliverySummaryTotals.commission / deliverySummaryTotals.settledBase) * 100).toFixed(1)}%` : '—'}
+                </td>
+                <td></td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(deliverySummaryTotals.netReceived)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
+          {partnerFilter === 'all' ? 'Bills' : `${partnerFilter} bills`}
+        </p>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Date (BS)</th><th>Bill No</th><th>Partner</th><th>Table</th>
                 <th style={{ textAlign: 'right' }}>Amount</th><th>Status</th>
-                <th style={{ textAlign: 'right' }}>Commission</th><th style={{ textAlign: 'right' }}>Net Received</th>
+                <th style={{ textAlign: 'right' }}>Commission</th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="This bill's commission as a % of its own ex-VAT, post-discount value — so a single bill the platform over-deducted on can be found, not just an average that looks slightly off." width={310}>Comm. %</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>Net Received</th>
                 <th>Settled Via</th>
               </tr>
             </thead>
             <tbody>
-              {deliveryPartnerRows.map(r => {
+              {visibleDeliveryRows.map(r => {
                 const bs = adToBs(new Date(r.closedAt))
+                const billPct = r.settled && r.exVatBase > 0 ? (r.commission / r.exVatBase) * 100 : null
+                const agreed = partnerRates[r.deliveryPartner]
+                // Same two-part tolerance as the rollup, at one bill's scale: rounding to the
+                // rupee can only move a single bill by NPR 0.5, so anything past NPR 1 is real.
+                const billOff = billPct != null && agreed != null && !Number.isNaN(agreed)
+                  && Math.abs(billPct - agreed) >= 0.5
+                  && Math.abs(r.commission - r.exVatBase * agreed / 100) > 1
                 return (
                   <tr key={r.id} onClick={() => viewPosBill(clientId, { id: r.id })} style={{ cursor: 'pointer' }}>
                     <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
@@ -979,6 +1195,9 @@ export default function SalesReport() {
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(r.amount)}</td>
                     <td>{r.settled ? <span className="badge-green" style={{ fontSize: 11 }}>Settled</span> : <span className="badge-amber" style={{ fontSize: 11 }}>Outstanding</span>}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{r.settled ? fmtNpr(r.commission) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: billOff ? 'var(--theme-amber-text)' : 'var(--theme-text3)', fontWeight: billOff ? 700 : 400 }}>
+                      {billPct == null ? '—' : `${billPct.toFixed(1)}%${billOff ? ' ⚠' : ''}`}
+                    </td>
                     <td style={{ textAlign: 'right' }}>{r.settled ? fmtNpr(r.amount - r.commission) : '—'}</td>
                     <td>{r.settled ? r.settledMethod : '—'}</td>
                   </tr>
@@ -991,6 +1210,7 @@ export default function SalesReport() {
                 <td style={{ textAlign: 'right' }}>{fmtNpr(deliveryPartnerTotals.amount)}</td>
                 <td></td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(deliveryPartnerTotals.commission)}</td>
+                <td></td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(deliveryPartnerTotals.netReceived)}</td>
                 <td></td>
               </tr>
