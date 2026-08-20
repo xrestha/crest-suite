@@ -22,9 +22,11 @@ const UNITS = ['GM', 'ML', 'KG', 'LTR', 'PCS', 'PKT', 'BTL', 'BOX', 'ROLL', 'BUN
 
 const USAGE_LABELS = { OS: 'Opening Stock', CS: 'Closing Stock', R: 'Recipes', P: 'Purchases', W: 'Wastage', SM: 'Staff Meals', RQ: 'Requisitions', VR: 'Vendor Returns' }
 
+// `rate` here is the price of ONE base unit — the only price the form collects and the exact value
+// written to items.rate. There is no pack size on the form or in the row; see the note on `pack`.
 const EMPTY_FORM = {
   name: '', category_id: '', uom: 'GM',
-  purchase_qty: '1', rate: '', yield_pct: '100',
+  rate: '', yield_pct: '100',
   purchase_unit: '', base_unit: '', conversion_factor: ''
 }
 
@@ -47,7 +49,14 @@ export default function Items() {
   const [initingCats, setInitingCats] = useState(false)
   const [usageMap, setUsageMap] = useState({})
   const [filterUsage, setFilterUsage] = useState('all')
-  const [perUnitDraft, setPerUnitDraft] = useState('')
+  // Working-out, never data: "I bought 500 GM for NPR 388.50" → NPR 0.777 per GM, which is what
+  // actually gets stored. Deliberately cleared every time the dialog opens — items.purchase_qty is
+  // always 1 and there is no column to remember a pack size in. If the pack is a standing fact
+  // about the item ("this always comes in 500 GM bottles"), that belongs on the Conversion tab,
+  // which is also what the Purchase Bill reads to decide whether its Qty column means bottles or
+  // grams. Two boxes, one meaning each — the old Purchase Qty / Rate pair meant the pack price
+  // while you typed and the per-unit price once you reopened it (S597).
+  const [pack, setPack] = useState({ qty: '', total: '' })
 
   useEffect(() => {
     if (!clientId) return
@@ -196,45 +205,44 @@ export default function Items() {
     setInitingCats(false)
   }
 
-  // Purchase Qty and Rate are an ENTRY AID, not what gets stored. Every item is saved in its
-  // SMALLEST unit: `purchase_qty` is always 1, so `items.rate` is the price of one base unit and
-  // equals the generated `per_uom_rate`. Typing "1000 GM for NPR 500" is just a convenient way of
-  // saying "NPR 0.50 per GM" — doSave() divides it out. Storing the pack size instead is what let a
-  // 500 GM bottle prefill NPR 388.50 into a Purchase Bill row counting grams, billing 500 bottles.
-  //
-  // scaleToRate keeps the two boxes in step WHILE editing: a per-unit price typed off an invoice
-  // line is scaled UP by the pack size to fill Rate, never divided (this field was once labelled
-  // "Total (NPR)" and did `rate = amount / qty`, which the generated column then divided by `qty` a
-  // SECOND time — S566, found via a CUP HOLDER valuing 880 PCS at NPR 12).
-  const scaleToRate = (perUnit, qty) => String(parseFloat((perUnit * qty).toFixed(4)))
+  // Every item is stored in its SMALLEST unit: `purchase_qty` is always 1, so `items.rate` is the
+  // price of one base unit and equals the generated `per_uom_rate`. Storing a pack size instead is
+  // what let a 500 GM bottle prefill NPR 388.50 into a Purchase Bill row counting grams, billing
+  // 500 bottles (S597). Longer history: this box was once "Total (NPR)" and did
+  // `rate = amount / qty`, which the generated column then divided by `qty` a SECOND time — S566,
+  // found via a CUP HOLDER valuing 880 PCS at NPR 12. The form now collects the per-unit price
+  // directly, so neither multiplication nor division survives at save time.
+  const packPerUnit = (() => {
+    const q = parseFloat(pack.qty), t = parseFloat(pack.total)
+    return q > 0 && t > 0 ? t / q : null
+  })()
 
-  // A blank Purchase Qty means "one unit", so a per-unit price on its own is a complete entry.
-  const qtyOf = src => (parseFloat(src) > 0 ? parseFloat(src) : 1)
-
-  function setPerUnitPrice(val) {
-    setPerUnitDraft(val)
-    const per = parseFloat(val)
-    if (per > 0) setForm(prev => ({ ...prev, rate: scaleToRate(per, qtyOf(prev.purchase_qty)) }))
+  function setPackField(field, val) {
+    const next = { ...pack, [field]: val }
+    setPack(next)
+    const q = parseFloat(next.qty), t = parseFloat(next.total)
+    if (q > 0 && t > 0) setForm(prev => ({ ...prev, rate: String(parseFloat((t / q).toFixed(6))) }))
   }
 
   function openNew() {
     setEditing(null)
     setForm({ ...EMPTY_FORM, category_id: categories[0]?.id || '' })
     setActiveTab('details')
-    setPerUnitDraft('')
+    setPack({ qty: '', total: '' })
     setError('')
     setShowForm(true)
   }
 
   function openEdit(item) {
     setEditing(item.id)
-    setPerUnitDraft('')
+    setPack({ qty: '', total: '' })
     setForm({
       name: item.name,
       category_id: item.category_id || '',
       uom: item.uom,
-      purchase_qty: item.purchase_qty,
-      rate: item.rate,
+      // per_uom_rate is the authoritative per-unit figure; rate only equals it because purchase_qty
+      // is pinned to 1, so read the generated column and let a legacy row correct itself on save.
+      rate: item.per_uom_rate ?? item.rate,
       yield_pct: item.yield_pct != null ? String(item.yield_pct) : '100',
       purchase_unit: item.purchase_unit || '',
       base_unit: item.base_unit || '',
@@ -266,7 +274,7 @@ export default function Items() {
   async function doSave() {
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return false }
     if (!form.name.trim()) { setError('Item name is required.'); return false }
-    if (!form.rate) { setError('Rate is required — either the price for the whole Purchase Qty, or the price per unit.'); return false }
+    if (!form.rate) { setError(`Price per ${form.uom} is required — type it in, or use "Bought a pack?" to work it out.`); return false }
 
     // Conversion validation
     const hasPurchaseUnit = form.purchase_unit.trim() !== ''
@@ -284,16 +292,16 @@ export default function Items() {
 
     const cf = hasFactor ? parseFloat(form.conversion_factor) : 1
 
-    // Normalise to the smallest unit before writing — see the note above scaleToRate. purchase_qty
-    // is deliberately NOT set from the conversion factor: a buy-in-CTN / count-in-BTL relationship
-    // belongs to the Conversion tab, which is what the Purchase Bill reads to pick its qty unit.
-    // Mirroring it here would store a per-CTN price in a column every valuation reads as per-BTL.
+    // purchase_qty is pinned to 1 and deliberately NOT set from the conversion factor: a
+    // buy-in-CTN / count-in-BTL relationship belongs to the Conversion tab, which is what the
+    // Purchase Bill reads to pick its qty unit. Mirroring it here would store a per-CTN price in a
+    // column every valuation reads as per-BTL.
     const payload = {
       name: form.name.trim().toUpperCase(),
       category_id: form.category_id || null,
       uom: form.uom,
       purchase_qty: 1,
-      rate: parseFloat((parseFloat(form.rate) / qtyOf(form.purchase_qty)).toFixed(6)),
+      rate: parseFloat(parseFloat(form.rate).toFixed(6)),
       purchase_unit: hasPurchaseUnit ? form.purchase_unit.trim().toUpperCase() : null,
       base_unit: hasBaseUnit ? form.base_unit.trim().toUpperCase() : null,
       conversion_factor: cf,
@@ -337,10 +345,6 @@ export default function Items() {
     return n.toFixed(2)
   }
 
-  const perUom = (qty, rate) => {
-    if (!qty || !rate) return '—'
-    return fmtPerUom(rate / qty)
-  }
 
   // Conversion preview string
   function conversionPreview(pu, bu, cf) {
@@ -477,59 +481,56 @@ export default function Items() {
                   </select>
                 </div>
                 <div className="form-field">
-                  <label htmlFor="items-f5">
-                    <Tip text={`Only used to work out the price of one ${form.uom} — it is never stored. Enter the pack you bought (1000 if a 1 KG bag counts as 1000 ${form.uom}) and put that pack's price in Rate. Leave at 1 if Rate is already the price of one ${form.uom}.`} width={280}>
-                      Purchase Qty
-                    </Tip>
-                  </label>
-                  <input id="items-f5"
-                    type="number"
-                    value={form.purchase_qty}
-                    onChange={e => {
-                      const qty = e.target.value
-                      const per = parseFloat(perUnitDraft)
-                      // An entered per-unit price stays authoritative when the pack size changes —
-                      // otherwise `rate` keeps its old value and the per-unit price it was derived
-                      // from silently becomes something else.
-                      setForm(f(per > 0 && parseFloat(qty) > 0
-                        ? { purchase_qty: qty, rate: scaleToRate(per, parseFloat(qty)) }
-                        : { purchase_qty: qty }))
-                    }}
-                    placeholder="1"
-                  />
-                </div>
-                <div className="form-field">
                   <label htmlFor="items-f6">
-                    <Tip text={`Price for the WHOLE Purchase Qty above — not per ${form.uom}. e.g. a 1 KG bag counted as 1000 GM and costing NPR 500 → Purchase Qty 1000, Rate 500. The item is then saved as the price of ONE ${form.uom} (NPR 0.50 here). If your invoice only shows the per-unit price, leave this and use "Price per unit" instead.`} width={300}>
-                      Rate (NPR)
+                    <Tip text={`What ONE ${form.uom} costs. This is the only price Crest stores, and the figure every recipe cost, stock value and report is built on. If you only know what a whole pack cost, use "Bought a pack?" below and this fills itself in.`} width={300}>
+                      Price per {form.uom} (NPR) *
                     </Tip>
                   </label>
                   <input id="items-f6"
-                    type="number"
-                    value={form.rate}
-                    onChange={e => { setPerUnitDraft(''); setForm(f({ rate: e.target.value })) }}
-                    placeholder="500"
-                  />
-                </div>
-                <div className="form-field">
-                  <label htmlFor="items-f7">
-                    <Tip text={`The price of ONE ${form.uom} — the unit price on your invoice line. Rate above is filled in for you as this × Purchase Qty.`} width={260}>
-                      Price per unit (NPR)
-                    </Tip>
-                  </label>
-                  <input id="items-f7"
                     type="number" min="0" step="any"
-                    value={perUnitDraft}
-                    placeholder={perUom(qtyOf(form.purchase_qty), form.rate) === '—' ? '' : perUom(qtyOf(form.purchase_qty), form.rate)}
-                    onChange={e => setPerUnitPrice(e.target.value)}
+                    value={form.rate}
+                    onChange={e => { setPack({ qty: '', total: '' }); setForm(f({ rate: e.target.value })) }}
+                    placeholder="0.777"
                   />
                 </div>
               </div>
-              {form.rate && (
-                <p style={{ fontSize: 12, color: 'var(--theme-accent-ink)', margin: '10px 0 0' }}>
-                  Saved as NPR {perUom(qtyOf(form.purchase_qty), form.rate)} per {form.uom} — Purchase Qty is only used to work this out.
-                </p>
-              )}
+
+              {/* Pack helper — arithmetic on screen, never stored. See the note on `pack` above. */}
+              <div style={{
+                marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                background: 'var(--theme-bg)', border: '1px solid var(--theme-border-lt)',
+                borderRadius: 'var(--radius-sm)', padding: '12px 16px'
+              }}>
+                <span style={{ fontSize: 13, color: 'var(--theme-text2)', fontWeight: 600 }}>
+                  <Tip text={`Here to do the division for you, nothing more. Type what you actually bought — "500 ${form.uom} for NPR 388.50" — and the price above fills in. Neither box is saved. To record that this item ALWAYS comes in a pack, set it up on the Conversion tab instead: that is what the Purchase Bill reads to decide whether its Qty column means packs or ${form.uom}.`} width={320}>
+                    Bought a pack?
+                  </Tip>
+                </span>
+                <input id="items-pack-qty"
+                  aria-label={`Pack size, in ${form.uom}`}
+                  className="form-input"
+                  type="number" min="0" step="any"
+                  value={pack.qty}
+                  onChange={e => setPackField('qty', e.target.value)}
+                  placeholder="500"
+                  style={{ width: 92 }}
+                />
+                <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{form.uom} for NPR</span>
+                <input id="items-pack-total"
+                  aria-label="Price paid for that whole pack"
+                  className="form-input"
+                  type="number" min="0" step="any"
+                  value={pack.total}
+                  onChange={e => setPackField('total', e.target.value)}
+                  placeholder="388.50"
+                  style={{ width: 112 }}
+                />
+                {packPerUnit != null && (
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+                    → NPR {fmtPerUom(packPerUnit)} per {form.uom}
+                  </span>
+                )}
+              </div>
             </>
           )}
 
@@ -592,7 +593,7 @@ export default function Items() {
                     </p>
                     {form.rate && form.conversion_factor && (
                       <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
-                        NPR {perUom(qtyOf(form.purchase_qty), form.rate)} per {form.base_unit?.toUpperCase()} → NPR {((parseFloat(form.rate) / qtyOf(form.purchase_qty)) * parseFloat(form.conversion_factor)).toFixed(2)} per {form.purchase_unit?.toUpperCase()}
+                        NPR {fmtPerUom(form.rate)} per {form.base_unit?.toUpperCase()} → NPR {(parseFloat(form.rate) * parseFloat(form.conversion_factor)).toFixed(2)} per {form.purchase_unit?.toUpperCase()}
                       </p>
                     )}
                   </div>

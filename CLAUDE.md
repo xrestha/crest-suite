@@ -448,11 +448,22 @@ is now always **1**, so **`items.rate` is the price of ONE base unit and equals 
 Count, Variance, COGS, Reorder and the Monthly Owner Report all value stock straight off
 `per_uom_rate`, so a wrong pair here misprices the item everywhere at once with nothing to flag it.
 
-The Add/Edit Item form still **accepts** a pack — "Purchase Qty 1000, Rate 500" is how an invoice
-line reads — and divides it out on save. Those two boxes are an **entry aid**; the green line under
-them states what will actually be stored. `enteredQty` defaults to 1, so a bare "Price per unit" is
-a complete entry on its own. Migration `20260820100000` backfilled the book (value-preserving:
-`per_uom_rate` is unchanged for every row) and a `CHECK (purchase_qty = 1)` holds the line.
+The Add/Edit Item form collects **one price — "Price per GM (NPR)"** (the label tracks the UOM) —
+and writes it to `rate` unchanged. A **"Bought a pack?"** line beneath it does the division on
+screen (`500 GM for NPR 388.50 → NPR 0.777 per GM`) and fills the field above; neither of its two
+boxes is state that survives, and both are cleared every time the dialog opens. Migration
+`20260820100000` backfilled the book (value-preserving: `per_uom_rate` is unchanged for every row)
+and a `CHECK (purchase_qty = 1)` holds the line.
+
+**The form's first pass at this kept `Purchase Qty` and `Rate` as fields, and that was the same bug
+one layer up.** `Rate` meant the pack price while you typed and the per-unit price once you reopened
+the item — one box, two meanings, which is precisely what had just been taken out of the database.
+The rule the second pass follows: **a field that is only arithmetic must not look like a field that
+is stored.** So the stored value gets a box with a name that states its unit, and the arithmetic
+gets a sentence-shaped helper that visibly empties itself. `Purchase Qty` left the form entirely —
+it is structurally 1, so a box showing it taught nothing — and `Price per unit` stopped rendering
+its value as a *rounded placeholder* (`0.78` for a stored `0.777`), which had made the one number
+the page is built on the only one on screen that was not real.
 
 **Until S597 the same column meant two things and the product could not tell.** `per_uom_rate` came
 out right either way, so recipe costing and every report looked correct — but **Add Purchase Bill

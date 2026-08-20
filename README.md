@@ -178,12 +178,30 @@ meanings.
 **Every item is now stored in its smallest unit** — `purchase_qty` is always 1, so `items.rate`
 **is** the price of one base unit and equals `per_uom_rate`. That is what the Item Master screenshot
 already showed for all 253 other items, and it is the form recipe costing wants: sauce per ML, salt
-per GM. The Add/Edit Item form still **accepts** a pack, because "1000 GM for NPR 500" is how an
-invoice line reads — it just divides it out before writing, and the green line under the form now
-states what will actually be saved rather than what was typed. Migration `20260820100000` backfills
-the book (`rate = rate / purchase_qty`, value-preserving — `per_uom_rate` is unchanged for every
-row, so no stock valuation, COGS, variance or frozen Owner Report figure moves) and a
-`CHECK (purchase_qty = 1)` stops a fourth write path reintroducing the ambiguity later.
+per GM. Migration `20260820100000` backfills the book (`rate = rate / purchase_qty`,
+value-preserving — `per_uom_rate` is unchanged for every row, so no stock valuation, COGS, variance
+or frozen Owner Report figure moves) and a `CHECK (purchase_qty = 1)` stops a fourth write path
+reintroducing the ambiguity later.
+
+**Then the same bug turned up one layer above the database, and the form was reworked a second
+time.** The first pass kept `Purchase Qty` and `Rate` as fields and divided them out on save. Which
+meant **`Rate` showed the pack price while you typed and the per-unit price once you reopened the
+item** — one box, two meanings, exactly what had just been taken out of `items`. Owner spotted it
+immediately ("purchase qty = ok, rate = ?").
+
+The Details tab now collects **one price**: `Price per GM (NPR)`, the label tracking the UOM, whose
+value is written to `rate` untouched. Under it sits a **"Bought a pack?"** line that reads as a
+sentence — `500 GM for NPR 388.50 → NPR 0.777 per GM` — and fills the field above as you type.
+Neither of its boxes is saved, and both blank themselves every time the dialog opens, because
+there is no column to remember a pack size in. The rule: **a field that is only arithmetic must not
+look like a field that is stored.** `Purchase Qty` left the form entirely (structurally 1, so a box
+showing it taught nothing), and the surviving price box stopped rendering its value as a *rounded
+placeholder* — `0.78` in grey against a stored `0.777` — which had made the one number the whole
+page is built on the only one on screen that wasn't real.
+
+A pack that is a permanent fact about an item ("this always comes in 500 GM bottles") still has a
+home, and it is the one that was always right for it: the **Conversion tab**, which is also what
+the Purchase Bill reads.
 
 **`purchase_qty` no longer mirrors `conversion_factor`.** Buying in CTN and counting in BTL is
 described by the Conversion tab alone — which is what the Purchase Bill reads to decide whether its
