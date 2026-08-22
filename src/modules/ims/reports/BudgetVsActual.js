@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -13,6 +14,7 @@ export default function BudgetVsActual() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [categories, setCategories] = useState([])
@@ -62,6 +64,7 @@ export default function BudgetVsActual() {
       const catItems = (items || []).filter(i => i.category_id === cat.id)
       actualMap[cat.id] = catItems.reduce((s, i) => s + (purchMap[i.id] || 0) - (retMap[i.id] || 0), 0)
     })
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setActuals(actualMap)
 
     // Budget map: category_id → amount
@@ -71,6 +74,7 @@ export default function BudgetVsActual() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)

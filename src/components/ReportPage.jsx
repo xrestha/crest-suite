@@ -18,8 +18,8 @@ import NoPeriodState from './NoPeriodState'
  * "Capital in 90+ Day Stock: NPR 0" in green until the real number arrived — and on a failed read
  * it stayed there. A number a page has not computed yet is not a number.
  *
- * Slots, in render order: `banners` (provisional/warning callouts, always shown — they qualify
- * the whole page), `stats`, `note` (the page's own basis/caveat prose), `filters`, body,
+ * Slots, in render order: `banners` (provisional/warning callouts — shown in every state EXCEPT
+ * error, see below), `stats`, `note` (the page's own basis/caveat prose), `filters`, body,
  * `footnote`. `children` is the content body and is reached only when the page has loaded, has
  * not failed, and is not empty.
  */
@@ -61,7 +61,13 @@ export default function ReportPage({
         )}
       </div>
 
-      {banners}
+      {/* Banners qualify the whole page, so they survive loading and the empty state — but NOT a
+          failed read. A banner is derived from data state the caller set BEFORE the read (e.g.
+          ConsolidatedPnl's "Provisional — this period is still open… the statement is reliable
+          once the period is closed"), and rendering that directly above this component's own
+          "Nothing here is a real figure — this is a failed read" card puts two contradictory
+          sentences on screen, one of which asserts a statement exists. */}
+      {!error && banners}
 
       {figuresAreReal && stats}
       {figuresAreReal && note}

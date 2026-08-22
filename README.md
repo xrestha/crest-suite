@@ -158,6 +158,111 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S601b — 2026-08-22 — What the audit of the P&L found, and the race across every period page
+
+Follow-on from S601. A multi-agent audit of the ReportPage family confirmed 12 findings (2 refuted).
+
+**Crash.** `ConsolidatedPnl` passed its whole table as `ReportPage`'s `children`. JSX children are an
+ARGUMENT — evaluated by the parent before `ReportPage` is called — so `ReportPage`'s loading/error/
+empty gate could not protect it, and `pnl` is null on first render. Every visit threw, before
+`SuiteGate` even ran. Guarded at the call site. **A gating wrapper cannot protect an eagerly
+evaluated children expression**; only an early return, a call-site guard, or a render prop can.
+
+**Leak.** `/pnl` and `/owner-dashboard` are nav-gated to admin/Owner but had no route guard. The
+staff-isolation policies are RESTRICTIVE SELECT filters, so a fenced table returns
+`{ data: [], error: null }` — indistinguishable from an empty period and invisible to `firstError()`.
+A POS PIN account reaching `/pnl` got real Revenue, COGS NPR 0, and **Net Profit = Revenue at a 100%
+margin, in green.** `MonthlyOwnerReport`, the third page behind the same nav condition, has always
+carried the guard; these two never got it.
+
+**Bill discounts were not in COGS.** `purchase_entries.discount_amount` is a BILL-level figure
+repeated on every line. The P&L ignored it, so COGS ran high and Net Profit low by the full discount
+while the Purchases register showed the discounted total for the same bill. Fixed in all three places
+that are required to agree — `ConsolidatedPnl`, `MonthlySummary` and `get_group_pnl` (migration
+`20260822140000`, **apply by hand in the SQL Editor**) — through the existing, tested
+`allocateBillDiscounts()`. Allocation is PROPORTIONAL, not a flat subtraction: those totals are summed
+over active, non-sub-recipe items only, so subtracting a whole bill's discount would over-credit a
+bill that touches an excluded item. Confirmed in the same pass that wastage and staff meals are NOT
+double-counted — COGS subtracts them and the statement re-deducts them as their own lines, and the
+algebra cancels exactly.
+
+**The period-switch race, fixed on 19 pages.** No page identified which load was current, and a closed
+native `<select>` fires `change` on every arrow keypress — so arrowing a 12-period list started twelve
+concurrent loads, and the last to land won the figures while `selectedPeriod` was whatever was clicked
+last. On the P&L that label drives the subtitle, the print title, the Excel `scopeLine` AND the
+downloaded filename, so one month's figures could leave the building inside another month's workbook.
+`src/shared/hooks/useLatestRequest.js` is the single guard: keyed on the period id rather than a
+counter (these loaders are also called after a save or a period close, and a counter would discard
+those as stale), and **it fails open** — before any `begin()` it returns true, so a page that adopts
+the check and forgets the claim degrades to the old racy behaviour rather than rendering permanently
+blank. Of the two possible mistakes only one is recoverable by the user.
+
+Also fixed: `ReportPage` no longer renders `banners` over its own error card (a "provisional, reliable
+once the period is closed" caveat directly above "this is a failed read" asserts a statement exists);
+`StockAgeing` stopped captioning an unfiltered value with a filtered count ("NPR 800,000 / 0 items"
+above "No items match the current filters"); `PeriodComparison`'s three charts still collapsed Ashadh
+and Ashwin into one "Ash" tick and now use `BS_MONTHS_SHORT`; and the Food Cost % chart no longer
+vanishes — taking its own withheld-month explanation and screen-reader summary with it — when a client
+has only one closed month.
+
+Still open, deliberately: three minor `ConsolidatedPnl` issues (a blank month prints a full statement
+of NPR 0 instead of reaching its empty state; the Excel export keys outlet columns by name so
+same-named outlets collapse; an admin with no client selected hangs on "Building the statement…").
+
+### S601 — 2026-08-22 — The Food Cost % chart read 391.8%, and four separate things had to be wrong for it to
+
+A screenshot of the dashboard's **Food Cost % — Monthly Trend**, expanded: three months, an average
+of **173.5%**, and Bhadra 2083 sitting at **391.8%** with the whole useful 0–50% band squashed into
+the bottom eighth of the plot. Nothing on the card said the number was not a food cost.
+
+Today is **Bhadra 6 of 31**. That is most of the story, and the rest is that the chart had no idea.
+
+**1. The denominator was truncated at 1000 rows.** `loadFcTrend` reads ~12 periods of
+`sales_entries` — one row per recipe per day, so thousands a month — with a bare `.select()`.
+PostgREST caps that at 1000 and says nothing. The numerator directly above it *was* wrapped in
+`fetchAllRows` by the S529 sweep; the denominator was missed. Truncating only the bottom of a
+fraction means every Food Cost % on the chart failed **high** — a believable wrong number on the
+figure the product is sold on. `wastages` and the single-period `sales_entries` read in `loadStats`
+(which feeds the FC% KPI card) had the same shape and are paged now too.
+
+**2. The same query dropped every null-source row.** Comps were excluded server-side with
+`.neq('source', 'pos_comp')`, and `sales_entries.source` is nullable (`DEFAULT 'manual'`, no NOT
+NULL) — in SQL `NULL <> 'pos_comp'` is NULL, so those rows were filtered out of revenue as well.
+`loadStats` has always filtered comps in JS, so the KPI card and the chart could print two different
+revenues for the same month. Both filter client-side now.
+
+**3. The open-period guard existed 200px away and had never been applied to the chart.** The FC% KPI
+card refuses to paint a verdict colour before `SETTLE_DAY` (10), under a comment describing this
+exact failure: *"a restaurant three days in, having just bought a month of rice, reads a Food Cost %
+in the hundreds."* The chart plotted that same part-month as an equal citizen — it took the "Highest
+month" pill, dragged the average, and set the y-axis scale. Same rule now: before Day 10 the open
+month is **withheld and named** underneath (silently dropping it is its own lie); after it, the point
+is drawn in grey and stays out of every superlative. The tooltip also stopped withholding that
+point's purchases and revenue — the one figure most likely to alarm was the only one you could not
+interrogate.
+
+**4. The average was a mean of ratios.** `sum(fc) / n` weights a quiet month equally with a busy one
+and is not a food cost % of anything. It is blended now — total purchases ÷ total revenue across
+completed months — and the pill says how many months it covers.
+
+Two threshold fixes came with it. The chart's bands, its dots and the KPI card were all hardcoded
+`35/45` while Settings → Thresholds offers `fc_warning_pct`/`fc_critical_pct`; all three read the
+client's own values now, and the middle band is amber rather than accent, matching what `fcBand()`
+returns. **`PeriodComparison.js` was worse**: its legend read the client's thresholds while its
+reference lines *and* dot colours stayed on the pre-S551 hardcoded `30/38`, so a dot could sit above
+the line it was drawn against and still be painted green.
+
+Finally, **`BS_MONTHS[i].slice(0, 3)` renders both Ashadh and Ashwin as "Ash"** — on an 11-month axis
+two different months share one label, year included. `BS_MONTHS_SHORT` (four characters, derived from
+the same full names so a chart can never contradict the dropdown a user picked from) replaces all
+five call sites, with a test asserting the array stays unique.
+
+**What the screenshot actually showed, restated:** only Shrawan 2083's 41.8% was a real reading, and
+only after #1 — if sales rows were truncated, the true figure is lower still.
+
+Touched: `ClientDashboard.jsx`, `PeriodComparison.js`, `OwnerDashboard.jsx`, `Roster.jsx`,
+`bsCalendar.js` (+ test), `Help.js`, `service-worker.js` (`crest-v123`).
+
 ### S600 — 2026-08-22 — Final Settlement stops being a calculator, and four money bugs fall out of it
 
 An employee left, and working out what to do with his record surfaced that `/hr/settlement` computes

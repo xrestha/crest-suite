@@ -10,6 +10,7 @@ import { daysInBsMonth } from '../../../utils/bsCalendar'
 import { loadSubRecipeUsage, usageForSource, subRecipeHasIngredient, EMPTY_USAGE } from './subRecipeUsage'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { printWithTitle } from '../../../utils/printTitle'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -19,6 +20,7 @@ export default function StockMovements() {
   const { scopedFrom } = useScopedDb()
   const [searchParams] = useSearchParams()
 
+  const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
@@ -57,6 +59,7 @@ export default function StockMovements() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setDayFrom('')
@@ -90,6 +93,7 @@ export default function StockMovements() {
       // recipe with no BOM is a gap regardless of which one sold it.
       supabase.from('sales_entries').select('recipe_id').eq('period_id', periodId),
     ])
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setStaffNames(Object.fromEntries((profs || []).map(s => [s.id, s.full_name])))
 
     // Cross-reference recipes actually sold this period against ones with zero recipe_ingredients
@@ -102,6 +106,7 @@ export default function StockMovements() {
         supabase.from('recipe_ingredients').select('recipe_id').in('recipe_id', soldRecipeIds),
         scopedFrom('recipes', 'id, name').in('id', soldRecipeIds),
       ])
+      if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
       const withIngredients = new Set((ingRows || []).map(r => r.recipe_id))
       setNoBomRecipes((recipeRows || []).filter(r => !withIngredients.has(r.id)).map(r => r.name).sort())
     } else {

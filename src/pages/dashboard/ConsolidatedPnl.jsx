@@ -23,11 +23,13 @@
 // (closing = 0 for every item) paints a structurally wrong figure — the same rule Variance and
 // Shrinkage follow. An open period can still be selected; it renders flagged as provisional.
 import { useEffect, useState } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { supabase } from '../../supabaseClient'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
+import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
 import { sheetWithLetterhead } from '../../shared/excelLetterhead'
 import { useBizInfo } from '../../shared/hooks/useBizInfo'
 import SuiteGate from '../../components/SuiteGate'
@@ -89,7 +91,7 @@ const lineColor = (line, amount) =>
 const fmtLine = (line, amount) => (line.cost && amount !== 0 ? `(${npr(amount)})` : npr(amount))
 
 export default function ConsolidatedPnl() {
-  const { clientId, profile, loading: authLoading, clientModules, outlets } = useAuth()
+  const { clientId, profile, loading: authLoading, clientModules, outlets, isAdmin, isOwner } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
@@ -182,7 +184,9 @@ export default function ConsolidatedPnl() {
       scopedFrom('items', 'id, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
-      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('purchase_entries')
+        .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
+        .eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
@@ -224,8 +228,17 @@ export default function ConsolidatedPnl() {
     }
     const openMap = qtyMap(opening), closeMap = qtyMap(closing)
     const wasteMap = qtyMap(wastages), staffMap = qtyMap(staffMealsData)
+    // Bill discounts. `purchase_entries.discount_amount` is a BILL-level figure repeated on every
+    // line of the bill, and this statement used to ignore it entirely — so a NPR 10,000 discount
+    // made COGS NPR 10,000 too high and Net Profit NPR 10,000 too low, while the Purchases
+    // register for the same bill showed the discounted total. allocateBillDiscounts() is the
+    // shared, tested helper (supplierAttribution.js, with its own test file): it dedupes the
+    // repeated value per bill with max(), then spreads it across that bill's own lines in
+    // proportion to line value. Proportional matters here rather than a flat total subtraction,
+    // because the sum below is taken only over ACTIVE, non-sub-recipe items — subtracting a whole
+    // bill's discount when part of that bill sits outside the sum would over-credit it.
     const purchVal = {}, retVal = {}
-    ;(purchases || []).forEach(p => { purchVal[p.item_id] = (purchVal[p.item_id] || 0) + parseFloat(p.qty) * parseFloat(p.rate) })
+    ;allocateBillDiscounts(purchases).forEach(p => { purchVal[p.item_id] = (purchVal[p.item_id] || 0) + p.lineNet })
     ;(returns || []).forEach(r => { retVal[r.item_id] = (retVal[r.item_id] || 0) + parseFloat(r.qty) * parseFloat(r.rate) })
 
     let openingVal = 0, purchasesVal = 0, returnsVal = 0, wastageVal = 0, staffMealsVal = 0, closingVal = 0
@@ -321,6 +334,18 @@ export default function ConsolidatedPnl() {
   }
 
   if (authLoading) return null
+  // Owner-or-admin only, matching this page's nav entry in Layout.js — CLAUDE.md's standing rule
+  // that a page's route guard and its nav visibility must be kept in sync, and MonthlyOwnerReport
+  // (the sibling behind the same nav condition) has carried this line all along.
+  //
+  // Without it the page was reachable-but-hidden, and the consequence was worse than a leak. The
+  // staff-isolation policies are RESTRICTIVE SELECT filters, so a fenced table returns
+  // `{ data: [], error: null }` — indistinguishable from an empty period, and invisible to
+  // firstError(). A POS PIN account reached this page with sales_entries readable and items /
+  // opening_stock / closing_stock / purchase_entries / overheads / hr_* all silently empty, which
+  // renders a complete, confident statement with real Revenue, COGS NPR 0, and Net Profit equal to
+  // Revenue at a 100% margin. ProtectedRoute has already resolved `profile` by the time this runs.
+  if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />
 
   const warnStyle = {
     background: 'color-mix(in srgb, var(--theme-amber) 13%, transparent)',
@@ -447,7 +472,15 @@ export default function ConsolidatedPnl() {
         note={coverage}
         footnote={footnote}
       >
-        {grouped ? (
+        {/* `!stmt ? null :` is load-bearing, not defensive noise. JSX children are an ARGUMENT:
+            this whole expression is evaluated by ConsolidatedPnl and handed to ReportPage as a
+            finished element tree, so ReportPage's loading/error/empty gate — which only decides
+            what to RENDER — cannot protect it. `pnl` and `consolidated` are both null until a load
+            completes, and LINES.map() below dereferences them unconditionally, so the first render
+            of every visit threw "Cannot read properties of null (reading 'revenue')" before
+            ReportPage got a chance to show the spinner. A gating wrapper can never guard an eager
+            children expression; only an early return, a guard here, or a render prop can. */}
+        {!stmt ? null : grouped ? (
           <div className="table-wrap">
             {/* Sticky first column: with five outlets this matrix is eight currency columns wide,
                 so scrolling right to reach Consolidated used to scroll the line labels off screen

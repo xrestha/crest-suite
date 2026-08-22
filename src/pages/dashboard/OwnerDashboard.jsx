@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { TriangleAlert } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
@@ -10,7 +10,7 @@ import { useTheme } from '../../context/ThemeContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
-import { getBsToday, BS_MONTHS, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
+import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import { useSettings } from '../../context/SettingsContext'
 import { fcBand } from '../../shared/imsFormulas'
 import Tip from '../../components/Tip'
@@ -50,7 +50,7 @@ const TREND_COLORS = {
 // existing report in the codebase is period-bound; a true cross-period rolling window would need
 // new multi-period join logic with no precedent, so Phase 1 stays consistent with everything else).
 export default function OwnerDashboard() {
-  const { profile, clientId, clientModules, hasFeature, loading: authLoading } = useAuth()
+  const { profile, clientId, clientModules, hasFeature, loading: authLoading, isAdmin, isOwner } = useAuth()
   const canOverheads = hasFeature('overheads')
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
@@ -369,7 +369,7 @@ export default function OwnerDashboard() {
   const trendChartData = trendReports.map(r => {
     const c = r.snapshot?.combined || {}
     return {
-      label: `${BS_MONTHS[r.bs_month - 1].slice(0, 3)} ${r.bs_year}`,
+      label: `${BS_MONTHS_SHORT[r.bs_month - 1]} ${r.bs_year}`,
       fc: c.foodCostPct != null ? Number(c.foodCostPct.toFixed(1)) : null,
       labor: c.laborCostPct != null ? Number(c.laborCostPct.toFixed(1)) : null,
       prime: c.primeCostPct != null ? Number(c.primeCostPct.toFixed(1)) : null,
@@ -396,6 +396,14 @@ export default function OwnerDashboard() {
       onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }
     } : {})
   })
+
+  // Owner-or-admin only, matching this page's nav entry in Layout.js. The route sat inside
+  // ProtectedRoute + SuiteGate alone, and neither of those checks a ROLE — so any staff account of
+  // a Suite Pro client could reach the Owner Dashboard directly by URL. Same lapse as /pnl; the
+  // third page behind the same nav condition, MonthlyOwnerReport, has always had this line.
+  // Placed after every hook (rules of hooks) and safe against auth timing because ProtectedRoute
+  // has already resolved `profile` before this component mounts.
+  if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />
 
   return (
     <div>

@@ -294,7 +294,10 @@ export default function StockAgeing() {
           <Tip width={300} text="Value of stock still on hand as at the date this report is aged to, valued at what you actually paid for each batch — not the current master rate.">Stock On Hand</Tip>
         </div>
         <div className="stat-value gold" style={{ fontSize: 18 }}>{npr(totals?.value)}</div>
-        <div className="stat-sub">{filtered.length} item{filtered.length === 1 ? '' : 's'}</div>
+        {/* rows, not filtered: the value above is the whole report's, and a filtered count
+            under an unfiltered figure read as "NPR 800,000 across 5 items". The filtered count
+            is shown in the filter bar below, where it belongs. */}
+        <div className="stat-sub">{rows.length} item{rows.length === 1 ? '' : 's'}</div>
       </div>
       <div className="stat-card">
         <div className="stat-label">

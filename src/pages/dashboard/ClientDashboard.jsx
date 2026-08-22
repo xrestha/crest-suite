@@ -1,6 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
+import { useSettings } from '../../context/SettingsContext'
+import { fcThresholds } from '../../shared/imsFormulas'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
@@ -16,7 +18,7 @@ import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
 import ConfirmModal from '../../components/ConfirmModal'
-import { getBsToday, BS_MONTHS, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
+import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
@@ -131,6 +133,7 @@ export default function ClientDashboard() {
   // more use for revenue figures on their landing dashboard than a POS-only staffer has for IMS's.
   const posIsStationTeam = posTeam === 'kitchen' || posTeam === 'bar'
   const { colors, themeKey } = useTheme()
+  const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
   const hrApprovals = useHrApprovalCounts() // shared with HrDashboard.jsx's own Approvals row
@@ -285,14 +288,14 @@ export default function ClientDashboard() {
       // matching every other consumption-facing report (ReorderReport, Variance, ShrinkageReport
       // etc. per PosOrders.jsx's own source-taxonomy comment) — a comped dish still used real
       // stock even though it collected no revenue.
-      period ? supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount, source').eq('period_id', period.id) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount, source').eq('period_id', period.id).order('id')) : { data: [] },
       period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
       period ? supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id) : { data: [] },
       // `bucket` is selected (not just `amount`) because the Overheads page splits fixed costs
       // into three buckets — overhead / labor / tax_fees — and the Revenue vs Cost Breakdown pie
       // needs them apart. The KPI cards still use the all-bucket sum; see overheadBuckets below.
       period ? supabase.from('overheads').select('amount, bucket').eq('period_id', period.id) : { data: [] },
-      period ? supabase.from('wastages').select('item_id, qty').eq('period_id', period.id) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
     ])
 
     const independentResults = await independentPromise
@@ -787,9 +790,19 @@ export default function ClientDashboard() {
 
     const trendResults = await Promise.all([
       periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', periodIds).order('id')) : { data: [] },
-      periodIds.length ? supabase.from('vendor_returns').select('period_id, qty, rate').in('period_id', periodIds)   : { data: [] },
-      // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      periodIds.length ? supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount').in('period_id', periodIds).neq('source', 'pos_comp') : { data: [] },
+      periodIds.length ? fetchAllRows(() => supabase.from('vendor_returns').select('period_id, qty, rate').in('period_id', periodIds).order('id')) : { data: [] },
+      // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for — but the
+      // filter is applied in JS below, NOT as `.neq('source','pos_comp')`. `sales_entries.source`
+      // is nullable (DEFAULT 'manual', no NOT NULL), and in SQL `NULL <> 'pos_comp'` is NULL, so
+      // the server-side form silently dropped every null-source row from REVENUE ONLY — leaving
+      // this chart's denominator short against a full numerator, and disagreeing with loadStats'
+      // own revenue for the very same month, which has always filtered client-side.
+      //
+      // fetchAllRows for the same reason: this is ~12 periods of one row per recipe per day, so a
+      // bare .select() truncates at PostgREST's 1000-row cap with no error — and because only the
+      // denominator was truncated, every Food Cost % on the chart failed HIGH. A believable wrong
+      // number, on the figure the product is sold on.
+      periodIds.length ? fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount, source').in('period_id', periodIds).order('id')) : { data: [] },
       scopedFrom('recipes', 'id, selling_price'),
     ])
     const [{ data: allPurch }, { data: allRet }, { data: allSales }, { data: recipeData }] = trendResults
@@ -812,6 +825,7 @@ export default function ClientDashboard() {
     // since a single menu price change would retroactively distort every past month's Food
     // Cost % line on the chart.
     ;(allSales || []).forEach(e => {
+      if (e.source === 'pos_comp') return
       const price = e.unit_price != null ? parseFloat(e.unit_price) : (priceMap[e.recipe_id] || 0)
       revMap[e.period_id] = (revMap[e.period_id] || 0) + parseFloat(e.qty_sold) * price - (parseFloat(e.discount) || 0)
     })
@@ -820,7 +834,7 @@ export default function ClientDashboard() {
       const net = (grossMap[p.id] || 0) - (retMap[p.id] || 0)
       const rev = revMap[p.id] || 0
       const fc  = rev > 0 ? parseFloat(((net / rev) * 100).toFixed(1)) : null
-      return { label: `${BS_MONTHS[p.bs_month - 1].slice(0, 3)} ${p.bs_year}`, fc, purchases: Math.round(net), revenue: Math.round(rev), open: false }
+      return { label: `${BS_MONTHS_SHORT[p.bs_month - 1]} ${p.bs_year}`, fc, purchases: Math.round(net), revenue: Math.round(rev), open: false }
     }).reverse()
 
     if (currentPeriod) {
@@ -828,9 +842,12 @@ export default function ClientDashboard() {
       const rev = revMap[currentPeriod.id] || 0
       const fc  = rev > 0 ? parseFloat(((net / rev) * 100).toFixed(1)) : null
       if (fc != null) {
+        // Purchases/revenue were withheld here (null) so the tooltip would omit them, which left
+        // the one point most likely to look alarming as the only one you could not interrogate.
+        // They are carried now; `open` is what the tooltip and the dot key off to say "so far".
         points.push({
-          label: `${BS_MONTHS[currentPeriod.bs_month - 1].slice(0, 3)} ${currentPeriod.bs_year}`,
-          fc, purchases: null, revenue: null, open: true
+          label: `${BS_MONTHS_SHORT[currentPeriod.bs_month - 1]} ${currentPeriod.bs_year}`,
+          fc, purchases: Math.round(net), revenue: Math.round(rev), open: true
         })
       }
     }
@@ -909,12 +926,39 @@ export default function ClientDashboard() {
   const topItemSpendSummary = topItemSpend.length === 0
     ? 'No purchase data for this period.'
     : `Top items by spend: ${topItemSpend.slice(0, 3).map(i => `${i.fullName} at NPR ${i.value.toLocaleString('en-NP')}`).join(', ')}.`
-  const fcTrendSummary = fcTrend.length === 0
+  // ── Food Cost % trend: an unfinished month is not a data point ──────────────────────────────
+  //
+  // The KPI card above refuses to paint a verdict colour on the open period before SETTLE_DAY,
+  // because purchases arrive in lumps and sales accrue daily (see the long note at `periodTooEarly`).
+  // The chart 200px below it used to ignore that entirely: a day-6 period whose owner had just
+  // bought the month's stock plotted at 391.8%, took the "Highest month" pill, dragged an unweighted
+  // mean to 173.5%, and compressed every settled month into the bottom eighth of the y-axis — so the
+  // one chart built to show whether food cost is drifting became unreadable for exactly that.
+  //
+  // Same rule, same threshold: before SETTLE_DAY the open month is withheld and NAMED (silently
+  // dropping it would be its own lie); after it, the point is drawn but stays out of every
+  // superlative and out of the average, since a part-month can neither win nor lose a month.
+  const fcOpenPoint    = fcTrend.find(p => p.open) || null
+  const fcOpenTooEarly = !!fcOpenPoint && periodTooEarly
+  const fcChartData    = fcOpenTooEarly ? fcTrend.filter(p => !p.open) : fcTrend
+  const fcSettled      = fcTrend.filter(p => !p.open)
+  // Blended (total purchases ÷ total revenue), not the mean of the monthly ratios: a mean weights a
+  // quiet month equally with a busy one and is not a food cost % of anything.
+  const fcSettledRev   = fcSettled.reduce((sum, p) => sum + (p.revenue || 0), 0)
+  const fcSettledPurch = fcSettled.reduce((sum, p) => sum + (p.purchases || 0), 0)
+  const fcTrendAvg     = fcSettledRev > 0 ? (fcSettledPurch / fcSettledRev) * 100 : null
+  const fcTrendBest    = fcSettled.length > 0 ? fcSettled.reduce((best, p) => p.fc < best.fc ? p : best) : null
+  const fcTrendWorst   = fcSettled.length > 0 ? fcSettled.reduce((worst, p) => p.fc > worst.fc ? p : worst) : null
+  const fcBands        = fcThresholds(settings)
+  // fcBand() returns CSS var() strings, which do not resolve inside an SVG fill — so the bands come
+  // from the client's own thresholds while the colours come from the resolved theme palette.
+  const fcDotColor = pct => pct == null ? colors.text3
+    : pct <= fcBands.warn     ? colors.greenText
+    : pct <= fcBands.critical ? colors.amberText
+    : colors.redText
+  const fcTrendSummary = fcChartData.length === 0
     ? 'No food cost history yet.'
-    : `Food cost percentage over the last ${fcTrend.length} month${fcTrend.length === 1 ? '' : 's'}: ${fcTrend.map(p => `${p.label} ${p.fc}%`).join(', ')}.`
-  const fcTrendAvg = fcTrend.length > 0 ? fcTrend.reduce((s, p) => s + p.fc, 0) / fcTrend.length : null
-  const fcTrendBest = fcTrend.length > 0 ? fcTrend.reduce((best, p) => p.fc < best.fc ? p : best) : null
-  const fcTrendWorst = fcTrend.length > 0 ? fcTrend.reduce((worst, p) => p.fc > worst.fc ? p : worst) : null
+    : `Food cost percentage over the last ${fcChartData.length} month${fcChartData.length === 1 ? '' : 's'}: ${fcChartData.map(p => `${p.label} ${p.fc}%${p.open ? ' so far, month still open' : ''}`).join(', ')}.${fcTrendAvg != null ? ` Average across completed months: ${fcTrendAvg.toFixed(1)}%.` : ''}${fcOpenTooEarly ? ` ${fcOpenPoint.label} is only ${dayOfPeriod} days in and is not shown yet.` : ''}`
 
   // Revenue vs Cost Breakdown pie — a "P&L at a glance" composition of exactly the figures behind
   // the Est. Net Margin % card (revenue minus food cost and overheads), in the standard restaurant
@@ -1200,7 +1244,9 @@ export default function ClientDashboard() {
       </div>
       <div style={{
         ...kpiValueStyle(22, 800),
-        color: verdict(fcPct, v => v <= 35 ? 'var(--theme-green-text)' : v <= 45 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
+        // Client-configured thresholds, not a fourth hardcoded copy of 35/45 — Settings offers
+        // fc_warning_pct/fc_critical_pct and this card is the headline they were added for.
+        color: verdict(fcPct, v => v <= fcBands.warn ? 'var(--theme-green-text)' : v <= fcBands.critical ? 'var(--theme-amber-text)' : 'var(--theme-red-text)')
       }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
       </div>
@@ -1785,11 +1831,20 @@ export default function ClientDashboard() {
               title="Food Cost % — Monthly Trend"
               footer={<>
                 <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10, flexWrap: 'wrap' }}>
-                  <span style={{ color: 'var(--theme-green-text)' }}>● ≤35% Good</span>
-                  <span style={{ color: 'var(--theme-accent-ink)' }}>● 35–45% Watch</span>
-                  <span style={{ color: 'var(--theme-red-text)' }}>● &gt;45% High</span>
-                  <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period</span>
+                  <span style={{ color: 'var(--theme-green-text)' }}>● ≤{fcBands.warn}% Good</span>
+                  <span style={{ color: 'var(--theme-amber-text)' }}>● {fcBands.warn}–{fcBands.critical}% Watch</span>
+                  <span style={{ color: 'var(--theme-red-text)' }}>● &gt;{fcBands.critical}% High</span>
+                  {!fcOpenTooEarly && <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period, part-month</span>}
                 </div>
+                {/* A withheld month is stated, not silently dropped — otherwise the chart quietly
+                    claims the current month has no figure at all. */}
+                {fcOpenTooEarly && (
+                  <div style={{ fontSize: 10, marginTop: 6, color: 'var(--theme-text2)' }}>
+                    {fcOpenPoint.label} in progress — Day {dayOfPeriod} of {periodDays}. A part-month
+                    usually buys stock for the whole month, so its ratio is arithmetic rather than a
+                    signal; it joins the line from Day {SETTLE_DAY}.
+                  </div>
+                )}
                 <p className="sr-only">{fcTrendSummary}</p>
               </>}
               renderChart={h => {
@@ -1798,19 +1853,19 @@ export default function ClientDashboard() {
                 <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
                   {big && fcTrendAvg != null && (
                     <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                      <StatPill label="Average" value={`${fcTrendAvg.toFixed(1)}%`} color={colors.text2} />
-                      <StatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.greenText} />
-                      <StatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.redText} />
+                      <StatPill label={`Average · ${fcSettled.length} completed month${fcSettled.length === 1 ? '' : 's'}`} value={`${fcTrendAvg.toFixed(1)}%`} color={colors.text2} />
+                      <StatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.greenText} textColor={colors.greenText} />
+                      <StatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.redText} textColor={colors.redText} />
                     </div>
                   )}
-                  <div style={{ minWidth: Math.max(0, fcTrend.length * 64), height: big ? h - 60 : h }}>
+                  <div style={{ minWidth: Math.max(0, fcChartData.length * 64), height: big ? h - 60 : h }}>
                     <ResponsiveContainer width="100%" height={big ? h - 60 : h}>
-                      <LineChart data={fcTrend} margin={{ top: 8, right: 48, bottom: 0, left: 0 }}>
+                      <LineChart data={fcChartData} margin={{ top: 8, right: 48, bottom: 0, left: 0 }}>
                         <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
                         <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
                         <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
-                        <ReferenceLine y={35} stroke={colors.greenText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '35%', fill: colors.greenText, fontSize: 9, position: 'right' }} />
-                        <ReferenceLine y={45} stroke={colors.redText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '45%', fill: colors.redText, fontSize: 9, position: 'right' }} />
+                        <ReferenceLine y={fcBands.warn} stroke={colors.greenText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.warn}%`, fill: colors.greenText, fontSize: 9, position: 'right' }} />
+                        <ReferenceLine y={fcBands.critical} stroke={colors.redText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.critical}%`, fill: colors.redText, fontSize: 9, position: 'right' }} />
                         {big && fcTrendAvg != null && <ReferenceLine y={fcTrendAvg} stroke={colors.text2} strokeDasharray="2 3" strokeOpacity={0.85} label={{ value: `avg ${fcTrendAvg.toFixed(1)}%`, fill: colors.text2, fontSize: 9, position: 'insideBottomRight' }} />}
                         <Tooltip
                           contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--theme-text1)' }}
@@ -1818,16 +1873,19 @@ export default function ClientDashboard() {
                           itemStyle={{ color: 'var(--theme-text1)' }}
                           formatter={(v, _n, props) => {
                             const p = props.payload
-                            const lines = [`${v}%`]
-                            if (p.purchases != null) lines.push(`Purchases: NPR ${p.purchases.toLocaleString('en-NP')}`)
-                            if (p.revenue != null)   lines.push(`Revenue: NPR ${p.revenue.toLocaleString('en-NP')}`)
+                            const so = p.open ? ' so far' : ''
+                            const lines = [`${v}%${p.open ? ' · part-month' : ''}`]
+                            if (p.purchases != null) lines.push(`Purchases${so}: NPR ${p.purchases.toLocaleString('en-NP')}`)
+                            if (p.revenue != null)   lines.push(`Revenue${so}: NPR ${p.revenue.toLocaleString('en-NP')}`)
                             return [lines.join(' · '), 'Food Cost %']
                           }}
                         />
                         <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accentInk} connectNulls={false} {...chartMotion()}
                           dot={(props) => {
                             const { cx, cy, payload } = props
-                            const col = payload.fc <= 35 ? colors.greenText : payload.fc <= 45 ? colors.accentInk : colors.redText
+                            // An unfinished month wears no verdict colour — same rule as the KPI
+                            // card above, which greys out rather than painting a part-month red.
+                            const col = payload.open ? colors.text2 : fcDotColor(payload.fc)
                             return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
                           }}
                           activeDot={{ r: 5, fill: colors.accentInk }}

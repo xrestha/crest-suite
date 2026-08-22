@@ -8,6 +8,8 @@ import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import { allocateBillDiscounts } from './supplierAttribution'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -15,6 +17,7 @@ export default function MonthlySummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [report, setReport] = useState(null)
@@ -34,6 +37,7 @@ export default function MonthlySummary() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -58,7 +62,9 @@ export default function MonthlySummary() {
       scopedFrom('items', '*, categories(id, name)').eq('is_active', true).eq('is_sub_recipe', false),
       supabase.from('opening_stock').select('*').eq('period_id', periodId),
       supabase.from('closing_stock').select('*').eq('period_id', periodId),
-      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('purchase_entries')
+        .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
+        .eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId),
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
@@ -74,11 +80,15 @@ export default function MonthlySummary() {
     const staffMealMap = {}; (staffMealsData || []).forEach(r => { staffMealMap[r.item_id] = (staffMealMap[r.item_id] || 0) + parseFloat(r.qty) })
 
     // Purchase map: item_id -> { qty, value }
+    // `value` is NET of bill discounts (allocateBillDiscounts spreads each bill's single
+    // discount_amount across its own lines by line value); `qty` is untouched, since a discount
+    // changes what was paid, not what arrived. Consolidated P&L uses the same helper on the same
+    // rows, which is what keeps the two pages' COGS tied.
     const purchMap = {}
-    ;(purchases || []).forEach(p => {
+    ;allocateBillDiscounts(purchases).forEach(p => {
       if (!purchMap[p.item_id]) purchMap[p.item_id] = { qty: 0, value: 0 }
       purchMap[p.item_id].qty += parseFloat(p.qty)
-      purchMap[p.item_id].value += parseFloat(p.qty) * parseFloat(p.rate)
+      purchMap[p.item_id].value += p.lineNet
     })
 
     // Returns map: item_id -> { qty, value }
@@ -143,6 +153,7 @@ export default function MonthlySummary() {
     const fcPct            = totalRevenue > 0 ? (totalCOGS / totalRevenue) * 100 : null
     const purchaseFcPct    = totalRevenue > 0 ? (totalNetPurchase / totalRevenue) * 100 : null
 
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setReport({
       catRows, totalOpening, totalPurchase, totalReturn, totalNetPurchase,
       totalWastage, totalStaffMeals, totalClosing, totalCOGS, totalRevenue, fcPct, purchaseFcPct

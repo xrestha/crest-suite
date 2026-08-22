@@ -44,6 +44,18 @@ export const BS_MONTHS = [
   'Kartik', 'Mangsir', 'Poush', 'Magh', 'Falgun', 'Chaitra'
 ]
 
+/**
+ * Axis/chip-sized month labels. Every caller that wanted a short month used
+ * `BS_MONTHS[i].slice(0, 3)`, which renders BOTH Ashadh and Ashwin as "Ash" — so an 11-month
+ * trend axis showed two different months under one identical label, with the year on both.
+ * Four characters is the shortest uniform width that separates them while staying derived from
+ * the full names above, so a chart label can never contradict the dropdown a user picked from.
+ */
+export const BS_MONTHS_SHORT = [
+  'Bais', 'Jest', 'Asha', 'Shra', 'Bhad', 'Ashw',
+  'Kart', 'Mang', 'Pous', 'Magh', 'Falg', 'Chai'
+]
+
 const BS_CALENDAR = {
   2000: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
   2001: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],

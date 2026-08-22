@@ -8,6 +8,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const npr = n => Number(n || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })
@@ -17,6 +18,7 @@ export default function StockReport() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
 
+  const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
@@ -42,6 +44,7 @@ export default function StockReport() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -125,6 +128,7 @@ export default function StockReport() {
       }
     })
 
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setRows(built)
   }
 

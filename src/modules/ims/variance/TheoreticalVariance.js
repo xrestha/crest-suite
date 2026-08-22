@@ -8,6 +8,7 @@ import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -19,6 +20,7 @@ export default function TheoreticalVariance() {
   // populate it and then call computeVariance() in the same tick, before a state update lands.
   const yieldMapRef = useRef({})
 
+  const periodReq = useLatestRequest()
   const [periods,         setPeriods]         = useState([])
   const [selectedPeriod,  setSelectedPeriod]  = useState(null)
   const [items,           setItems]           = useState([])
@@ -86,6 +88,7 @@ export default function TheoreticalVariance() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setComputing(true)
@@ -158,6 +161,7 @@ export default function TheoreticalVariance() {
     const openMap = {}, closeMap = {}, purchMap = {}, retMap = {}, wastMap = {}, staffMap = {}
     ;(opening || []).forEach(r => { openMap[r.item_id]  = parseFloat(r.qty || 0) })
     ;(closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty || 0) })
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setHasClosing((closing || []).length > 0)
     ;(purch   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + parseFloat(r.qty || 0) })
     ;(rets    || []).forEach(r => { retMap[r.item_id]   = (retMap[r.item_id]   || 0) + parseFloat(r.qty || 0) })

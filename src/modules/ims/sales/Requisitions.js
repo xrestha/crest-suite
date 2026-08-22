@@ -12,6 +12,7 @@ import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const DEPARTMENTS = [
@@ -40,6 +41,7 @@ export default function Requisitions() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
+  const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [items, setItems] = useState([])
@@ -90,10 +92,12 @@ export default function Requisitions() {
       .eq('period_id', periodId)
       .order('bs_day', { ascending: false })
       .order('created_at', { ascending: false })
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setReqs(data || [])
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     backToList()

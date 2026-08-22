@@ -32,6 +32,7 @@ import { selectDepletingSales } from '../sales/salesDepletion'
 import {
   vendorNetByItem, vendorNetTotals, attributeConsumption, NO_VENDOR, UNATTRIBUTED,
 } from './supplierAttribution'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const npr = n => `NPR ${(n || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`
@@ -49,6 +50,7 @@ export default function SupplierContribution() {
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
 
+  const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
@@ -90,6 +92,7 @@ export default function SupplierContribution() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setExpanded(null)
@@ -127,6 +130,7 @@ export default function SupplierContribution() {
     // of NPR 0 — indistinguishable from a genuinely quiet period, on the page an accountant
     // reconciles against Vendor Report. See shared/queryError.js.
     const failed = firstError(results)
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     if (failed) { setLoadError(failed); setRows([]); setTotals({ attributed: 0, consumed: 0, unattributed: 0 }); return }
 
     const [
@@ -206,6 +210,7 @@ export default function SupplierContribution() {
       }
     }).sort((a, b) => b.attributed - a.attributed || (b.purchased || 0) - (a.purchased || 0))
 
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setRows(built)
     setPurchaseShareBase(purchaseTotal)
     setTotals({

@@ -10,6 +10,7 @@ import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -28,6 +29,7 @@ export default function Variance() {
   const flagPct = varianceFlagPct(settings)
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [report, setReport] = useState([])
@@ -61,6 +63,7 @@ export default function Variance() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -103,6 +106,7 @@ export default function Variance() {
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setHasClosing((closing || []).length > 0)
 
     // PATCHED: build purchMap net of returns

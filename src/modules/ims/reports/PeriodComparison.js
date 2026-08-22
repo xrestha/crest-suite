@@ -16,8 +16,7 @@ import {
 import { chartMotion } from '../../../shared/chartMotion'
 import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared/imsFormulas'
 import { useSettings } from '../../../context/SettingsContext'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
+import { BS_MONTHS, BS_MONTHS_SHORT } from '../../../utils/bsCalendar'
 
 // Fallback categorical rotation for any recipe category beyond Food/Beverage (which get fixed
 // semantic colors) — mirrors the Dashboard's Sales Mix convention (ClientDashboard.jsx) so a
@@ -25,9 +24,11 @@ const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kart
 // lives in a page file.
 const FALLBACK_HEX = ['#c9a84c', '#60a5fa', '#f87171', '#fb923c', '#22d3ee', '#f472b6', '#facc15', '#818cf8']
 
+// `short` feeds the X axis and tooltip header of all three charts on this page. It used to be
+// `m.slice(0, 3)`, which renders Ashadh AND Ashwin as "Ash" — two different months under one tick,
+// same year on both, on 9 of the 12 possible 12-month windows.
 function periodLabel(p, short) {
-  const m = BS_MONTHS[p.bs_month - 1]
-  return `${short ? m.slice(0, 3) : m} ${p.bs_year}`
+  return `${short ? BS_MONTHS_SHORT[p.bs_month - 1] : BS_MONTHS[p.bs_month - 1]} ${p.bs_year}`
 }
 
 // curr vs prev as a % change — null when there's no meaningful baseline to compare against
@@ -73,6 +74,7 @@ export default function PeriodComparison() {
   // Was a module-level hardcoded 30/38 scale; now the client's own thresholds, like every other
   // FC% surface (src/shared/imsFormulas.js).
   const fcColor = pct => fcBand(pct, settings).color
+  const fcT = fcThresholds(settings)
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods] = useState([])
@@ -449,9 +451,9 @@ export default function PeriodComparison() {
             title="Food Cost % — Period Trend"
             footer={
               <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10, flexWrap: 'wrap' }}>
-                <span style={{ color: 'var(--theme-green-text)' }}>● ≤{fcThresholds(settings).warn}% Good</span>
-                <span style={{ color: 'var(--theme-amber-text)' }}>● {fcThresholds(settings).warn}–{fcThresholds(settings).critical}% Watch</span>
-                <span style={{ color: 'var(--theme-red-text)' }}>● &gt;{fcThresholds(settings).critical}% High</span>
+                <span style={{ color: 'var(--theme-green-text)' }}>● ≤{fcT.warn}% Good</span>
+                <span style={{ color: 'var(--theme-amber-text)' }}>● {fcT.warn}–{fcT.critical}% Watch</span>
+                <span style={{ color: 'var(--theme-red-text)' }}>● &gt;{fcT.critical}% High</span>
                 <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period</span>
               </div>
             }
@@ -461,8 +463,12 @@ export default function PeriodComparison() {
                   <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
                   <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
-                  <ReferenceLine y={30} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '30%', fill: colors.green, fontSize: 9, position: 'right' }} />
-                  <ReferenceLine y={38} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '38%', fill: colors.red, fontSize: 9, position: 'right' }} />
+                  {/* The legend below this chart always read the client's own thresholds while
+                      these lines and the dots below stayed on the pre-S551 hardcoded 30/38 — so a
+                      dot could sit above the line it was drawn against and still be painted green.
+                      One source now, the same one fcBand() uses. */}
+                  <ReferenceLine y={fcT.warn} stroke={colors.green} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcT.warn}%`, fill: colors.green, fontSize: 9, position: 'right' }} />
+                  <ReferenceLine y={fcT.critical} stroke={colors.red} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcT.critical}%`, fill: colors.red, fontSize: 9, position: 'right' }} />
                   <RTooltip
                     contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--theme-text1)' }}
                     labelStyle={{ color: 'var(--theme-text1)' }}
@@ -478,7 +484,7 @@ export default function PeriodComparison() {
                   <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false} {...chartMotion()}
                     dot={(props) => {
                       const { cx, cy, payload } = props
-                      const col = payload.fc == null ? colors.text3 : payload.fc <= 30 ? colors.green : payload.fc <= 38 ? colors.amber : colors.red
+                      const col = payload.fc == null ? colors.text3 : payload.fc <= fcT.warn ? colors.green : payload.fc <= fcT.critical ? colors.amber : colors.red
                       return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
                     }}
                     activeDot={{ r: 5, fill: colors.accent }}

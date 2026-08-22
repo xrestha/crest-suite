@@ -4,7 +4,7 @@ import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { adToBs, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, formatAd } from '../../../utils/bsCalendar'
+import { adToBs, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, BS_MONTHS_SHORT, formatAd } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -450,7 +450,7 @@ export default function Roster() {
       return {
         bsYear: bs.year, bsMonth: bs.month, bsDay: bs.day,
         label:    WEEKDAYS[d.getDay()],
-        sublabel: `${bs.day} ${BS_MONTHS[bs.month - 1].slice(0, 3)}`,
+        sublabel: `${bs.day} ${BS_MONTHS_SHORT[bs.month - 1]}`,
       }
     })
   } else {
@@ -1259,7 +1259,7 @@ export default function Roster() {
                   return (
                     <tr key={i}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
-                        {weekday} {r.col.bsDay} {BS_MONTHS[r.col.bsMonth - 1].slice(0, 3)}
+                        {weekday} {r.col.bsDay} {BS_MONTHS_SHORT[r.col.bsMonth - 1]}
                         {r.holiday && (
                           r.holiday.multiplier != null
                             ? <Tip text={`Forecast Revenue/Covers on this row are adjusted ×${r.holiday.multiplier} for ${r.holiday.name} (set in Holiday Calendar).`} width={260}>

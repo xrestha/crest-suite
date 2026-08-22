@@ -15,6 +15,7 @@ import { cacheItems, getCachedItems, cacheCategories, getCachedCategories, cache
 import { getBsToday } from '../../../utils/bsCalendar'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const WASTAGE_REASONS = ['Spoilage', 'Expiry', 'Over-prep', 'Breakage', 'Spillage', 'Customer return', 'Other']
@@ -33,6 +34,7 @@ export default function Stock() {
   const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [items, setItems] = useState([])
@@ -183,6 +185,7 @@ export default function Stock() {
       }
     })
     Object.keys(catchAllMap).forEach(id => { if (data[id]) data[id].wastage = catchAllMap[id] })
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setDailyWastage(dailyMap)
     setDailyRows(dated)
 
@@ -215,6 +218,7 @@ export default function Stock() {
         .eq('requisitions.period_id', periodId)
         .eq('requisitions.status', 'issued')
         .order('id'))
+      if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
       ;(reqLines || []).forEach(r => { reqMap[r.item_id] = (reqMap[r.item_id] || 0) + parseFloat(r.qty_issued || 0) })
       setRequisitioned(reqMap)
     } catch (_) {
@@ -227,6 +231,7 @@ export default function Stock() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     if (!navigator.onLine) {

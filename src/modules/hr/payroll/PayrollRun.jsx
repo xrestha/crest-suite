@@ -13,6 +13,7 @@ import { computeMonthlyTds } from './tds'
 import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap } from './payrollData'
 import PayslipBody from './PayslipBody'
 import { printWithTitle } from '../../../utils/printTitle'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
 
@@ -24,6 +25,7 @@ const inp = {
 export default function PayrollRun() {
   const { clientId, isAdmin, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const periodReq = useLatestRequest()
   const [periods,    setPeriods]    = useState([])
   const [period,     setPeriod]     = useState(null)
   const [run,        setRun]        = useState(null)
@@ -102,6 +104,7 @@ export default function PayrollRun() {
       scopedFrom('hr_advances').order('issued_date'),
       scopedFrom('hr_advance_repayments'),
     ])
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setEmployees(emps || [])
     setComponents(comps || [])
     setAttendance(att || [])
@@ -119,6 +122,7 @@ export default function PayrollRun() {
         fetchYtdMap(scopedFrom, periodObj),
         fetchApprovedTadaMap(scopedFrom, periodObj),
       ])
+      if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
       setYtdMap(ytd); setTadaMap(tada)
     } else {
       setPayslips([])
@@ -127,6 +131,7 @@ export default function PayrollRun() {
   }
 
   async function handlePeriodChange(id) {
+    periodReq.begin(id)   // claim the page before any await
     const p = periods.find(x => x.id === id); if (!p) return
     setPeriod(p); setMsg(''); setLoading(true)
     await loadAll(id, p.bs_year, p.bs_month); setLoading(false)

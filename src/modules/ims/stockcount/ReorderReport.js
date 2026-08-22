@@ -8,6 +8,7 @@ import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { printWithTitle } from '../../../utils/printTitle'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -17,6 +18,7 @@ export default function ReorderReport() {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const navigate = useNavigate()
 
+  const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
@@ -70,6 +72,7 @@ export default function ReorderReport() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -106,6 +109,7 @@ export default function ReorderReport() {
 
     const parMap = {}
     ;(pars || []).forEach(p => { parMap[p.item_id] = { id: p.id, par_qty: parseFloat(p.par_qty) || 0 } })
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setParLevels(parMap)
 
     const openMap  = {}; (opening  || []).forEach(r => { openMap[r.item_id]  = parseFloat(r.qty) || 0 })
@@ -157,6 +161,7 @@ export default function ReorderReport() {
       }
     })
 
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setRows(built)
   }
 

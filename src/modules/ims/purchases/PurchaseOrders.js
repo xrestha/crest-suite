@@ -9,6 +9,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
@@ -37,6 +38,7 @@ export default function PurchaseOrders() {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
   const [periods,        setPeriods]        = useState([])
+  const periodReq = useLatestRequest()
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [vendors,        setVendors]        = useState([])
   const [items,          setItems]          = useState([])
@@ -93,10 +95,12 @@ export default function PurchaseOrders() {
     const { data } = await scopedFrom('purchase_orders', '*, vendors(name), purchase_order_items(*, items(name, uom))')
       .eq('period_id', periodId)
       .order('created_at', { ascending: false })
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setPos(data || [])
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setView('list')

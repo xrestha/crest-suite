@@ -1,6 +1,6 @@
 import {
   daysInBsMonth, bsToAd, adToBs, adToBsSafe, getBsFiscalYear, formatAd, bsAddDays, bsDiffDays,
-  BS_YEAR_MIN, BS_YEAR_MAX,
+  BS_YEAR_MIN, BS_YEAR_MAX, BS_MONTHS, BS_MONTHS_SHORT,
 } from './bsCalendar'
 
 const d = s => new Date(s + 'T00:00:00')
@@ -197,5 +197,20 @@ describe('table integrity (2000-2087)', () => {
     expect(formatAd(bsToAd(2036, 10, 1))).toBe(
       formatAd(new Date(bsToAd(2036, 9, 30).getTime() + 86400000))
     )
+  })
+})
+
+describe('BS_MONTHS_SHORT', () => {
+  it('has one label per month, in the same order', () => {
+    expect(BS_MONTHS_SHORT).toHaveLength(BS_MONTHS.length)
+    BS_MONTHS_SHORT.forEach((short, i) => {
+      expect(BS_MONTHS[i].startsWith(short)).toBe(true)
+    })
+  })
+
+  // The whole reason this array exists: BS_MONTHS[i].slice(0, 3) renders both Ashadh and Ashwin
+  // as "Ash", so an 11-month chart axis showed two different months under one label.
+  it('is unique, so no two months can share an axis label', () => {
+    expect(new Set(BS_MONTHS_SHORT).size).toBe(BS_MONTHS_SHORT.length)
   })
 })

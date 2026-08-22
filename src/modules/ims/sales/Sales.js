@@ -12,6 +12,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { persistSalesDay, findSupersededRows, depleteManualSales, SAVE_TIMEOUT_MS } from './persistSalesDay'
 import SupersedeConfirmModal from './SupersedeConfirmModal'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 // S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
@@ -53,6 +54,7 @@ export default function Sales() {
   // in the background all day as bills close, so those must always reload fresh rather than risk
   // a stale cached number silently reaching a save. See conversation with Aashish (2026-07-27).
   const [periods, setPeriods]       = useState(() => readPageCache('sales', 'periods', effectiveClientId) ?? [])
+  const periodReq = useLatestRequest()
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [recipes, setRecipes]       = useState(() => readPageCache('sales', 'recipes', effectiveClientId) ?? [])
   const [sales, setSales]           = useState({}) // { recipe_id: qty } — bulk only, bs_day=0
@@ -147,6 +149,7 @@ export default function Sales() {
     ;(data || []).forEach(s => {
       map[s.recipe_id] = parseFloat(s.qty_sold) || 0
     })
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setSales(map)
     setBulkForm({}) // reset form so it reads from DB
   }
@@ -189,6 +192,7 @@ export default function Sales() {
         unpricedAgg[e.recipe_id] = (unpricedAgg[e.recipe_id] || 0) + qty
       }
     })
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setAllDaySums(agg)
     setAllDayDiscounts(discAgg)
     setAllDayPricedRev(pricedAgg)
@@ -399,6 +403,7 @@ export default function Sales() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     await Promise.all([loadSales(periodId), loadAllDaySums(periodId)])

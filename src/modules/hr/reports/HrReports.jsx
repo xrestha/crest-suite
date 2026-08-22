@@ -8,6 +8,7 @@ import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
 import { fiscalYearOf } from '../payroll/tds'
 import { SSF_CAP } from '../payrollConstants'
 import { printWithTitle } from '../../../utils/printTitle'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
@@ -27,6 +28,7 @@ function retireInfo(dateStr) {
 export default function HrReports() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
   const [periods,   setPeriods]   = useState([])
   const [period,    setPeriod]    = useState(null)
   const [run,       setRun]       = useState(null)
@@ -106,6 +108,7 @@ export default function HrReports() {
 
   async function loadAll(periodId, p) {
     const { data: runRow } = await scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle()
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setRun(runRow || null)
     if (runRow) {
       const { data: slips } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
@@ -135,6 +138,7 @@ export default function HrReports() {
   }
 
   async function handlePeriodChange(id) {
+    periodReq.begin(id)   // claim the page before any await
     const p = periods.find(x => x.id === id); if (!p) return
     setPeriod(p); setLoading(true)
     await loadAll(id, p); setLoading(false)

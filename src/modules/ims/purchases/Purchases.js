@@ -16,6 +16,7 @@ import PurchaseBillPrint from './PurchaseBillPrint'
 import ReturnsTab from './ReturnsTab'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -31,6 +32,7 @@ export default function Purchases() {
   const [cachedPeriods] = useState(() => readPageCache('purchases', 'periods', effectiveClientId))
   const cachedOpenPeriod = (cachedPeriods || []).find(x => x.status === 'open') || null
   const [periods, setPeriods]               = useState(cachedPeriods ?? [])
+  const periodReq = useLatestRequest()
   const [selectedPeriod, setSelectedPeriod] = useState(cachedOpenPeriod)
   const [items, setItems]                   = useState(() => readPageCache('purchases', 'items', effectiveClientId) ?? [])
   const [vendors, setVendors]               = useState(() => readPageCache('purchases', 'vendors', effectiveClientId) ?? [])
@@ -113,6 +115,7 @@ export default function Purchases() {
       .order('bs_day')
       .order('created_at')
       .order('id'))
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setAndCache(setPurchases, `purchases_${periodId}`, data || [])
   }
 
@@ -120,10 +123,12 @@ export default function Purchases() {
     const { data } = await scopedFrom('vendor_returns', '*, items(name, uom, purchase_unit, conversion_factor), vendors(name), purchase_entries(bs_day, qty, rate)')
       .eq('period_id', periodId)
       .order('created_at')
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setAndCache(setReturns, `returns_${periodId}`, data || [])
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setFilterDay('all')
