@@ -219,12 +219,21 @@ export default function FinalSettlement() {
       : null
   ), [emp, selectedLeaveType, leaveReqs, settlements, leaveYear])
 
-  // Prefill on selection, not on every render — once the employee and type are chosen the number
-  // is a starting point the operator can still overrule.
+  // Unpaid leave has no accrued value to buy back, so encashing it is a category error rather
+  // than an unusual choice. `paid` is the discriminator, not the quota: a client can create an
+  // uncapped type that is still paid, and quota-only logic would treat those two the same.
+  const encashable = selectedLeaveType ? selectedLeaveType.paid !== false : true
+
+  // Prefill on selection, and ALWAYS write something — the first version returned early for any
+  // type with no quota, which left the previous type's day count sitting in the box. Switching
+  // from Bereavement (13 days) to Unpaid therefore kept 13 and happily costed it, paying real
+  // money for leave that has none. Found on a real settlement screen, not by reading the code.
   useEffect(() => {
-    if (!balance || !balance.capped) return
-    setLeaveDays(String(Math.max(0, Math.round(balance.remaining * 10) / 10)))
-  }, [empId, leaveTypeId, leaveYear])  // eslint-disable-line react-hooks/exhaustive-deps
+    if (!balance) return
+    setLeaveDays(encashable && balance.capped
+      ? String(Math.max(0, Math.round(balance.remaining * 10) / 10))
+      : '0')
+  }, [empId, leaveTypeId, leaveYear, encashable])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // "Paid" means a FINALIZED run carrying a real amount — a 0-value row legitimately exists for
   // wage staff, and a draft run is not a payment.
@@ -670,7 +679,9 @@ export default function FinalSettlement() {
             <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-leave-days">
               <Tip text="Number of unused annual leave days to encash. Nepal Labour Act rate: basic ÷ 26 per day." width={260}>Unused Leave Days</Tip>
             </label>
-            <input id="settle-leave-days" type="number" className="form-select" min={0} max={365} value={leaveDays} onChange={e => setLeaveDays(e.target.value)} />
+            <input id="settle-leave-days" type="number" className="form-select" min={0} max={365}
+              value={leaveDays} disabled={!encashable}
+              onChange={e => setLeaveDays(e.target.value)} />
             {leaveTypes.length > 0 && (
               <select
                 aria-label="Leave type being encashed"
@@ -685,11 +696,19 @@ export default function FinalSettlement() {
             {/* Where the prefilled number came from. Leave is bucketed by BS CALENDAR year, while
                 the festival and TDS figures on this same page use the Shrawan-start fiscal year —
                 so the year is stated rather than left to be assumed. */}
-            {balance && balance.capped && (
+            {!encashable ? (
+              <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
+                {selectedLeaveType?.name} is unpaid leave — there is no accrued value to buy back, so nothing is encashed.
+              </p>
+            ) : balance && balance.capped ? (
               <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
                 Balance for BS {leaveYear}: {fmt(balance.quota)} quota − {balance.used} taken
                 {balance.encashed > 0 ? ` − ${balance.encashed} already encashed` : ''} = <strong>{Math.round(balance.remaining * 10) / 10} days</strong>.
                 {' '}Carry-forward from earlier years is not included — the app does not track it.
+              </p>
+            ) : (
+              <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
+                {selectedLeaveType?.name} has no annual quota, so there is no balance to encash from — enter the days yourself if this type is genuinely being paid out.
               </p>
             )}
           </div>
