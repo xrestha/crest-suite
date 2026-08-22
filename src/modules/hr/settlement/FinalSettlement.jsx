@@ -519,6 +519,13 @@ export default function FinalSettlement() {
     if (fErr) return fail('finalizing', fErr)
 
     await Promise.all([loadSettlements(), loadEmployees()])
+    // Keep the employee we just settled on screen. loadEmployees() only returns active/probation
+    // staff, so finalizing removes the very person whose settlement you are looking at — the form
+    // and its Mark-paid/Reopen buttons emptied out the instant the action succeeded, and the only
+    // way back was through the history list. Found by running a real settlement end to end.
+    setEmployees(prev => prev.some(e => e.id === emp.id)
+      ? prev
+      : [...prev, { ...emp, status: newStatus, end_date: row.last_working_date, access_blocked: true }])
     setBusy(false)
     setMsg('ok:Settlement finalized. '
       + (settledIds.length > 0 ? settledIds.length + ' advance(s) closed. ' : '')
