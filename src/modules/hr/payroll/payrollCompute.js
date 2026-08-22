@@ -64,6 +64,32 @@ function daysNotYetJoined(joinDateStr, period, monthDays) {
   return count
 }
 
+// The mirror of daysNotYetJoined, for the other end of the employment. Days within this BS period
+// that fall AFTER the employee's last working day, folded into the same unpaidDays sum.
+//
+// Without it a leaver drew a full contractual month for a month they worked part of, and Final
+// Settlement then added its own partial-month figure on top — the same month paid roughly 1.5
+// times. Running the settlement first instead simply dropped them out of the payroll picker
+// (every picker filters status IN ('active','probation')), losing their allowances, overtime and
+// that month's SSF entirely. Neither ordering was right, and neither page said so; with this the
+// two converge. Added S600.
+//
+// Deliberately NOT implemented by writing 'absent' attendance rows for the post-exit days:
+// `absent_days` is a reported figure (Payroll Run's Excel column, HR Reports) and that would
+// misreport a departure as absenteeism.
+function daysAfterExit(endDateStr, period, monthDays) {
+  if (!endDateStr) return 0
+  const [ey, em, ed] = endDateStr.split('-').map(Number)
+  if (!ey || !em || !ed) return 0
+  const end = new Date(ey, em - 1, ed)
+  let count = 0
+  for (let d = 1; d <= monthDays; d++) {
+    // Strictly after: the last working day itself is worked and paid.
+    if (bsToAd(period.bs_year, period.bs_month, d) > end) count++
+  }
+  return count
+}
+
 // Compute OT amount from approved hr_overtime_entries rows.
 // Weekday entries at 1.5×, holiday entries at 2×.
 function entryOt(approvedOtEntries, hr) {
@@ -158,8 +184,14 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     const allowances  = earnings.reduce((s, c)   => s + calcAmount(c, basic), 0)
     const otherDed    = deductions.reduce((s, c) => s + calcAmount(c, basic), 0)
     const gross       = basic + allowances
-    const preJoinDays = daysNotYetJoined(employee.join_date, period, monthDays)
-    const unpaidDays  = t.absent + t.unpaid_leave + t.half_day * 0.5 + t.half_unpaid_leave * 0.5 + preJoinDays
+    const preJoinDays  = daysNotYetJoined(employee.join_date, period, monthDays)
+    const postExitDays = daysAfterExit(employee.end_date, period, monthDays)
+    // A month can contain both a join and an exit (a short spell). The two windows are disjoint by
+    // construction — before the join, after the exit — so they add; the clamp only guards the
+    // nonsense case of an end_date earlier than the join_date, where they would overlap and
+    // otherwise deduct more days than the month has.
+    const notEmployedDays = Math.min(monthDays, preJoinDays + postExitDays)
+    const unpaidDays  = t.absent + t.unpaid_leave + t.half_day * 0.5 + t.half_unpaid_leave * 0.5 + notEmployedDays
     // Unpaid days forfeit the whole day's pay — allowances included, not just the basic
     // portion (otherwise a full-month absence would still pay full allowances).
     const perDay      = monthDays > 0 ? gross / monthDays : 0
@@ -181,7 +213,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
       ssf_employee:      ssfEmp,
       ssf_employer:      ssfEmpr,
       net_pay: gross + otAmount - absenceDed - ssfEmp - otherDed - tdsVal - advDed,
-      breakdown: { basis, monthDays, tally: t, hourlyRate: hr, gross, unpaidDays, perDay, paidFraction, ssfBase, preJoinDays, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount },
+      breakdown: { basis, monthDays, tally: t, hourlyRate: hr, gross, unpaidDays, perDay, paidFraction, ssfBase, preJoinDays, postExitDays, notEmployedDays, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount },
     }
   }
 

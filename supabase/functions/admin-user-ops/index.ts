@@ -1180,6 +1180,9 @@ Deno.serve(async (req) => {
           await del(admin.from('hr_payslips').delete().in('run_id', runIds), 'hr_payslips')
         }
         await del(admin.from('hr_payroll_runs').delete().eq('client_id', clientId), 'hr_payroll_runs')
+        // Before hr_advance_repayments (whose final_settlement_id points at it) and before
+        // hr_employees, so neither is left referencing a row that no longer exists.
+        await del(admin.from('hr_final_settlements').delete().eq('client_id', clientId), 'hr_final_settlements')
         await del(admin.from('hr_attendance').delete().eq('client_id', clientId), 'hr_attendance')
         await del(admin.from('hr_leave_requests').delete().eq('client_id', clientId), 'hr_leave_requests')
         await del(admin.from('hr_overtime_entries').delete().eq('client_id', clientId), 'hr_overtime_entries')
@@ -1316,6 +1319,9 @@ Deno.serve(async (req) => {
         await del(admin.from('hr_payslips').delete().in('run_id', runIds), 'hr_payslips')
       }
       await del(admin.from('hr_payroll_runs').delete().eq('client_id', clientId), 'hr_payroll_runs')
+      // Before hr_advance_repayments (whose final_settlement_id points at it) and before
+      // hr_employees, so neither is left referencing a row that no longer exists.
+      await del(admin.from('hr_final_settlements').delete().eq('client_id', clientId), 'hr_final_settlements')
       await del(admin.from('hr_attendance').delete().eq('client_id', clientId), 'hr_attendance')
       await del(admin.from('hr_leave_requests').delete().eq('client_id', clientId), 'hr_leave_requests')
       await del(admin.from('hr_overtime_entries').delete().eq('client_id', clientId), 'hr_overtime_entries')

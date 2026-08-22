@@ -31,6 +31,13 @@ export const EMPLOYEE_STATUS_COLORS = {
 export const SSF_CAP          = 100000
 export const SSF_EMPLOYEE_PCT = 0.11
 export const SSF_EMPLOYER_PCT = 0.20
+// The share of the employer's 20% that the SSF allocates to its gratuity fund. It matters because
+// gratuity already funded through SSF is netted off the employer's own cash liability — see
+// gratuityCompute.js. Lived as a bare 0.0333 inside GratuityTracker and a second copy inside
+// FinalSettlement until S600; it belongs here with the other rates it moves with.
+export const SSF_GRATUITY_PCT = 0.0333
+// Nepal Labour Act: gratuity vests after one year of continuous service.
+export const GRATUITY_VESTING_MONTHS = 12
 
 // Minimum wage (full-time monthly): NPR 19,550 = 12,170 basic + 7,380 dearness allowance.
 export const MIN_WAGE_MONTHLY  = 19550

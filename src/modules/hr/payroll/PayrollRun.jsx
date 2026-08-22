@@ -85,7 +85,7 @@ export default function PayrollRun() {
       { data: advs },   { data: reps },
     ] = await Promise.all([
       scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle(),
-      scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date')
+      scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date, end_date')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('hr_salary_components'),
       // Paged: hr_attendance is one row per employee PER DAY, so a period holds staff × ~30 rows
@@ -182,10 +182,10 @@ export default function PayrollRun() {
   // reimplementing the arithmetic — a second copy could drift and report false confidence.
   const freshness = (() => {
     if (!run || run.status === 'finalized' || employees.length === 0 || payslips.length === 0) {
-      return { stale: [], missing: [], ok: true }
+      return { stale: [], missing: [], departed: [], ok: true }
     }
     let live
-    try { live = buildRows(run.id, ytdMap, tadaMap) } catch { return { stale: [], missing: [], ok: true } }
+    try { live = buildRows(run.id, ytdMap, tadaMap) } catch { return { stale: [], missing: [], departed: [], ok: true } }
     const storedByEmp = Object.fromEntries(payslips.map(s => [s.employee_id, s]))
     const stale = [], missing = []
     live.forEach(row => {
@@ -193,7 +193,20 @@ export default function PayrollRun() {
       if (!stored) { missing.push(row.employee_id); return }
       if (Math.round(stored.net_pay) !== Math.round(row.net_pay)) stale.push(row.employee_id)
     })
-    return { stale, missing, ok: stale.length === 0 && missing.length === 0 }
+    // A third bucket: a payslip that exists in this run for someone who is no longer live.
+    //
+    // `live` only contains active/probation employees, so a stored payslip for someone since
+    // settled or deactivated matched nothing above and the run reported itself fresh — while
+    // Regenerate hard-deletes every payslip and re-inserts only the live ones, destroying an
+    // already-issued payslip with no warning. Final Settlement stamping an employee on Finalize
+    // is exactly what creates this state (S600).
+    const liveIds = new Set(live.map(r => r.employee_id))
+    const departed = payslips.filter(s => !liveIds.has(s.employee_id)).map(s => s.employee_id)
+    // Deliberately NOT part of `ok`. A departed employee's payslip is legitimate — they worked
+    // part of the month — so finalizing the run WITH it is the correct outcome. Blocking finalize
+    // on it would strand the run: Regenerate destroys the payslip, Finalize refuses, and there is
+    // no third move. It gates Regenerate instead, below.
+    return { stale, missing, departed, ok: stale.length === 0 && missing.length === 0 }
   })()
 
   const nameOf = id => empMap[id]?.full_name || 'Unknown'
@@ -213,6 +226,24 @@ export default function PayrollRun() {
 
   async function regenerate() {
     if (!run || run.status === 'finalized') return
+    // Regenerate rebuilds from LIVE employees, so a payslip belonging to someone who has since
+    // been settled or deactivated is deleted and never re-inserted. That payslip is real — they
+    // worked part of the month — and losing it is silent, which is why this asks rather than the
+    // staleness banner merely mentioning it.
+    if (freshness.departed?.length > 0) {
+      const names = freshness.departed.map(nameOf)
+      const proceed = window.confirm(
+        `${names.slice(0, 8).join(', ')}${names.length > 8 ? `, +${names.length - 8} more` : ''} `
+        + `${names.length === 1 ? 'has a payslip' : 'have payslips'} in this run but ${names.length === 1 ? 'is' : 'are'} no longer active `
+        + `(settled or deactivated).
+
+Regenerating rebuilds the run from active employees only, so `
+        + `${names.length === 1 ? 'that payslip' : 'those payslips'} will be deleted and not restored.
+
+Continue?`
+      )
+      if (!proceed) return
+    }
     setConfirmAction(null)
     setBusy(true); setMsg('')
     const ytdMap = await fetchYtdMap(scopedFrom, period)
@@ -352,21 +383,33 @@ export default function PayrollRun() {
     setConfirmAction(null)
     setBusy(true)
 
-    // Reverse auto-repayments created by this run
+    // Which advances did THIS run touch? Read them off its own tagged rows before deleting them —
+    // this is the only record of what it settled.
+    //
+    // The reactivation below used to consider every settled advance in the client, filtered only
+    // on "has an outstanding balance now". That was survivable while payroll was the sole writer
+    // of repayment rows. It stopped being safe once Final Settlement began writing them too
+    // (S600): reopening a payroll run could reactivate an advance a settlement had closed and
+    // already deducted in full, handing a departed employee a live loan and silently invalidating
+    // the settlement's frozen figure. Scoped to this run's own advances, that cannot happen.
+    const { data: ownReps } = await scopedFrom('hr_advance_repayments', 'advance_id').eq('payroll_run_id', run.id)
+    const touchedIds = [...new Set((ownReps || []).map(r => r.advance_id))]
+
     await scopedDelete('hr_advance_repayments').eq('payroll_run_id', run.id)
 
-    // Reactivate any advances that were auto-settled by this run but now have outstanding balance
-    const { data: updatedReps } = await scopedFrom('hr_advance_repayments', 'advance_id, amount')
-    const updatedRepaidMap = {}
-    ;(updatedReps || []).forEach(r => {
-      updatedRepaidMap[r.advance_id] = (updatedRepaidMap[r.advance_id] || 0) + (parseFloat(r.amount) || 0)
-    })
-    const reactivateIds = advances
-      .filter(a => a.status === 'settled')
-      .filter(a => Math.max(0, parseFloat(a.amount) - (updatedRepaidMap[a.id] || 0)) > 0.01)
-      .map(a => a.id)
-    if (reactivateIds.length > 0) {
-      await scopedUpdate('hr_advances', { status: 'active' }).in('id', reactivateIds)
+    if (touchedIds.length > 0) {
+      const { data: updatedReps } = await scopedFrom('hr_advance_repayments', 'advance_id, amount').in('advance_id', touchedIds)
+      const updatedRepaidMap = {}
+      ;(updatedReps || []).forEach(r => {
+        updatedRepaidMap[r.advance_id] = (updatedRepaidMap[r.advance_id] || 0) + (parseFloat(r.amount) || 0)
+      })
+      const reactivateIds = advances
+        .filter(a => touchedIds.includes(a.id) && a.status === 'settled')
+        .filter(a => Math.max(0, parseFloat(a.amount) - (updatedRepaidMap[a.id] || 0)) > 0.01)
+        .map(a => a.id)
+      if (reactivateIds.length > 0) {
+        await scopedUpdate('hr_advances', { status: 'active' }).in('id', reactivateIds)
+      }
     }
 
     // Revert TADA claims this run auto-marked Paid — but only ones marked paid BY payroll,
@@ -456,7 +499,7 @@ export default function PayrollRun() {
         {/* Stale-draft warning. Finalize refuses while this is showing, but the refusal alone
             would only be discovered at the moment of committing — this states the problem, names
             who it affects and points at the one-click fix beforehand. */}
-        {!loading && !freshness.ok && (
+        {!loading && (!freshness.ok || freshness.departed?.length > 0) && (
           <div
             role="alert"
             className="card"
@@ -481,6 +524,13 @@ export default function PayrollRun() {
                 <><strong style={{ color: 'var(--theme-text1)' }}>{freshness.missing.length}</strong>{' '}
                   employee{freshness.missing.length === 1 ? ' was' : 's were'} added after this run and {freshness.missing.length === 1 ? 'has' : 'have'} no payslip in it
                   {' '}({freshness.missing.slice(0, 4).map(nameOf).join(', ')}{freshness.missing.length > 4 ? `, +${freshness.missing.length - 4} more` : ''}).{' '}
+                </>
+              )}
+              {freshness.departed?.length > 0 && (
+                <><strong style={{ color: 'var(--theme-text1)' }}>{freshness.departed.length}</strong>{' '}
+                  employee{freshness.departed.length === 1 ? ' has a payslip' : 's have payslips'} here but {freshness.departed.length === 1 ? 'is' : 'are'} no longer active
+                  {' '}({freshness.departed.slice(0, 4).map(nameOf).join(', ')}{freshness.departed.length > 4 ? `, +${freshness.departed.length - 4} more` : ''}) —
+                  {' '}Regenerate would delete {freshness.departed.length === 1 ? 'it' : 'them'}.{' '}
                 </>
               )}
               Regenerate rebuilds the draft from current data; manual TDS and TADA edits are reset.

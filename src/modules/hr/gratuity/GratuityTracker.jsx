@@ -3,19 +3,11 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
-import { SSF_CAP } from '../payrollConstants'
+import { calcGratuity } from './gratuityCompute'
+import { fetchSsfStartMap, ssfMonthsFrom } from './ssfEnrolment'
 
 const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
 const fmtD = iso => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-NP', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
-
-// Months of service from join_date to today.
-function serviceMonths(joinDateStr) {
-  if (!joinDateStr) return 0
-  const j = new Date(joinDateStr + 'T00:00:00')
-  if (isNaN(j)) return 0
-  const today = new Date()
-  return Math.max(0, (today.getFullYear() - j.getFullYear()) * 12 + (today.getMonth() - j.getMonth()))
-}
 
 // Format service duration as "X yr Y mo"
 function fmtService(months) {
@@ -26,33 +18,13 @@ function fmtService(months) {
   return `${y} yr ${m} mo`
 }
 
-// Gratuity accrual per Nepal Labour Act: 1 month basic per year of service (8.33%/yr).
-// SSF employer contribution includes 3.33% of capped basic per month toward gratuity fund.
-function calcGratuity(emp) {
-  const basic   = parseFloat(emp.basic_salary) || 0
-  const months  = serviceMonths(emp.join_date)
-  const vested  = months >= 12
-
-  // Labour Act total accrued (monthly: basic/12 × months = basic × years)
-  const monthlyAccrual = basic / 12
-  const totalAccrued   = monthlyAccrual * months
-
-  // SSF gratuity portion: 3.33% of capped basic per month (employer SSF → SSF gratuity fund)
-  const ssfBasic       = Math.min(basic, SSF_CAP)
-  const SSF_GRATUITY_PCT = 0.0333  // share of employer SSF 20% allocated to gratuity
-  const ssfMonthly     = emp.ssf_enrolled ? ssfBasic * SSF_GRATUITY_PCT : 0
-  const ssfCovered     = ssfMonthly * months
-
-  // Residual cash liability (Labour Act minus what SSF has already funded)
-  const netLiability   = Math.max(0, totalAccrued - ssfCovered)
-
-  return { basic, months, vested, monthlyAccrual, totalAccrued, ssfMonthly, ssfCovered, netLiability }
-}
-
 export default function GratuityTracker() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
   const [employees, setEmployees] = useState([])
+  // When SSF contributions actually began, per employee — derived from payroll rather than
+  // assumed from the join date. See ssfEnrolment.js for why that distinction is worth six figures.
+  const [ssfStart,  setSsfStart]  = useState({})
   const [loading,   setLoading]   = useState(true)
   const [filter,    setFilter]    = useState('all')   // all | vested | vesting
   const [dept,      setDept]      = useState('all')
@@ -64,16 +36,23 @@ export default function GratuityTracker() {
 
   async function load() {
     setLoading(true)
-    const { data } = await scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, join_date, basic_salary, pay_basis, ssf_enrolled, status')
+    // ssf_no is selected because the SSF gate is `ssf_enrolled AND ssf_no`, matching payroll — a
+    // flagged employee with a blank number had nothing contributed on their behalf.
+    const { data } = await scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, status')
       .in('status', ['active', 'probation'])
       .order('full_name')
     setEmployees(data || [])
+    // Best-effort: without it every employee reads as "coverage unknown", which shows no offset
+    // rather than a wrong one.
+    try { setSsfStart(await fetchSsfStartMap(scopedFrom)) } catch { setSsfStart({}) }
     setLoading(false)
   }
 
+  const gratuityOf = e => calcGratuity(e, { ssfMonths: ssfMonthsFrom(ssfStart[e.id]) })
+
   const rows = employees
     .filter(e => (e.pay_basis || 'monthly') === 'monthly')  // only monthly staff; daily/hourly have no fixed monthly basic
-    .map(e => ({ ...e, g: calcGratuity(e) }))
+    .map(e => ({ ...e, g: gratuityOf(e) }))
     .filter(r => {
       if (filter === 'vested')  return r.g.vested
       if (filter === 'vesting') return !r.g.vested
@@ -103,7 +82,10 @@ export default function GratuityTracker() {
       'Basic (NPR)':       r.g.basic,
       'Monthly Accrual':   Math.round(r.g.monthlyAccrual),
       'Total Accrued':     Math.round(r.g.totalAccrued),
-      'SSF Covered':       r.ssf_enrolled ? Math.round(r.g.ssfCovered) : 'Not enrolled',
+      'SSF Covered':       !r.g.enrolled ? 'Not enrolled'
+        : !r.g.coverageKnown ? 'No SSF payslip history'
+        : Math.round(r.g.ssfCovered),
+      'SSF Months':        r.g.enrolled && r.g.coverageKnown ? r.g.coveredMonths : '',
       'Net Liability':     Math.round(r.g.netLiability),
     })))
     const wb = XLSX.utils.book_new()
@@ -114,7 +96,7 @@ export default function GratuityTracker() {
   // Re-compute filter counts without the current filter applied
   const allRows = employees.filter(e => (e.pay_basis || 'monthly') === 'monthly')
     .filter(r => dept === 'all' || r.department === dept)
-    .map(e => ({ ...e, g: calcGratuity(e) }))
+    .map(e => ({ ...e, g: gratuityOf(e) }))
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
 
@@ -172,6 +154,16 @@ export default function GratuityTracker() {
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>3.33% employer SSF → gratuity fund</div>
             </div>
           </div>
+
+          {/* An enrolled employee with no SSF-bearing payslip on record gets NO offset — which is
+              the safe direction, but it silently inflates the liability figure above unless it is
+              said out loud. Before this the opposite happened silently: the offset was applied
+              across their whole service whether SSF had funded it or not. */}
+          {rows.filter(r => r.g.enrolled && !r.g.coverageKnown).length > 0 && (
+            <div className="card" style={{ marginBottom: 14, padding: '10px 16px', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)', fontSize: 12, color: 'var(--theme-text3)' }}>
+              ⚠ {rows.filter(r => r.g.enrolled && !r.g.coverageKnown).length} SSF-enrolled staff have no finalized payslip carrying an SSF deduction, so there is no evidence of when contributions began. No SSF offset is applied for them — their liability above is the full Labour Act accrual.
+            </div>
+          )}
 
           {nonMonthly > 0 && (
             <div className="card" style={{ marginBottom: 14, padding: '10px 16px', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)', fontSize: 12, color: 'var(--theme-text3)' }}>

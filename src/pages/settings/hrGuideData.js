@@ -504,7 +504,7 @@ export const HR_GUIDE_GROUPS = [
         route: '/hr/settlement',
         plan: 'Manager only',
         summary:
-          'The one-employee exit calculator: pick the leaver, enter the last working day, unused leave days, whether this FY\'s festival allowance was already paid, and whether notice was served — and print the full settlement memo with every line item shown.',
+          'Computes AND records a leaver\'s full and final payout — partial month, leave encashment, gratuity, festival pro-ration, less unserved notice, outstanding advances and TDS. Finalize closes the recovered advances, stamps the employee, blocks their Crest Staff login and locks the document; an admin can Reopen to reverse all of it.',
         workflow: [
           'Select the employee and inputs; the memo derives earnings (partial month, leave encashment, gratuity, festival pro-ration), deductions (notice shortfall, advances, lump-sum TDS) and the net figure, all itemized.',
         ],
@@ -522,6 +522,11 @@ export const HR_GUIDE_GROUPS = [
         gotchas: [
           'The settlement TDS uses an explicit approximation for the year\'s income — basic × 12 with standard SSF assumptions — rather than reading real finalized payslips the way Festival does. For a leaver with unusual YTD income, review the TDS line by hand.',
           'The employee picker filters on status — which is exactly why blocking a leaver\'s Self-Service login must never touch status, or they vanish from this page before their own settlement is run.',
+        
+          'Run the settlement BEFORE marking anyone resigned/inactive. Every payroll and settlement picker filters status IN (active, probation), so deactivating first removes them from the page built for leavers.',
+          'Finalize refuses on three states rather than warning: payroll already paid that final month (which would pay it ~1.5 times), a prior settlement overlaps this employment spell (which would pay gratuity twice for the same years), or the same settlement was finalized in another tab.',
+          'A settlement that nets negative does NOT close the advances — recovery is capped at what the payout actually covers, and the remainder stays an open advance because the money has not been repaid.',
+          'Finalized means computed and locked, not paid. Mark paid separately when the money leaves.',
         ],
         connections: 'Reads Pay Setup (basic), Employees (join date, status), Advances (outstanding), and the same tax tables as payroll. The printed memo is the exit document.',
       },

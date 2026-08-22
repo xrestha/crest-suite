@@ -227,7 +227,7 @@ export default function PayrollCalculation() {
       { data: emps }, { data: comps }, { data: att }, { data: ot },
       { data: advs }, { data: reps }, { data: runRow },
     ] = await Promise.all([
-      scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date')
+      scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date, end_date')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('hr_salary_components'),
       // Paged — same reason as PayrollRun.jsx: one row per employee per day crosses the silent

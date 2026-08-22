@@ -248,3 +248,84 @@ describe('computePayslip — hourly basis', () => {
     expect(slip.net_pay).toBe(26325)
   })
 })
+
+// ── end_date proration (S600) ────────────────────────────────────────────────
+// The mirror of the join-date block above. Without it a leaver drew a full contractual month and
+// Final Settlement added its own partial-month figure on top — the same month paid ~1.5 times.
+describe('computePayslip — monthly basis, end_date', () => {
+  const period = { bs_year: 2082, bs_month: 1 }   // 31 days
+
+  test('employee with no end_date is unaffected', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 30000, ssf_enrolled: false }
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.breakdown.postExitDays).toBe(0)
+    expect(slip.net_pay).toBe(30000)
+  })
+
+  test('employee who left after this period is paid in full', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 30000, ssf_enrolled: false, end_date: formatAd(bsToAd(2082, 3, 1)) }
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.breakdown.postExitDays).toBe(0)
+    expect(slip.net_pay).toBe(30000)
+  })
+
+  test('mid-period leaver is paid only up to their last working day', () => {
+    // 31000 over a 31-day month = 1000/day. Last day worked = the 16th, so days 17-31 are unpaid.
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false, end_date: formatAd(bsToAd(2082, 1, 16)) }
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.breakdown.postExitDays).toBe(15)
+    expect(slip.absence_deduction).toBe(15000)
+    expect(slip.net_pay).toBe(16000)
+  })
+
+  test('the last working day itself is paid', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false, end_date: formatAd(bsToAd(2082, 1, 31)) }
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.breakdown.postExitDays).toBe(0)
+    expect(slip.net_pay).toBe(31000)
+  })
+
+  test('employee who left before this period draws nothing, not a full month', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 30000, ssf_enrolled: false, end_date: formatAd(bsToAd(2081, 12, 1)) }
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.breakdown.postExitDays).toBe(31)
+    expect(slip.absence_deduction).toBe(30000)
+    expect(slip.net_pay).toBe(0)
+  })
+
+  test('a join and an exit in the same month pay only the days between them', () => {
+    // Joined the 11th, left the 20th: 10 days worked out of 31 at 1000/day.
+    const employee = {
+      pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false,
+      join_date: formatAd(bsToAd(2082, 1, 11)),
+      end_date:  formatAd(bsToAd(2082, 1, 20)),
+    }
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.breakdown.preJoinDays).toBe(10)
+    expect(slip.breakdown.postExitDays).toBe(11)
+    expect(slip.breakdown.notEmployedDays).toBe(21)
+    expect(slip.net_pay).toBe(10000)
+  })
+
+  test('an end_date before the join_date cannot deduct more days than the month has', () => {
+    const employee = {
+      pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false,
+      join_date: formatAd(bsToAd(2082, 1, 20)),
+      end_date:  formatAd(bsToAd(2082, 1, 5)),
+    }
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.breakdown.notEmployedDays).toBe(31)
+    expect(slip.absence_deduction).toBe(31000)
+    expect(slip.net_pay).toBe(0)
+  })
+
+  test('SSF shrinks with the shortened month, since it derives from the paid fraction', () => {
+    const employee = {
+      pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: true, ssf_no: '123',
+      end_date: formatAd(bsToAd(2082, 1, 16)),
+    }
+    const slip = computePayslip(employee, [], [], period)
+    expect(slip.ssf_employee).toBeLessThan(31000 * 0.11)
+    expect(slip.ssf_employee).toBeGreaterThan(0)
+  })
+})

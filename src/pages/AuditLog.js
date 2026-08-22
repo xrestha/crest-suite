@@ -14,6 +14,7 @@ const TABLE_LABELS = {
   monthly_periods:  'Period',
   items:            'Item Master',
   // HR module
+  hr_final_settlements: 'Final Settlement',
   hr_employees:           'Employee',
   hr_salary_components:   'Salary',
   hr_attendance:          'Attendance',

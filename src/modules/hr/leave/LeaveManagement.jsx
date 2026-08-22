@@ -6,6 +6,7 @@ import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange } from './leaveConstants'
+import { leaveBalance } from './leaveBalance'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
 
@@ -48,6 +49,13 @@ export default function LeaveManagement() {
   const [employees, setEmployees] = useState([])
   const [periods,   setPeriods]   = useState([])
   const [requests,  setRequests]  = useState([])
+  // Finalized settlements, so an encashed day stops reading as still-available. Loaded here
+  // rather than derived, because the Balances tab is the only screen that shows a balance at all.
+  const [settlements, setSettlements] = useState([])
+  // Someone settled or deactivated vanishes from every HR picker by design — but their balance is
+  // exactly what you want to check when a final settlement is being questioned, so the Balances
+  // tab can opt them back in.
+  const [showSeparated, setShowSeparated] = useState(false)
   const [loading,   setLoading]   = useState(true)
   const [busy,      setBusy]      = useState(false)
   const [msg,       setMsg]       = useState('')
@@ -80,13 +88,17 @@ export default function LeaveManagement() {
       const r = await scopedFrom('hr_leave_types').order('sort_order')
       lt = r.data || []
     }
-    const [{ data: emps }, { data: pr }, { data: reqs }] = await Promise.all([
-      scopedFrom('hr_employees', 'id, full_name, employee_code, department, status')
-        .in('status', ['active', 'probation']).order('full_name'),
+    const [{ data: emps }, { data: pr }, { data: reqs }, { data: setl }] = await Promise.all([
+      // Every status, not just active/probation — the Balances tab filters in JS so it can show a
+      // leaver on request, while every other tab here still works from the active list below.
+      scopedFrom('hr_employees', 'id, full_name, employee_code, department, status').order('full_name'),
       scopedFrom('monthly_periods', 'id, bs_year, bs_month, status'),
       scopedFrom('hr_leave_requests').order('start_date', { ascending: false }),
+      scopedFrom('hr_final_settlements', 'employee_id, leave_type_id, leave_days_encashed, last_working_date, status')
+        .eq('status', 'finalized'),
     ])
     setTypes(lt); setEmployees(emps || []); setPeriods(pr || []); setRequests(reqs || [])
+    setSettlements(setl || [])
     setLoading(false)
   }
 
@@ -183,18 +195,21 @@ export default function LeaveManagement() {
   }
 
   // ── Balances ──────────────────────────────────────────────────────────────
-  // Used days = Σ days of approved requests for emp+type whose start_date falls in bsYear.
-  function usedFor(empId, typeId) {
-    return requests
-      .filter(r => r.employee_id === empId && r.leave_type_id === typeId && r.status === 'approved'
-        && adToBs(new Date(r.start_date)).year === bsYear)
-      .reduce((a, r) => a + (parseFloat(r.days) || 0), 0)
-  }
+  // The arithmetic lives in leaveBalance.js so Final Settlement can pre-fill the days it encashes
+  // from the same figure this tab shows, instead of asking an operator to work it out (S600).
+  const balanceFor = (empId, type) =>
+    leaveBalance({ requests, settlements, leaveType: type, employeeId: empId, bsYear })
+  const usedFor = (empId, typeId) => balanceFor(empId, types.find(t => t.id === typeId)).used
+
+  // Every tab except Balances works from currently-employed staff, exactly as before.
+  const activeEmployees = employees.filter(e => e.status === 'active' || e.status === 'probation')
+  const balanceEmployees = showSeparated ? employees : activeEmployees
+  const separatedCount = employees.length - activeEmployees.length
 
   async function exportBalances() {
     const XLSX = await import('xlsx')
-    const rows = employees.map(e => {
-      const row = { Employee: e.full_name, Code: e.employee_code || '' }
+    const rows = balanceEmployees.map(e => {
+      const row = { Employee: e.full_name, Code: e.employee_code || '', Status: e.status }
       activeTypes.forEach(t => {
         const used = usedFor(e.id, t.id)
         row[t.name] = t.annual_quota > 0 ? `${fmt(used)} / ${fmt(t.annual_quota)}` : fmt(used)
@@ -250,7 +265,7 @@ export default function LeaveManagement() {
 
       {loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
-      ) : employees.length === 0 ? (
+      ) : activeEmployees.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>No active employees. Add employees in HR → Employees first.</div>
       ) : tab === 'requests' ? (
         /* ── REQUESTS ── */
@@ -262,7 +277,7 @@ export default function LeaveManagement() {
                 <label style={lbl} htmlFor="leave-employee">Employee</label>
                 <select id="leave-employee" style={{ ...inp, width: '100%' }} value={fEmp} onChange={e => setFEmp(e.target.value)}>
                   <option value="">— Select —</option>
-                  {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+                  {activeEmployees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
                 </select>
               </div>
               <div>
@@ -379,7 +394,17 @@ export default function LeaveManagement() {
       ) : tab === 'balances' ? (
         /* ── BALANCES ── */
         <div>
-          <div className="card no-print" style={{ marginBottom: 14, display: 'flex', justifyContent: 'flex-end' }}>
+          <div className="card no-print" style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {/* Every other HR screen hides separated staff, correctly — but a balance is most
+                often questioned AFTER someone leaves, when their final settlement encashed some
+                of it. Hiding them here made the encashment invisible on the one screen that
+                shows balances at all. */}
+            {separatedCount > 0 ? (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--theme-text2)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={showSeparated} onChange={e => setShowSeparated(e.target.checked)} />
+                Include separated staff ({separatedCount})
+              </label>
+            ) : <span />}
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportBalances}>⬇ Export Excel</button>
           </div>
           <div className="card" style={{ padding: 0 }}>
@@ -396,13 +421,19 @@ export default function LeaveManagement() {
                   </tr>
                 </thead>
                 <tbody>
-                  {employees.map(e => (
+                  {balanceEmployees.map(e => (
                     <tr key={e.id}>
-                      <td style={{ position: 'sticky', left: 0, background: 'var(--theme-card)', zIndex: 1, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{e.full_name}</td>
+                      <td style={{ position: 'sticky', left: 0, background: 'var(--theme-card)', zIndex: 1, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
+                        {e.full_name}
+                        {e.status !== 'active' && e.status !== 'probation' && (
+                          <span className="badge-gray" style={{ marginLeft: 8, fontSize: 10, textTransform: 'capitalize' }}>{e.status}</span>
+                        )}
+                      </td>
                       {activeTypes.map(t => {
-                        const used = usedFor(e.id, t.id)
-                        const remaining = t.annual_quota - used
-                        const over = t.annual_quota > 0 && remaining < 0
+                        const bal = balanceFor(e.id, t)
+                        const used = bal.used + bal.encashed
+                        const remaining = bal.remaining
+                        const over = bal.capped && remaining < 0
                         return (
                           <td key={t.id} style={{ textAlign: 'right', color: over ? 'var(--theme-red-text)' : used > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                             {t.annual_quota > 0
@@ -418,7 +449,7 @@ export default function LeaveManagement() {
             </div>
           </div>
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Each cell shows approved leave days used against the annual quota for BS {bsYear}. Uncapped types (e.g. Unpaid) show only the days taken. Quotas are flat annual figures — accrual and carry-forward roll-over are not yet automatic.
+            Each cell shows leave days used against the annual quota for BS {bsYear} — approved requests plus any days encashed on a finalised settlement, since both are days already paid for. Uncapped types (e.g. Unpaid) show only the days taken. Balances are per BS calendar year, not the Shrawan-start fiscal year that payroll and festival allowance use. Quotas are flat annual figures — accrual and carry-forward roll-over are not yet automatic.
           </div>
         </div>
       ) : (

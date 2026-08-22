@@ -158,6 +158,100 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S600 — 2026-08-22 — Final Settlement stops being a calculator, and four money bugs fall out of it
+
+An employee left, and working out what to do with his record surfaced that `/hr/settlement` computes
+a leaver's payout, prints it, and **writes nothing**. Its own code said so, and named the
+consequence:
+
+> *This page calculates and prints; it writes nothing… Naming the consequences is the fix that was
+> chosen over making this page perform the writes itself.*
+
+Three follow-ups were left on an amber card for the operator to remember — settle the recovered
+advances, mark the employee, record the encashment — and the first has teeth: an advance recovered
+in a settlement but left Active is **deducted again on the next payroll run**.
+
+Planning the fix turned up four live money bugs, three of which this feature would otherwise have
+frozen into a signed, paid document.
+
+**1. The SSF gratuity offset spanned an employee's whole service.** Gratuity is reduced by the share
+the employer's SSF contribution already funded (3.33% of capped basic per month) — but both
+implementations multiplied that across *total service*, gated only on the `ssf_enrolled` flag. SSF
+only began accepting contributions in 2075/76 and most clients enrolled later still. A ten-year
+employee enrolled two years ago had **eight phantom years** netted off: at the capped basic, roughly
+**NPR 320,000 withheld from someone who was owed it.** No enrolment date exists anywhere in the
+schema, so it is now derived from evidence — the first finalized payslip actually carrying an SSF
+deduction — and no evidence means **no offset at all**, because the wrong guess silently reduces what
+a leaver is paid.
+
+**2. The final month could be paid twice, or not at all.** `computePayslip` prorates for `join_date`
+and had no `end_date` mirror. Run payroll first and a leaver drew a full month, then the settlement
+added partial salary on top (~1.5×). Settle first and they vanished from the payroll picker
+entirely, losing allowances, overtime, TADA and that month's SSF. Neither page said so. The engine
+now prorates both ends, so the two orderings converge instead of the operator having to know which
+to do first.
+
+**3. Partial salary divided `basic` where payroll divides `gross`** — every allowance silently
+dropped from a leaver's final month. Visible on screen now: a real employee's row reads
+`27,000 ÷ 31 × 6`, where 27,000 is basic 16,200 plus 10,800 of allowances.
+
+**4. Gratuity's SSF gate disagreed with payroll's.** Payroll requires `ssf_enrolled && ssf_no`; both
+gratuity copies tested the flag alone, so an employee flagged enrolled with a blank SSF number had a
+contribution netted off that was never made.
+
+### What it does now
+
+`hr_final_settlements` stores the settlement, and Finalize performs the three follow-ups itself:
+recovers and closes the advances, marks the employee resigned/terminated/inactive with their last
+working date, and blocks their Crest Staff login. A finalized settlement is locked, listed in a
+history you can reprint or mark as paid, and an admin can **Reopen** to reverse every one of those
+writes.
+
+**The write order is the whole design.** The row goes in as a **draft** first so each later step has
+an id to tag itself with, and only becomes authoritative once the ledgers are actually written — a
+crash part-way leaves a draft, which closes nothing and claims nothing, rather than a finalized
+document asserting money moved that never did. Every write checks its error and stops, naming what
+did and did not land. `PayrollRun`'s own Finalize ignores all four of its returns; that was not a
+pattern to copy into a page that closes loans.
+
+**Finalize refuses rather than warns** on three states, each of which pays somebody twice: a
+finalized payslip already covering the final month, a prior settlement overlapping the current
+`join_date` (the rehire case, where service months span both spells and gratuity is paid twice for
+the same years), and a concurrent finalize in another tab. And **recovery is capped at the payout** —
+a settlement that nets negative has not recovered the balance, so that advance stays open, because
+there is no receivable ledger to move a shortfall into.
+
+**It stopped asking for what the database already knows.** Leave days come from the employee's
+balance (labelled, because leave runs on the BS calendar year while festival and TDS on the same page
+use the Shrawan-start fiscal year); festival from the allowance register; TDS from real year-to-date
+earnings rather than a projected `basic × 12`, which over-withheld every mid-year leaver; and the
+final month from actual attendance. **Missing attendance is not zero attendance** — with nothing
+marked the page says so and prorates on calendar days, rather than silently deducting a month nobody
+recorded or silently assuming perfect attendance. That warning has to fire *before* Finalize, because
+afterwards the employee leaves every attendance screen and the month can no longer be entered.
+
+### Two adjacent fixes it forced
+
+**Payroll's Reopen was unscoped.** It reactivated *any* settled advance in the client with an
+outstanding balance — not scoped to the run, its employees, or the advances it settled. Survivable
+while payroll was the only writer of repayment rows; the moment settlements write them too,
+reopening a payroll run could reactivate an advance a settlement had closed and already deducted in
+full. Both Reopens now work only from their own tagged rows.
+
+**Payroll's staleness check couldn't see a departed employee's payslip.** It only iterates live
+employees, so a payslip belonging to someone since settled was invisible — while Regenerate
+hard-deletes every payslip and re-inserts only the live ones, destroying an issued payslip silently.
+Settling someone mid-month is exactly what arms that. It deliberately does **not** block Finalize
+(that would strand the run: Regenerate destroys the payslip, Finalize refuses, no third move) — it
+gates Regenerate with a confirm naming who would lose theirs.
+
+Gratuity now lives in one shared, tested module used by both the Tracker and the settlement, with
+`SSF_GRATUITY_PCT` and the vesting cliff moved into `payrollConstants.js`. 51 tests were added
+(`gratuityCompute`, `leaveBalance`, and the `end_date` proration); 368 pass. **The migration
+`20260822120000_hr_final_settlements.sql` must be applied by hand in the SQL Editor before the page
+can save** — until then it degrades to the calculator it was, which was verified live rather than
+assumed.
+
 ### S599 — 2026-08-22 — The employee portal becomes an app you install
 
 "I want a proper mobile app for employee self service." The portal already worked; what it had never

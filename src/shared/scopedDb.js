@@ -31,7 +31,7 @@ export const CLIENT_SCOPED_TABLES = [
   'hr_leave_requests', 'hr_leave_types', 'hr_holiday_calendar', 'hr_festival_allowances',
   'hr_overtime_entries', 'hr_payroll_runs', 'hr_payslips', 'hr_roster',
   'hr_salary_components', 'hr_shift_types', 'hr_roster_publish_state', 'hr_shift_swap_requests',
-  'hr_tada_claims', 'hr_incentive_configs', 'hr_incentives',
+  'hr_tada_claims', 'hr_incentive_configs', 'hr_incentives', 'hr_final_settlements',
   // NOT hr_tada_claim_items — no client_id column of its own (scoped via claim_id →
   // hr_tada_claims.id, same parent-scoped pattern as recipe_ingredients); stays on raw
   // supabase.from() in TadaClaims.jsx.

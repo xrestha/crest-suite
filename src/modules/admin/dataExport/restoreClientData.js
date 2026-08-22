@@ -31,7 +31,7 @@ const RESTORE_ORDER = [
   'hr_incentive_configs', 'hr_incentives', 'hr_tada_claims', 'hr_tada_claim_items',
   'hr_advances', 'hr_advance_repayments', 'hr_festival_allowances',
   'hr_overtime_entries', 'hr_leave_requests', 'hr_attendance',
-  'hr_payroll_runs', 'hr_payslips',
+  'hr_payroll_runs', 'hr_payslips', 'hr_final_settlements',
   // POS — tables/customers before orders; credit notes after orders (circular FK, see below)
   // pos_cash_movements after pos_shifts and pos_orders — it holds an FK to both.
   'pos_tables', 'pos_customers', 'pos_shifts', 'pos_parking_slips',
