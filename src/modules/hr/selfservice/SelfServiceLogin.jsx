@@ -4,6 +4,9 @@ import { supabase } from '../../../supabaseClient'
 import { useTheme } from '../../../context/ThemeContext'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
 import { withTimeout } from '../../../utils/withTimeout'
+import { useStaffAppManifest } from './useStaffApp'
+import { rememberStaffClient } from './staffClient'
+import './selfService.css'
 
 const KEYS = [
   ['1', '2', '3'],
@@ -21,6 +24,7 @@ export default function SelfServiceLogin() {
   const navigate = useNavigate()
   const { colors } = useTheme()
   const isDark = relativeLuminance(colors.bg) < 0.5
+  useStaffAppManifest()
 
   const [staff,     setStaff]     = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -49,6 +53,10 @@ export default function SelfServiceLogin() {
 
   useEffect(() => {
     if (!clientId) { navigate('/login', { replace: true }); return }
+    // The link an employee is sent carries their company; the installed app's start_url cannot.
+    // Remembering it here is what lets the home-screen icon open on this PIN pad instead of the
+    // admin sign-in page nobody here has a password for.
+    rememberStaffClient(clientId)
     loadStaff()
   }, [clientId, navigate, loadStaff])
 
@@ -134,9 +142,10 @@ export default function SelfServiceLogin() {
   const pinDots = Math.max(4, pin.length)
 
   return (
-    <div style={{
-      minHeight: '100vh', background: 'var(--theme-bg)',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24,
+    <div className="self-service" style={{
+      minHeight: '100dvh', background: 'var(--theme-bg)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      padding: 'calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom))',
     }}>
     {/* Elevated card wrapper (2026-07-14 audit) — this file's own comment claims "same shape as
         PosLogin.jsx", but the content previously floated bare on the page background instead of

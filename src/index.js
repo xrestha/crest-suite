@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
+import { initInstallPrompt } from './utils/installPrompt';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
@@ -35,5 +36,9 @@ if ('serviceWorker' in navigator) {
     }
   }
 }
+
+// Chrome fires beforeinstallprompt once and early — before the lazily-loaded Crest Staff portal
+// exists to hear it — so it is captured at boot and replayed from the portal's account sheet.
+initInstallPrompt();
 
 reportWebVitals();

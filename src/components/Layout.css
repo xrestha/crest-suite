@@ -54,6 +54,38 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* A bottom sheet (Modal variant="sheet") arrives from the edge it docks to, so it travels on Y
+   only — a scale would read as a card appearing in the middle of the screen and then falling. */
+@keyframes modal-sheet-in {
+  from { opacity: 0.6; transform: translateY(12%); }
+  to   { opacity: 1;   transform: translateY(0); }
+}
+
+/* Bottom sheet. Modal.js owns the behaviour and the docking; everything here is shape.
+   - dvh, not vh: a phone browser's chrome collapses on scroll, and vh does not follow it.
+   - The bottom padding carries env(safe-area-inset-bottom) so the last control clears the iPhone
+     home indicator. That only resolves to a real value because index.html sets viewport-fit=cover.
+   - overscroll-behavior stops a scroll that reaches the end of the sheet from chaining to the
+     page behind it, which on a phone drags the backdrop instead of doing nothing.
+   - No grab handle, deliberately: the sheet is not drag-dismissible, and a handle would advertise
+     a gesture that does nothing. */
+.modal-sheet {
+  max-height: 88dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-bottom: none;
+  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  animation: modal-sheet-in var(--motion-slow) var(--ease-entrance);
+}
+/* A full-width action inside a sheet: .btn has no justify-content of its own, so stretching one
+   without this leaves its label sitting at the left edge of a 358px button. */
+.modal-sheet .btn-block {
+  width: 100%;
+  justify-content: center;
+}
+
 .chart-modal-backdrop { animation: chart-modal-backdrop-in var(--motion-fast) var(--ease-standard); }
 .chart-modal-panel    { animation: chart-modal-panel-in 180ms var(--ease-entrance); }
 
@@ -127,7 +159,8 @@
      reveals them rather than hiding them. */
   .chart-modal-backdrop,
   .chart-modal-panel,
-  .chart-stat-strip > * {
+  .chart-stat-strip > *,
+  .modal-sheet {
     animation: none !important;
   }
   .chart-icon-btn,

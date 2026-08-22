@@ -183,18 +183,68 @@ function applyTheme(t) {
   r.style.setProperty('--theme-card-shadow', t.cardShadow)
 }
 
+// ── `system`: follow the phone's own light/dark setting ──────────────────────────────────────
+// Added for the Crest Staff employee app. An employee reaches the portal on their own phone and
+// cannot open Settings → Appearance at all — ProtectedRoute bounces a self-service account away
+// from every admin route — so the only theme they could ever have was whatever the hardcoded
+// default happened to be: a dark app held up in Kathmandu daylight, with no way to change it.
+//
+// The pair is `dark` ↔ `light` deliberately. Those two are the same design in two schemes (gold
+// accent on charcoal / gold accent on warm white), so following the OS changes the SCHEME and
+// nothing else. Pairing the light half with Latte or Rosé Dawn would swap the accent hue at
+// sunset too, which reads as a different app rather than the same one in daylight.
+//
+// `system` is deliberately NOT a member of PRESETS: it has no palette of its own, and PRESETS is
+// a map of real hex values that colour work (and any contrast check over it) iterates. It is a
+// MODE that resolves to one of them.
+export const SYSTEM_KEY = 'system'
+const SYSTEM_PAIR = { dark: 'dark', light: 'light' }
+
+function prefersDark() {
+  try {
+    // Default to dark when the query is unavailable — that is what this product has always been.
+    return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ?? true
+  } catch {
+    return true
+  }
+}
+
+function resolveColors(key) {
+  if (key === SYSTEM_KEY) return PRESETS[prefersDark() ? SYSTEM_PAIR.dark : SYSTEM_PAIR.light]
+  return PRESETS[key] || PRESETS.dark
+}
+
+// Only the employee portal defaults to following the device. The admin app keeps its `dark`
+// default: silently re-theming every owner who has never opened Settings is a different change
+// from the one this was built for. An explicitly chosen preset always wins on both surfaces.
+function defaultKeyForSurface() {
+  try {
+    return window.location.pathname.startsWith('/hr/self-service') ? SYSTEM_KEY : 'dark'
+  } catch {
+    return 'dark'
+  }
+}
+
 function loadSaved() {
   try {
     const raw = localStorage.getItem('crest_theme')
-    if (!raw) return { key: 'dark', colors: PRESETS.dark }
+    if (!raw) {
+      const key = defaultKeyForSurface()
+      return { key, colors: resolveColors(key) }
+    }
     const saved = JSON.parse(raw)
+    // `system` persists the KEY ONLY, so there is nothing to merge — re-ask the device instead.
+    // Storing its resolved colours would replay whichever scheme was last active and defeat the
+    // entire point on the next load.
+    if (saved.key === SYSTEM_KEY) return { key: SYSTEM_KEY, colors: resolveColors(SYSTEM_KEY) }
     // Merge over the current preset defaults rather than trusting the saved blob verbatim — a
     // snapshot captured before a field (e.g. cardShadow) existed would otherwise permanently miss
     // it, since switchPreset/updateColor both persist a full colors object to localStorage.
     const base = PRESETS[saved.key] || PRESETS.dark
     return { key: saved.key, colors: { ...base, ...saved.colors } }
   } catch {
-    return { key: 'dark', colors: PRESETS.dark }
+    const key = defaultKeyForSurface()
+    return { key, colors: resolveColors(key) }
   }
 }
 
@@ -208,12 +258,28 @@ export function ThemeProvider({ children }) {
   useEffect(() => { applyTheme(colors) }, [colors])
 
   function switchPreset(key) {
-    const preset = PRESETS[key]
-    if (!preset) return
+    if (key !== SYSTEM_KEY && !PRESETS[key]) return
+    const next = resolveColors(key)
     setThemeKey(key)
-    setColors(preset)
-    localStorage.setItem('crest_theme', JSON.stringify({ key, colors: preset }))
+    setColors(next)
+    // See loadSaved: the system mode stores its key and nothing else.
+    localStorage.setItem('crest_theme', JSON.stringify(
+      key === SYSTEM_KEY ? { key } : { key, colors: next },
+    ))
   }
+
+  // Track the device live while — and only while — the mode is `system`, so a phone flipping to
+  // dark at sunset repaints without a reload, and an explicitly chosen preset is never quietly
+  // overridden by the OS.
+  useEffect(() => {
+    if (themeKey !== SYSTEM_KEY) return undefined
+    let mq
+    try { mq = window.matchMedia('(prefers-color-scheme: dark)') } catch { return undefined }
+    if (!mq?.addEventListener) return undefined
+    const onChange = () => setColors(resolveColors(SYSTEM_KEY))
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [themeKey])
 
   function updateColor(colorKey, value) {
     const updated = { ...colors, [colorKey]: value }
@@ -244,7 +310,7 @@ export function ThemeProvider({ children }) {
   }), [colors])
 
   return (
-    <ThemeContext.Provider value={{ themeKey, colors: resolved, switchPreset, updateColor, resetToPreset, PRESETS }}>
+    <ThemeContext.Provider value={{ themeKey, colors: resolved, switchPreset, updateColor, resetToPreset, PRESETS, SYSTEM_KEY }}>
       {children}
     </ThemeContext.Provider>
   )

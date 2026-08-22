@@ -5,7 +5,16 @@
     <link rel="icon" type="image/svg+xml" href="%PUBLIC_URL%/favicon.svg" />
     <link rel="icon" type="image/png" href="%PUBLIC_URL%/logo192.png" />
     <link rel="icon" type="image/x-icon" href="%PUBLIC_URL%/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      viewport-fit=cover is not cosmetic: without it env(safe-area-inset-*) resolves to 0 on every
+      iPhone, so the Crest Staff portal's fixed bottom tab bar would sit under the home indicator
+      with its safe-area padding silently doing nothing. It is also what the black-translucent
+      status-bar style below has always assumed.
+      Deliberately NO maximum-scale / user-scalable=no: pinning the viewport blocks pinch-zoom for
+      everyone, which is an accessibility failure. The 16px input floor in selfService.css is what
+      stops iOS auto-zooming on field focus instead.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#c9a84c" />
     <meta name="description" content="Food cost & inventory management for Nepal hospitality" />
     <meta name="mobile-web-app-capable" content="yes" />

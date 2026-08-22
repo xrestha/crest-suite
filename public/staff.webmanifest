@@ -1,0 +1,18 @@
+{
+  "name": "Crest Staff",
+  "short_name": "Crest Staff",
+  "description": "Your shifts, payslips, leave and claims",
+  "id": "/hr/self-service",
+  "start_url": "/hr/self-service",
+  "scope": "/hr/self-service",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#0f1117",
+  "background_color": "#0f1117",
+  "icons": [
+    { "src": "staff192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "staff512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    { "src": "staff192.png", "type": "image/png", "sizes": "192x192", "purpose": "maskable" },
+    { "src": "staff512.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
+  ]
+}

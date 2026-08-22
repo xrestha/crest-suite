@@ -127,6 +127,16 @@ typography:
     fontWeight: 700
   rail-icon:
     fontSize: "17px"
+  # Touch text-input only, added 2026-08-22 for the Crest Staff employee app. This is not a taste
+  # step and must not be used as one: 16px is the threshold below which iOS Safari zooms the
+  # viewport on focus and never zooms back out, so every field an employee types into on a phone
+  # has to sit at or above it. The alternative fix — pinning the viewport with
+  # maximum-scale/user-scalable=no — blocks pinch-zoom for everyone and is an accessibility
+  # failure, which is why it is deliberately not used. Scoped to .self-service in
+  # selfService.css; the admin app's 13px `body` step is still correct on a mouse-driven screen.
+  touch-input:
+    fontSize: "16px"
+    fontWeight: 400
   card-heading:
     fontSize: "15px"
     fontWeight: 600

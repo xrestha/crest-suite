@@ -31,6 +31,13 @@ export default function BsCalendarPicker({
   placeholder = 'Select BS date',
   disabled = false, clearable = false,
   id, ariaLabel,
+  // Opt-in phone sizing for the Crest Staff portal. It has to be a prop, not a
+  // `@media (pointer: coarse)` rule, because every size in this component is an inline style and
+  // a media query cannot reach one. On the default path nothing changes; with `touch` the day
+  // cells go from 26px to 44 (a 26px cell in a 7-column grid is a ~36×26 target — under WCAG
+  // 2.2's 24px floor once the gap is counted, and nowhere near a thumb), the nav arrows and month
+  // select come up with them, and the popover fills the width it is given instead of a 280px cap.
+  touch = false,
 }) {
   const locked = lockYear != null && lockMonth != null
   const today  = getBsToday()
@@ -71,10 +78,33 @@ export default function BsCalendarPicker({
     const above      = spaceBelow < 240
     setPos({
       top:   above ? Math.max(8, rect.top - 4) : rect.bottom + 4,
-      left:  Math.min(rect.left, window.innerWidth - 284),
-      width: Math.min(Math.max(rect.width, 260), 280),
+      // On touch the calendar takes the full width of the field it belongs to (clamped to the
+      // viewport), so a 44px day cell has room to be 44px wide as well as tall.
+      left:  touch ? Math.max(8, Math.min(rect.left, window.innerWidth - rect.width - 8))
+                   : Math.min(rect.left, window.innerWidth - 284),
+      width: touch ? Math.min(Math.max(rect.width, 300), window.innerWidth - 16)
+                   : Math.min(Math.max(rect.width, 260), 280),
       above,
     })
+  }, [open, touch])
+
+  // Escape closes the calendar, and must not reach anything else.
+  //
+  // Modal listens for Escape on `document` in the bubble phase, so without this the key closed
+  // the whole dialog the picker was opened from — on the employee portal that meant a half-filled
+  // leave request vanishing because someone dismissed a date picker. Capture phase plus
+  // stopPropagation is what keeps the outer dialog out of it; the picker only claims the key
+  // while it is actually open.
+  useEffect(() => {
+    if (!open) return undefined
+    const onKey = e => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      setOpen(false)
+      triggerRef.current?.querySelector('button')?.focus()
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
   }, [open])
 
   // Close on outside click. Checks both the trigger AND the portaled popover (the popover's
@@ -147,7 +177,8 @@ export default function BsCalendarPicker({
     background: 'none', border: 'none',
     cursor: enabled ? 'pointer' : 'default',
     color: enabled ? 'var(--theme-text2)' : 'transparent',
-    fontSize: 18, lineHeight: 1, padding: '2px 8px',
+    fontSize: touch ? 22 : 18, lineHeight: 1,
+    padding: touch ? '8px 14px' : '2px 8px', minHeight: touch ? 44 : undefined,
     borderRadius: 4, fontFamily: 'inherit',
   })
 
@@ -160,8 +191,9 @@ export default function BsCalendarPicker({
         bottom:    pos.above ? window.innerHeight - pos.top + 4 : undefined,
         left:      pos.left,
         width:     pos.width,
-        minWidth:  260,
-        maxHeight: 'calc(100vh - 16px)',
+        minWidth:  touch ? 0 : 260,
+        // dvh, not vh: a phone browser's chrome collapses on scroll and vh does not follow it.
+        maxHeight: 'calc(100dvh - 16px)',
         overflowY: 'auto',
         zIndex:    9999,
         background: 'var(--theme-card)',
@@ -185,7 +217,10 @@ export default function BsCalendarPicker({
               onChange={e => setNavMonth(parseInt(e.target.value, 10))}
               style={{
                 flex: 1.3, minWidth: 0, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-                borderRadius: 5, padding: '4px 4px', fontSize: 11, color: 'var(--theme-text1)',
+                borderRadius: 5, padding: touch ? '10px 8px' : '4px 4px',
+                // 16px on touch: below it iOS zooms the viewport the moment this select is opened.
+                fontSize: touch ? 16 : 11, minHeight: touch ? 44 : undefined,
+                color: 'var(--theme-text1)',
                 fontFamily: 'inherit', cursor: 'pointer',
               }}
             >
@@ -195,6 +230,7 @@ export default function BsCalendarPicker({
               value={String(navYear)}
               onChange={v => setNavYear(parseInt(v, 10))}
               options={YEAR_OPTIONS}
+              touch={touch}
               style={{ flex: 1 }}
             />
           </div>
@@ -214,7 +250,7 @@ export default function BsCalendarPicker({
       {/* Day grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1 }}>
         {cells.map((day, i) => {
-          if (!day) return <div key={i} style={{ height: 26 }} />
+          if (!day) return <div key={i} style={{ height: touch ? 44 : 26 }} />
           const isToday = day === today.day && navMonth === today.month && navYear === today.year
           const isSel   = selected && day === selected.day && navMonth === selected.month && navYear === selected.year
           return (
@@ -223,8 +259,8 @@ export default function BsCalendarPicker({
               type="button"
               onClick={() => selectDay(day)}
               style={{
-                width: '100%', height: 26, border: 'none',
-                borderRadius: 4, fontSize: 11, cursor: 'pointer',
+                width: '100%', height: touch ? 44 : 26, border: 'none',
+                borderRadius: touch ? 'var(--radius-sm)' : 4, fontSize: touch ? 15 : 11, cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontWeight: isSel || isToday ? 700 : 400,
                 background: isSel
@@ -256,7 +292,7 @@ export default function BsCalendarPicker({
           <button
             type="button"
             onClick={goToday}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--theme-accent-ink)', fontWeight: 600, padding: '2px 4px', fontFamily: 'inherit' }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: touch ? 14 : 11, color: 'var(--theme-accent-ink)', fontWeight: 600, padding: touch ? '10px 8px' : '2px 4px', minHeight: touch ? 44 : undefined, fontFamily: 'inherit' }}
           >
             Today
           </button>
@@ -265,7 +301,7 @@ export default function BsCalendarPicker({
           <button
             type="button"
             onClick={() => { onChange(''); setOpen(false) }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--theme-text3)', padding: '2px 4px', fontFamily: 'inherit' }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: touch ? 14 : 11, color: 'var(--theme-text3)', padding: touch ? '10px 8px' : '2px 4px', minHeight: touch ? 44 : undefined, fontFamily: 'inherit' }}
           >
             Clear
           </button>
@@ -286,7 +322,8 @@ export default function BsCalendarPicker({
         style={{
           width: '100%', textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer',
           background: 'var(--theme-input-bg)', border: `1px solid ${open ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-          borderRadius: 6, padding: '8px 10px', fontSize: 13,
+          borderRadius: touch ? 'var(--radius-md)' : 6, padding: touch ? '11px 12px' : '8px 10px',
+          minHeight: touch ? 44 : undefined, fontSize: touch ? 16 : 13,
           color: displayValue ? 'var(--theme-text1)' : 'var(--theme-text3)',
           boxShadow: open ? '0 0 0 3px var(--theme-focus-ring)' : 'none',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',

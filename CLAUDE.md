@@ -423,6 +423,17 @@ Use these global classes from `Layout.css` — don't repeat inline styles:
 
 Without one, Chrome guesses from `type` + surrounding context — and any `type="password"` field anywhere on the page makes it treat the nearest preceding text input as a login username, which has bled a saved login into unrelated fields (a `SearchableSelect` search box, a signup form) more than once (S329). Use `autoComplete="new-password"` on every PIN/account-creation field (POS Staff Add/Reset PIN, Enable Self-Service, trial signup), and `autoComplete="username"` / `"current-password"` on an actual sign-in form's email/password. PIN-pad login screens (POS/HR Self-Service) build their own keypad UI rather than a text input, so they're unaffected.
 
+### Crest Staff — the employee app
+
+See `.claude/rules/staff-app.md` (auto-loads when editing `src/modules/hr/selfservice/`, `webPush.js`
+or the service worker). Headline rules: `/hr/self-service` is a **second installable PWA** with its
+own manifest/icon/start URL, swapped onto the page at runtime; a day with no shift and a day whose
+month is unpublished are identical in the data and must never look identical on screen; a failed
+read is never an empty list; push only offers a button in the states where pressing it can work
+(iOS-not-installed is checked BEFORE capability); 16px fields / 44px controls scoped to
+`.self-service`, with `touch` props on the two inline-styled pickers; and the whole thing runs on
+RPCs that already existed — no migration, no Edge Function deploy.
+
 ### Password policy, leaked-password protection, PIN vault, login pages
 
 See `.claude/rules/auth-and-pins.md` (auto-loads when editing Login/ResetPassword/PosStaff/SelfService files, `weakPasswords.js`, or `supabase/functions/`). Headline rules: `MIN_PASSWORD_LENGTH` has an independent server copy; PINs are never raw auth passwords (peppered HMAC); the PIN vault is a deliberate weakening, PINs only, never staff passwords.

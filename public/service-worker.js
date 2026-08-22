@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crest-v119';
+const CACHE_NAME = 'crest-v120';
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -71,11 +71,23 @@ self.addEventListener('fetch', event => {
 // supabase/functions/hr-push sends). Payload is always JSON: { title, body, url }.
 self.addEventListener('push', event => {
   let data = {};
-  try { data = event.data ? event.data.json() : {}; } catch (_) {}
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (_) {
+    // A non-JSON payload should still reach the employee rather than being dropped silently.
+    data = { body: event.data ? event.data.text() : '' };
+  }
+  // The subscription is made with userVisibleOnly: true, so a push MUST produce a visible
+  // notification. Browsers punish a worker that stays silent — repeatedly, and the subscription
+  // is eventually revoked — so there is no early return here, only fallback text.
   event.waitUntil(
-    self.registration.showNotification(data.title || 'Crest HR', {
-      body: data.body || '',
-      icon: '/logo192.png',
+    self.registration.showNotification(data.title || 'Crest Staff', {
+      body: data.body || 'Open the app to see what changed.',
+      icon: '/staff192.png',
+      badge: '/staff192.png',
+      // A shared tag REPLACES an unread notification instead of stacking a second one: publishing
+      // a roster twice in a minute should not leave two identical entries on the lock screen.
+      tag: data.tag || 'crest-hr',
       data: { url: data.url || '/hr/self-service' },
     })
   );
@@ -84,5 +96,21 @@ self.addEventListener('push', event => {
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const url = event.notification.data?.url || '/hr/self-service';
-  event.waitUntil(clients.openWindow(url));
+
+  event.waitUntil((async () => {
+    const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+
+    // Already on the right screen: bring it forward. Opening a second window over the one the
+    // employee already has would lose whatever they were part-way through — a half-typed leave
+    // reason, say. openWindow unconditionally (what this did before) does exactly that.
+    for (const client of open) {
+      if (new URL(client.url).pathname === url && 'focus' in client) return client.focus();
+    }
+    // Some other screen of the same app is open — reuse that window rather than spawning another.
+    if (open.length > 0 && 'navigate' in open[0]) {
+      await open[0].focus();
+      return open[0].navigate(url);
+    }
+    return self.clients.openWindow(url);
+  })());
 });

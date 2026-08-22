@@ -25,15 +25,39 @@ const modalStack = []
 // two-column billing modal with a live bill preview down one side, and its shift-close counting
 // sheet. `title` is then the accessible name rather than a rendered heading, so a dialog can never
 // go unnamed either way. Reach for it only when the standard card shape would have to be undone.
+//
+// `variant="sheet"` docks the panel to the bottom edge of the screen instead of centring it — the
+// phone form for a long form, used by the Crest Staff employee portal. It is three style
+// expressions and a class, NOT a second component, because the focus trap, the Escape stack,
+// `role="dialog"` and focus restoration above are exactly what a sheet needs too and a separate
+// primitive would have to reimplement all four. Size, the rounded top edge, the safe-area padding
+// and the slide-up live in `.modal-sheet` (Layout.css) — the animation in particular cannot be an
+// inline style, or `prefers-reduced-motion` could never switch it off.
 export default function Modal({
   onClose, title, headerExtra, children, maxWidth = 960,
-  zIndex = 100, unstyled = false, panelStyle,
+  zIndex = 100, unstyled = false, panelStyle, variant,
 }) {
+  const sheet = variant === 'sheet'
+  // A sheet renders its OWN header — a 44px close target and usually a subtitle, neither of which
+  // the desktop title bar provides — so the built-in one is suppressed rather than stacked on top
+  // of it, exactly as `unstyled` does. `title` then becomes the accessible name, so a sheet can
+  // still never go unnamed.
+  const ownHeader = unstyled || sheet
   const titleId = useId()
   const panelRef = useRef(null)
   const triggerRef = useRef(null)
+  const dirtyRef = useRef(false)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+
+  // A sheet's backdrop is a thin strip above a panel filling the bottom of a phone screen, i.e.
+  // the easiest thing in the app to hit by accident with a thumb — and behind it may be a
+  // half-filled TADA claim with six fields and three expense lines. So once anything inside has
+  // been typed or picked, a backdrop tap is ignored; Escape and the sheet's own Close button
+  // still work, and nothing is trapped. A read-only sheet never fires these events, so it keeps
+  // closing on backdrop exactly as a dialog does.
+  const onBackdrop = () => { if (!(sheet && dirtyRef.current)) onClose() }
+  const markDirty = () => { dirtyRef.current = true }
 
   useEffect(() => {
     // Remember whatever had focus before the modal opened (the button that triggered it)
@@ -75,27 +99,34 @@ export default function Modal({
 
   return (
     <div
-      onClick={onClose}
+      onClick={onBackdrop}
       className="no-print"
       style={{
         position: 'fixed', inset: 0, zIndex, background: 'rgba(0,0,0,0.6)',
-        overflowY: 'auto', padding: unstyled ? 16 : '40px 16px',
-        display: 'flex', alignItems: unstyled ? 'center' : 'flex-start', justifyContent: 'center',
+        // A sheet scrolls inside its own panel, so the overlay must not scroll too — two nested
+        // scrollers on a phone means the backdrop drags out from under the sheet.
+        overflowY: sheet ? 'hidden' : 'auto',
+        padding: sheet ? 0 : (unstyled ? 16 : '40px 16px'),
+        display: 'flex',
+        alignItems: sheet ? 'flex-end' : (unstyled ? 'center' : 'flex-start'),
+        justifyContent: 'center',
       }}
     >
       <div
         ref={panelRef}
         onClick={e => e.stopPropagation()}
-        className={unstyled ? undefined : 'card'}
+        onInput={sheet ? markDirty : undefined}
+        onChange={sheet ? markDirty : undefined}
+        className={sheet ? 'card modal-sheet' : (unstyled ? undefined : 'card')}
         role="dialog"
         aria-modal="true"
-        {...(unstyled ? { 'aria-label': title } : { 'aria-labelledby': titleId })}
+        {...(ownHeader ? { 'aria-label': title } : { 'aria-labelledby': titleId })}
         tabIndex={-1}
         style={unstyled
           ? { outline: 'none', ...panelStyle }
-          : { width: '100%', maxWidth, margin: 'auto', outline: 'none' }}
+          : { width: '100%', maxWidth: sheet ? 640 : maxWidth, margin: sheet ? 0 : 'auto', outline: 'none', ...panelStyle }}
       >
-        {!unstyled && (
+        {!ownHeader && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 id={titleId} style={{ margin: '0 0 16px', fontSize: 15, color: 'var(--theme-text1)' }}>{title}</h3>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: -4 }}>

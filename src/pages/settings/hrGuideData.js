@@ -561,10 +561,11 @@ export const HR_GUIDE_GROUPS = [
         route: '/hr/self-service',
         plan: 'Employees with Self-Service enabled',
         summary:
-          'The employee\'s own portal: payslips, leave balances and requests, TADA claims, and their published roster — behind a name-picker + 4-6 digit PIN on one shared per-company link. Enabled per employee from the Employees page; no app install, no device setup, works from the employee\'s own phone.',
+          'The employee\'s own app: today\'s shift, their published roster, leave and TADA requests, and their payslips — behind a name-picker + 4-6 digit PIN on one shared per-company link. It installs to a phone\'s home screen as "Crest Staff" with its own icon, opening full-screen on the shift they came to check.',
         workflow: [
           'The manager enables Self-Service for an employee (sets the PIN) and shares the company\'s one login link or QR. The employee opens it, taps their own name, enters the PIN.',
-          'Four tabs: Payslip (own finalized payslips, same layout as the printed one), Leave (balances + submit/cancel requests, half-day supported), TADA (file claims with line items), Roster (their own week, off days greyed, shift-swap requests).',
+          'Four destinations on a bottom bar: Home (today\'s shift, the next working shift, swaps waiting on them, latest payslip), Roster (their own Sun-Sat week + swap requests), Requests (Leave and TADA, each opening as a bottom sheet), Pay (own finalized payslips, same layout as the printed one).',
+          'Tell employees to add it to their home screen — on Android the account sheet offers a button, on iPhone it is Share → Add to Home Screen. On iPhone that step is also what makes notifications possible at all: iOS never gives push to a browser tab.',
         ],
         fields: [
           { label: 'PIN', desc: '4-6 digits. It is never the account\'s real password — the server verifies a peppered fingerprint of it, and the login completes server-side so the account\'s email never reaches the browser.' },
@@ -574,7 +575,9 @@ export const HR_GUIDE_GROUPS = [
         gotchas: [
           'There is no "reset PIN" for Self-Service — re-enable (re-enrol) the employee from Employees instead, which sets a fresh PIN.',
           'A blocked employee (bulk Deactivate on Employees) gets the same generic "Invalid credentials" as a wrong PIN — the portal never confirms to a leaver that their account exists.',
-          'The Roster tab shows PUBLISHED days only — an unpublished draft week looks empty to the employee, which is the intended behaviour, not a sync problem.',
+          'The Roster tab shows PUBLISHED days only — but an unpublished day now SAYS "Not published yet" instead of looking like a day with no shift. Those two are identical in the data and mean opposite things to someone deciding whether to come in.',
+          'Notifications only offer a button where pressing one can actually do something — on an iPhone opened from a chat app it explains the Home Screen step instead, because a tab on iOS has no push at all.',
+          'Light or dark follows the phone\'s own setting. Employees cannot reach Settings → Appearance, so a fixed theme was the only one they could ever have.',
           'Every screen surfaces a failed load as an error rather than an empty list — "no payslips" always means no payslips, never a swallowed network failure.',
         ],
         connections: 'Payslips come from finalized Payroll Runs; leave requests land in Leave Management\'s queue; TADA claims in TADA\'s queue; roster from published Roster days; swap requests into the Roster\'s swap panel. Login enablement and blocking live on Employees.',

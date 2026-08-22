@@ -158,6 +158,91 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S599 — 2026-08-22 — The employee portal becomes an app you install
+
+"I want a proper mobile app for employee self service." The portal already worked; what it had never
+been given was a SHAPE. An employee opened it on their own phone — usually from a WhatsApp link,
+inside an in-app browser that had already taken ~150px — and got a 640px desktop column: their name
+as a page title, an uppercase eyebrow under it, Sign Out and a permanent "Enable Notifications"
+button in the top-right thumb zone, then a wrapping pill tab-bar whose **default tab was Payslip**,
+the thing they check once a month, while the roster they came for sat second.
+
+The sister app (Bloom Hospitality, `c:\HSS`) had rebuilt exactly this two days earlier, so its
+answer is the reference and several of its files ported across almost verbatim.
+
+**It is now a second installable app.** `public/staff.webmanifest` declares "Crest Staff" with its
+own icon — the same gold hexagon, with a person punched out of it, so it reads as Crest but is not
+mistaken for the admin app on a home screen — its own `start_url` and its own scope. `index.html`
+can carry only one `<link rel="manifest">`, so the portal swaps that tag, `apple-touch-icon`,
+`apple-mobile-web-app-title` and `theme-color` **at runtime**: both Chrome's install flow and iOS's
+Share → Add to Home Screen read the live DOM at the moment the user acts. The login screen
+remembers its `:clientId`, so tapping the installed icon after a session expires lands on that
+company's PIN pad rather than the admin sign-in page no employee has a password for.
+
+**The shape.** A 56px header and a fixed bottom tab bar — Home · Roster · Requests · Pay — replacing
+~200px of stacked chrome, bottom-anchored because the bottom third of a phone measures ~96% tap
+accuracy against ~61% up top. One `TABS` array drives the bar, the content switch and the screen's
+heading, so the default can never again disagree with the render order. Leave and TADA merged into
+Requests (the same act from the employee's side) so four destinations stay legible at 390px. Sign
+Out moved into a `⋯` account sheet, with the notification state and the install offer. The tab is
+in the URL, so the phone's Back gesture moves between destinations instead of leaving the app.
+
+**Home answers the question people open it for** — "am I working, and when?" — with today's shift,
+the next day they actually WORK (off days skipped: "next shift: Day Off" answers a question nobody
+asked), any swap waiting on them, and their latest payslip. Every figure comes from an RPC the
+portal already called: no migration, no Edge Function deploy, nothing that could touch the admin
+side. Home loads this week **and next**, so the answer on a Saturday is Monday rather than silence.
+
+Four things that were quietly wrong, none cosmetic:
+
+- **A failed read rendered as an empty month.** One shared error string across four tabs, and the
+  reads that mattered never reached it — a failed `get_my_hr_payslips` printed "No finalized
+  payslips yet." That is S594's rule unlearned in the one place the reader has nothing to check the
+  figure against. `employeeError.js` (ported from HSS) turns a PostgREST/Postgres code into one
+  honest sentence, per area, keeping the technical detail alongside rather than in the headline.
+- **"Not published yet" and "no shift" were indistinguishable.** `get_my_roster` returns only
+  published days, so the absence of a row means either — and they mean opposite things to someone
+  deciding whether to come in. The week now renders every calendar day, and says which.
+- **The notifications button could report success on a device that had never subscribed.**
+  `isPushSubscribed()` only ever asked the browser whether *a* subscription existed, so on a shared
+  phone one employee's made the next one's portal claim notifications were on. It now verifies the
+  DB row, there is an unsubscribe path, and `pushEnvironment.js` decides — capability-first, never
+  UA sniffing — whether a button can do anything at all, checking `ios && !standalone` **before**
+  capability: on iOS a tab genuinely has no PushManager, and "your browser doesn't support
+  notifications" is wrong AND a dead end when the same phone works once installed.
+- **iOS zoomed the viewport on every field focus.** The 16px floor lived only in `Login.css`, which
+  these pages never imported. It is now a `.self-service`-scoped rule, along with a 44px control
+  floor — and because `BsCalendarPicker` and `SearchableSelect` size themselves with INLINE styles
+  that no media query can reach, both gained an opt-in `touch` prop. The date picker's day cells
+  went from 26px to 44; its month select from 11px to 16.
+
+`viewport-fit=cover` was added to `index.html`, without which every `env(safe-area-inset-*)` rule in
+the new shell resolves to 0 and the tab bar sits under the home indicator. `Modal` gained
+`variant="sheet"` (three style expressions and a class — the focus trap, Escape stack and dialog
+semantics are exactly what a sheet needs) plus a dirty-backdrop guard, so a half-filled TADA claim
+cannot vanish to a stray thumb on the backdrop. The theme now follows the phone: `ThemeContext`
+gained a `system` mode pairing `dark` ↔ `light` — the same design in two schemes — tracked live and
+persisted as the key only, defaulting on the portal alone, since employees cannot reach Settings →
+Appearance at all.
+
+**Found while driving it on a real logged-in session** (Playwright at 390×844, against the live
+test client): the sheets rendered **two** close buttons, because a styled `Modal` draws its own
+title bar and the sheet draws a 44px one — `variant="sheet"` now suppresses the built-in header the
+way `unstyled` does. Leave requests printed raw AD ISO dates (`2026-06-26 → 2026-07-12`) in an app
+whose every other date is Bikram Sambat; they now read `12–28 Ashadh 2083`, via `adToBsSafe` so an
+out-of-range value degrades to the truthful AD string. The week header wrapped to two lines and
+pushed the ‹ › controls out of line. And **Escape closed the whole sheet instead of the date picker**
+— `Modal` listens on `document`, and neither picker stopped the event — which is a papercut in the
+admin app too, and is fixed for both.
+
+51 tests were added (`todayView`, `pushEnvironment`, `employeeError`, plus render tests for the
+shell and the Today screen); 334 pass. Service worker at `crest-v120`, whose `notificationclick`
+now focuses an existing window instead of spawning a duplicate on every tap, and whose `push`
+handler gained a `tag` so publishing a roster twice does not stack two lock-screen entries.
+
+**Not yet verified:** real push delivery to a phone, and the iOS install itself — both need a
+device. Everything else was driven live.
+
 ### S598 — 2026-08-22 — Copy a week of roster onto the next one
 
 The roster board could assign a rectangle of cells in one drag, and could not repeat a week. But a

@@ -8,7 +8,14 @@ import { useState, useRef, useEffect, useMemo, useId } from 'react'
 // — without it the trigger reads to a screen reader as an unnamed button, which is what every
 // call site had before S551. It lands on the trigger button (the element that is focused when
 // the control is closed) and is mirrored onto the filter input's aria-labelledby when open.
-export default function SearchableSelect({ value, onChange, options, placeholder = '— Select —', style, id }) {
+//
+// `touch` is opt-in rather than a `@media (pointer: coarse)` rule because every size in this
+// component is an INLINE style, and a media query cannot reach an inline style — that is exactly
+// the hazard DESIGN.md names. Two things change and both are load-bearing on a phone: the filter
+// input goes to 16px, below which iOS Safari zooms the viewport on focus and never zooms back;
+// and the trigger and option rows clear the 44px touch target instead of measuring ~31px and
+// ~33px. Passed by the Crest Staff portal only, so the admin app's density is untouched.
+export default function SearchableSelect({ value, onChange, options, placeholder = '— Select —', style, id, touch = false }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
@@ -77,7 +84,7 @@ export default function SearchableSelect({ value, onChange, options, placeholder
     if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(h + 1, filtered.length - 1)) }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(h => Math.max(h - 1, 0)) }
     else if (e.key === 'Enter') { e.preventDefault(); if (filtered[highlight]) pick(filtered[highlight]) }
-    else if (e.key === 'Escape') { e.preventDefault(); close() }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close() }
   }
 
   return (
@@ -90,8 +97,9 @@ export default function SearchableSelect({ value, onChange, options, placeholder
         onClick={() => (open ? close() : openIt())}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', padding: '7px 10px',
-          fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+          background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)',
+          padding: touch ? '11px 12px' : '7px 10px', minHeight: touch ? 44 : undefined,
+          fontSize: touch ? 16 : 13, color: 'var(--theme-text1)', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
         }}
       >
         <span style={{ color: selected ? 'var(--theme-text1)' : 'var(--theme-text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -123,7 +131,8 @@ export default function SearchableSelect({ value, onChange, options, placeholder
             aria-activedescendant={filtered[highlight] ? optionId(filtered[highlight].value) : undefined}
             style={{
               width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: 'none',
-              borderBottom: '1px solid var(--theme-border)', padding: '9px 11px', fontSize: 13, color: 'var(--theme-text1)',
+              borderBottom: '1px solid var(--theme-border)', padding: touch ? '12px 12px' : '9px 11px',
+              fontSize: touch ? 16 : 13, color: 'var(--theme-text1)',
               outline: 'none', fontFamily: 'inherit',
             }}
           />
@@ -140,7 +149,9 @@ export default function SearchableSelect({ value, onChange, options, placeholder
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => pick(opt)}
                 style={{
-                  padding: '8px 11px', fontSize: 13, cursor: 'pointer',
+                  padding: touch ? '12px 12px' : '8px 11px', minHeight: touch ? 44 : undefined,
+                  display: touch ? 'flex' : undefined, alignItems: touch ? 'center' : undefined,
+                  fontSize: touch ? 15 : 13, cursor: 'pointer',
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                   background: i === highlight ? 'var(--theme-table-hover)' : 'transparent',
                   color: opt.value === value ? 'var(--theme-accent)' : 'var(--theme-text1)',

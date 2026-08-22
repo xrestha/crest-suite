@@ -1,0 +1,272 @@
+/* ============================================================================================
+   CREST STAFF — the employee app shell
+   ============================================================================================
+   Scoped entirely under .self-service / .ss-*, because this is a different altitude from the
+   admin app: a phone held one-handed by someone checking whether they work tomorrow, not a
+   desktop screen driven with a mouse. Every value below is a --theme-* token, so the portal
+   re-skins with the rest of the product (and follows the phone's light/dark setting — see
+   ThemeContext's SYSTEM_KEY).
+
+   Nothing here may leak into the admin app: its tables are tuned to ~36px rows and would be
+   inflated by the touch floors below.
+   ============================================================================================ */
+
+/* ── Touch sizing ──────────────────────────────────────────────────────────────────────────
+   WCAG 2.2 SC 2.5.8 asks for 24px minimum and 44px as the target on touch. Layout.css already
+   does this app-wide for .btn under @media (pointer: coarse) — but it deliberately leaves
+   .tab-btn at 32px and covers no form control at all, and this surface is 100% touch. */
+.self-service .btn,
+.self-service .tab-btn,
+.self-service input,
+.self-service select,
+.self-service textarea {
+  min-height: 44px;
+}
+
+/* 16px is not a taste choice: it is the threshold below which iOS Safari zooms the viewport on
+   focus and never zooms back out. Every field in this portal was 13px, so typing a leave reason
+   left the whole app zoomed in with no way back. The alternative fix — pinning the viewport with
+   maximum-scale/user-scalable=no — blocks pinch-zoom for everyone and is an accessibility
+   failure, which is why index.html deliberately does not use it.
+   NOTE an inline fontSize beats this rule, so any control here that sets its own size must set
+   16 too (see the `inp` style object in SelfServiceHome.jsx). */
+.self-service input,
+.self-service select,
+.self-service textarea {
+  font-size: 16px;
+}
+
+/* Two altitudes means two type scales, not one scale with bigger buttons: an 11px badge that
+   reads fine on a desktop table is a squint at arm's length on a phone. */
+.self-service .badge,
+.self-service .badge-green,
+.self-service .badge-yellow,
+.self-service .badge-amber,
+.self-service .badge-purple,
+.self-service .badge-red,
+.self-service .badge-gray {
+  font-size: 12px;
+  padding: 3px 9px;
+}
+
+/* ── Shell ────────────────────────────────────────────────────────────────────────────────── */
+.ss-page {
+  display: flex;
+  flex-direction: column;
+  /* dvh, not vh: a mobile browser's chrome collapses on scroll and vh does not follow it, which
+     leaves a fixed bottom bar floating above the real bottom edge. */
+  min-height: 100dvh;
+  background: var(--theme-bg);
+}
+
+.ss-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 0 16px;
+  /* Opaque, because content scrolls underneath it. */
+  background: var(--theme-bg);
+  border-bottom: 1px solid var(--theme-border);
+  padding-top: env(safe-area-inset-top);
+}
+
+.ss-content {
+  flex: 1;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px 16px 0;
+  /* Clear the fixed tab bar plus the iPhone home indicator, or the last row of every list sits
+     under the navigation. env() only resolves to a real value because index.html sets
+     viewport-fit=cover. */
+  padding-bottom: calc(76px + env(safe-area-inset-bottom));
+}
+
+/* Bottom, not top: the bottom third of a phone measures ~96% tap accuracy against ~61% in the
+   top stretch zone, and this is the control an employee uses on every visit.
+   z-index 60 sits above Fab (50) and below Modal's overlay (100), so a sheet always covers the
+   bar rather than letting it float over the dialog. */
+.ss-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  background: var(--theme-card);
+  border-top: 1px solid var(--theme-border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.ss-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 56px;
+  padding: 6px 4px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--theme-text3);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+/* Active state is two-channel — ink AND the icon's stroke weight (set in JSX) — plus
+   aria-current. Colour alone is never the only signal. accent-ink, not accent: the accent used
+   AS text needs the ink variant, which is what makes it legible on the five light presets. */
+.ss-tab--active {
+  color: var(--theme-accent-ink);
+}
+
+.ss-tab:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: -2px;
+  background: var(--theme-focus-ring);
+}
+
+/* Count badge, positioned against the icon rather than the full-width cell so it hugs the glyph. */
+.ss-tab-dot {
+  position: absolute;
+  top: -6px;
+  left: 12px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--theme-red);
+  color: var(--theme-bg);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* ── Section headings ─────────────────────────────────────────────────────────────────────── */
+.ss-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--theme-text3);
+}
+
+.ss-label-aside {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--theme-text2);
+}
+
+.ss-section + .ss-section {
+  margin-top: 22px;
+}
+
+/* Amber tint = something is waiting on the employee. Deliberately NOT used for a decision that
+   has already been made — that needs no reply, and an alarm colour on it just cries wolf. */
+.ss-attention {
+  background: color-mix(in srgb, var(--theme-amber) 10%, var(--theme-card));
+  border-color: color-mix(in srgb, var(--theme-amber) 35%, var(--theme-border));
+}
+
+/* ── Roster day rows ──────────────────────────────────────────────────────────────────────── */
+.ss-day {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-lg);
+  background: var(--theme-card);
+  text-align: left;
+}
+
+/* A day with no shift is still shown — "am I working on Thursday?" needs a visible answer — but
+   it must not carry the same weight as a day that is scheduled. Three channels do that: no fill,
+   a dashed border, and roughly half the vertical padding.
+   Deliberately NOT opacity: opacity multiplies through the text colour and takes --theme-text3
+   below AA on the light presets, and it is invisible to a contrast check, so it fails silently. */
+.ss-day--blank {
+  background: none;
+  border-style: dashed;
+  border-color: var(--theme-border-lt);
+  padding: 7px 14px;
+}
+
+.ss-day--off {
+  background: var(--theme-table-hover);
+  border-color: var(--theme-border-lt);
+}
+
+/* Today is a temporal marker, not a status, so it gets the accent structurally (border + ring)
+   rather than a status colour. */
+.ss-day--today {
+  border-color: var(--theme-accent);
+  box-shadow: inset 0 0 0 1px var(--theme-accent);
+}
+
+.ss-day-date {
+  flex-shrink: 0;
+  width: 76px;
+}
+
+/* ── Sheets ───────────────────────────────────────────────────────────────────────────────── */
+/* Header row inside a Modal variant="sheet" — a sheet has no title bar of its own. */
+.ss-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ss-sheet-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--theme-text1);
+}
+
+/* ── Forms ────────────────────────────────────────────────────────────────────────────────── */
+.ss-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ss-field > label,
+.ss-field > .ss-field-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--theme-text2);
+}
+
+/* A repeating expense line stacks one field per row. At 390px the previous flex row wrapped a
+   130px select, a description and a 100px amount unpredictably, so no two lines looked alike. */
+.ss-line {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--theme-border-lt);
+  border-radius: var(--radius-md);
+  background: var(--theme-bg);
+}
