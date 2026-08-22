@@ -158,6 +158,44 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S598 — 2026-08-22 — Copy a week of roster onto the next one
+
+The roster board could assign a rectangle of cells in one drag, and could not repeat a week. But a
+restaurant's week mostly repeats — the same people, the same shifts, two or three exceptions — so
+every Sunday was spent rebuilding a board that already existed seven columns to the left.
+
+**Weekly view now has `⧉ Copy to Next Week`** (`Roster.jsx`). It stamps every shift on the visible
+week onto the same weekday of the following week, then navigates to that week, so the result is
+something the manager reads off the board rather than something a toast claims happened.
+
+Three decisions worth keeping:
+
+- **It mirrors, it does not merge.** A cell that is empty this week is *cleared* next week. "Copy
+  the week" means the two weeks look identical; a merge leaves shifts standing that nobody put
+  there deliberately, in a plan whose whole value is that it can be read at a glance. Everything it
+  would replace or clear is counted in a `ConfirmModal` first — that dialog is the safety, not a
+  softer write.
+- **The target week is read from the DB, never from `roster` state.** That state holds only the BS
+  months the *visible* week spans, and +7 days routinely lands in the next BS month (they run
+  28–32 days). A local lookup would have reported an empty target week and overwritten a real one
+  in silence — the same class of mistake as reading a truncated `.select()` as a real total. A
+  failed read aborts the whole thing rather than opening a dialog full of confident zeros.
+- **Write first, clear second.** If the second half fails, next week carries the copied shifts plus
+  a few leftovers — visible on the board and fixable — instead of a week emptied for a copy that
+  never arrived.
+
+The dialog also carries the two facts a manager can only otherwise learn afterwards: whether anyone
+has **approved leave** on a day being filled (same override the single-cell assign has offered since
+the leave-conflict check shipped), and whether the target week is **already published** — staff have
+seen the old version, so it names Re-Publish + Notify. Copying itself never publishes.
+
+Scope is whatever the **Department filter** shows, stated in the dialog when a filter is on, so a
+filtered copy cannot quietly rewrite a department that is not on screen. The button is weekly-only:
+"next month" is not a fixed-length copy the way "next week" is, so the same control on the monthly
+view would be answering a different question.
+
+Docs: Help page Roster entry, HR module guide (workflow + two gotchas), both READMEs.
+
 ### S597 — 2026-08-20 — One column meant two things, and the Purchase Bill read it the wrong way
 
 Two screenshots: Item Master showing BBQ SAUCE as **Purchase Qty 500, Rate 388.50, per-GM 0.78** —

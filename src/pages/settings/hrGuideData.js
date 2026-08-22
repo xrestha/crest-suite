@@ -163,11 +163,12 @@ export const HR_GUIDE_GROUPS = [
         route: '/hr/roster',
         plan: 'Supervisor+',
         summary:
-          'The shift board: assign shift types to employees per day in week or month view, drag to fill ranges, publish days to employees\' Self-Service, approve shift swaps, and see a planned-labor-cost forecast with the demand overlay from the Holiday Calendar and Demand Forecast.',
+          'The shift board: assign shift types to employees per day in week or month view, drag to fill ranges, copy a whole week onto the next one, publish days to employees\' Self-Service, approve shift swaps, and see a planned-labor-cost forecast with the demand overlay from the Holiday Calendar and Demand Forecast.',
         workflow: [
           'Define shift types once (name, start/end, colour) in the shift settings panel; assign them to cells by click or drag-select (touch devices get an explicit tap-first/tap-last "Select range" mode).',
           'Publish when a stretch is ready — publishing is per DAY, and only scheduled staff on those days are notified (web push where enabled).',
           '"Suggest" ranks unscheduled employees by fewest hours already scheduled this period, within whatever the Department filter shows.',
+          '"⧉ Copy to Next Week" (weekly view) stamps the whole visible week onto the following week, same weekday to same weekday, then lands on it so the exceptions get edited on a real board.',
           'Approve or reject employee-initiated shift swaps from the swap panel once the target coworker has consented.',
         ],
         fields: [
@@ -180,6 +181,8 @@ export const HR_GUIDE_GROUPS = [
         gotchas: [
           'Assigning a shift on a day with APPROVED leave prompts a confirm (override allowed — someone has to cover Dashain); clearing a cell never prompts.',
           'Off days are per employee, not a company-wide weekday — there is no global "Saturday off" switch anywhere in the module.',
+          'Copy to Next Week MIRRORS: a cell that is empty this week is cleared next week, so the two weeks end up identical rather than merged. The confirm dialog counts what will be replaced and cleared first, and warns if the target week is already published (staff saw the old version — Re-Publish + Notify afterwards) or if anyone has approved leave on a day being filled.',
+          'It copies only what the Department filter is showing. With a filter on, the other departments\' next week is left exactly as it was.',
         ],
         connections: 'Shift length feeds Attendance\'s OT auto-calculation and Generate-from-Roster. Published days feed Self-Service\'s Roster tab. The labor forecast reads Pay Setup rates; the demand overlay reads Holiday Calendar multipliers and the Suite Demand Forecast.',
       },

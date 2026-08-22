@@ -6,6 +6,7 @@ import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { adToBs, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, formatAd } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
+import ConfirmModal from '../../../components/ConfirmModal'
 import { printWithTitle } from '../../../utils/printTitle'
 import {
   calcHours, rKey, computeEmpHours, computeDayHours,
@@ -57,6 +58,18 @@ function weekDays(start) {
     d.setDate(d.getDate() + i)
     return d
   })
+}
+
+// Labels a week the way the toolbar does, spanning potentially 2 BS months. Lifted out of the
+// component so the copy-week dialog can name the target week in the same words.
+function weekLabelFor(start) {
+  const days = weekDays(start)
+  const s    = adToBs(days[0])
+  const e    = adToBs(days[6])
+  const sm   = BS_MONTHS[s.month - 1]
+  const em   = BS_MONTHS[e.month - 1]
+  if (s.month === e.month && s.year === e.year) return `${sm} ${s.day}–${e.day}, ${s.year}`
+  return `${sm} ${s.day} – ${em} ${e.day}, ${s.year}`
 }
 
 const stickyCol = {
@@ -489,19 +502,138 @@ export default function Roster() {
   }
 
   // Weekly label spanning potentially 2 BS months
-  const weekLabel = (() => {
-    const days = weekDays(weekStart)
-    const s    = adToBs(days[0])
-    const e    = adToBs(days[6])
-    const sm   = BS_MONTHS[s.month - 1]
-    const em   = BS_MONTHS[e.month - 1]
-    if (s.month === e.month && s.year === e.year) return `${sm} ${s.day}–${e.day}, ${s.year}`
-    return `${sm} ${s.day} – ${em} ${e.day}, ${s.year}`
-  })()
+  const weekLabel = weekLabelFor(weekStart)
 
   const periodLabel = viewMode === 'weekly'
     ? weekLabel
     : `${BS_MONTHS[bsMonth - 1]} ${bsYear}`
+
+  // ── Copy this week onto next week ─────────────────────────────────────────────────────────
+  // Most weeks repeat — the same people on the same shifts, with two or three edits — and
+  // rebuilding that cell by cell is the most repetitive thing on this page. This stamps the whole
+  // visible week onto the next one, same weekday to same weekday, and then lands you on it so
+  // the edits happen on a real board rather than on trust.
+  //
+  // It MIRRORS rather than merges: a cell that is empty this week is cleared next week, because
+  // "copy the week" means the two weeks look identical, and a merge quietly leaves shifts standing
+  // that nobody put there deliberately. Everything it will overwrite or clear is counted in the
+  // confirm dialog before a single row is written.
+  //
+  // The target week's existing rows are read from the DB, never from `roster`: that state holds
+  // only the BS months the VISIBLE week spans, and +7 days routinely lands in the next BS month
+  // (they run 28–32 days), so a local lookup would report an empty target week and overwrite a
+  // real one silently.
+  const [copyPlan,  setCopyPlan]  = useState(null)
+  const [copyBusy,  setCopyBusy]  = useState(false)
+  const [copyError, setCopyError] = useState('')
+
+  const weekShiftCount = viewMode === 'weekly'
+    ? columns.reduce((n, col) => n + filteredEmps.filter(e => roster[rKey(col.bsYear, col.bsMonth, col.bsDay, e.id)]).length, 0)
+    : 0
+
+  async function openCopyWeek() {
+    if (!clientId || copyBusy) return
+    setCopyBusy(true)
+    setCopyError('')
+    try {
+      const pairs = weekDays(weekStart).map(d => {
+        const t = new Date(d)
+        t.setDate(t.getDate() + 7)
+        return { from: adToBs(d), to: adToBs(t) }
+      })
+
+      const writes = []
+      const targetKeys = new Set()
+      for (const emp of filteredEmps) {
+        for (const p of pairs) {
+          targetKeys.add(rKey(p.to.year, p.to.month, p.to.day, emp.id))
+          const row = roster[rKey(p.from.year, p.from.month, p.from.day, emp.id)]
+          if (row?.shift_type_id) writes.push({ empId: emp.id, to: p.to, shiftTypeId: row.shift_type_id })
+        }
+      }
+
+      // What's already on the target week — rows and publish state — one read per BS month it spans.
+      const months = new Map()
+      pairs.forEach(p => { const k = `${p.to.year}:${p.to.month}`; if (!months.has(k)) months.set(k, p.to) })
+      const existingId = new Map()   // target cell key -> hr_roster.id
+      const publishedTargetDays = new Set()
+      for (const bs of months.values()) {
+        const [rows, pub] = await Promise.all([
+          scopedFrom('hr_roster', 'id, employee_id, bs_year, bs_month, bs_day')
+            .eq('bs_year', bs.year).eq('bs_month', bs.month),
+          scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
+            .eq('bs_year', bs.year).eq('bs_month', bs.month),
+        ])
+        // A failed read here would understate what the copy is about to destroy, so it stops the
+        // whole thing rather than opening a dialog full of confident zeros.
+        if (rows.error) throw rows.error
+        if (pub.error)  throw pub.error
+        for (const r of rows.data || []) {
+          const k = rKey(r.bs_year, r.bs_month, r.bs_day, r.employee_id)
+          if (targetKeys.has(k)) existingId.set(k, r.id)
+        }
+        for (const r of pub.data || []) publishedTargetDays.add(`${r.bs_year}:${r.bs_month}:${r.bs_day}`)
+      }
+
+      const writeKeys = new Set(writes.map(w => rKey(w.to.year, w.to.month, w.to.day, w.empId)))
+      const overwrite = writes.filter(w => existingId.has(rKey(w.to.year, w.to.month, w.to.day, w.empId))).length
+      const clearIds  = [...existingId.entries()].filter(([k]) => !writeKeys.has(k)).map(([, id]) => id)
+
+      const conflicts = [...new Set(
+        writes
+          .filter(w => isOnApprovedLeave(w.empId, { bsYear: w.to.year, bsMonth: w.to.month, bsDay: w.to.day }))
+          .map(w => employees.find(e => e.id === w.empId)?.full_name)
+          .filter(Boolean)
+      )]
+
+      const targetStart = new Date(weekStart)
+      targetStart.setDate(targetStart.getDate() + 7)
+
+      setCopyPlan({
+        writes, clearIds, overwrite, conflicts,
+        publishedCount: pairs.filter(p => publishedTargetDays.has(`${p.to.year}:${p.to.month}:${p.to.day}`)).length,
+        targetLabel: weekLabelFor(targetStart),
+      })
+    } catch (e) {
+      setCopyError(e?.message || 'Could not read next week — nothing was copied.')
+    } finally {
+      setCopyBusy(false)
+    }
+  }
+
+  async function runCopyWeek() {
+    if (!copyPlan || copyBusy) return
+    setCopyBusy(true)
+    setCopyError('')
+    try {
+      // Write first, clear second. If the second half fails, next week carries the copied shifts
+      // plus a few leftovers — visible on the board and fixable — rather than a week that was
+      // emptied for a copy that never arrived.
+      if (copyPlan.writes.length > 0) {
+        const rows = copyPlan.writes.map(w => ({
+          employee_id: w.empId,
+          shift_type_id: w.shiftTypeId,
+          bs_year: w.to.year, bs_month: w.to.month, bs_day: w.to.day,
+        }))
+        const { error } = await scopedUpsert('hr_roster', rows, { onConflict: 'client_id,employee_id,bs_year,bs_month,bs_day' })
+        if (error) throw error
+      }
+      if (copyPlan.clearIds.length > 0) {
+        const { error } = await scopedDelete('hr_roster').in('id', copyPlan.clearIds)
+        if (error) throw error
+      }
+      setCopyPlan(null)
+      // Land on the week that was just written — the copy is then something the manager reads off
+      // the board, not something the dialog claims happened.
+      const d = new Date(weekStart)
+      d.setDate(d.getDate() + 7)
+      setWeekStart(d)
+    } catch (e) {
+      setCopyError(e?.message || 'The copy did not finish — check next week before running it again.')
+    } finally {
+      setCopyBusy(false)
+    }
+  }
 
   // Per-day labor-forecast rows for the Labor Forecast tab — one row per visible column,
   // combining scheduled hours/cost (from the roster) with the demand forecast (if any).
@@ -631,6 +763,24 @@ export default function Roster() {
                 className="form-select" value={deptFilter} onChange={e => setDeptFilter(e.target.value)}>
                 {depts.map(d => <option key={d}>{d}</option>)}
               </select>
+            )}
+
+            {/* Copy the visible week onto the next one. Weekly only — "next month" is not a
+                fixed-length copy the way "next week" is (BS months run 28–32 days), so the same
+                button on the monthly view would have to answer a different question. */}
+            {viewMode === 'weekly' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Tip width={280} text="Stamps every shift on this week onto the same weekday next week, so next week ends up matching this one exactly. You see what would be overwritten before anything is written.">
+                  <button className="btn btn-ghost" style={{ fontSize: 12 }}
+                    disabled={copyBusy || weekShiftCount === 0}
+                    onClick={openCopyWeek}>
+                    {copyBusy && !copyPlan ? 'Checking…' : '⧉ Copy to Next Week'}
+                  </button>
+                </Tip>
+                {copyError && !copyPlan && (
+                  <span style={{ fontSize: 11, color: 'var(--theme-red-text)' }}>{copyError}</span>
+                )}
+              </div>
             )}
 
             {/* Publish — day-grain, so a manager can publish a week at a time instead of having
@@ -984,6 +1134,56 @@ export default function Roster() {
               }}
               onClose={() => setSuggestCol(null)}
             />
+          )}
+
+          {/* Copy-week confirmation. The body is a count of what will actually change, not an
+              "are you sure?" — this writes across a week the manager isn't looking at. */}
+          {copyPlan && (
+            <ConfirmModal
+              title={`Copy this week onto ${copyPlan.targetLabel}?`}
+              confirmLabel="Copy week"
+              busyLabel="Copying…"
+              busy={copyBusy}
+              danger={copyPlan.overwrite + copyPlan.clearIds.length > 0}
+              onCancel={() => { setCopyPlan(null); setCopyError('') }}
+              onConfirm={runCopyWeek}
+            >
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                <li>
+                  <strong>{copyPlan.writes.length}</strong> shift{copyPlan.writes.length === 1 ? '' : 's'} copied
+                  onto {copyPlan.targetLabel}, each on the same weekday
+                  {deptFilter !== 'All' ? ` — ${deptFilter} only, because that filter is on` : ''}.
+                </li>
+                {copyPlan.overwrite > 0 && (
+                  <li>
+                    <strong>{copyPlan.overwrite}</strong> shift{copyPlan.overwrite === 1 ? '' : 's'} already
+                    scheduled next week {copyPlan.overwrite === 1 ? 'is' : 'are'} replaced.
+                  </li>
+                )}
+                {copyPlan.clearIds.length > 0 && (
+                  <li>
+                    <strong>{copyPlan.clearIds.length}</strong> shift{copyPlan.clearIds.length === 1 ? '' : 's'} next
+                    week sit{copyPlan.clearIds.length === 1 ? 's' : ''} on a cell that is empty this week, so
+                    {copyPlan.clearIds.length === 1 ? ' it is' : ' they are'} cleared and the two weeks match.
+                  </li>
+                )}
+                {copyPlan.conflicts.length > 0 && (
+                  <li style={{ color: 'var(--theme-amber-text)' }}>
+                    {copyPlan.conflicts.join(', ')} {copyPlan.conflicts.length === 1 ? 'has' : 'have'} approved
+                    leave next week — those days are still filled, so check them afterwards.
+                  </li>
+                )}
+                {copyPlan.publishedCount > 0 && (
+                  <li style={{ color: 'var(--theme-amber-text)' }}>
+                    {copyPlan.publishedCount} of next week's days {copyPlan.publishedCount === 1 ? 'is' : 'are'} already
+                    published — staff have seen the old version, so press Re-Publish + Notify once you're done editing.
+                  </li>
+                )}
+              </ul>
+              {copyError && (
+                <p style={{ marginTop: 12, marginBottom: 0, color: 'var(--theme-red-text)' }}>{copyError}</p>
+              )}
+            </ConfirmModal>
           )}
         </>
       )}
