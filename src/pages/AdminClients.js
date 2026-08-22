@@ -540,6 +540,30 @@ export default function AdminClients() {
                     >
                       {c.is_active ? 'Deactivate' : 'Activate'}
                     </button>
+                    {/* The employee app's front door, per client. The link is minted per client
+                        (/hr/self-service/login/:clientId) and until now existed only on the HR
+                        Employees page — which needs HR enabled, a manager role, and an admin
+                        already "viewing as" that client — so there was no way to reach a given
+                        client's staff login from the admin panel at all.
+                        A real <a target="_blank"> rather than a button calling window.open: it
+                        gives middle-click, ctrl-click and "Copy link address" for free, which is
+                        what an admin actually wants when passing the link on to a client. */}
+                    <Tip
+                      width={300}
+                      style={{ borderBottom: 'none', cursor: 'pointer' }}
+                      text={`Opens ${c.name}'s employee PIN login (Crest Staff) in a new tab — the same link their staff use.${c.hr_enabled ? '' : ' Note that HR is OFF for this client, so nobody has a self-service login yet.'} Signing in there as an employee REPLACES your admin session in this browser, so use a private window if you need to stay signed in as admin.`}
+                    >
+                      <a
+                        className="btn btn-ghost"
+                        href={`/hr/self-service/login/${c.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        style={{ fontSize: 12.5, padding: '7px 13px', textDecoration: 'none' }}
+                      >
+                        Staff Login ↗
+                      </a>
+                    </Tip>
                     <button
                       className="btn btn-ghost"
                       // accent-ink (accent used AS text) + the accent-alpha border token — the

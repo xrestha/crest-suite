@@ -770,7 +770,7 @@ export default function Roster() {
                 button on the monthly view would have to answer a different question. */}
             {viewMode === 'weekly' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Tip width={280} text="Stamps every shift on this week onto the same weekday next week, so next week ends up matching this one exactly. You see what would be overwritten before anything is written.">
+                <Tip width={280} style={{ borderBottom: 'none', cursor: 'pointer' }} text="Stamps every shift on this week onto the same weekday next week, so next week ends up matching this one exactly. You see what would be overwritten before anything is written.">
                   <button className="btn btn-ghost" style={{ fontSize: 12 }}
                     disabled={copyBusy || weekShiftCount === 0}
                     onClick={openCopyWeek}>

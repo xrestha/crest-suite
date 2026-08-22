@@ -243,6 +243,26 @@ handler gained a `tag` so publishing a roster twice does not stack two lock-scre
 **Not yet verified:** real push delivery to a phone, and the iOS install itself — both need a
 device. Everything else was driven live.
 
+**Follow-up, same day — a way in from the admin panel.** The staff login link is minted per client
+and, until now, existed in exactly one place: HR → Employees → Copy Self-Service Link. Reaching it
+meant switching into the client, having HR enabled and holding a manager role — so as the platform
+admin there was no way to open a given client's staff login at all, which is the first thing you
+need when a client asks how the employee app works. Every client card in Admin → Clients now carries
+a **Staff Login ↗** button beside Manage.
+
+It is a real `<a target="_blank">` rather than a button calling `window.open`, so middle-click,
+ctrl-click and "Copy link address" all work — the last of those being what an admin actually wants
+when passing the link to a client. Its tooltip carries the two things that are not obvious from the
+button: that **signing in there with an employee PIN replaces your admin session in that browser**
+(a private window is the way to test a PIN and stay signed in as admin), and, on a client with HR
+switched off, that nobody has a self-service login yet. Verified live against all three clients:
+each button carries its own client id, the HR-off note appears only on the client it applies to, and
+opening the page leaves the admin session intact.
+
+Also fixed here: the `⧉ Copy to Next Week` button shipped in S598 was wrapped in a bare `Tip`, whose
+trigger span paints a dashed underline — the neutraliser `Sales.js` already uses
+(`style={{ borderBottom: 'none', cursor: 'pointer' }}`) was missing.
+
 ### S598 — 2026-08-22 — Copy a week of roster onto the next one
 
 The roster board could assign a rectangle of cells in one drag, and could not repeat a week. But a

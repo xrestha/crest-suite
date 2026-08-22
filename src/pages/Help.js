@@ -683,6 +683,16 @@ const POS_FEATURES = [
 
 const ADMIN_FEATURES = [
                 {
+                  icon: '🔑', name: 'Staff Login (per client)',
+                  guide: 'Every client card in Admin → Clients carries a "Staff Login ↗" button that opens that company\'s employee PIN login — the Crest Staff app — in a new tab. It is the same link the client\'s own manager shares with their team from HR → Employees → Copy Self-Service Link, but reachable without switching into the client first, without HR being enabled, and without holding a manager role. Right-click → Copy link address to send it on to a client.',
+                  tips: [
+                    'Signing in there with an employee PIN REPLACES your admin session in that browser — open a private window if you need to stay signed in as admin',
+                    'The button is on every client, including ones with HR off; the tooltip says so, and the page shows an empty staff picker until someone is given a Self-Service login',
+                    'Employees get their login from HR → Employees → Enable Self-Service, which sets their initial PIN',
+                    'It opens in a new tab, so middle-click and ctrl-click work the way they do on any link',
+                  ],
+                },
+                {
                   icon: '📱', name: 'Guest Menu Preview',
                   guide: 'Preview the currently-viewed client\'s guest QR menu without needing a printed QR code or asking the client for one. Pick a client in the sidebar switcher first, then pick one of that client\'s tables — the page embeds the exact live page a guest sees after scanning that table\'s QR (GuestMenu.jsx), including guest ordering if the client has that Pro-tier feature enabled.',
                   tips: [
