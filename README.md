@@ -158,6 +158,32 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S604b — 2026-08-23 — The admin preview that had never rendered in production
+
+Reported from a live screenshot immediately after S604 shipped: Guest Menu Preview showed an empty
+frame. Not a regression from that session's 390px change — `X-Frame-Options: DENY` and CSP
+`frame-ancestors 'none'` have been on every response since the S531 security review (2026-08-10),
+and **`DENY` blocks framing including same-origin.** Confirmed against the deployed site with
+`curl -I`, not inferred.
+
+So the page's entire mechanism — an `<iframe src>` of the real public route, chosen so the preview
+is byte-for-byte what a guest sees rather than a second component to keep in sync — had been dead in
+production for two weeks, while working perfectly on every developer's machine. `vercel.json` headers
+do not apply to the CRA dev server, so localhost renders it fine and every review of that page
+passed. That is the transferable lesson: **anything verified only on `npm start` is unverified
+against the header stack.** The critique that produced S604 measured this same iframe at 1134px,
+which is how we know it was reviewing a dev server.
+
+Relaxed to `X-Frame-Options: SAMEORIGIN` + `frame-ancestors 'self'`. Both keys had to move together —
+modern browsers prefer `frame-ancestors`, older ones honour `X-Frame-Options`, so leaving either at
+its strictest keeps the frame blocked. The security cost is real but small and worth naming: `'self'`
+permits only our own origin to frame us, clickjacking requires an *attacker-controlled* framing page,
+and an attacker who could serve one from our origin already has XSS. `DENY` was stricter than the
+threat model needs and it cost a whole feature.
+
+`PosOrders.jsx`'s bill-preview iframe is unaffected — it uses `srcDoc`, so there is no HTTP response
+for either header to be attached to.
+
 ### S604 — 2026-08-23 — The sticky bar that had never stuck, on three pages, and a menu that overstated its own prices
 
 The guest-menu critique's backlog, plus one finding that came out of verifying the first fix.
