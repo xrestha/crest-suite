@@ -79,3 +79,32 @@ theoretical, pushed variance down, and MASKED real over-consumption — backward
 report). All four consumers of that figure — these three plus Supplier Contribution — now agree.
 The dedup is applied per-period on Shrinkage (the POS-supersedes-manual rule is bs_day-scoped), and
 the same pass added `fetchAllRows` paging to all three previously-unpaged sales reads.
+
+### Bill discounts belong in COGS, and `allocateBillDiscounts()` is the only way to get them there (S601)
+
+`purchase_entries.discount_amount` is a **BILL-level** figure repeated on every line of the bill.
+`VendorReport.js`, `OutstandingPayables.js`, `VatReport.js`, `NonVatReport.js` and
+`supplierAttribution.js` all dedupe it by bill before use. The P&L was the one place that ignored it
+entirely — `sum(qty * rate)` charged the undiscounted price into COGS, so COGS ran high and Net
+Profit low by the whole discount while the Purchases register showed the discounted total for the
+same bill. Measured on the reference client, one month was **NPR 289,456** overstated.
+
+Fixed across the three places that are required to agree, in one change: `ConsolidatedPnl.jsx`,
+`MonthlySummary.js` (both via `allocateBillDiscounts()` from `supplierAttribution.js`) and
+`get_group_pnl` (migration `20260822140000`, the same arithmetic in SQL).
+
+Three things not to re-derive:
+
+- **`max(discount_amount)`, never `sum`.** The value is repeated per line, so summing it multiplies
+  the discount by the bill's line count.
+- **Allocation is PROPORTIONAL, not a flat subtraction.** Those totals are summed only over ACTIVE,
+  non-sub-recipe items (S436), and a bill can contain a line for an item outside that filter — so
+  subtracting the whole bill's discount from a total that never included the whole bill's gross
+  over-credits it. The `bill` CTE's `gross` is deliberately computed over ALL lines; narrowing it
+  silently inflates every share.
+- **`qty` is untouched.** A discount changes what was paid, not what arrived.
+
+Also settled by the same audit, so it does not get re-asked: `buildStatement()` does **not**
+double-count wastage and staff meals. `computeUsed()` subtracts them from COGS and the statement
+re-deducts them as their own lines; `netProfit = Rev − (O + P − R − C) − L − OH − T`, so the two
+cancel exactly and total food cost recognised (`cogs + W + S`) equals full depletion.

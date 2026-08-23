@@ -357,6 +357,69 @@ Also worth knowing before touching a page's status messages: `.btn:disabled` now
 | `ModuleGate` | `src/components/ModuleGate.js` | Module-level route guard |
 | `PremiumGate` | `src/components/PremiumGate.js` | Plan/feature-level route guard |
 
+### A gating wrapper cannot protect an eagerly-evaluated children expression (S601)
+
+`ConsolidatedPnl.jsx` passed its whole table as `ReportPage`'s `children`. `ReportPage` renders
+`children` only once the page has loaded — but **JSX children are an ARGUMENT**: the expression is
+fully evaluated by the parent and handed over as a finished element tree, so the gate inside the
+wrapper never gets a say. `pnl` is `useState(null)` and `loading` is `useState(true)`, so
+`LINES.map(l => … pnl[l.key] …)` ran on the first render and threw on `revenue`. It crashed on
+**every** visit for a single-outlet client, before `SuiteGate` even rendered — so the entitlement
+gate could not stop it either. Only an early return, a guard at the call site (`{!stmt ? null : …}`),
+or a render prop can protect it. The same applies to `banners`/`stats`/`note`/`filters`/`footnote`:
+`ReportPage` suppresses them while loading or after an error, but the caller still *evaluates* them.
+
+Related, from the same audit: **`banners` is no longer rendered over the error card.** A banner is
+derived from state the caller set before the read, so ConsolidatedPnl's "Provisional — this period is
+still open… the statement is reliable once the period is closed" printed directly above ReportPage's
+own "Nothing here is a real figure — this is a failed read". Two contradictory sentences, one of them
+asserting a statement exists.
+
+### An overlapping load must not win the page (S601)
+
+Every period-scoped page had the same handler: `setSelectedPeriod(…)` → `setLoading(true)` →
+`await buildReport(id)` → `setLoading(false)`, with the load setting its data whenever it resolved.
+Nothing identified which load was current. A closed native `<select>` fires `change` on every arrow
+keypress, so arrowing a 12-period list starts twelve concurrent loads — each a `Promise.all` of eight
+to eleven queries — and **the last response to land wins the figures while `selectedPeriod` is
+whatever was clicked last**. On Consolidated P&L that label drives the subtitle, the print title, the
+Excel `scopeLine` AND the downloaded filename, so one month's figures could leave the building inside
+another month's workbook.
+
+`src/shared/hooks/useLatestRequest.js` is the one guard, now on 19 pages. Call `periodReq.begin(id)`
+synchronously in `handlePeriodChange` before any await, and
+`if (!periodReq.isCurrent(periodId)) return` after the last await and before the first setter.
+
+Two properties worth not re-deriving. **The key is the period id, not a counter** — these loaders are
+also called after a save, after a period close, on a manual refresh, and none of those go through
+`handlePeriodChange`; a counter would treat every one as stale and silently discard a legitimate
+reload. And **it fails open**: before any `begin()` the ref is null and `isCurrent()` returns true, so
+a page that adopts the check and forgets the claim degrades to the old racy behaviour rather than
+rendering permanently blank. Of the two possible mistakes only one is recoverable by the user — which
+is also why a page's own `init()` needs no `begin()`: once the handler claims, init's stale load is
+correctly rejected on its own.
+
+**Not swept:** `AttendanceSheet.jsx` and `Overtime.jsx` (their loaders are `useCallback` with a
+different signature — `loadEntries(bsYear, bsMonth)` would need a composite key), and
+`SupplierPriceTracker.js`/`MonthlyOwnerReport.jsx`, which select an id and derive rather than load.
+
+### A page reachable by URL needs the guard its nav item implies (S601)
+
+`/pnl` and `/owner-dashboard` are rendered in `Layout.js` only for `isAdmin || isOwner`, but both sat
+inside `ProtectedRoute` + `SuiteGate` alone and **neither of those checks a role**. `SuiteGate` gates
+on `suite_plan`; `PremiumGate` on plan/feature. Nothing gated on who was asking.
+
+The consequence was worse than a leak, and it is the reason this deserves its own rule. The
+staff-isolation policies (S316/S419/S430) are **RESTRICTIVE SELECT filters**, so a fenced table
+returns `{ data: [], error: null }` — indistinguishable from an empty period, and invisible to
+`firstError()`. A POS PIN account reaching `/pnl` had `sales_entries` readable while `items`,
+`opening_stock`, `closing_stock`, `purchase_entries`, `overheads` and every `hr_*` table came back
+empty, so the page rendered a complete, confident statement with real Revenue, COGS NPR 0, Gross
+Profit = Revenue and **Net Profit = Revenue at a 100% margin, in green**. `MonthlyOwnerReport` — the
+third page behind the identical nav condition — has always carried
+`if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />`. Copy that line; place it
+after every hook, and rely on `ProtectedRoute` having already resolved `profile`.
+
 ### A report page must not show a number it has not computed (S594)
 
 `src/components/ReportPage.jsx` exists because the design system governs colour and shape rigorously

@@ -51,3 +51,13 @@ Three things it enforces that the overheads trap above makes possible:
 - **Colour is decided by `lineColor(line, amount)` and the `strong` flag is not something a caller may force** (S594). It tests `strong && amount > 0` *before* `line.cost`, so `lineColor({ ...l, strong: true }, …)` painted every positive consolidated figure success-green — COGS, Wastage, Labour, Overheads and Tax & Fees rendering as `(NPR 1,240,000)` in green while the identical line sat grey one column left. On the page a multi-outlet owner compares branches with, that made the whole consolidated column read as good news; to an accountant, parenthesised-and-green reads as a credit. If a column needs weight, set `fontWeight`.
 
 A related but distinct artifact, not a fourth dashboard: **`/owner-report`** (`MonthlyOwnerReport.jsx`, `SuiteGate` with `requireModules={['ims']}`) — see "Monthly Owner/Manager Report" below. Where all three above are always live (re-query on every load, reflect the currently-open period), this one is a **frozen snapshot** captured once when a period *closes* and never recomputed afterward, even if the underlying data is later corrected in place.
+
+### Owner-altitude pages need a role guard, not just a Suite gate (S601)
+
+/owner-dashboard, /owner-report and /pnl are rendered in Layout.js only for `isAdmin || isOwner`,
+but SuiteGate checks `suite_plan` and ProtectedRoute checks a session — neither checks a role. Two
+of the three had no route guard, and because the staff-isolation policies are RESTRICTIVE SELECT
+filters (empty result, no error), a POS PIN account got a full P&L reading Net Profit = Revenue at
+100% margin rather than an access error. All three now carry
+`if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />` after their hooks.
+See CLAUDE.md, "A page reachable by URL needs the guard its nav item implies".
