@@ -7,11 +7,35 @@
    The base scale also went up ~20% across the board (inputs 14→15px, buttons 40→46px, hero
    headline 20→up to 44px), because the old sizing only read comfortably at 125% browser zoom. ── */
 .login-page {
-  min-height: 100vh;
+  /* Its own scrollport, not `min-height: 100vh`. `src/index.css` sets
+     `html, body { overflow-x: hidden }` as an app-wide horizontal guard; because html's overflow
+     is then not `visible` it stops propagating to the viewport, body becomes its own scroll
+     container sized exactly to its content, and a `position: sticky` child's scrollport is
+     therefore something that never itself scrolls. Measured on the real built page at 390x780:
+     `.login-nav`'s viewport top went 0 -> -250 -> -600, i.e. it moved 1:1 with the content and
+     had never stuck at all. Same root cause as the guest menu's category bar (S604), and this is
+     the same fix — the app shell is immune only because it scrolls its own div.
+
+     Relaxing the body rule instead was measured and REJECTED: with `overflow-x: hidden` on `html`
+     alone the guard stops working entirely (1610px of horizontal overflow on a probe page,
+     identical to having no rule), so the one-line version trades a dead sticky nav for a page
+     that scrolls sideways.
+
+     `100dvh` rather than `100vh` for the reason the rest of this file's short-viewport tiers
+     exist: on a phone `100vh` is the tallest the viewport ever gets, so the fold lands under the
+     URL bar. This does not change the S553/S560 fit budget — the content is the same height, it
+     simply overflows a container instead of the body. */
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   background: var(--theme-bg, #0f1117);
   color: var(--theme-text1, #e8e0d0);
   display: flex;
   flex-direction: column;
+}
+
+@supports not (height: 100dvh) {
+  .login-page { height: 100vh; }
 }
 
 /* ── Header ── */

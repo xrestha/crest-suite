@@ -158,6 +158,77 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S604 — 2026-08-23 — The sticky bar that had never stuck, on three pages, and a menu that overstated its own prices
+
+The guest-menu critique's backlog, plus one finding that came out of verifying the first fix.
+
+**The category bar had never worked, and neither had two others.** `src/index.css` opens with
+`html, body { overflow-x: hidden }`. Because html's overflow is then not `visible` it stops
+propagating to the viewport, body becomes its own scroll container sized to its content, and a
+`position: sticky` child of the body has a scrollport that never scrolls. It renders, it computes
+to `sticky`, and it moves 1:1 with the content forever.
+
+Reproduced in a harness built from the real CSS — barTop `114 → −186 → −586 → −986`. Then, checking
+whether anything else had the same shape, measured on the **built** pages at 390×780: `/login` and
+`/pricing` both went `0 → −250 → −600`. Three public pages, three dead sticky navs, none of them
+noticed because every authenticated screen is immune (the app shell scrolls its own div).
+
+**The one-line fix does not work, and that is the part worth keeping.** Dropping to
+`html { overflow-x: hidden }` alone does restore sticky — and loses the guard entirely: a probe page
+with a deliberately 2000px-wide child reported **1610px** of horizontal overflow, identical to
+having no rule at all. So each page gets its own scrollport (`height: 100dvh; overflow-y: auto;
+overscroll-behavior: contain`) and loses the `min-height: 100vh` it was carrying — 100vh ≥ 100dvh,
+so a min-height pushes the root taller than its own scrollport and hands the scroll straight back to
+the body, which is the original bug. Verified after: container scrolls 1220px (/login) and 5532px
+(/pricing), nav holds at 0 at every position, horizontal overflow 0.
+
+**The menu overstated its own prices.** `priceIncVat` applied `vat_rate` unconditionally; the till
+applies it only when `settings.is_vat_registered`, and `get_guest_menu` never returned that flag —
+so a non-registered outlet advertised every dish ~13% above what it then billed. Migration
+`20260823100000` returns the flag (DROP + CREATE: the return type changes), and `priceIncVat` now
+takes it as a **required** argument, so a call site that forgets it fails toward no-VAT rather than
+toward over-charging. The page also never said what a price included; it does now, in the outlet's
+own case rather than a generic hedge.
+
+**A failed status poll rendered as "no open order".** The 5s poll destructured `{ data }` and
+dropped `error` — the S594 rule on the guest surface, where the cost is a diner watching a tracker
+that has quietly stopped. It now keeps the last known stage, says so after two consecutive misses,
+and pauses entirely while the tab is hidden (it had been running 720 requests/hr per open tab on a
+page that sits on a table for an hour).
+
+Also: nothing bound the order to its table at commit — QR stickers get moved and guests scan the
+next table's code — so the review modal now says "Sending to <Table>" and the confirmation card
+repeats it; a raw Postgres `err.message` was being rendered to an anonymous member of the public;
+emptying the cart from inside the modal was a dead end; a section literally titled **OTHER**, a
+database default, was reaching paying customers; the document title was "Crest Suite", so a
+restaurant sharing its own QR link previewed its supplier's B2B software to a diner; steppers were
+40px and shared two labels between four of them; the cart bar sat in the iPhone home-indicator
+gesture strip; and the note textarea had no accessible name at all.
+
+On the admin side: the preview rendered a phone page at 1134px, so the one person who could ask for
+the mobile fixes never saw the mobile layout — now 390px. Its table list used
+`.neq('status','inactive')` on a nullable column (the documented trap — silently dropped every
+NULL-status table) and dropped `error`, rendering "This client has no tables set up yet" on a failed
+read. And it now states menu coverage out loud — "3 of 7 dishes have a photo" with a link into
+Recipes — because a menu of names and prices looks finished, so nobody learns there is anything to
+fill in.
+
+**Left undone, deliberately:** no search, no per-item note, no repeat-order, and no Nepali. The
+last is structural — `<html lang="en">` is fixed and `recipes` has one `name` column — so it is a
+roadmap decision, not a bug.
+
+**Migration `20260823100000_guest_menu_vat_registration.sql` is APPLIED and verified** (2026-08-23,
+against the live DB). All three checks pass: the function returns the flag, `anon` and
+`authenticated` both still hold EXECUTE after the DROP, and the value agrees with `settings` for
+every POS-enabled client.
+
+**And the bug was live, not theoretical.** The one real client on the book — BHATTI CHOILA — is
+`is_vat_registered = false`, so their public QR menu had been printing every price with 13% VAT
+added on top of what they actually bill: a NPR 500 dish read as NPR 565 to every guest who scanned
+a table. This is exactly the shape the column's default hides — `is_vat_registered` defaults to
+`true`, so unconditional VAT looks correct for every hypothetical client and is wrong for the only
+real one. A default that matches the common case is not evidence that the uncommon case works.
+
 ### S603 — 2026-08-23 — The field-error pattern reaches the app, seven years after the login page got it
 
 DESIGN.md carried a rule saying a failing field takes `aria-invalid`, a red border and a message

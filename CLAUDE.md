@@ -551,6 +551,40 @@ controls, carrying a `borderRadius: 6` off the closed 8/12/18/24 scale. Its `<se
 `.form-select` **plus** an explicit `width: '100%'`, since that is the one declaration `inp` was
 supplying that the class does not.
 
+### `position: sticky` is dead in the body flow, app-wide (S604)
+
+`src/index.css` opens with `html, body { overflow-x: hidden }` — an app-wide horizontal-overflow
+guard. Because `html`'s overflow is then not `visible` it stops propagating to the viewport, `body`
+becomes its own scroll container sized exactly to its content, and **a `position: sticky` child of
+the body has a scrollport that never scrolls**. It renders, it computes to `sticky`, and it moves
+1:1 with the content forever.
+
+Every screen in IMS/HR/POS is immune because the app shell scrolls its own div. The pages that are
+not are the three that render directly into the body: the guest menu, `/login` and `/pricing`. All
+three had a sticky bar that had never stuck in production — measured on the built pages at 390×780,
+the nav's viewport `top` went `0 → −250 → −600`.
+
+**The one-line fix does not work, and this was measured rather than reasoned.** Dropping the rule to
+`html { overflow-x: hidden }` alone does restore sticky, but the guard stops working entirely — a
+probe page with a deliberately 2000px-wide child reported **1610px** of horizontal overflow, byte
+for byte what it reports with no rule at all. So the fix is per-page: give the page root its own
+scrollport (`height: 100dvh; overflow-y: auto; overscroll-behavior: contain`) and **remove any
+`min-height: 100vh` it was carrying** — 100vh ≥ 100dvh, so a min-height pushes the root taller than
+its own scrollport and hands the scroll straight back to the body, which is the original bug.
+
+`dvh`, not `vh`: on a phone `100vh` is the tallest the viewport ever gets, so the fold — where a
+cart button or a primary CTA lives — sits under the URL bar.
+
+Two things to re-verify after making a page its own scrollport, because they silently change
+meaning: an `IntersectionObserver` with `root: null` measures against the *viewport*, which only
+agrees with the container while the container is exactly viewport-height — pass the container
+explicitly; and `element.scrollHeight` vs `window.innerHeight` stops being the fit test, since the
+body no longer scrolls.
+
+**Verify by measurement, never by eye.** This is correct-looking in code and in review; only reading
+`getBoundingClientRect().top` across real scroll positions catches it. A harness that reproduces the
+two structural facts (the index.css rule + a sticky child) is enough — it does not need the app.
+
 ### Every `type="password"` input needs an explicit `autoComplete`
 
 Without one, Chrome guesses from `type` + surrounding context — and any `type="password"` field anywhere on the page makes it treat the nearest preceding text input as a login username, which has bled a saved login into unrelated fields (a `SearchableSelect` search box, a signup form) more than once (S329). Use `autoComplete="new-password"` on every PIN/account-creation field (POS Staff Add/Reset PIN, Enable Self-Service, trial signup), and `autoComplete="username"` / `"current-password"` on an actual sign-in form's email/password. PIN-pad login screens (POS/HR Self-Service) build their own keypad UI rather than a text input, so they're unaffected.

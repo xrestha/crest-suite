@@ -159,3 +159,65 @@ body:has(.guest-menu) {
 .guest-menu .guest-order-glow {
   animation-name: gm-order-glow-pulse;
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+   THE PAGE IS ITS OWN SCROLL CONTAINER — this is what makes the category bar stick
+   ══════════════════════════════════════════════════════════════════════════════════════════════
+   The sticky category bar had never worked, in production, since it was written. Measured twice
+   independently: as the page scrolls, the bar's viewport `top` goes 131 -> -219 -> -284. It moves
+   1:1 with the content, i.e. it is not sticky at all — and it is the only navigation a long menu
+   has, so the IntersectionObserver, the -60px rootMargin and `--guest-menu-nav-h` were all paying
+   for a feature that did not run.
+
+   The cause is not on this page. `src/index.css` sets `html, body { overflow-x: hidden }` as an
+   app-wide horizontal-overflow guard. Because `html`'s overflow is then not `visible`, it stops
+   propagating to the viewport, `body` becomes its own scroll container sized exactly to its
+   content (measured: `scrollHeight 1259`, computed `overflow: hidden auto` on both), and a
+   `position: sticky` child's scrollport is therefore something that never itself scrolls. Every
+   other screen in the product is immune because the app shell scrolls its own div; this is the one
+   page that puts a sticky element directly in the body flow.
+
+   Fixing it here rather than by relaxing the body rule for this route (`html:has(.guest-menu)`,
+   one line) is deliberate: that would drop the app-wide horizontal guard on this page and has no
+   fallback in a browser without `:has()`. Giving this page its own scrollport is local, explicit,
+   and works everywhere.
+
+   `100dvh`, not `100vh`: on a phone `100vh` is the tallest the viewport ever gets, so with the URL
+   bar showing, the bottom of the page — where the cart button lives — sits below the fold.
+
+   `overscroll-behavior: contain` stops a flick at the end of the menu chaining into a pull-to-
+   refresh, which on a page a guest is mid-order on would throw away an unsent cart.
+   ══════════════════════════════════════════════════════════════════════════════════════════════ */
+.guest-menu {
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Older engines with no dvh support fall back to the tallest-viewport value rather than to no
+   height at all — the bar still sticks, the bottom is just occasionally under the URL bar. */
+@supports not (height: 100dvh) {
+  .guest-menu { height: 100vh; }
+}
+
+/* ── Touch, on the one surface that is 100% touch ──────────────────────────────────────────────
+   Layout.css tunes `.tab-btn` to a 32px coarse-pointer floor, which is right for a filter pill on
+   a staff screen where a dozen of them share a toolbar. Here the same class is the ONLY navigation
+   a long menu has, tapped one-handed at arm's length in a dim room, so it takes WCAG 2.2 SC 2.5.8's
+   44px target instead. Scoped to `.guest-menu` — this is a claim about this page's context, not a
+   correction to the shared component. */
+@media (pointer: coarse) {
+  .guest-menu .tab-btn {
+    min-height: 44px;
+  }
+}
+
+/* Inline-styled buttons on this page carried no class, so they fell through to whatever focus ring
+   the UA draws — on a bone card that is frequently nothing visible at all. `.gm-chip` gives the
+   allergen toggles the same solid-outline pairing S574 established app-wide, in this page's own
+   pine rather than the admin accent. */
+.guest-menu .gm-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--gm-pine), 0 0 0 5px rgba(0,70,67,0.16);
+}

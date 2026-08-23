@@ -270,6 +270,16 @@ Recorded so they aren't rediscovered from scratch:
   1000 and therefore their own stacking contexts — that single fact is why POS grew nine
   hand-rolled overlays instead of using the component.
 
+  **S604 was the guest menu's own critique (23/40).** Three of its findings are worth carrying:
+  the public menu applied `vat_rate` unconditionally while the till gates it on
+  `settings.is_vat_registered`, so a non-registered outlet advertised every dish ~13% above what it
+  billed — `get_guest_menu` now returns the flag (migration `20260823100000`) and `priceIncVat`
+  takes it as a REQUIRED argument, so a call site that forgets it fails toward no-VAT rather than
+  toward over-charging. The 5s status poll dropped `error`, so a failed read rendered identically
+  to "no open order" — the S594 rule on the guest surface, where the cost is a diner watching a
+  tracker that has silently stopped; it now keeps the last known stage and says so. And a raw
+  `err.message` from `submit_guest_order` was rendered to an anonymous member of the public.
+
   **S603's pass was the input classes.** POS carried 20 of the 62 text controls in the product that
   were wearing `className="form-select"` — a `<select>` class, so `cursor: pointer`, so a text box
   announcing itself as a menu — across `PosTableManagement`, `PosShifts`, `PosStaff`,

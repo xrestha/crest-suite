@@ -9,7 +9,17 @@ import './guestMenu.css'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const fmtNutrient = (def, value) => `${(Number(value) || 0).toFixed(def.dp)} ${def.unit}`
-const priceIncVat = item => Math.round((parseFloat(item.selling_price) || 0) * (1 + (parseFloat(item.vat_rate) || 0)))
+// The price a guest will actually be charged for one of these.
+//
+// `vatRegistered` is NOT optional and must not be defaulted here. The till applies vat_rate only
+// when `settings.is_vat_registered` (`computeOrderAmounts` in utils/posBillingMath.js) and prints
+// "BILL" rather than "TAX INVOICE" when it is false — this page used to apply it unconditionally,
+// so a non-registered outlet advertised every dish ~13% above what it then billed. Taking the flag
+// as a required argument is what stops that drifting back: a call site that forgets it gets
+// `undefined`, i.e. no VAT, which is the safe direction (a menu that understates is a smaller
+// betrayal than one that overstates) and is visibly wrong on a registered client's own menu.
+const priceIncVat = (item, vatRegistered) =>
+  Math.round((parseFloat(item.selling_price) || 0) * (1 + (vatRegistered ? (parseFloat(item.vat_rate) || 0) : 0)))
 
 // Same three stages + wording as the staff-side floor-view badge (PosOrders.jsx) and KDS board —
 // used as a fallback badge when this browser has no submitted-order snapshot of its own (e.g. a
@@ -128,6 +138,12 @@ export default function GuestMenu() {
 
   const [activeCategory, setActiveCategory] = useState(null)
   const categoryRefs = useRef({}) // category name -> section DOM node, populated during render
+  // The page's own scrollport (guestMenu.css gives `.guest-menu` height:100dvh + overflow-y:auto).
+  // The IntersectionObserver below must be rooted on it: with a scrolling ANCESTOR rather than the
+  // document, a null root measures against the viewport, which only happens to agree while the
+  // container is exactly viewport-height — it stops agreeing the moment anything is laid out
+  // around it, and the failure is a chip bar that highlights the wrong section rather than an error.
+  const scrollRootRef = useRef(null)
 
   // Veg-only + allergen-exclusion filters — Veg/Non-Veg is the primary dietary distinction in
   // this market (already tagged per-item via is_veg for the veg/non-veg dot), and allergens are
@@ -183,32 +199,89 @@ export default function GuestMenu() {
   }, [tableId, retryToken])
 
   // 5s poll while the guest has the menu open — same cadence as the staff floor-view badge.
+  //
+  // Two things this used to get wrong. It destructured `{ data }` and dropped `error`, so a failed
+  // read — an RLS rejection, a dead connection, a PostgREST schema-cache miss — resolved to
+  // `data: null` and rendered as "no open order": the S594 rule (a failed read is not an empty
+  // period) on the guest surface, where the consequence is a diner watching a status card that
+  // silently stopped tracking their food. The last known status is now KEPT on a failed poll
+  // rather than being cleared to null, because a stale-but-true stage beats a confident wrong one,
+  // and a run of failures says so out loud.
+  //
+  // And it never paused: ~55 requests were observed in one sitting, i.e. 720/hr per open tab, on a
+  // page that is left open on a table for an hour. A phone with the screen off, or the browser
+  // backgrounded, does not need a status it cannot display — so the interval only runs while the
+  // document is visible, and polls once immediately on becoming visible again so a guest returning
+  // to the tab sees the current stage rather than waiting up to 5s for it.
+  const [statusStale, setStatusStale] = useState(false)
   useEffect(() => {
     let cancelled = false
-    const poll = () => supabase.rpc('get_guest_table_status', { p_table_id: tableId }).then(({ data }) => {
+    let failures = 0
+    let id = null
+    const poll = () => supabase.rpc('get_guest_table_status', { p_table_id: tableId }).then(({ data, error: err }) => {
       if (cancelled) return
+      if (err) {
+        // Two consecutive misses before saying anything: one dropped request on a cafe's wifi is
+        // normal and a banner that flickers on every blip teaches the guest to ignore it.
+        failures += 1
+        if (failures >= 2) setStatusStale(true)
+        return
+      }
+      failures = 0
+      setStatusStale(false)
       const row = data?.[0]
       setKotStatus(row?.has_open_order ? row.kot_status : null)
       setRemainingMinutes(row?.has_open_order ? (row.remaining_minutes ?? null) : null)
     })
-    poll()
-    const id = setInterval(poll, 5000)
-    return () => { cancelled = true; clearInterval(id) }
+    const start = () => { if (id === null) { poll(); id = setInterval(poll, 5000) } }
+    const stop = () => { if (id !== null) { clearInterval(id); id = null } }
+    const onVisibility = () => (document.visibilityState === 'visible' ? start() : stop())
+    onVisibility()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      cancelled = true
+      stop()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [tableId])
 
-  // Poll the guest's own submitted request, if any, for staff Accept/Dismiss.
+  // Poll the guest's own submitted request, if any, for staff Accept/Dismiss. Same visibility
+  // gating and same failure handling as the table-status poll above — this one already kept its
+  // last value on a missing row (`if (row)`), so a failed read was less damaging here, but it
+  // still counts toward the same "we've lost touch" banner rather than being silently absorbed.
   useEffect(() => {
     if (!requestId) return
     let cancelled = false
-    const poll = () => supabase.rpc('get_guest_order_request_status', { p_request_id: requestId }).then(({ data }) => {
+    let id = null
+    const poll = () => supabase.rpc('get_guest_order_request_status', { p_request_id: requestId }).then(({ data, error: err }) => {
       if (cancelled) return
+      if (err) return
       const row = data?.[0]
       if (row) setRequestStatus(row.status)
     })
-    poll()
-    const id = setInterval(poll, 5000)
-    return () => { cancelled = true; clearInterval(id) }
+    const start = () => { if (id === null) { poll(); id = setInterval(poll, 5000) } }
+    const stop = () => { if (id !== null) { clearInterval(id); id = null } }
+    const onVisibility = () => (document.visibilityState === 'visible' ? start() : stop())
+    onVisibility()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      cancelled = true
+      stop()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [requestId])
+
+  // The document title is "Crest Suite" from index.html, so a restaurant sharing its own QR link
+  // previewed their supplier's B2B inventory software to a diner — the one place in the product
+  // where the Crest brand is actively wrong. Set from the data rather than hardcoded, and restored
+  // on unmount so an admin previewing this in an iframe does not leave the admin tab renamed.
+  useEffect(() => {
+    const outlet = rows?.[0]?.outlet_name
+    if (!outlet) return
+    const previous = document.title
+    document.title = `${outlet} — Menu`
+    return () => { document.title = previous }
+  }, [rows])
 
   // Chime once whenever the guest's own order actually advances a stage (placed → confirmed →
   // sent to kitchen → preparing → ready, or dismissed) — not on every 5s poll that finds no
@@ -250,13 +323,19 @@ export default function GuestMenu() {
   )
   const activeFilterCount = (vegOnly ? 1 : 0) + excludedAllergens.length
 
+  // `UNCATEGORISED` is a sentinel, not a heading. An item with no category used to land in a
+  // section literally titled "OTHER" on a paying customer's screen — a database default reaching
+  // a diner. It now renders with no heading at all when it is the only group (there is nothing to
+  // distinguish it FROM), and as "More" when it sits alongside real ones.
+  const UNCATEGORISED = ' uncategorised'
   const categories = []
   const byCategory = {}
   for (const r of filteredRows) {
-    const cat = r.category || 'Other'
+    const cat = r.category || UNCATEGORISED
     if (!byCategory[cat]) { byCategory[cat] = []; categories.push(cat) }
     byCategory[cat].push(r)
   }
+  const categoryLabel = cat => (cat === UNCATEGORISED ? 'More' : cat)
 
   // Default the highlighted chip to the first category before the guest has scrolled at all —
   // otherwise the bar renders with no active chip until the observer's first callback fires.
@@ -280,7 +359,8 @@ export default function GuestMenu() {
         const cat = categories.find(c => categoryRefs.current[c] === top.target)
         if (cat) setActiveCategory(cat)
       },
-      { rootMargin: '-60px 0px -70% 0px', threshold: 0 } // -60px ~= sticky nav bar height (52px) + a small buffer
+      // root: the page's own scrollport, not the viewport — see scrollRootRef above.
+      { root: scrollRootRef.current, rootMargin: '-60px 0px -70% 0px', threshold: 0 } // -60px ~= sticky nav bar height (52px) + a small buffer
     )
     targets.forEach(el => observer.observe(el))
     return () => observer.disconnect()
@@ -321,13 +401,24 @@ export default function GuestMenu() {
   const tableName = rows[0].table_name
   const nutritionEnabled = rows[0].nutrition_enabled
   const orderingEnabled = rows[0].guest_ordering_enabled
+  // `?? true` matches the column default and every other JS caller, so a client whose RPC
+  // predates migration 20260823100000 keeps today's behaviour instead of silently dropping VAT
+  // off a registered outlet's menu — this page applies migrations by hand, so that window is real.
+  const vatRegistered = rows[0].is_vat_registered ?? true
+  const vatApplies = vatRegistered && rows.some(r => (parseFloat(r.vat_rate) || 0) > 0)
+  // A menu where SOME dishes have a photo and others don't renders ragged — an 84px thumbnail on
+  // one card and none on the next, so the text starts at two different left edges down the list.
+  // The fix is per-menu, not per-item: once any dish has an image, every card reserves the column.
+  // A menu with no photography at all (which is most of them today) keeps the clean text-only
+  // card, which is a legitimate printed-menu shape and not a broken one.
+  const anyImages = rows.some(r => r.image_url)
 
   const cartLines = Object.entries(cart)
     .filter(([, qty]) => qty > 0)
     .map(([recipeId, qty]) => ({ item: byRecipe[recipeId], qty }))
     .filter(l => l.item)
   const cartCount = cartLines.reduce((s, l) => s + l.qty, 0)
-  const cartTotal = cartLines.reduce((s, l) => s + priceIncVat(l.item) * l.qty, 0)
+  const cartTotal = cartLines.reduce((s, l) => s + priceIncVat(l.item, vatRegistered) * l.qty, 0)
 
   function setQty(recipeId, qty) {
     setCart(prev => ({ ...prev, [recipeId]: Math.max(0, Math.min(50, qty)) }))
@@ -347,7 +438,17 @@ export default function GuestMenu() {
     })
     setSubmitting(false)
     if (err) {
-      setSubmitError(err.message || 'Could not place order. Please ask staff for assistance.')
+      // Never `err.message`. This is an anonymous member of the public on their own phone, and a
+      // raw PostgREST/Postgres string ("new row violates row-level security policy for table
+      // ...") tells them nothing they can act on while leaking schema detail to an unauthenticated
+      // surface. The one distinction worth drawing is the one the guest can do something about —
+      // being offline — so that is the only branch.
+      console.error('submit_guest_order failed', err)
+      setSubmitError(
+        navigator.onLine === false
+          ? "You appear to be offline. Reconnect and try again, or ask a staff member to take your order."
+          : "We couldn't send that order. Please try again, or ask a staff member for help."
+      )
       return
     }
     sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: data, items: itemsSnapshot, covers }))
@@ -373,7 +474,11 @@ export default function GuestMenu() {
   }
 
   return (
-    <div className="guest-menu" style={{ minHeight: '100vh', background: 'var(--theme-bg)', color: 'var(--theme-text1)' }}>
+    // The inline `minHeight: 100vh` this used to carry had to go: guestMenu.css now makes this
+    // element its own scrollport at `height: 100dvh`, and a min-height of 100vh (always >= 100dvh)
+    // would push it taller than that scrollport, handing the scroll back to the body — which is
+    // precisely the condition that stopped the category bar sticking in the first place.
+    <div className="guest-menu" ref={scrollRootRef} style={{ background: 'var(--theme-bg)', color: 'var(--theme-text1)' }}>
       <div style={{ maxWidth: 640, margin: '0 auto', padding: '28px 20px 100px', '--guest-menu-nav-h': '52px' }}>
         {/* This is the one page PRODUCT.md names as the deliberate brand-facing exception — a
             guest's own leisurely browsing moment, not an ops screen — so the outlet name gets the
@@ -386,6 +491,13 @@ export default function GuestMenu() {
               breaking the One Accent Rule. */}
           <div aria-hidden="true" style={{ width: 34, height: 2, borderRadius: 1, background: 'var(--theme-accent)', margin: '0 auto 10px' }} />
           <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>{tableName}</p>
+          {/* Nothing on this page previously said what a price included, which is the other half
+              of the VAT bug: even once the arithmetic is right, "NPR 500" is a promise the guest
+              cannot check. One quiet line, and it states the case that is actually true for this
+              outlet rather than a generic hedge. */}
+          <p style={{ margin: '6px 0 0', fontSize: 11.5, color: 'var(--theme-text3)' }}>
+            {vatApplies ? 'All prices include VAT.' : 'All prices are final. No VAT is added.'}
+          </p>
         </div>
 
         {(rows.some(r => r.is_veg != null) || allAllergens.length > 0) && (
@@ -415,7 +527,7 @@ export default function GuestMenu() {
                 aria-current={activeCategory === cat ? 'true' : undefined}
                 onClick={() => scrollToCategory(cat)}
               >
-                {cat}
+                {categoryLabel(cat)}
               </button>
             ))}
           </div>
@@ -430,6 +542,7 @@ export default function GuestMenu() {
             <OrderStatusCard
               requestStatus={requestStatus} kotStatus={kotStatus} remainingMinutes={remainingMinutes}
               items={requestSnapshot.items} covers={requestSnapshot.covers}
+              tableName={tableName} statusStale={statusStale}
               onOrderAgain={orderAgain}
             />
           </div>
@@ -454,16 +567,19 @@ export default function GuestMenu() {
             key={cat} ref={el => { categoryRefs.current[cat] = el }}
             style={{ marginBottom: 28, scrollMarginTop: 'var(--guest-menu-nav-h)' }}
           >
-            <h2 style={{
-              fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
-              color: 'var(--theme-accent-ink)', margin: '0 0 12px', paddingBottom: 6,
-              borderBottom: '1px solid var(--theme-border)',
-            }}>{cat}</h2>
+            {!(cat === UNCATEGORISED && categories.length === 1) && (
+              <h2 style={{
+                fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+                color: 'var(--theme-accent-ink)', margin: '0 0 12px', paddingBottom: 6,
+                borderBottom: '1px solid var(--theme-border)',
+              }}>{categoryLabel(cat)}</h2>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {byCategory[cat].map(item => (
                 <MenuItemCard
                   key={item.recipe_id} item={item} nutritionEnabled={nutritionEnabled}
-                  orderingEnabled={orderingEnabled}
+                  orderingEnabled={orderingEnabled} vatRegistered={vatRegistered}
+                  showImageColumn={anyImages}
                   qty={cart[item.recipe_id] || 0}
                   onQtyChange={qty => setQty(item.recipe_id, qty)}
                 />
@@ -477,7 +593,12 @@ export default function GuestMenu() {
         <button
           onClick={() => setReviewOpen(true)}
           style={{
-            position: 'fixed', left: 16, right: 16, bottom: 16, zIndex: 50,
+            position: 'fixed', left: 16, right: 16, zIndex: 50,
+            // viewport-fit=cover ships on this page, so `bottom: 16` put the primary call to
+            // action inside the iPhone home-indicator gesture strip — a swipe up to submit an
+            // order dismisses the app instead. The inset is 0 on every device without one.
+            bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+            minHeight: 44,
             maxWidth: 608, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '14px 18px', borderRadius: 10, border: 'none', cursor: 'pointer',
             background: 'var(--theme-accent)', color: 'var(--theme-accent-text)', fontSize: 14, fontWeight: 700,
@@ -505,8 +626,12 @@ export default function GuestMenu() {
                   {allAllergens.map(a => (
                     <button
                       key={a} type="button" onClick={() => toggleAllergen(a)}
+                      // A toggle must say whether it is on. Without aria-pressed the only signal
+                      // that an allergen is excluded is the red border, i.e. colour alone.
+                      aria-pressed={excludedAllergens.includes(a)}
+                      className="gm-chip"
                       style={{
-                        padding: '6px 12px', borderRadius: 20, fontSize: 12.5, textTransform: 'capitalize', cursor: 'pointer',
+                        padding: '8px 14px', minHeight: 44, borderRadius: 20, fontSize: 12.5, textTransform: 'capitalize', cursor: 'pointer',
                         border: `1px solid ${excludedAllergens.includes(a) ? 'var(--theme-red)' : 'var(--theme-border)'}`,
                         background: excludedAllergens.includes(a) ? 'var(--gm-danger-tint)' : 'var(--theme-input-bg)',
                         color: excludedAllergens.includes(a) ? 'var(--theme-red-text)' : 'var(--theme-text2)',
@@ -531,13 +656,25 @@ export default function GuestMenu() {
       {reviewOpen && (
         <Modal title="Your Order" onClose={() => setReviewOpen(false)} maxWidth={480}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {cartLines.length === 0 && <p style={{ fontSize: 13, color: 'var(--theme-text2)' }}>Your cart is empty.</p>}
+            {/* Emptying the cart from inside this modal used to leave a single sentence and no
+                way forward — the guest had to find the backdrop or the × to get back to the menu
+                they were trying to order from. */}
+            {cartLines.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '8px 0 4px' }}>
+                <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
+                  Nothing in your order yet.
+                </p>
+                <button type="button" className="btn btn-primary" onClick={() => setReviewOpen(false)}>
+                  Back to the menu
+                </button>
+              </div>
+            )}
             {cartLines.map(l => (
               <div key={l.item.recipe_id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ flex: 1, fontSize: 14 }}>{l.item.name}</span>
-                <Stepper qty={l.qty} onChange={qty => setQty(l.item.recipe_id, qty)} />
+                <Stepper qty={l.qty} label={l.item.name} onChange={qty => setQty(l.item.recipe_id, qty)} />
                 <span style={{ width: 74, textAlign: 'right', fontSize: 13, color: 'var(--theme-text2)' }}>
-                  {fmtNpr(priceIncVat(l.item) * l.qty)}
+                  {fmtNpr(priceIncVat(l.item, vatRegistered) * l.qty)}
                 </span>
               </div>
             ))}
@@ -547,11 +684,21 @@ export default function GuestMenu() {
                   <span>Total</span>
                   <span>{fmtNpr(cartTotal)}</span>
                 </div>
+                <p style={{ margin: '2px 0 0', fontSize: 11.5, color: 'var(--theme-text3)' }}>
+                  {vatApplies ? 'Includes VAT.' : 'No VAT is added.'} Staff confirm this order before the kitchen starts; you pay at the table.
+                </p>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
                   <span style={{ fontSize: 13 }}>How many of you are dining?</span>
-                  <Stepper qty={covers} onChange={n => setCovers(Math.max(1, Math.min(50, n)))} />
+                  <Stepper qty={covers} label="guests dining" onChange={n => setCovers(Math.max(1, Math.min(50, n)))} />
                 </div>
+                {/* This had no accessible name whatsoever — a placeholder is not a label, and it
+                    disappears the moment anyone types into it. `.form-input` also brings the 16px
+                    coarse-pointer floor, below which iOS Safari zooms the viewport and never
+                    zooms back; at 13px this box did exactly that, mid-order. */}
+                <label htmlFor="guest-note" className="sr-only">Notes for the kitchen (optional)</label>
                 <textarea
+                  id="guest-note"
+                  className="form-input"
                   value={guestNote} onChange={e => setGuestNote(e.target.value)}
                   placeholder="Any notes for the kitchen? (optional)"
                   rows={2}
@@ -562,11 +709,20 @@ export default function GuestMenu() {
                   }}
                 />
                 {submitError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12.5, margin: 0 }}>{submitError}</p>}
+                {/* The last thing read before committing. A QR sticker that has been moved, or a
+                    guest who scanned the code on the next table, is only catchable here — and the
+                    modal did not name the table at all. */}
+                <p style={{
+                  margin: '6px 0 0', fontSize: 13, fontWeight: 600, color: 'var(--theme-accent-ink)',
+                  textAlign: 'center',
+                }}>
+                  Sending to {tableName}
+                </p>
                 <button
                   className="btn btn-primary" disabled={submitting} onClick={placeOrder}
                   style={{ marginTop: 4 }}
                 >
-                  {submitting ? 'Placing order…' : 'Place Order'}
+                  {submitting ? 'Placing order…' : `Place Order · ${fmtNpr(cartTotal)}`}
                 </button>
               </>
             )}
@@ -577,7 +733,7 @@ export default function GuestMenu() {
   )
 }
 
-function OrderStatusCard({ requestStatus, kotStatus, remainingMinutes, items, covers, onOrderAgain }) {
+function OrderStatusCard({ requestStatus, kotStatus, remainingMinutes, items, covers, tableName, statusStale, onOrderAgain }) {
   if (requestStatus === 'dismissed') {
     return (
       <div className="card" style={{ padding: 16, marginBottom: 24, borderColor: 'var(--theme-red)' }}>
@@ -606,6 +762,14 @@ function OrderStatusCard({ requestStatus, kotStatus, remainingMinutes, items, co
       <p style={{ margin: '0 0 14px', fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>
         {stageLabel}
       </p>
+      {/* A stalled poll is not a stage. Saying so keeps the tracker honest: the dots below are
+          still showing the last stage we actually heard, and a guest who knows that will ask a
+          member of staff instead of waiting on a card that has quietly stopped moving. */}
+      {statusStale && (
+        <p role="status" style={{ margin: '-8px 0 14px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          Can't reach the kitchen right now — this is the last update we received. Trying again…
+        </p>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
         {STAGES.map((s, i) => (
           <div key={s} style={{ display: 'flex', alignItems: 'center', flex: i < STAGES.length - 1 ? 1 : '0 0 auto' }}>
@@ -632,41 +796,73 @@ function OrderStatusCard({ requestStatus, kotStatus, remainingMinutes, items, co
           {covers > 0 && (
             <span style={{ fontSize: 11.5, color: 'var(--theme-text3)', marginTop: 4 }}>{covers} guest{covers > 1 ? 's' : ''}</span>
           )}
+          {/* QR stickers get moved, and guests scan the code on the next table over. The table
+              appeared exactly once on this page, as 13px tertiary text under the outlet name, and
+              never again — so an order could be placed against the wrong table with nothing on
+              screen that would have caught it. Repeated here, where it is a statement of fact
+              about food already on its way. */}
+          {tableName && (
+            <span style={{ fontSize: 11.5, color: 'var(--theme-text3)' }}>Going to {tableName}</span>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-function Stepper({ qty, onChange }) {
-  // Matches posOrdersConstants.js's btnSm sizing — same widget, same touch-target standard,
-  // and here on the guest's own phone there's no cramped side panel forcing a smaller size.
+// `label` names what is being counted. Without it a menu of N dishes renders 2N buttons all
+// announcing "Decrease quantity", and the covers stepper announces the same thing again — four
+// steppers sharing two labels, which tells a screen-reader user the control's verb and never its
+// subject. DESIGN.md's template-aria-label rule (a control inside a .map() names its row).
+function Stepper({ qty, onChange, label }) {
+  // 44, not the 40 this copied from posOrdersConstants.js's btnSm. That size is tuned for a dense
+  // staff side panel on a fixed till; this is a diner's own phone, held one-handed, and 44 is
+  // WCAG 2.2 SC 2.5.8's touch target — on the one surface in the product that is 100% touch,
+  // there is no competing density argument for going under it.
   const btn = {
-    width: 40, height: 40, borderRadius: 8, border: '1px solid var(--theme-border-lt)',
+    width: 44, height: 44, borderRadius: 8, border: '1px solid var(--theme-border-lt)',
     background: 'var(--theme-input-bg)', color: 'var(--theme-text1)', cursor: 'pointer',
     fontSize: 18, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
   }
+  const what = label ? ` of ${label}` : ''
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <button type="button" style={btn} aria-label="Decrease quantity" onClick={() => onChange(qty - 1)}>−</button>
-      <span style={{ minWidth: 20, textAlign: 'center', fontSize: 14 }} aria-live="polite">{qty}</span>
-      <button type="button" style={btn} aria-label="Increase quantity" onClick={() => onChange(qty + 1)}>+</button>
+      <button type="button" style={btn} aria-label={`Decrease quantity${what}`} onClick={() => onChange(qty - 1)}>−</button>
+      <span style={{ minWidth: 24, textAlign: 'center', fontSize: 14 }} aria-live="polite">{qty}</span>
+      <button type="button" style={btn} aria-label={`Increase quantity${what}`} onClick={() => onChange(qty + 1)}>+</button>
     </div>
   )
 }
 
-function MenuItemCard({ item, nutritionEnabled, orderingEnabled, qty, onQtyChange }) {
+function MenuItemCard({ item, nutritionEnabled, orderingEnabled, vatRegistered, showImageColumn, qty, onQtyChange }) {
   const [imgFailed, setImgFailed] = useState(false)
-  const priceInc = priceIncVat(item)
+  const priceInc = priceIncVat(item, vatRegistered)
+  const hasImage = item.image_url && !imgFailed
 
   return (
     <div className="card" style={{ display: 'flex', gap: 14, padding: 14 }}>
-      {item.image_url && !imgFailed && (
+      {hasImage && (
         <img
           src={item.image_url} alt={item.name} onError={() => setImgFailed(true)}
           loading="lazy" decoding="async"
           style={{ width: 84, height: 84, borderRadius: 8, objectFit: 'cover', flexShrink: 0, background: 'var(--theme-input-bg)' }}
         />
+      )}
+      {/* Only on a menu that HAS photography — see anyImages. A monogram tile rather than a broken
+          -image glyph or an empty grey box: it holds the column so the list stays aligned, and it
+          reads as a deliberate plate mark rather than as something that failed to load. */}
+      {!hasImage && showImageColumn && (
+        <div
+          aria-hidden="true"
+          style={{
+            width: 84, height: 84, borderRadius: 8, flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border-lt)',
+            color: 'var(--theme-text3)', fontFamily: 'Georgia, serif', fontSize: 26, lineHeight: 1,
+          }}
+        >
+          {(item.name || '?').trim().charAt(0).toUpperCase()}
+        </div>
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
@@ -710,10 +906,11 @@ function MenuItemCard({ item, nutritionEnabled, orderingEnabled, qty, onQtyChang
         {orderingEnabled && (
           <div style={{ marginTop: 10 }}>
             {qty > 0 ? (
-              <Stepper qty={qty} onChange={onQtyChange} />
+              <Stepper qty={qty} label={item.name} onChange={onQtyChange} />
             ) : (
               <button
-                type="button" className="btn btn-ghost" style={{ fontSize: 12.5, padding: '4px 12px' }}
+                type="button" className="btn btn-ghost" style={{ fontSize: 12.5, padding: '4px 12px', minHeight: 44 }}
+                aria-label={`Add ${item.name} to your order`}
                 onClick={() => onQtyChange(1)}
               >+ Add</button>
             )}

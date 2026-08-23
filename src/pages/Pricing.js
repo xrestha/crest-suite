@@ -80,7 +80,13 @@ export default function Pricing() {
   }, [showFaq])
 
   return (
-    <div style={{ minHeight: '100vh', background: BG, color: 'var(--theme-text1)' }}>
+    // Its own scrollport rather than `minHeight: 100vh` — index.css's app-wide
+    // `html, body { overflow-x: hidden }` makes body a scroll container sized to its content, so
+    // the sticky nav below had a scrollport that never scrolled and had never stuck (measured on
+    // the built page: nav top 0 -> -250 -> -600). Same root cause and same fix as the guest menu's
+    // category bar and .login-page; relaxing the body rule was measured and loses the horizontal
+    // guard entirely. dvh so the fold is not under a phone's URL bar.
+    <div style={{ height: '100dvh', overflowY: 'auto', overscrollBehaviorY: 'contain', background: BG, color: 'var(--theme-text1)' }}>
 
       {/* Nav */}
       <nav style={{ background: CARD, borderBottom: `1px solid ${BORDER}`, padding: '0 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64, position: 'sticky', top: 0, zIndex: 100 }}>
