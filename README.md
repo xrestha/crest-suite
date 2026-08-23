@@ -213,8 +213,16 @@ applies it only when `settings.is_vat_registered`, and `get_guest_menu` never re
 so a non-registered outlet advertised every dish ~13% above what it then billed. Migration
 `20260823100000` returns the flag (DROP + CREATE: the return type changes), and `priceIncVat` now
 takes it as a **required** argument, so a call site that forgets it fails toward no-VAT rather than
-toward over-charging. The page also never said what a price included; it does now, in the outlet's
-own case rather than a generic hedge.
+toward over-charging. The page also never said what a price included; it now carries
+**"All prices are inclusive of VAT."** — and only for a VAT-registered outlet. That asymmetry is
+deliberate: a diner here genuinely cannot tell whether a menu price is the final price, since
+plenty of restaurants add 13% at the till, so stating the inclusion removes a real doubt. The
+non-registered case has no doubt to remove, and spelling it out as "no VAT is added" would answer a
+question nobody asked while volunteering, on the one page a restaurant's customers ever see, that
+the business is not VAT-registered. Absence of a claim is neutral; an explicit absence is a
+disclosure, and it is not the software's to make on a client's behalf. The promise is safe to print
+only because there is no service charge anywhere in the product — if one is ever added, this line
+changes with it.
 
 **A failed status poll rendered as "no open order".** The 5s poll destructured `{ data }` and
 dropped `error` — the S594 rule on the guest surface, where the cost is a diner watching a tracker

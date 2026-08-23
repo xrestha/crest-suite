@@ -327,7 +327,11 @@ export default function GuestMenu() {
   // section literally titled "OTHER" on a paying customer's screen — a database default reaching
   // a diner. It now renders with no heading at all when it is the only group (there is nothing to
   // distinguish it FROM), and as "More" when it sits alongside real ones.
-  const UNCATEGORISED = ' uncategorised'
+  // A value no real category can equal. Built with fromCharCode rather than written as an
+  // escape: a scripted edit collapsed the backslash once already and embedded a literal NUL
+  // byte in this file, which compiles and runs fine and makes the whole source read as
+  // BINARY to grep, ripgrep and every review tool. Keep the source plain text.
+  const UNCATEGORISED = String.fromCharCode(0) + 'uncategorised'
   const categories = []
   const byCategory = {}
   for (const r of filteredRows) {
@@ -493,11 +497,23 @@ export default function GuestMenu() {
           <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>{tableName}</p>
           {/* Nothing on this page previously said what a price included, which is the other half
               of the VAT bug: even once the arithmetic is right, "NPR 500" is a promise the guest
-              cannot check. One quiet line, and it states the case that is actually true for this
-              outlet rather than a generic hedge. */}
-          <p style={{ margin: '6px 0 0', fontSize: 11.5, color: 'var(--theme-text3)' }}>
-            {vatApplies ? 'All prices include VAT.' : 'All prices are final. No VAT is added.'}
-          </p>
+              cannot check. This line is that promise, and it is safe to make because there is no
+              service charge anywhere in the product — a bill is items + VAT (if registered)
+              - discount, rounded. If a service charge is ever added, this line has to change too.
+
+              Shown ONLY for a VAT-registered outlet, and the asymmetry is deliberate. Plenty of
+              restaurants here add 13% at the till, so a diner genuinely cannot tell whether a menu
+              price is the final price — stating the inclusion removes a real doubt. The
+              non-registered case has no such doubt to remove: the price shown is simply the price.
+              Spelling that out as "no VAT is added" would answer a question nobody asked and, on
+              the one page a restaurant's customers ever see, volunteer that the business is not
+              VAT-registered. Absence of a claim is neutral; an explicit absence is a disclosure,
+              and it is not this software's to make on a client's behalf. */}
+          {vatApplies && (
+            <p style={{ margin: '6px 0 0', fontSize: 11.5, color: 'var(--theme-text3)' }}>
+              All prices are inclusive of VAT.
+            </p>
+          )}
         </div>
 
         {(rows.some(r => r.is_veg != null) || allAllergens.length > 0) && (
@@ -685,7 +701,7 @@ export default function GuestMenu() {
                   <span>{fmtNpr(cartTotal)}</span>
                 </div>
                 <p style={{ margin: '2px 0 0', fontSize: 11.5, color: 'var(--theme-text3)' }}>
-                  {vatApplies ? 'Includes VAT.' : 'No VAT is added.'} Staff confirm this order before the kitchen starts; you pay at the table.
+                  {vatApplies ? 'Inclusive of VAT. ' : ''}Staff confirm this order before the kitchen starts; you pay at the table.
                 </p>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
                   <span style={{ fontSize: 13 }}>How many of you are dining?</span>
