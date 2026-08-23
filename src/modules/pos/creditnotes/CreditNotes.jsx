@@ -153,7 +153,7 @@ export default function CreditNotes() {
             </div>
             <div>
               <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="credit-notes-invoice-no">Invoice No.</label>
-              <input id="credit-notes-invoice-no" className="form-select" style={{ width: 140 }} placeholder="e.g. 2238" value={invoiceSearch}
+              <input id="credit-notes-invoice-no" className="form-input" style={{ width: 140 }} placeholder="e.g. 2238" value={invoiceSearch}
                 onChange={e => setInvoiceSearch(e.target.value)} />
             </div>
           </div>

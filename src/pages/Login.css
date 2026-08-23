@@ -365,13 +365,9 @@
   border-radius: var(--radius-md, 12px);
 }
 
-/* Per-field validation message, sitting directly under the input it belongs to. Carries role=alert
-   in the markup so it's announced, not just shown. */
-.login-field-error {
-  font-size: 13px;
-  color: var(--theme-red-text, #f87171);
-  line-height: 1.4;
-}
+/* The per-field validation message is `.field-error` in `index.css` — global, so the signed-out
+   pages and the app share one rule. This page had the only copy until 2026-08-23/S603; a second
+   copy here is what the class was extracted to prevent. */
 
 .login-field input[aria-invalid="true"] {
   border-color: var(--theme-red, #f87171);

@@ -158,6 +158,123 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S603 — 2026-08-23 — The field-error pattern reaches the app, seven years after the login page got it
+
+DESIGN.md carried a rule saying a failing field takes `aria-invalid`, a red border and a message
+under the box — and then said, in the same sentence, that only the signed-out pages did it and the
+rest of the product should treat it as "the pattern to extend". Nobody had. `aria-invalid` appeared
+in **exactly one file** in the whole codebase.
+
+What the other forms did instead was report a message about one box as one string somewhere else
+on the modal. `EmployeeForm.jsx` is the one that names the gap: it switched **tab** to reveal the
+offending field and then printed "Full name is required." in the footer. It knew which field had
+failed, moved the screen to it, and threw the fact away — a sighted user hunts, a screen-reader
+user is told a save failed and never told by what.
+
+Now shared. `.field-error` lives in `index.css` (global, so the signed-out pages and the app share
+one rule instead of Login owning the only copy — `.login-field-error` is folded into it), the
+`[aria-invalid="true"]` border hook covers `.form-input`/`.form-select`/`.form-field input|select|
+textarea` in `Layout.css`, and `components/FieldError.jsx` supplies the message plus
+`fieldAria(id, message)` and `invalidStyle(base, message)`. Adopted on 13 forms: Items, Vendors,
+Recipes, Purchase Bill, Menu Pricing, Fixed Assets (add + dispose), Gate Passes, Parking Slips,
+Employees, Advances (both modals), Incentive Configs, Reset Password.
+
+Four decisions came out of doing it:
+
+- **`aria-invalid` is the styling hook as well as the signal**, deliberately. A separate
+  `.is-invalid` class would let a field be *shown* as failing without being *announced* as failing;
+  this way they cannot drift.
+- **Form-level and field-level are different channels, not the same one placed differently.** A
+  rejected write, or a rule spanning several boxes — Items' conversion trio, Recipes' "add at least
+  one ingredient", Purchase Bill's line table — has no field to sit under and correctly stays
+  form-level.
+- **Editing a field clears its own error.** A border still red under a corrected box teaches the
+  user these messages are stale, which is how a real one gets scrolled past later.
+- **Invalid outranks every other border state** — focus, Menu Pricing's amber unsaved-edit border,
+  an open picker. Focusing the field the user has to fix is exactly when the signal must not vanish.
+
+`BsCalendarPicker` and `SearchableSelect` needed an `invalid={message}` **prop** rather than the CSS
+hook, for the same reason `touch` is a prop: every colour in them is an inline style and an
+attribute selector has no path to one. Both use `aria-describedby` only — their trigger is a
+`<button>`, and `aria-invalid` is unsupported on the button role, so setting it does nothing but
+trip jsx-a11y. Earning it would mean making the trigger a real combobox.
+
+Not done, and still open in DESIGN.md: the **disabled** field state remains unformalized, and a
+control styled inline still escapes both the border hook and the touch-sizing media query.
+
+Same pass, two stale rules in DESIGN.md corrected — both described the product as it was before a
+fix that had already shipped, which is worse than a gap because it reads as current:
+
+- The **Report shell** section still said `banners` is not gated on error. S601 reversed that
+  (`{!error && banners}`) after ConsolidatedPnl printed "Provisional — this period is still open…
+  the statement is reliable once the period is closed" directly above ReportPage's own "Nothing here
+  is a real figure — this is a failed read".
+- The **`id` + `htmlFor`** rule still read as a rollout in progress, naming three compliant files and
+  the IMS sweep. S569 and S576 finished it. Re-measured rather than asserted: all 27 files using
+  `.form-field` associate their labels, 345 `htmlFor` pairs across 61 files, and of 189 real
+  `<select>` elements **none** is unnamed — so the companion rule about unnamed selects (written as
+  "86 across 43 files") is now recorded as closed too.
+
+Then item 2 off the same list: **the disabled field state, which did not exist.** `.form-field
+input` sets its own `background`, `border` and `color`, and those override the UA's disabled
+styling — so a disabled field rendered **identical to an editable one**. Sales and Overheads
+disable their whole grid on a closed period, so the two pages where a locked month most needs to be
+obvious were the two where nothing said so; the boxes simply stopped responding.
+
+The surface now carries the state: the well flattens to `transparent`, the border steps to
+`--theme-border-lt`, cursor `not-allowed`. **Not `.btn:disabled`'s `opacity: 0.55`** — a button's
+label is a verb you may not press, a field's content is data, and a locked period's figures have to
+stay legible precisely because they can no longer be corrected. Read-only shares the treatment but
+keeps a text caret; it is not refusal, and the value is meant to be selected and copied. Two UA
+behaviours had to be overridden or none of it lands: WebKit paints disabled text with
+`-webkit-text-fill-color` (which `color` does not override) and iOS Safari adds its own opacity.
+
+The inline-styled controls escape all of it — and the period-lock inputs are inline, i.e. the sites
+that need it most — so `disabledStyle(base, isDisabled)` joins `invalidStyle(base, message)` in the
+new `src/shared/inlineFieldState.js`, applied on Sales (3), Overheads (4) and Leave Management (1).
+`AssetFormModal`'s Total Cost dropped its hand-rolled `color: text2` patch, which had been one site
+guessing at a treatment that did not exist. Three buttons on Sales were caught by the first pass of
+the sweep and reverted — `.btn:disabled` already owns those, and a field treatment on a button is
+the wrong answer twice.
+
+Then items 3 and 4, which turned out to share a root: **controls that had never been put on a
+class.**
+
+**The 16px touch floor had never left the login page.** DESIGN.md has described "under
+`pointer: coarse` inputs go to 16px" as the product's strategy since the touch tier was written, and
+it existed as `.login-field input` in `Login.css` and **nowhere else** — every field in IMS, HR and
+POS stayed 13px on a tablet. 16px is the threshold below which iOS Safari zooms the viewport on
+focus and never zooms back out, so on the till and the stock count — tablet surfaces by design —
+tapping any field turned "enter the quantity" into "now pan sideways to find Save". `Layout.css`'s
+coarse block now carries an element-level rule for `input`/`select`/`textarea` plus `min-height:
+44px` for `button:not([class])`.
+
+`!important` on that rule is load-bearing, not defensive — the same justification the reduced-motion
+block in the same file already carries. **370 form controls across ~46 files set their font-size in
+an inline `style` object**, and no selector beats an inline style; without it the floor would reach
+the controls that least needed it and skip every one that did. The button half is scoped to
+`:not([class])` because every classed button already has a tuned value here, and a bare `button`
+selector would quietly re-decide the ones that merely have no rule yet.
+
+**62 text controls across 22 files were wearing `.form-select`** — inputs and `QtyInput`s carrying
+`cursor: pointer`, i.e. text fields announcing themselves as menus. S593 named that bug in one file;
+it was in 22. All swapped to `.form-input`, and the swap was **not** a rename: `.form-input` sets
+`width: 100%` and `.form-select` does not, so a blind substitution would have stretched every
+toolbar search box that had never pinned its own width, and in a flex row a `flex-basis` of 100%
+wraps its neighbours. `.form-input--auto` is the difference — 14 of the 62 take it, classified
+mechanically (not inside a `.form-field`, no `width:`, no `flex:`). Width is layout, not control
+identity.
+
+`EmployeeForm.jsx`'s `inp` constant went with it: a hand-rolled copy of `.form-input` on 33
+controls, including a `borderRadius: 6` off the closed 8/12/18/24 scale. Its selects needed
+`.form-select` plus an explicit `width: '100%'` — the one thing `inp` supplied that the class does
+not — and the validated field could drop `invalidStyle` entirely, since a class is reachable by the
+`[aria-invalid]` hook.
+
+**Not claimed as finished:** 370 classless inline-styled controls remain. The touch floor no longer
+waits on them, but a class is still the better answer — it also brings the `[aria-invalid]` hook,
+the `:disabled` treatment and the shape scale, none of which an `!important` floor can supply.
+
 ### S602 — 2026-08-23 — A sub-recipe inside a sub-recipe, and the diamond that cost nothing
 
 Asked whether a sub-recipe can contain another sub-recipe — a "micro recipe". It already could: the

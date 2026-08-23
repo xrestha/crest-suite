@@ -1039,7 +1039,7 @@ export default function Help() {
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder="Search features, glossary terms, and FAQs…"
-          className="form-select"
+          className="form-input"
           style={{ width: '100%', maxWidth: 480 }}
         />
       </div>

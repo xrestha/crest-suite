@@ -1228,7 +1228,7 @@ export default function Roster() {
               </label>
               <input id="roster-covers-target" type="number" min="1" step="1" defaultValue={coversPerStaffTarget}
                 onBlur={e => saveCoversPerStaffTarget(e.target.value)}
-                className="form-select" style={{ width: 56, padding: '3px 6px', fontSize: 12 }} />
+                className="form-input" style={{ width: 56, padding: '3px 6px', fontSize: 12 }} />
             </div>
           </div>
 

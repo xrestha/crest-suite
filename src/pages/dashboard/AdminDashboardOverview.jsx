@@ -317,7 +317,7 @@ export default function AdminDashboardOverview() {
                 id="admin-client-search"
                 type="search" value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search by name or location…"
-                className="form-select" style={{ fontSize: 12, maxWidth: 220 }}
+                className="form-input form-input--auto" style={{ fontSize: 12, maxWidth: 220 }}
               />
               {/* Without this the table just silently shows fewer rows than the operator expects
                   and there is nothing on screen saying why, or how to get back. */}

@@ -7,6 +7,7 @@ import Tip from '../../../components/Tip'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import { disabledStyle } from '../../../shared/inlineFieldState'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
@@ -453,7 +454,7 @@ export default function Overheads() {
                         else updateRow(activeBucket, idx, 'category', e.target.value)
                       }}
                       disabled={isLocked}
-                      style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
+                      style={disabledStyle({ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }, isLocked)}
                     >
                       {cfg.presets.map(c => <option key={c} value={c}>{c}</option>)}
                       <option value="__custom__">Custom…</option>
@@ -464,7 +465,7 @@ export default function Overheads() {
                         onChange={e => updateRow(activeBucket, idx, 'category', e.target.value)}
                         placeholder="Category name"
                         disabled={isLocked}
-                        style={{ marginTop: 4, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
+                        style={disabledStyle({ marginTop: 4, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: '100%' }, isLocked)}
                       />
                     )}
                   </td>
@@ -474,7 +475,7 @@ export default function Overheads() {
                       onChange={e => updateRow(activeBucket, idx, 'description', e.target.value)}
                       disabled={isLocked}
                       placeholder={cfg.placeholders[row.category] || 'Description…'}
-                      style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
+                      style={disabledStyle({ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }, isLocked)}
                     />
                   </td>
                   <td style={{ textAlign: 'right' }}>
@@ -484,7 +485,7 @@ export default function Overheads() {
                       onChange={e => updateRow(activeBucket, idx, 'amount', e.target.value)}
                       disabled={isLocked}
                       placeholder="0"
-                      style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 130, textAlign: 'right' }}
+                      style={disabledStyle({ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 130, textAlign: 'right' }, isLocked)}
                     />
                   </td>
                   <td style={{ textAlign: 'right', fontSize: 13, color: bucketTotal > 0 && parseFloat(row.amount) > 0 ? (cfg.textColor || cfg.color) : 'var(--theme-text3)', fontWeight: 600 }}>

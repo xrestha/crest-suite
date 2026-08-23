@@ -13,6 +13,7 @@ import { persistSalesDay, findSupersededRows, depleteManualSales, SAVE_TIMEOUT_M
 import SupersedeConfirmModal from './SupersedeConfirmModal'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { disabledStyle } from '../../../shared/inlineFieldState'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 // S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
@@ -711,12 +712,12 @@ export default function Sales() {
                                 onChange={e => setBulkForm(f => ({ ...f, [recipe.id]: e.target.value }))}
                                 placeholder="0"
                                 disabled={isLocked}
-                                style={{
+                                style={disabledStyle({
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 110, textAlign: 'right',
                                   borderColor: parseFloat(qty) > 0 ? 'rgba(201,168,76,0.4)' : 'var(--theme-border)'
-                                }}
+                                }, isLocked)}
                               />
                             </td>
                             <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
@@ -871,12 +872,12 @@ export default function Sales() {
                                 onChange={e => setDailyForm(f => ({ ...f, [recipe.id]: e.target.value }))}
                                 placeholder="0"
                                 disabled={isLocked}
-                                style={{
+                                style={disabledStyle({
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 110, textAlign: 'right',
                                   borderColor: qty > 0 ? 'rgba(201,168,76,0.4)' : 'var(--theme-border)'
-                                }}
+                                }, isLocked)}
                               />
                             </td>
                             <td style={{ textAlign: 'right' }}>
@@ -886,12 +887,12 @@ export default function Sales() {
                                 onChange={e => setDiscountForm(f => ({ ...f, [recipe.id]: e.target.value }))}
                                 placeholder="0"
                                 disabled={isLocked}
-                                style={{
+                                style={disabledStyle({
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 100, textAlign: 'right',
                                   borderColor: disc > 0 ? 'rgba(248,113,113,0.4)' : 'var(--theme-border)'
-                                }}
+                                }, isLocked)}
                               />
                             </td>
                             <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>

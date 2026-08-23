@@ -218,7 +218,7 @@ export default function AdminClients() {
           <input
             id="clients-search"
             type="search" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search clients…" className="form-select" style={{ maxWidth: 220 }}
+            placeholder="Search clients…" className="form-input form-input--auto" style={{ maxWidth: 220 }}
           />
           <button className="btn btn-primary" onClick={() => { setShowNewForm(true); setFormError('') }}>+ New Client</button>
         </div>

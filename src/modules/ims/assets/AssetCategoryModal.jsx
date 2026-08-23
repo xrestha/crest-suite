@@ -75,7 +75,7 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
                     value={row.name}
                     onChange={e => update(idx, 'name', e.target.value)}
                     placeholder="e.g. Kitchen Equipment"
-                    className="form-select"
+                    className="form-input"
                     style={{ width: '100%' }}
                   />
                 </td>
@@ -84,7 +84,7 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
                     type="number" min="0" step="0.5"
                     value={row.default_useful_life_years}
                     onChange={e => update(idx, 'default_useful_life_years', e.target.value)}
-                    className="form-select"
+                    className="form-input"
                     style={{ width: '100%' }}
                   />
                 </td>

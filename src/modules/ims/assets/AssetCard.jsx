@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
+import FieldError, { fieldAria } from '../../../components/FieldError'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { computeDisposalGainLoss } from './depreciationCompute'
@@ -19,6 +20,8 @@ export default function AssetCard({ asset, onClose, onChanged }) {
   const [disposalForm, setDisposalForm] = useState({ status: 'disposed', disposal_date: '', disposal_proceeds: '', disposal_reason: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // Per-field validation; `error` above stays the form-level channel for a rejected write (S603).
+  const [dateErr, setDateErr] = useState('')
 
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -37,7 +40,8 @@ export default function AssetCard({ asset, onClose, onChanged }) {
   const pctDepreciated = asset.total_cost > 0 ? (accumulatedDepreciation / asset.total_cost) * 100 : 0
 
   async function submitDisposal() {
-    if (!disposalForm.disposal_date) { setError('Disposal date is required.'); return }
+    if (!disposalForm.disposal_date) { setDateErr('Disposal date is required.'); return }
+    setDateErr('')
     setSaving(true); setError('')
     const proceeds = parseFloat(disposalForm.disposal_proceeds) || 0
     const gainLoss = computeDisposalGainLoss({ closingNbvAtDisposal: currentNbv, disposalProceeds: proceeds })
@@ -140,15 +144,16 @@ export default function AssetCard({ asset, onClose, onChanged }) {
             </div>
             <div className="form-field">
               <label htmlFor="assetc-f2">Disposal Date</label>
-              <input id="assetc-f2" type="date" className="form-select" value={disposalForm.disposal_date} onChange={e => setDisposalForm(f => ({ ...f, disposal_date: e.target.value }))} />
+              <input id="assetc-f2" type="date" className="form-input" value={disposalForm.disposal_date} onChange={e => { setDateErr(''); setDisposalForm(f => ({ ...f, disposal_date: e.target.value })) }} {...fieldAria('assetc-f2', dateErr)} />
+              <FieldError id="assetc-f2" message={dateErr} />
             </div>
             <div className="form-field">
               <label htmlFor="assetc-f3">Proceeds (NPR)</label>
-              <input id="assetc-f3" type="number" className="form-select" value={disposalForm.disposal_proceeds} onChange={e => setDisposalForm(f => ({ ...f, disposal_proceeds: e.target.value }))} />
+              <input id="assetc-f3" type="number" className="form-input" value={disposalForm.disposal_proceeds} onChange={e => setDisposalForm(f => ({ ...f, disposal_proceeds: e.target.value }))} />
             </div>
             <div className="form-field" style={{ gridColumn: '1 / -1' }}>
               <label htmlFor="assetc-f4">Reason</label>
-              <input id="assetc-f4" className="form-select" value={disposalForm.disposal_reason} onChange={e => setDisposalForm(f => ({ ...f, disposal_reason: e.target.value }))} style={{ width: '100%' }} />
+              <input id="assetc-f4" className="form-input" value={disposalForm.disposal_reason} onChange={e => setDisposalForm(f => ({ ...f, disposal_reason: e.target.value }))} style={{ width: '100%' }} />
             </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>

@@ -3,6 +3,7 @@ import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import QtyInput from '../../../components/QtyInput'
 import SearchableSelect from '../../../components/SearchableSelect'
+import FieldError, { fieldAria } from '../../../components/FieldError'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { POOL_LABELS, POOL_EXAMPLES } from './taxPoolConstants'
 
@@ -40,10 +41,15 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
   const [form, setForm] = useState(() => asset ? formFromAsset(asset) : emptyForm())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // Per-field validation; `error` above stays the form-level channel for a rejected write (S603).
+  const [fieldErr, setFieldErr] = useState({})
 
   const categoryOptions = categories.map(c => ({ value: c.id, label: c.name }))
 
   function set(field, value) {
+    // Editing a field clears its own error — a border still red under a corrected box teaches the
+    // user that these messages are stale and worth ignoring.
+    setFieldErr(e => (e[field] ? { ...e, [field]: '' } : e))
     setForm(f => {
       const next = { ...f, [field]: value }
       if (field === 'category_id') {
@@ -58,9 +64,12 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
   }
 
   async function save() {
-    if (!form.name.trim()) { setError('Name is required.'); return }
-    if (!form.acquisition_date) { setError('Acquisition date is required.'); return }
-    if (!form.useful_life_years || parseFloat(form.useful_life_years) <= 0) { setError('Useful life must be greater than 0.'); return }
+    const fe = {}
+    if (!form.name.trim()) fe.name = 'Name is required.'
+    if (!form.acquisition_date) fe.acquisition_date = 'Acquisition date is required.'
+    if (!form.useful_life_years || parseFloat(form.useful_life_years) <= 0) fe.useful_life_years = 'Useful life must be greater than 0.'
+    setFieldErr(fe)
+    if (Object.keys(fe).length) return
 
     setSaving(true); setError('')
     const payload = {
@@ -99,37 +108,43 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
         </div>
         <div className="form-field">
           <label htmlFor="assetf-f2">Name</label>
-          <input id="assetf-f2" className="form-select" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Commercial Refrigerator" />
+          <input id="assetf-f2" className="form-input" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Commercial Refrigerator" {...fieldAria('assetf-f2', fieldErr.name)} />
+          <FieldError id="assetf-f2" message={fieldErr.name} />
         </div>
         <div className="form-field">
           <label htmlFor="assetf-f3"><Tip text="Which physical station or area this asset lives — e.g. Kitchen, Front of House, Storage." width={230}>Location</Tip></label>
-          <input id="assetf-f3" className="form-select" value={form.location} onChange={e => set('location', e.target.value)} placeholder="e.g. Kitchen" />
+          <input id="assetf-f3" className="form-input" value={form.location} onChange={e => set('location', e.target.value)} placeholder="e.g. Kitchen" />
         </div>
 
         <div className="form-field">
           <label htmlFor="assetf-f4">Quantity</label>
-          <QtyInput id="assetf-f4" value={form.quantity} onChange={v => set('quantity', v)} className="form-select" style={{ width: '100%' }} />
+          <QtyInput id="assetf-f4" value={form.quantity} onChange={v => set('quantity', v)} className="form-input" style={{ width: '100%' }} />
         </div>
         <div className="form-field">
           <label htmlFor="assetf-f5">Unit Cost (NPR)</label>
-          <QtyInput id="assetf-f5" value={form.unit_cost} onChange={v => set('unit_cost', v)} className="form-select" style={{ width: '100%' }} />
+          <QtyInput id="assetf-f5" value={form.unit_cost} onChange={v => set('unit_cost', v)} className="form-input" style={{ width: '100%' }} />
         </div>
         <div className="form-field">
           <label htmlFor="assetf-f6">Total Cost (NPR)</label>
-          <input id="assetf-f6" className="form-select" value={totalCost.toLocaleString('en-NP')} disabled style={{ color: 'var(--theme-text2)' }} />
+          {/* A computed figure, never typed into. The inline `color: text2` this used to carry was a
+              per-site guess at a disabled treatment that did not exist; `.form-select:disabled` in
+              Layout.css owns it now, and keeps the number readable rather than dimming it. */}
+          <input id="assetf-f6" className="form-input" value={totalCost.toLocaleString('en-NP')} disabled />
         </div>
 
         <div className="form-field">
           <label htmlFor="assetf-f7">Acquisition Date</label>
-          <input id="assetf-f7" type="date" className="form-select" value={form.acquisition_date} onChange={e => set('acquisition_date', e.target.value)} />
+          <input id="assetf-f7" type="date" className="form-input" value={form.acquisition_date} onChange={e => set('acquisition_date', e.target.value)} {...fieldAria('assetf-f7', fieldErr.acquisition_date)} />
+          <FieldError id="assetf-f7" message={fieldErr.acquisition_date} />
         </div>
         <div className="form-field">
           <label htmlFor="assetf-f8"><Tip text="Auto-fills from the category's default when you pick one — still editable per asset." width={250}>Useful Life (years)</Tip></label>
-          <QtyInput id="assetf-f8" value={form.useful_life_years} onChange={v => set('useful_life_years', v)} className="form-select" style={{ width: '100%' }} />
+          <QtyInput id="assetf-f8" value={form.useful_life_years} onChange={v => set('useful_life_years', v)} className="form-input" style={{ width: '100%' }} {...fieldAria('assetf-f8', fieldErr.useful_life_years)} />
+          <FieldError id="assetf-f8" message={fieldErr.useful_life_years} />
         </div>
         <div className="form-field">
           <label htmlFor="assetf-f9"><Tip text="Estimated value at the end of its useful life — depreciation never brings NBV below this." width={250}>Salvage Value (NPR)</Tip></label>
-          <QtyInput id="assetf-f9" value={form.salvage_value} onChange={v => set('salvage_value', v)} className="form-select" style={{ width: '100%' }} />
+          <QtyInput id="assetf-f9" value={form.salvage_value} onChange={v => set('salvage_value', v)} className="form-input" style={{ width: '100%' }} />
         </div>
 
         <div className="form-field">
@@ -146,20 +161,20 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
         </div>
         <div className="form-field">
           <label htmlFor="assetf-f11"><Tip text="Percentage of this asset's use that's personal rather than business. Reports default to filtering this to 0% — apportioned depreciation for a non-zero value isn't calculated in v1." width={300}>Personal Use %</Tip></label>
-          <QtyInput id="assetf-f11" value={form.personal_use_percent} onChange={v => set('personal_use_percent', v)} className="form-select" style={{ width: '100%' }} />
+          <QtyInput id="assetf-f11" value={form.personal_use_percent} onChange={v => set('personal_use_percent', v)} className="form-input" style={{ width: '100%' }} />
         </div>
         <div className="form-field">
           <label htmlFor="assetf-f12">Department / Cost Center</label>
-          <input id="assetf-f12" className="form-select" value={form.department} onChange={e => set('department', e.target.value)} placeholder="e.g. Kitchen" />
+          <input id="assetf-f12" className="form-input" value={form.department} onChange={e => set('department', e.target.value)} placeholder="e.g. Kitchen" />
         </div>
 
         <div className="form-field" style={{ gridColumn: '1 / -1' }}>
           <label htmlFor="assetf-f13">Description</label>
-          <input id="assetf-f13" className="form-select" value={form.description} onChange={e => set('description', e.target.value)} style={{ width: '100%' }} />
+          <input id="assetf-f13" className="form-input" value={form.description} onChange={e => set('description', e.target.value)} style={{ width: '100%' }} />
         </div>
         <div className="form-field" style={{ gridColumn: '1 / -1' }}>
           <label htmlFor="assetf-f14">Notes</label>
-          <textarea id="assetf-f14" className="form-select" value={form.notes} onChange={e => set('notes', e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} />
+          <textarea id="assetf-f14" className="form-input" value={form.notes} onChange={e => set('notes', e.target.value)} rows={2} style={{ width: '100%', resize: 'vertical' }} />
         </div>
       </div>
 

@@ -31,6 +31,12 @@ export default function BsCalendarPicker({
   placeholder = 'Select BS date',
   disabled = false, clearable = false,
   id, ariaLabel,
+  // The validation message this picker's field is showing, or falsy. It has to be a PROP for the
+  // same reason `touch` does: every size and colour in this component is an inline style, so the
+  // `[aria-invalid="true"]` rules in Layout.css have no path to the trigger. Passing the message
+  // itself (rather than a boolean) lets the trigger point `aria-describedby` at the `<FieldError>`
+  // rendered beside it, which is the half that makes the state announced rather than merely red.
+  invalid = '',
   // Opt-in phone sizing for the Crest Staff portal. It has to be a prop, not a
   // `@media (pointer: coarse)` rule, because every size in this component is an inline style and
   // a media query cannot reach one. On the default path nothing changes; with `touch` the day
@@ -313,15 +319,25 @@ export default function BsCalendarPicker({
 
   return (
     <div ref={triggerRef} style={{ position: 'relative' }}>
+      {/* The invalid state reaches the trigger as aria-describedby, NOT aria-invalid: this is a
+          <button>, and aria-invalid is not supported on the button role — a button cannot be in an
+          invalid VALUE state, so assistive tech ignores it (and jsx-a11y flags it). Pointing at the
+          <FieldError> beside it is what actually reaches a screen-reader user; the red border below
+          is the sighted half. Making this a real combobox, the way SearchableSelect became one in
+          S521, would earn aria-invalid properly — a larger change than the one this belongs to. */}
       <button
         type="button"
         id={id}
         aria-label={ariaLabel}
+        aria-describedby={invalid && id ? `${id}-err` : undefined}
         disabled={disabled}
         onClick={() => !disabled && setOpen(o => !o)}
         style={{
           width: '100%', textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer',
-          background: 'var(--theme-input-bg)', border: `1px solid ${open ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+          background: 'var(--theme-input-bg)',
+          // Invalid outranks open: focusing the field the user has to fix is exactly when the
+          // signal must not disappear.
+          border: `1px solid ${invalid ? 'var(--theme-red)' : open ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
           borderRadius: touch ? 'var(--radius-md)' : 6, padding: touch ? '11px 12px' : '8px 10px',
           minHeight: touch ? 44 : undefined, fontSize: touch ? 16 : 13,
           color: displayValue ? 'var(--theme-text1)' : 'var(--theme-text3)',

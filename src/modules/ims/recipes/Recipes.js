@@ -7,6 +7,7 @@ import { withTimeout } from '../../../utils/withTimeout'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
+import FieldError, { fieldAria } from '../../../components/FieldError'
 import { NUTRIENTS, calcRecipeNutrition, calcLiveNutrition, hasNutrition } from '../../../utils/nutrition'
 import { getSuggestedPrice } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -72,6 +73,10 @@ export default function Recipes() {
   const [fcPctSaved, setFcPctSaved] = useState(null) // null = new recipe; string = DB value
   const [fcPctSaving, setFcPctSaving] = useState(false)
   const [error, setError] = useState('')
+  // Per-field validation. `error` above stays the form-level channel — no client selected, a
+  // rejected write, and the ingredient-list rule, which belongs to the list rather than to any one
+  // box and so has no field to sit under (S603).
+  const [nameErr, setNameErr] = useState('')
   const [search, setSearch] = useState('')
   const [ingSearch, setIngSearch] = useState('')
   const [printRecipe, setPrintRecipe] = useState(null)
@@ -197,6 +202,7 @@ export default function Recipes() {
     setFcPctSaved(null)
     setUsdaCandidates([])
     setError('')
+    setNameErr('')
     setView('edit')
   }
 
@@ -228,6 +234,7 @@ export default function Recipes() {
     setIngredients(ings.length > 0 ? ings : [{ _key: Date.now(), item_id: '', sub_recipe_id: '', qty_per_portion: '', type: 'item' }])
     setUsdaCandidates([])
     setError('')
+    setNameErr('')
     setView('edit')
   }
 
@@ -452,7 +459,8 @@ export default function Recipes() {
     // recipe invisible (the list query filters by client_id). This previously happened
     // when an admin saved before the viewed client had hydrated from localStorage.
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return }
-    if (!recipeForm.name.trim()) { setError('Recipe name is required.'); return }
+    if (!recipeForm.name.trim()) { setNameErr('Recipe name is required.'); return }
+    setNameErr('')
     const validIngs = ingredients.filter(i =>
       (i.type === 'item' ? i.item_id : i.sub_recipe_id) && parseFloat(i.qty_per_portion) > 0
     )
@@ -1116,7 +1124,8 @@ export default function Recipes() {
             <div style={{ display: 'grid', gridTemplateColumns: isSubRecipeForm ? '2fr 1fr 1fr 1fr' : '2fr 1fr 1fr 1fr', gap: 16 }}>
               <div className="form-field">
                 <label htmlFor="recipe-f1">Recipe / Dish Name *</label>
-                <input id="recipe-f1" value={recipeForm.name} onChange={e => setRecipeForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Mango Sticky Rice" autoFocus />
+                <input id="recipe-f1" value={recipeForm.name} onChange={e => { setNameErr(''); setRecipeForm(f => ({ ...f, name: e.target.value })) }} placeholder="e.g. Mango Sticky Rice" autoFocus {...fieldAria('recipe-f1', nameErr)} />
+                <FieldError id="recipe-f1" message={nameErr} />
               </div>
               <div className="form-field">
                 <label htmlFor="recipe-f2">Category</label>

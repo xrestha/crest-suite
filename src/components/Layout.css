@@ -1205,6 +1205,41 @@ tr.interactive-row:focus-visible {
   .tab-btn {
     min-height: 32px;
   }
+
+  /* ── The 16px floor, which the app had never had ────────────────────────────────────────────
+     DESIGN.md has described "under `pointer: coarse` inputs go to 16px" as the product's strategy
+     since the touch tier was written, and until 2026-08-23/S603 that rule existed in exactly one
+     place: `.login-field input` in `Login.css`. So it covered the signed-out pages and **nothing
+     else** — every field in IMS, HR and POS stayed at 13px on a tablet. 16px is the threshold
+     below which iOS Safari zooms the viewport on focus and never zooms back out, so tapping any
+     field in the product turned "enter the quantity" into "now pan the page sideways to find the
+     Save button". That is not a nicety on this product: the POS till and the stock count are
+     tablet surfaces by design.
+
+     `!important` is load-bearing here, exactly as it is in the reduced-motion block above, and for
+     the same reason: 266 form controls across 46 files set their font-size in an inline `style`
+     object, and no selector beats an inline style. Without it this rule would close the gap for
+     the controls that least needed it and skip every one that did. A control on a class is still
+     the better answer — it also wins the `[aria-invalid]` and `:disabled` hooks — but the floor
+     must not wait on that sweep.
+
+     Deliberately excluded: checkbox/radio (sized above), range/color (no text), file (the real
+     input is visually-hidden behind a .btn), and the button-shaped input types. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="submit"]):not([type="button"]):not([type="reset"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* A button carrying NO class is one styled inline, which is the shape this block could not
+     reach. Scoped to `:not([class])` on purpose rather than bare `button`: every classed button
+     already has a tuned value here (.btn 44, .btn-sm and .tab-btn 32, .sidebar-link 40) and a bare
+     selector would quietly re-decide the ones that simply have no rule yet. min-height only —
+     min-width on a narrow icon button in a table row squeezes its neighbours, while extra height
+     just makes the row taller, which on a tablet is the point. */
+  button:not([class]) {
+    min-height: 44px;
+  }
   /* The sidebar's own controls were in no coarse rule at all: measured 20px (outlet/client
      dropdown trigger) and 25px (search) on every authenticated page. They are the entry point to
      switching outlet and to the command palette, so on a tablet the two most frequent navigation
@@ -1705,6 +1740,110 @@ textarea:focus-visible {
 .form-input::placeholder,
 .form-field input::placeholder {
   color: var(--theme-text3);
+}
+
+/* `.form-input` fills its container, which is right inside a `.form-field` column and wrong in a
+   filter toolbar — a search box or a time field there sizes to its content, and a flex-basis of
+   100% makes its neighbours wrap. This modifier is the difference, and it exists because 60 text
+   inputs across 22 files had been wearing `.form-select` instead (S593's rule, at scale): that
+   class carries `cursor: pointer`, so a text field announced itself as a menu, and swapping it for
+   `.form-input` would otherwise have changed the width of every one that had not pinned its own.
+   Width is layout, not control identity — reach for this rather than an inline `width: auto`. */
+.form-input--auto {
+  width: auto;
+}
+
+/* ── Invalid field ────────────────────────────────────────────────────────────────────────────
+   `aria-invalid="true"` is both the assistive-tech signal and the styling hook, so a field cannot
+   be shown as failing without also being announced as failing — the two can never drift apart the
+   way a `.is-invalid` class and a separate aria attribute would. Pair it with a `.field-error`
+   message carrying role="alert" (index.css): the red border is a reinforcement, never the message,
+   since colour alone conveys nothing to a screen reader or a red-blind reader (WCAG 1.4.1).
+
+   Placed AFTER the :focus rules deliberately. `.form-input[aria-invalid="true"]` and
+   `.form-input:focus` are both specificity (0,2,0), so source order is what decides which border
+   colour a focused invalid field gets — and it must stay red: focusing the field the user has to
+   fix is precisely when the signal must not disappear. The .form-field descendants win on
+   specificity either way; the standalone ones do not. */
+.form-input[aria-invalid="true"],
+.form-select[aria-invalid="true"],
+.form-field input[aria-invalid="true"],
+.form-field select[aria-invalid="true"],
+.form-field textarea[aria-invalid="true"] {
+  border-color: var(--theme-red);
+}
+
+.form-input[aria-invalid="true"]:focus,
+.form-select[aria-invalid="true"]:focus,
+.form-field input[aria-invalid="true"]:focus,
+.form-field select[aria-invalid="true"]:focus,
+.form-field textarea[aria-invalid="true"]:focus {
+  border-color: var(--theme-red);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-red) 22%, transparent);
+}
+
+/* Keyboard focus keeps the solid indicator from S574 — the ring alone measures 1.15:1 on Rosé
+   Dawn — but tinted red rather than accent, so the field still reads as the failing one. */
+.form-input[aria-invalid="true"]:focus-visible,
+.form-select[aria-invalid="true"]:focus-visible,
+.form-field input[aria-invalid="true"]:focus-visible,
+.form-field select[aria-invalid="true"]:focus-visible,
+.form-field textarea[aria-invalid="true"]:focus-visible {
+  box-shadow: 0 0 0 2px var(--theme-focus-outline),
+              0 0 0 5px color-mix(in srgb, var(--theme-red) 22%, transparent);
+}
+
+/* ── Not-editable field: disabled and read-only ───────────────────────────────────────────────
+   Until 2026-08-23/S603 there was NO rule here at all, while `.form-field input` sets its own
+   background, border and colour — so those declarations overrode the UA's disabled styling and a
+   disabled field rendered **identical to an editable one**. On Sales and Overheads a closed period
+   disables the whole grid, so the two pages where a locked month most needs to be obvious were the
+   two where nothing said so: the boxes simply stopped responding.
+
+   THE STATE IS CARRIED BY THE SURFACE, NEVER BY THE VALUE. The well flattens to transparent — it
+   stops looking like something you type into and takes the card or row behind it — and the border
+   steps down to `border-lt`. The text is left exactly as readable as it was. This is deliberately
+   NOT `.btn:disabled`'s `opacity: 0.55`, and the difference is not a stylistic one: a button's
+   label is a verb you may not press, while a field's content is DATA. A locked period still shows
+   a real month of real figures, and those have to stay legible precisely because they can no
+   longer be corrected. Dimming them is the opacity mistake this file's own Don't-list names —
+   opacity multiplies through the text colour and takes it below AA.
+
+   Disabled and read-only render the same because the message to the user is the same — not
+   editable here. What differs between them is the tab order and whether the value can be selected
+   and copied, which is the browser's job and not the palette's. */
+.form-input:disabled,
+.form-select:disabled,
+.form-field input:disabled,
+.form-field select:disabled,
+.form-field textarea:disabled,
+.form-input[readonly],
+.form-field input[readonly],
+.form-field textarea[readonly] {
+  background: transparent;
+  border-color: var(--theme-border-lt);
+  box-shadow: none;
+  /* WebKit paints a disabled control's text with -webkit-text-fill-color, which plain `color` does
+     not override, and iOS Safari layers its own opacity on top. Without both of these the value
+     greys out anyway and everything above is defeated by the UA stylesheet. */
+  -webkit-text-fill-color: var(--theme-text1);
+  opacity: 1;
+}
+
+.form-input:disabled,
+.form-select:disabled,
+.form-field input:disabled,
+.form-field select:disabled,
+.form-field textarea:disabled {
+  cursor: not-allowed;
+}
+
+/* Read-only is not refusal: the value is real and meant to be read, selected and copied, so the
+   cursor stays a text caret rather than the barred circle. */
+.form-input[readonly],
+.form-field input[readonly],
+.form-field textarea[readonly] {
+  cursor: text;
 }
 
 .form-grid {

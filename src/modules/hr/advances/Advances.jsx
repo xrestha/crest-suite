@@ -6,6 +6,8 @@ import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import FieldError, { fieldAria } from '../../../components/FieldError'
+import { invalidStyle } from '../../../shared/inlineFieldState'
 import { adToBs } from '../../../utils/bsCalendar'
 
 const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
@@ -43,6 +45,10 @@ export default function Advances() {
   const [repayForm,  setRepayForm]  = useState(EMPTY_REPAY)
   const [saving,     setSaving]     = useState(false)
   const [error,      setError]      = useState('')
+  // Per-field validation, keyed by control id so the two modals on this page (Add advance, Record
+  // repayment) can share one map without colliding. `error` above stays the form-level channel for
+  // a rejected write (S603).
+  const [fieldErr, setFieldErr] = useState({})
   const [settleTarget, setSettleTarget] = useState(null)
 
   const load = useCallback(async () => {
@@ -87,14 +93,20 @@ export default function Advances() {
   const advanceCount = activeAdvances.filter(a => a.type === 'advance').length
   const loanCount    = activeAdvances.filter(a => a.type === 'loan').length
 
-  function setAdd(f, v) { setAddForm(p => ({ ...p, [f]: v })) }
-  function setRepay(f, v) { setRepayForm(p => ({ ...p, [f]: v })) }
+  // Both setters clear the edited field's own error: a border still red under a corrected box
+  // teaches the user these messages are stale and worth ignoring.
+  function clearFieldErr(id) { setFieldErr(e => (e[id] ? { ...e, [id]: '' } : e)) }
+  function setAdd(f, v) { clearFieldErr(`adv-${f}`); setAddForm(p => ({ ...p, [f]: v })) }
+  function setRepay(f, v) { clearFieldErr(`adv-repay-${f}`); setRepayForm(p => ({ ...p, [f]: v })) }
 
   async function handleAdd() {
     if (!clientId) return
-    if (!addForm.employee_id) { setError('Select an employee.'); return }
-    if (!addForm.issued_date) { setError('Set the issued date.'); return }
-    if (!addForm.amount || parseFloat(addForm.amount) <= 0) { setError('Enter a valid amount.'); return }
+    const fe = {}
+    if (!addForm.employee_id) fe['adv-employee'] = 'Select an employee.'
+    if (!addForm.issued_date) fe['adv-issued-date'] = 'Set the issued date.'
+    if (!addForm.amount || parseFloat(addForm.amount) <= 0) fe['adv-amount'] = 'Enter a valid amount.'
+    setFieldErr(fe)
+    if (Object.keys(fe).length) return
     setError(''); setSaving(true)
     const { error: err } = await scopedInsert('hr_advances', {
       employee_id:        addForm.employee_id,
@@ -112,8 +124,11 @@ export default function Advances() {
 
   async function handleRepay() {
     if (!clientId || !selected) return
-    if (!repayForm.repaid_date) { setError('Set the repayment date.'); return }
-    if (!repayForm.amount || parseFloat(repayForm.amount) <= 0) { setError('Enter a valid amount.'); return }
+    const fe = {}
+    if (!repayForm.repaid_date) fe['adv-repay-date'] = 'Set the repayment date.'
+    if (!repayForm.amount || parseFloat(repayForm.amount) <= 0) fe['adv-repay-amount'] = 'Enter a valid amount.'
+    setFieldErr(fe)
+    if (Object.keys(fe).length) return
     const adv = advances.find(a => a.id === selected)
     if (!adv) return
     setError(''); setSaving(true)
@@ -361,7 +376,9 @@ export default function Advances() {
                 value={addForm.employee_id}
                 onChange={v => setAdd('employee_id', v)}
                 placeholder="Select employee…"
+                invalid={fieldErr['adv-employee']}
               />
+              <FieldError id="adv-employee" message={fieldErr['adv-employee']} />
             </div>
 
             <div style={{ display: 'flex', gap: 12 }}>
@@ -374,14 +391,16 @@ export default function Advances() {
               </div>
               <div style={{ flex: 1 }}>
                 <label style={lbl} htmlFor="adv-issued-date">Issued Date (BS)</label>
-                <BsCalendarPicker id="adv-issued-date" value={addForm.issued_date} onChange={v => setAdd('issued_date', v)} placeholder="Select date" clearable />
+                <BsCalendarPicker id="adv-issued-date" value={addForm.issued_date} onChange={v => setAdd('issued_date', v)} placeholder="Select date" clearable invalid={fieldErr['adv-issued-date']} />
+                <FieldError id="adv-issued-date" message={fieldErr['adv-issued-date']} />
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: 12 }}>
               <div style={{ flex: 1 }}>
                 <label style={lbl} htmlFor="adv-amount"><Tip text="Total amount issued to the employee." width={200}>Amount (NPR)</Tip></label>
-                <input id="adv-amount" style={inp} type="number" min="1" placeholder="e.g. 20000" value={addForm.amount} onChange={e => setAdd('amount', e.target.value)} />
+                <input id="adv-amount" style={invalidStyle(inp, fieldErr['adv-amount'])} type="number" min="1" placeholder="e.g. 20000" value={addForm.amount} onChange={e => setAdd('amount', e.target.value)} {...fieldAria('adv-amount', fieldErr['adv-amount'])} />
+                <FieldError id="adv-amount" message={fieldErr['adv-amount']} />
               </div>
               <div style={{ flex: 1 }}>
                 <label style={lbl} htmlFor="adv-installment"><Tip text="Monthly deduction amount. Shows in the detail panel as a reminder during payroll." width={240}>Installment / Month (NPR)</Tip></label>
@@ -418,12 +437,14 @@ export default function Advances() {
 
             <div>
               <label style={lbl} htmlFor="adv-repay-date">Repayment Date (BS)</label>
-              <BsCalendarPicker id="adv-repay-date" value={repayForm.repaid_date} onChange={v => setRepay('repaid_date', v)} placeholder="Select date" clearable />
+              <BsCalendarPicker id="adv-repay-date" value={repayForm.repaid_date} onChange={v => setRepay('repaid_date', v)} placeholder="Select date" clearable invalid={fieldErr['adv-repay-date']} />
+              <FieldError id="adv-repay-date" message={fieldErr['adv-repay-date']} />
             </div>
 
             <div>
               <label style={lbl} htmlFor="adv-repay-amount">Amount (NPR)</label>
-              <input id="adv-repay-amount" style={inp} type="number" min="1" placeholder={selectedAdv.installment_amount ? `Installment: ${fmt(selectedAdv.installment_amount)}` : 'Amount'} value={repayForm.amount} onChange={e => setRepay('amount', e.target.value)} />
+              <input id="adv-repay-amount" style={invalidStyle(inp, fieldErr['adv-repay-amount'])} type="number" min="1" placeholder={selectedAdv.installment_amount ? `Installment: ${fmt(selectedAdv.installment_amount)}` : 'Amount'} value={repayForm.amount} onChange={e => setRepay('amount', e.target.value)} {...fieldAria('adv-repay-amount', fieldErr['adv-repay-amount'])} />
+              <FieldError id="adv-repay-amount" message={fieldErr['adv-repay-amount']} />
             </div>
 
             <div>

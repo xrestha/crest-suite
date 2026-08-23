@@ -206,9 +206,9 @@ export default function TaxPoolTab({ assets }) {
               {POOLS_AD.map(p => <option key={p} value={p}>{POOL_LABELS[p]}</option>)}
             </select>
           </div>
-          <input type="date" className="form-select" value={newExpense.expense_date} onChange={e => setNewExpense(f => ({ ...f, expense_date: e.target.value }))} />
-          <input type="number" className="form-select" placeholder="Amount" value={newExpense.amount} onChange={e => setNewExpense(f => ({ ...f, amount: e.target.value }))} style={{ width: 120 }} />
-          <input className="form-select" placeholder="Description" value={newExpense.description} onChange={e => setNewExpense(f => ({ ...f, description: e.target.value }))} style={{ flex: 1, minWidth: 160 }} />
+          <input type="date" className="form-input form-input--auto" value={newExpense.expense_date} onChange={e => setNewExpense(f => ({ ...f, expense_date: e.target.value }))} />
+          <input type="number" className="form-input" placeholder="Amount" value={newExpense.amount} onChange={e => setNewExpense(f => ({ ...f, amount: e.target.value }))} style={{ width: 120 }} />
+          <input className="form-input" placeholder="Description" value={newExpense.description} onChange={e => setNewExpense(f => ({ ...f, description: e.target.value }))} style={{ flex: 1, minWidth: 160 }} />
           <button className="btn btn-ghost" onClick={addExpense}>+ Add</button>
         </div>
         <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px', fontStyle: 'italic' }}>

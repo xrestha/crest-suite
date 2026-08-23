@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
+import FieldError, { fieldAria } from '../../../components/FieldError'
 import { getBsToday, BS_MONTHS } from '../../../utils/bsCalendar'
 import { printParkingSlip } from './parkingSlipHtml'
 
@@ -27,6 +28,8 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
   const [billsLoading, setBillsLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
+  // Per-field validation; `error` above stays the form-level channel for a rejected write (S603).
+  const [vehicleErr, setVehicleErr] = useState('')
 
   const bsToday = getBsToday()
   const dateLabel = `${bsToday.day} ${BS_MONTHS[bsToday.month - 1]} ${bsToday.year}`
@@ -60,7 +63,8 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
   }))
 
   async function handleSave() {
-    if (!vehicleNumber.trim()) { setError('Vehicle number is required.'); return }
+    if (!vehicleNumber.trim()) { setVehicleErr('Vehicle number is required.'); return }
+    setVehicleErr('')
     setSaving(true); setError('')
     const linkedBill = todaysBills.find(o => o.id === billOrderId)
     const { data: slip, error: insErr } = await scopedInsert('pos_parking_slips', {
@@ -95,10 +99,12 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
           <input
             id="park-vehicle-number"
             value={vehicleNumber}
-            onChange={e => setVehicleNumber(e.target.value)}
+            onChange={e => { setVehicleErr(''); setVehicleNumber(e.target.value) }}
             placeholder="e.g. BA 2 KHA 1234"
             autoFocus
+            {...fieldAria('park-vehicle-number', vehicleErr)}
           />
+          <FieldError id="park-vehicle-number" message={vehicleErr} />
         </div>
         <div className="form-field">
           <span className="field-label" id="park-vehicle-type-label"><Tip text="Optional">Vehicle Type</Tip></span>

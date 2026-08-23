@@ -406,7 +406,7 @@ export default function AuditLog() {
         <input
           id="audit-search"
           type="search"
-          className="form-select"
+          className="form-input form-input--auto"
           placeholder="Search client, user, field, record ID…"
           value={search}
           onChange={e => setSearch(e.target.value)}

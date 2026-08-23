@@ -258,8 +258,8 @@ Recorded so they aren't rediscovered from scratch:
   smoke-tested; what remains on this page's beat is the payment-QR work blocked on FonePay/eSewa
   merchant onboarding, which is a business relationship rather than engineering — tracked in
   `POS_TODO.md`.
-- ~~**The mechanical sweep.**~~ **Closed across S576–S578.** Labels: 0 bare `<label>` vs 54
-  `htmlFor`, every `<select>` named. Colour: 117 base-signal-token `color:` sites converted, 0
+- ~~**The mechanical sweep.**~~ **Closed across S576–S578**, with a fourth pass in S603. Labels: 0
+  bare `<label>` vs 54 `htmlFor`, every `<select>` named. Colour: 117 base-signal-token `color:` sites converted, 0
   remain, 128 contrast-variant references now. Modals: all 9 hand-rolled overlays are on the
   shared `Modal`. Three shapes recur here and are worth copying rather than rediscovering — a
   caption over a button group or a read-only figure must be a `<span>` plus
@@ -269,6 +269,15 @@ Recorded so they aren't rediscovered from scratch:
   screen or the KDS needs `Modal`'s `zIndex` prop, because those are `position: fixed` layers at
   1000 and therefore their own stacking contexts — that single fact is why POS grew nine
   hand-rolled overlays instead of using the component.
+
+  **S603's pass was the input classes.** POS carried 20 of the 62 text controls in the product that
+  were wearing `className="form-select"` — a `<select>` class, so `cursor: pointer`, so a text box
+  announcing itself as a menu — across `PosTableManagement`, `PosShifts`, `PosStaff`,
+  `PosCustomers`, `CreditNotes`, `CoversReport` and the parking slip modal. All on `.form-input`
+  now, with `.form-input--auto` where the control sizes to a toolbar rather than filling a field.
+  The same pass gave the whole app the 16px `pointer: coarse` floor it had never had, which matters
+  more on this module than any other: **the till is a tablet**, and every field on it was 13px, i.e.
+  under the threshold at which iOS Safari zooms the viewport on focus and never zooms back.
 
 ## One bill-math primitive, however the report slices it (S580)
 

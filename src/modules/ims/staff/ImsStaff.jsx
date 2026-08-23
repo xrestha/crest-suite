@@ -306,7 +306,7 @@ export default function ImsStaff() {
         <div style={{ display: 'flex', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
           <input
             type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search staff…" className="form-select" style={{ maxWidth: 180 }}
+            placeholder="Search staff…" className="form-input form-input--auto" style={{ maxWidth: 180 }}
           />
           <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setRolesModal(true)}>
             Manage Roles

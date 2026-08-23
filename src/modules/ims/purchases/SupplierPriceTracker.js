@@ -323,7 +323,7 @@ export default function SupplierPriceTracker() {
         </select>
 
         <input
-          className="form-select" style={{ width: 200 }}
+          className="form-input" style={{ width: 200 }}
           placeholder="Search items…"
           value={search}
           onChange={e => setSearch(e.target.value)}

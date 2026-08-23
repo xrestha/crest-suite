@@ -340,11 +340,11 @@ export default function CoversReport() {
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div>
                 <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="covers-report-open">Open</label>
-                <input id="covers-report-open" type="time" className="form-select" value={openTime} onChange={e => setOpenTime(e.target.value)} />
+                <input id="covers-report-open" type="time" className="form-input form-input--auto" value={openTime} onChange={e => setOpenTime(e.target.value)} />
               </div>
               <div>
                 <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="covers-report-close">Close</label>
-                <input id="covers-report-close" type="time" className="form-select" value={closeTime} onChange={e => setCloseTime(e.target.value)} />
+                <input id="covers-report-close" type="time" className="form-input form-input--auto" value={closeTime} onChange={e => setCloseTime(e.target.value)} />
               </div>
               <button className="btn btn-primary" disabled={hoursSaving} onClick={saveOperatingHours}>
                 {hoursSaving ? 'Saving…' : 'Save'}

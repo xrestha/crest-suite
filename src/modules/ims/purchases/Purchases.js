@@ -414,7 +414,7 @@ export default function Purchases() {
             </p>
             <input
               autoFocus
-              className="form-select"
+              className="form-input"
               style={{ width: '100%', marginBottom: 16 }}
               value={deleteAllTyped}
               onChange={e => setDeleteAllTyped(e.target.value)}

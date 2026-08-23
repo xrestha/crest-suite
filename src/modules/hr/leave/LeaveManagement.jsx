@@ -7,6 +7,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange } from './leaveConstants'
 import { leaveBalance } from './leaveBalance'
+import { disabledStyle } from '../../../shared/inlineFieldState'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
 
@@ -299,7 +300,7 @@ export default function LeaveManagement() {
                 <label style={lbl} htmlFor="leave-day-type">
                   <Tip text="Only applies to a single-day request — pick the same Start and End date." width={240}>Day Type</Tip>
                 </label>
-                <select id="leave-day-type" style={{ ...inp, width: '100%' }} value={fDayType} disabled={!isSingleDay} onChange={e => setFDayType(e.target.value)}>
+                <select id="leave-day-type" style={disabledStyle({ ...inp, width: '100%' }, !isSingleDay)} value={fDayType} disabled={!isSingleDay} onChange={e => setFDayType(e.target.value)}>
                   {DAY_TYPES.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
                 </select>
               </div>

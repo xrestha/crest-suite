@@ -32,3 +32,15 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* Per-field validation message, sitting directly under the input it belongs to. Lives here rather
+   than in Layout.css because both surfaces need it: Layout.css is only loaded once <Layout /> is
+   mounted, so a copy there would have left the signed-out pages with their own drifting duplicate —
+   which is exactly what `.login-field-error` was until 2026-08-23/S603 folded it into this rule.
+   The markup carries role="alert" so the message is announced, not merely shown; the border colour
+   alone is never the error signal (WCAG 1.4.1). */
+.field-error {
+  font-size: 13px;
+  color: var(--theme-red-text, #f87171);
+  line-height: 1.4;
+}

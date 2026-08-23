@@ -85,11 +85,11 @@ export default function DepreciationRunTab({ assets, onReload }) {
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div className="form-field">
             <label htmlFor="deprec-f1">Period Start</label>
-            <input id="deprec-f1" type="date" className="form-select" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
+            <input id="deprec-f1" type="date" className="form-input" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
           </div>
           <div className="form-field">
             <label htmlFor="deprec-f2">Period End</label>
-            <input id="deprec-f2" type="date" className="form-select" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
+            <input id="deprec-f2" type="date" className="form-input" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
           </div>
           <button className="btn btn-primary" onClick={preview} disabled={loading}>{loading ? 'Computing…' : 'Preview'}</button>
           {lines && (
@@ -130,10 +130,10 @@ export default function DepreciationRunTab({ assets, onReload }) {
                       <td style={{ textAlign: 'right' }}>{fmt(l.opening_nbv)}</td>
                       <td style={{ textAlign: 'right' }}>{fmt(l.depreciation_amount)}</td>
                       <td style={{ textAlign: 'right' }}>
-                        <QtyInput value={l.override_amount} onChange={v => updateLine(l.asset_id, 'override_amount', v)} className="form-select" style={{ width: 110, textAlign: 'right' }} />
+                        <QtyInput value={l.override_amount} onChange={v => updateLine(l.asset_id, 'override_amount', v)} className="form-input" style={{ width: 110, textAlign: 'right' }} />
                       </td>
                       <td>
-                        <input className="form-select" value={l.override_reason} onChange={e => updateLine(l.asset_id, 'override_reason', e.target.value)}
+                        <input className="form-input" value={l.override_reason} onChange={e => updateLine(l.asset_id, 'override_reason', e.target.value)}
                           placeholder={l.override_amount !== '' ? 'Required' : ''} style={{ width: '100%' }} />
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(closingNbv)}</td>

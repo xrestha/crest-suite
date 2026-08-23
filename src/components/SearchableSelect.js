@@ -15,7 +15,14 @@ import { useState, useRef, useEffect, useMemo, useId } from 'react'
 // input goes to 16px, below which iOS Safari zooms the viewport on focus and never zooms back;
 // and the trigger and option rows clear the 44px touch target instead of measuring ~31px and
 // ~33px. Passed by the Crest Staff portal only, so the admin app's density is untouched.
-export default function SearchableSelect({ value, onChange, options, placeholder = '— Select —', style, id, touch = false }) {
+// `invalid` is the validation message this select's field is showing, or falsy. It has to be a
+// PROP rather than a CSS hook because every colour here is an inline style, so the
+// `[aria-invalid="true"]` rules in Layout.css have no path to the trigger — the same reason
+// `touch` is a prop. Passing the message itself (not a boolean) lets the trigger point
+// `aria-describedby` at the <FieldError> rendered beside it, which is the half a screen reader
+// actually receives; `aria-invalid` is deliberately NOT set, since this trigger is a <button> and
+// that attribute is unsupported on the button role.
+export default function SearchableSelect({ value, onChange, options, placeholder = '— Select —', style, id, touch = false, invalid = '' }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
@@ -94,10 +101,13 @@ export default function SearchableSelect({ value, onChange, options, placeholder
         id={id}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-describedby={invalid && id ? `${id}-err` : undefined}
         onClick={() => (open ? close() : openIt())}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-          background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)',
+          background: 'var(--theme-input-bg)',
+          border: `1px solid ${invalid ? 'var(--theme-red)' : 'var(--theme-border)'}`,
+          borderRadius: 'var(--radius-md)',
           padding: touch ? '11px 12px' : '7px 10px', minHeight: touch ? 44 : undefined,
           fontSize: touch ? 16 : 13, color: 'var(--theme-text1)', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
         }}

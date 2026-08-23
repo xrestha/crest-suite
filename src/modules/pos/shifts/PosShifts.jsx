@@ -57,7 +57,7 @@ function DenomGrid({ counts, onChange }) {
               // min="0" only blocks the spinner arrows — a typed "-5" still lands in the input
               // unless clamped here, since every downstream sum just does parseInt(...) || 0.
               onChange={e => onChange({ ...counts, [d]: e.target.value === '' ? '' : String(Math.max(0, parseInt(e.target.value) || 0)) })}
-              className="form-select" style={{ width: '100%', textAlign: 'center', padding: '4px 6px' }} />
+              className="form-input" style={{ width: '100%', textAlign: 'center', padding: '4px 6px' }} />
           </div>
         ))}
       </div>
@@ -643,12 +643,12 @@ export default function PosShifts() {
                     </div>
                     <div>
                       <label htmlFor="cashmove-amount" style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }}>Amount (NPR)</label>
-                      <input id="cashmove-amount" className="form-select" type="number" min="0" step="1" style={{ width: 130 }}
+                      <input id="cashmove-amount" className="form-input" type="number" min="0" step="1" style={{ width: 130 }}
                         value={cashMoveAmount} onChange={e => setCashMoveAmount(e.target.value)} placeholder="0" />
                     </div>
                     <div style={{ flex: 1, minWidth: 200 }}>
                       <label htmlFor="cashmove-reason" style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }}>Reason *</label>
-                      <input id="cashmove-reason" className="form-select" style={{ width: '100%' }}
+                      <input id="cashmove-reason" className="form-input" style={{ width: '100%' }}
                         value={cashMoveReason} onChange={e => setCashMoveReason(e.target.value)}
                         placeholder="e.g. Paid vegetable supplier" />
                     </div>
@@ -772,7 +772,7 @@ export default function PosShifts() {
 
             {modal === 'open' && (
               <input placeholder="Label (optional, e.g. Morning)" value={label} onChange={e => setLabel(e.target.value)}
-                className="form-select" style={{ width: '100%', marginBottom: 14 }} />
+                className="form-input" style={{ width: '100%', marginBottom: 14 }} />
             )}
 
             {modal === 'close' && currentReport && (

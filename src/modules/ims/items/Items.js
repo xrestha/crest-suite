@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
+import FieldError, { fieldAria } from '../../../components/FieldError'
 import { Navigate } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
 
@@ -43,6 +44,10 @@ export default function Items() {
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // Per-field validation, separate from `error` above. `error` stays the FORM-level channel — a
+  // save that the server rejected, or a rule spanning several fields (the conversion trio) that no
+  // single box owns. A message about one box belongs under that box (S603).
+  const [fieldErr, setFieldErr] = useState({})
   const [filterCat, setFilterCat] = useState('all')
   const [search, setSearch] = useState('')
   const [sortConvFirst, setSortConvFirst] = useState(false)
@@ -230,6 +235,7 @@ export default function Items() {
     setActiveTab('details')
     setPack({ qty: '', total: '' })
     setError('')
+    setFieldErr({})
     setShowForm(true)
   }
 
@@ -250,10 +256,17 @@ export default function Items() {
     })
     setActiveTab('details')
     setError('')
+    setFieldErr({})
     setShowForm(true)
   }
 
-  function f(val) { return { ...form, ...val } }
+  // Editing a field clears its own error — a red border under a box the user has just corrected
+  // teaches them the message is stale and worth ignoring.
+  function f(val) {
+    const keys = Object.keys(val)
+    setFieldErr(e => keys.some(k => e[k]) ? { ...e, ...Object.fromEntries(keys.map(k => [k, ''])) } : e)
+    return { ...form, ...val }
+  }
 
   function getNextItemCode() {
     const prefix = (settings?.item_code_prefix || 'ITM').toUpperCase()
@@ -273,8 +286,11 @@ export default function Items() {
   // so callers can chain a "save & next" navigation.
   async function doSave() {
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return false }
-    if (!form.name.trim()) { setError('Item name is required.'); return false }
-    if (!form.rate) { setError(`Price per ${form.uom} is required — type it in, or use "Bought a pack?" to work it out.`); return false }
+    const fe = {}
+    if (!form.name.trim()) fe.name = 'Item name is required.'
+    if (!form.rate) fe.rate = `Price per ${form.uom} is required — type it in, or use "Bought a pack?" to work it out.`
+    setFieldErr(fe)
+    if (fe.name || fe.rate) { setActiveTab('details'); return false }
 
     // Conversion validation
     const hasPurchaseUnit = form.purchase_unit.trim() !== ''
@@ -450,7 +466,9 @@ export default function Items() {
                     onChange={e => setForm(f({ name: e.target.value }))}
                     placeholder="e.g. CHICKEN BREAST"
                     autoFocus
+                    {...fieldAria('items-f1', fieldErr.name)}
                   />
+                  <FieldError id="items-f1" message={fieldErr.name} />
                 </div>
                 <div className="form-field">
                   <label htmlFor="items-f2">Category</label>
@@ -491,7 +509,9 @@ export default function Items() {
                     value={form.rate}
                     onChange={e => { setPack({ qty: '', total: '' }); setForm(f({ rate: e.target.value })) }}
                     placeholder="0.777"
+                    {...fieldAria('items-f6', fieldErr.rate)}
                   />
+                  <FieldError id="items-f6" message={fieldErr.rate} />
                 </div>
               </div>
 

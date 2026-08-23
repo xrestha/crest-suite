@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Modal from '../../../components/Modal'
+import FieldError, { fieldAria } from '../../../components/FieldError'
+import { invalidStyle } from '../../../shared/inlineFieldState'
 
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
@@ -20,11 +22,17 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
   const [form, setForm] = useState(EMPTY)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // Per-field validation; `error` above stays the form-level channel for a rejected write (S603).
+  const [nameErr, setNameErr] = useState('')
 
-  function set(f, v) { setForm(p => ({ ...p, [f]: v })) }
+  function set(f, v) {
+    if (f === 'name') setNameErr('')
+    setForm(p => ({ ...p, [f]: v }))
+  }
 
   async function handleAdd() {
-    if (!form.name.trim()) { setError('Enter a name.'); return }
+    if (!form.name.trim()) { setNameErr('Enter a name.'); return }
+    setNameErr('')
     setError(''); setSaving(true)
     const { error: err } = await scopedInsert('hr_incentive_configs', {
       name: form.name.trim(), calc_type: form.calc_type,
@@ -69,7 +77,8 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
 
         <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <label style={lbl} htmlFor="inccfg-name">New Incentive Type</label>
-          <input id="inccfg-name" style={inp} placeholder="e.g. Sales Bonus" value={form.name} onChange={e => set('name', e.target.value)} />
+          <input id="inccfg-name" style={invalidStyle(inp, nameErr)} placeholder="e.g. Sales Bonus" value={form.name} onChange={e => set('name', e.target.value)} {...fieldAria('inccfg-name', nameErr)} />
+          <FieldError id="inccfg-name" message={nameErr} />
           <div style={{ display: 'flex', gap: 10 }}>
             <select aria-label="How this incentive is calculated" className="form-select" style={{ flex: 1 }} value={form.calc_type} onChange={e => set('calc_type', e.target.value)}>
               <option value="manual">Manual entry each run</option>

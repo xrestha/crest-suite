@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
+import FieldError, { fieldAria } from '../../../components/FieldError'
 import { Navigate, Link } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
 
@@ -22,6 +23,9 @@ export default function Vendors() {
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // Per-field validation. `error` above stays the form-level channel (no client selected, a write
+  // the server rejected); a message about one box belongs under that box (S603).
+  const [fieldErr, setFieldErr] = useState('')
   const [search, setSearch] = useState('')
 
   useEffect(() => { if (clientId) loadVendors() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -37,6 +41,7 @@ export default function Vendors() {
     setEditing(null)
     setForm(EMPTY_FORM)
     setError('')
+    setFieldErr('')
     setShowForm(true)
   }
 
@@ -51,13 +56,15 @@ export default function Vendors() {
       payment_terms: vendor.payment_terms || ''
     })
     setError('')
+    setFieldErr('')
     setShowForm(true)
   }
 
   // Core save — returns true on success; does not close/reload (lets callers chain "save & next").
   async function doSave() {
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return false }
-    if (!form.name.trim()) { setError('Vendor name is required.'); return false }
+    if (!form.name.trim()) { setFieldErr('Vendor name is required.'); return false }
+    setFieldErr('')
     setSaving(true)
     setError('')
     if (editing) {
@@ -157,10 +164,12 @@ export default function Vendors() {
               <label htmlFor="vendor-f1">Vendor Name *</label>
               <input id="vendor-f1"
                 value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
+                onChange={e => { setFieldErr(''); setForm({ ...form, name: e.target.value }) }}
                 placeholder="e.g. Big Mart, Arawat Suppliers"
                 autoFocus
+                {...fieldAria('vendor-f1', fieldErr)}
               />
+              <FieldError id="vendor-f1" message={fieldErr} />
             </div>
             <div className="form-field">
               <label htmlFor="vendor-f2"><Tip text="Name of the sales rep or account manager at this supplier. Useful for direct contact on order issues.">Contact Person</Tip></label>

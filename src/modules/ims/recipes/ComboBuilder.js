@@ -104,7 +104,7 @@ export default function ComboBuilder() {
             type="number" min="0" max="100" step="1" value={discountPct}
             onChange={e => setDiscountPct(e.target.value)}
             onBlur={e => saveDiscountPct(e.target.value)}
-            className="form-select" style={{ width: 80 }}
+            className="form-input" style={{ width: 80 }}
           />
         </div>
       </div>

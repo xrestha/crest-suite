@@ -8,6 +8,7 @@ import Modal from '../../../components/Modal'
 import SearchableSelect from '../../../components/SearchableSelect'
 import QtyInput from '../../../components/QtyInput'
 import QuickCalculator from '../../../components/Calculator'
+import FieldError from '../../../components/FieldError'
 import { getCf, calcBillTotals, fmtRate } from './purchasesHelpers'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false }
@@ -54,9 +55,13 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
   const [billLines, setBillLines]   = useState(initial.lines)
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
+  // Per-field validation. `error` above stays the form-level channel — a rejected write, and the
+  // "add at least one line" rule, which belongs to the line table rather than any one box (S603).
+  const [dayErr, setDayErr] = useState('')
   const [calcOpen, setCalcOpen] = useState(false)
 
   function handleHeaderDayChange(day) {
+    setDayErr('')
     setBillHeader(h => ({ ...h, bs_day: day }))
     if (day && period) {
       setBillLines(prev => prev.map(l => {
@@ -113,8 +118,9 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
   async function saveBill() {
     const maxDay = period ? daysInBsMonth(period.bs_year, period.bs_month) : 32
     if (!billHeader.bs_day || billHeader.bs_day < 1 || billHeader.bs_day > maxDay) {
-      setError(`Enter a valid BS day (1–${maxDay}).`); return
+      setDayErr(`Enter a valid BS day (1–${maxDay}).`); return
     }
+    setDayErr('')
     const valid = billLines.filter(l => l.item_id && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0)
     if (valid.length === 0) { setError('Add at least one item with item, qty and rate filled.'); return }
 
@@ -190,7 +196,8 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
         </div>
         <div className="form-field">
           <label htmlFor="pb-day">Day (BS) *</label>
-          <BsCalendarPicker id="pb-day" lockYear={period?.bs_year} lockMonth={period?.bs_month} value={billHeader.bs_day} onChange={handleHeaderDayChange} placeholder="Pick day" />
+          <BsCalendarPicker id="pb-day" lockYear={period?.bs_year} lockMonth={period?.bs_month} value={billHeader.bs_day} onChange={handleHeaderDayChange} placeholder="Pick day" invalid={dayErr} />
+          <FieldError id="pb-day" message={dayErr} />
         </div>
         <div className="form-field">
           <label htmlFor="purcha-f2"><Tip text="Vendor's invoice or bill number. Shared across all items on this bill." width={240}>Invoice Ref</Tip></label>

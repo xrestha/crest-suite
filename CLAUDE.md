@@ -347,6 +347,7 @@ Also worth knowing before touching a page's status messages: `.btn:disabled` now
 | `Fab` | `src/components/Fab.js` | Fixed bottom-right `+ Add` button |
 | `Modal` | `src/components/Modal.js` | Centered overlay with backdrop-click close. Real dialog semantics since S521 (`role="dialog"`, `aria-modal`, `aria-labelledby`, initial focus + Tab trap on the panel, focus restored to the trigger on close, `aria-label="Close"` on the `×` button) — it backs 19+ create/edit flows app-wide, so this one fix covers every call site. **Nests since S574**: a module-level stack means only the topmost open Modal responds to Escape/Tab (before that, Escape in an inner confirm also closed the drawer behind it and two Tab traps fought). ClientDrawer's typed-name Danger confirms and its password-reset dialog rely on this. **`zIndex` (default 100) and `unstyled` were added S578** to bring POS's nine hand-rolled overlays back onto it: POS's order screen and the KDS board are `position: fixed` full-screen layers at 1000, i.e. their own stacking contexts, so a dialog opened from either needs a higher value or it renders *underneath* the screen that opened it — that one fact is why those nine existed. `unstyled` hands the panel to the caller (no `.card`, no title bar) for a dialog whose shape genuinely is not a card — the two-column billing modal with its live bill preview — keeping only the behaviour: focus capture and restore, the Tab trap, the Escape stack, `role="dialog"`. `title` then becomes the accessible name rather than a rendered heading, so a dialog cannot go unnamed either way. Reach for `unstyled` only when the card shape would have to be undone; `ConfirmModal` forwards `zIndex` too. |
 | `ConfirmModal` | `src/components/ConfirmModal.js` | Confirmation dialog on `Modal` (S575) for actions that change other ledgers, lock a period, or move money — period close, payroll Finalize/Regenerate/Reopen, drawer-short shift close, attendance clears. Takes `title`/`children` (consequence copy, not "are you sure?")/`confirmLabel`/`danger`/`busy`. Cancel and backdrop are inert while `busy`. Routine single-row deletes deliberately stay on `window.confirm`. Inside a hand-rolled overlay with a higher zIndex than 100, render it as a CHILD of that overlay or it stacks underneath (see PosShifts). |
+| `FieldError` | `src/components/FieldError.jsx` | The per-field validation message (`.field-error`, `role="alert"`) plus `fieldAria(id, message)` for the control (S603); `invalidStyle`/`disabledStyle` for a control still styled inline live in `src/shared/inlineFieldState.js`. Extends to the app the pattern that had lived only on Login/Reset since S534 — `aria-invalid` appeared in exactly one file in the product. **Form-level and field-level are different channels**: a rejected write, or a rule spanning several boxes, stays in the page's own `error` string; a message naming one box goes under that box. `id` must be the CONTROL's id — the message derives its own from it. `BsCalendarPicker`/`SearchableSelect` take `invalid={message}` instead (inline styles, so no CSS hook reaches them) and use `aria-describedby` only, since their trigger is a `<button>` and `aria-invalid` is unsupported on that role |
 | `BsCalendarPicker` | `src/components/BsCalendarPicker.js` | BS year/month/day picker, calendar-grid UI |
 | `QtyInput` | `src/components/QtyInput.js` | Numeric field that also accepts arithmetic (`3*24+7` → `79`). Use for any qty/rate box. Takes `onChange` (fires live for plain numbers) + `onCommit` (fires on blur/Enter with the evaluated number), and a `wrapperStyle` for the positioning span the result badge anchors to. **The raw expression never leaves the component** — the parent only ever receives a number or `''`. |
 | `Calculator` | `src/components/Calculator.js` | App-wide Quick Calculator modal (Alt+C), mounted once in `Layout.js`. Import it aliased — `Calculator` is also a lucide icon name. |
@@ -481,6 +482,74 @@ Use these global classes from `Layout.css` — don't repeat inline styles:
 - `btn`, `btn-ghost`, `btn-primary`, `btn-danger`, `btn-danger--strong` — button variants. `btn-danger` is a tinted red button, **not** a solid `--theme-red` fill: red has no paired foreground token (it ranges from light `#f87171` to dark `#dc2626` across the ten presets, so no single foreground contrasts on all of them), which is why the destructive variant is a tint plus full-opacity red text
 - `badge-green`, `badge-red`, `badge-amber`, `badge-yellow`, `badge-purple`, `badge-gray` — status chips. **That is the complete set — there is no `badge-gold`.** This list named one for a long time and 7 real call sites (HR/IMS/POS Staff rank pills, Advances' loan tag, KOT Log's BOT chip, POS Exception Report's discount row) used it, so all seven rendered as bare unstyled `<span>`s — no tint, no padding, no radius, no 11px size, just inherited text — with nothing to signal the class was missing. Fixed 2026-08-12 by repointing all seven to `badge-yellow`, which is what they meant: every one is a *categorical* distinction, and `badge-yellow` is the accent-tinted categorical-tag badge (see DESIGN.md), not a warning. `badge-amber` is the real warning color; don't reach for `badge-yellow` for a caution state. A class name that doesn't exist fails silently in CSS, so verify a badge class against `Layout.css` before using it rather than copying a nearby line.
 - `no-print` / `print-only` — print visibility. `print-blank-input` (S582) blanks an input's value AND placeholder in print while its border still prints — a fill-in-by-hand box for sheets meant to be priced with a pen (Chrome prints placeholder text as if it were a value, which is why hiding the value alone is not enough)
+
+### A disabled field had no treatment at all, and inline styles were why (S603)
+
+`.form-field input` sets its own `background`, `border` and `color`, which override the UA's
+disabled styling — so with no `:disabled` rule of its own, **a disabled field rendered identical to
+an editable one**. Sales and Overheads disable their whole grid on a closed period; those two pages
+are exactly where a locked month must be obvious, and nothing said so. The boxes just stopped
+responding.
+
+The rule (`Layout.css`) flattens the well to `transparent` and steps the border to
+`--theme-border-lt`, leaving the value's colour alone. **Not `.btn:disabled`'s `opacity: 0.55`** — a
+button's label is a verb you may not press, a field's content is data, and a locked period's figures
+must stay legible precisely because they can no longer be corrected (opacity multiplies through the
+text colour and takes it below AA, which DESIGN.md already forbids for rows). Read-only shares the
+treatment but keeps a text caret: it is not refusal, and the value is meant to be selected.
+
+Two UA behaviours must be overridden explicitly or none of it takes effect: WebKit paints a disabled
+control's text with **`-webkit-text-fill-color`**, which plain `color` does not override, and iOS
+Safari layers **its own opacity** on top.
+
+**An inline-styled control escapes the rule** — as it escapes the `[aria-invalid]` hook and the
+`@media (pointer: coarse)` sizing — and the period-lock inputs are all inline. `disabledStyle(base,
+isDisabled)` and `invalidStyle(base, message)` in `src/shared/inlineFieldState.js` compose the same
+treatments into an inline object so each state has one definition; applied on `Sales.js` (3),
+`Overheads.js` (4) and `LeaveManagement.jsx` (1). Reaching for a class is still the real fix.
+
+### The 16px touch floor had never left the login page (S603)
+
+DESIGN.md described "under `@media (pointer: coarse)` inputs go to 16px" as the product's strategy
+for a year. It existed as **`.login-field input` in `Login.css` and nowhere else** — so every field
+in IMS, HR and POS stayed 13px on a tablet, and 16px is the threshold below which iOS Safari zooms
+the viewport on focus and never zooms back. On a product whose till and stock count *are* tablet
+surfaces, tapping any field turned "enter the quantity" into "now pan sideways to find Save".
+
+`Layout.css`'s coarse block now carries an **element-level** rule — `input` (checkbox, radio, range,
+color, file and the button-shaped types excluded), `select`, `textarea` — at `font-size: 16px
+!important`, plus `min-height: 44px` on `button:not([class])`.
+
+**`!important` is load-bearing here**, same justification as the reduced-motion block above it: 370
+form controls across ~46 files set their font-size in an inline `style` object, and no selector
+beats an inline style. Without it the floor reaches the controls that least need it and skips every
+one that does. The button rule is `:not([class])` rather than bare `button` because every classed
+button already has a tuned value (`.btn` 44, `.btn-sm`/`.tab-btn` 32, `.sidebar-link` 40) and a bare
+selector would silently re-decide the ones that merely have no rule yet — `min-height` only, since
+`min-width` on a narrow icon button squeezes its neighbours.
+
+**This does not retire "reach for a class."** A class also brings the `[aria-invalid]` hook, the
+`:disabled` treatment and the closed shape scale, none of which an `!important` floor supplies. The
+floor exists so the zoom trap does not wait on a 370-site sweep.
+
+### `.form-select` on a text input, at scale — and why the swap is not a rename (S603)
+
+62 text controls across 22 files (`<input>`, `QtyInput`, one `<textarea>`) carried
+`className="form-select"`, which sets `cursor: pointer` — a text field announcing itself as a menu.
+That is S593's rule, and it had been copied 62 times because `.form-select` was the class that
+existed when those files were written. All now on `.form-input`.
+
+**`.form-input` sets `width: 100%` and `.form-select` does not**, so a blind substitution would have
+stretched every toolbar search box and filter field that never pinned its own width — and in a flex
+row a `flex-basis` of 100% wraps its neighbours. `.form-input--auto` (`width: auto`) is the
+difference; 14 of the 62 take it. Classification was mechanical: not inside a `.form-field`, no
+`width:` in its inline style, no `flex:`. Width is layout, not control identity — reach for the
+modifier, never an inline `width: auto`.
+
+`EmployeeForm.jsx`'s `inp` constant went at the same time: a hand-rolled copy of `.form-input` on 33
+controls, carrying a `borderRadius: 6` off the closed 8/12/18/24 scale. Its `<select>`s needed
+`.form-select` **plus** an explicit `width: '100%'`, since that is the one declaration `inp` was
+supplying that the class does not.
 
 ### Every `type="password"` input needs an explicit `autoComplete`
 

@@ -258,7 +258,7 @@ export default function PosCustomers() {
       {mainTab === 'customers' && (
         <>
           <input
-            className="form-select"
+            className="form-input"
             style={{ width: 320, maxWidth: '100%', marginBottom: 16 }}
             placeholder="Search by name or phone…"
             value={search}
@@ -484,7 +484,7 @@ export default function PosCustomers() {
                                   </Tip>
                                 </span>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <input type="number" min="0" max="100" step="0.1" className="form-select" style={{ width: 80 }}
+                                  <input type="number" min="0" max="100" step="0.1" className="form-input" style={{ width: 80 }}
                                     value={settleCommissionPct} onChange={e => setSettleCommissionPct(e.target.value)} placeholder="%" />
                                   <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>%</span>
                                 </div>

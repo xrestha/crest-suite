@@ -679,7 +679,7 @@ export default function FinalSettlement() {
             <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-leave-days">
               <Tip text="Number of unused annual leave days to encash. Nepal Labour Act rate: basic ÷ 26 per day." width={260}>Unused Leave Days</Tip>
             </label>
-            <input id="settle-leave-days" type="number" className="form-select" min={0} max={365}
+            <input id="settle-leave-days" type="number" className="form-input form-input--auto" min={0} max={365}
               value={leaveDays} disabled={!encashable}
               onChange={e => setLeaveDays(e.target.value)} />
             {leaveTypes.length > 0 && (
@@ -718,7 +718,7 @@ export default function FinalSettlement() {
             <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-notice-days">
               <Tip text="Required notice period per employment contract (in calendar days). If notice was not served, this amount is deducted from final pay." width={280}>Notice Period (days)</Tip>
             </label>
-            <input id="settle-notice-days" type="number" className="form-select" min={0} max={90} value={noticeDays} onChange={e => setNoticeDays(e.target.value)} />
+            <input id="settle-notice-days" type="number" className="form-input form-input--auto" min={0} max={90} value={noticeDays} onChange={e => setNoticeDays(e.target.value)} />
           </div>
 
           {/* Checkboxes */}

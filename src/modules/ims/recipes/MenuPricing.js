@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import FieldError, { fieldAria } from '../../../components/FieldError'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcBand, fcThresholds } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -620,21 +621,29 @@ export default function MenuPricing() {
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <input
+                        id={`menuprice-${r.id}`}
                         className="print-blank-input"
                         type="number" min="0" step="any"
                         value={draft !== undefined ? draft : ''}
                         placeholder={r.inclVat > 0 ? r.inclVat.toFixed(0) : '0'}
                         onChange={e => setDraft(r.id, e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && changed && saveRow(r)}
+                        aria-label={`New menu price for ${r.name}`}
+                        {...fieldAria(`menuprice-${r.id}`, errors[r.id])}
                         style={{
                           background: 'var(--theme-input-bg)',
-                          border: `1px solid ${changed ? 'var(--theme-amber)' : 'var(--theme-border)'}`,
+                          // Invalid outranks the amber unsaved-edit border: a row that failed to
+                          // save is still an unsaved edit, so amber would mask every rejection.
+                          border: `1px solid ${errors[r.id] ? 'var(--theme-red)' : changed ? 'var(--theme-amber)' : 'var(--theme-border)'}`,
                           borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13,
                           color: 'var(--theme-text1)', outline: 'none',
                           width: 110, textAlign: 'right',
                         }}
                       />
-                      {errors[r.id] && <div style={{ fontSize: 10, color: 'var(--theme-red-text)', marginTop: 2 }}>{errors[r.id]}</div>}
+                      {/* Was a bare red <div>: visible, but bound to nothing and announced never.
+                          The row's input is unlabelled in a table of ~100 rows, so the aria-label
+                          names WHICH dish as well (S576's template-label rule). */}
+                      <FieldError id={`menuprice-${r.id}`} message={errors[r.id]} />
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: newFcPct !== null ? 700 : 400, color: newFcPct !== null ? fcColor(newFcPct) : 'var(--theme-text3)' }}>
                       {newFcPct !== null ? `${newFcPct.toFixed(1)}%` : '—'}

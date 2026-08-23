@@ -331,7 +331,7 @@ export default function PosStaff() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexShrink: 0, flexWrap: 'wrap' }}>
           <input
             type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search staff…" className="form-select" style={{ maxWidth: 180 }}
+            placeholder="Search staff…" className="form-input form-input--auto" style={{ maxWidth: 180 }}
           />
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setRolesModal(true)}>
@@ -443,7 +443,7 @@ export default function PosStaff() {
                           min={0}
                           max={100}
                           step={1}
-                          className="form-select"
+                          className="form-input"
                           style={{ width: 70 }}
                           placeholder="No limit"
                           disabled={saving[p.id]}

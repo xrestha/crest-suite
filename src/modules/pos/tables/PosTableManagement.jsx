@@ -626,7 +626,7 @@ export default function PosTableManagement() {
             <>
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
                 <input
-                  className="form-select" style={{ flex: 1 }}
+                  className="form-input" style={{ flex: 1 }}
                   value={newPreset}
                   onChange={e => setNewPreset(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && addPreset()}
@@ -712,7 +712,7 @@ export default function PosTableManagement() {
                     <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{r.category}</div>
                   </div>
                   <input
-                    className="form-select"
+                    className="form-input"
                     defaultValue={r.hsc_code || ''}
                     onBlur={e => saveHsc(r, e.target.value)}
                     placeholder="e.g. 2202"
@@ -742,7 +742,7 @@ export default function PosTableManagement() {
             <>
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
                 <input
-                  className="form-select" style={{ flex: 1 }}
+                  className="form-input" style={{ flex: 1 }}
                   value={newDiscReason}
                   onChange={e => setNewDiscReason(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && addDiscReason()}
@@ -809,7 +809,7 @@ export default function PosTableManagement() {
             <>
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
                 <input
-                  className="form-select" style={{ flex: 1 }}
+                  className="form-input" style={{ flex: 1 }}
                   value={newPartnerName}
                   onChange={e => setNewPartnerName(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && addPartner()}
@@ -837,11 +837,11 @@ export default function PosTableManagement() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {partners.map((p, idx) => (
                       <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 26px', gap: 8, alignItems: 'center' }}>
-                        <input className="form-select" aria-label={`Platform name, row ${idx + 1}`} value={p.name}
+                        <input className="form-input form-input--auto" aria-label={`Platform name, row ${idx + 1}`} value={p.name}
                           onChange={e => updatePartner(idx, 'name', e.target.value)} placeholder="Platform name" />
-                        <input type="number" min="0" max="100" step="0.1" className="form-select" aria-label={`Commission % for ${p.name || `row ${idx + 1}`}`} value={p.commission_pct ?? ''}
+                        <input type="number" min="0" max="100" step="0.1" className="form-input form-input--auto" aria-label={`Commission % for ${p.name || `row ${idx + 1}`}`} value={p.commission_pct ?? ''}
                           onChange={e => updatePartner(idx, 'commission_pct', e.target.value)} placeholder="e.g. 20" />
-                        <input className="form-select" aria-label={`Buyer phone for ${p.name || `row ${idx + 1}`}`} value={p.phone ?? ''}
+                        <input className="form-input form-input--auto" aria-label={`Buyer phone for ${p.name || `row ${idx + 1}`}`} value={p.phone ?? ''}
                           onChange={e => updatePartner(idx, 'phone', e.target.value)} placeholder="9800000001" />
                         <button
                           onClick={() => removePartner(idx)}
@@ -887,28 +887,28 @@ export default function PosTableManagement() {
                   <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-prefix">
                     Prefix <Tip text="The name prefix — each table will be Prefix + number, e.g. 'Table 1', 'Bar 1'" />
                   </label>
-                  <input id="pos-table-management-prefix" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-prefix" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
                     value={qs.prefix} onChange={e => setQs(q => ({ ...q, prefix: e.target.value }))} placeholder="e.g. Table" />
                 </div>
                 <div>
                   <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-start">
                     Start # <Tip text="First table number" />
                   </label>
-                  <input id="pos-table-management-start" type="number" min="1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-start" type="number" min="1" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
                     value={qs.start} onChange={e => setQs(q => ({ ...q, start: e.target.value }))} />
                 </div>
                 <div>
                   <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-count">
                     Count <Tip text="How many tables to create (max 50)" />
                   </label>
-                  <input id="pos-table-management-count" type="number" min="1" max="50" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-count" type="number" min="1" max="50" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
                     value={qs.count} onChange={e => setQs(q => ({ ...q, count: e.target.value }))} />
                 </div>
                 <div>
                   <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-section">
                     Section <Tip text="Optional — groups these tables under a section tab (e.g. Main Hall, Bar, Outdoor)" />
                   </label>
-                  <input id="pos-table-management-section" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-section" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
                     value={qs.section} onChange={e => setQs(q => ({ ...q, section: e.target.value }))}
                     placeholder="e.g. Main Hall" list="qs-section-list" />
                   <datalist id="qs-section-list">
@@ -919,7 +919,7 @@ export default function PosTableManagement() {
                   <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-table-management-seats">
                     Seats <Tip text="Default capacity for all tables in this batch" />
                   </label>
-                  <input id="pos-table-management-seats" type="number" min="1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-seats" type="number" min="1" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
                     value={qs.capacity} onChange={e => setQs(q => ({ ...q, capacity: e.target.value }))} />
                 </div>
               </div>
@@ -1048,7 +1048,7 @@ export default function PosTableManagement() {
                 <Tip text="Displayed on the floor plan and on bills — e.g. Table 1, Bar 3, Patio A" />
               </label>
               <input id="pos-table-management-table-name"
-                className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
                 value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                 placeholder="e.g. Table 1" autoFocus
               />
@@ -1072,7 +1072,7 @@ export default function PosTableManagement() {
                 <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="pos-table-management-capacity">
                   Capacity <Tip text="Number of seats" />
                 </label>
-                <input id="pos-table-management-capacity" type="number" min="1" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                <input id="pos-table-management-capacity" type="number" min="1" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
                   value={form.capacity} onChange={e => setForm(f => ({ ...f, capacity: e.target.value }))} />
               </div>
             </div>
@@ -1092,7 +1092,7 @@ export default function PosTableManagement() {
                   <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="pos-table-management-sort-order">
                     Sort Order <Tip text="Lower numbers appear first within a section" />
                   </label>
-                  <input id="pos-table-management-sort-order" type="number" min="0" className="form-select" style={{ width: '100%', boxSizing: 'border-box' }}
+                  <input id="pos-table-management-sort-order" type="number" min="0" className="form-input" style={{ width: '100%', boxSizing: 'border-box' }}
                     value={form.sort_order} onChange={e => setForm(f => ({ ...f, sort_order: e.target.value }))} />
                 </div>
               </div>

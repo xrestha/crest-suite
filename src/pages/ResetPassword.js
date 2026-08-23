@@ -5,6 +5,7 @@ import { useSettings } from '../context/SettingsContext'
 import { useCapsLock } from '../shared/hooks/useCapsLock'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../utils/weakPasswords'
 import { supabase } from '../supabaseClient'
+import FieldError, { fieldAria } from '../components/FieldError'
 import './Login.css'
 
 // Landing page for the link in a Supabase password-reset email. Supabase redirects here with a
@@ -18,6 +19,8 @@ export default function ResetPassword() {
   const [confirm, setConfirm] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  // Per-field validation, keyed by control id. See handleSubmit for why.
+  const [fieldErr, setFieldErr] = useState({})
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
   const [linkFailed, setLinkFailed] = useState(false)
@@ -43,12 +46,19 @@ export default function ResetPassword() {
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`); return
+    // Three of these four rules name a specific box, so they belong under it — this page was
+    // reporting "Passwords do not match" in one strip below BOTH password fields, which says the
+    // form failed without saying which of the two the user should retype (S603). Only a rejected
+    // write stays in the form-level `error` channel.
+    const fe = {}
+    if (password.length < MIN_PASSWORD_LENGTH) fe.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+    else {
+      const weak = weakPasswordReason(password)
+      if (weak) fe.password = weak
     }
-    const weak = weakPasswordReason(password)
-    if (weak) { setError(weak); return }
-    if (password !== confirm) { setError('Passwords do not match.'); return }
+    if (password !== confirm) fe.confirm = 'Passwords do not match.'
+    setFieldErr(fe)
+    if (fe.password || fe.confirm) return
     setLoading(true)
     const { error } = await supabase.auth.updateUser({ password })
     setLoading(false)
@@ -102,9 +112,11 @@ export default function ResetPassword() {
                     id="new-password"
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="new-password"
-                    value={password} onChange={e => setPassword(e.target.value)}
+                    value={password} onChange={e => { setFieldErr(f => ({ ...f, password: '' })); setPassword(e.target.value) }}
                     {...capsHandlers}
+                    {...fieldAria('new-password', fieldErr.password)}
                     placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`} required autoFocus />
+                  <FieldError id="new-password" message={fieldErr.password} />
                   {capsOn && <span className="login-caps-hint" role="status">Caps Lock is on</span>}
                 </div>
                 <div className="login-field">
@@ -113,8 +125,10 @@ export default function ResetPassword() {
                     id="confirm-password"
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="new-password"
-                    value={confirm} onChange={e => setConfirm(e.target.value)}
+                    value={confirm} onChange={e => { setFieldErr(f => ({ ...f, confirm: '' })); setConfirm(e.target.value) }}
+                    {...fieldAria('confirm-password', fieldErr.confirm)}
                     placeholder="••••••••" required />
+                  <FieldError id="confirm-password" message={fieldErr.confirm} />
                   <label className="login-show-pw">
                     <input type="checkbox" checked={showPassword} onChange={e => setShowPassword(e.target.checked)} />
                     Show password

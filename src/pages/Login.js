@@ -6,6 +6,7 @@ import { useSettings } from '../context/SettingsContext'
 import { useCapsLock } from '../shared/hooks/useCapsLock'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../utils/weakPasswords'
 import { supabase } from '../supabaseClient'
+import FieldError, { fieldAria } from '../components/FieldError'
 import './Login.css'
 
 async function edgeOp(action, params = {}) {
@@ -191,16 +192,12 @@ export default function Login() {
   // instead of ping-ponging.
   if (ready && session && profile) return <Navigate to="/dashboard" replace />
 
-  const trialFieldError = (id) => tFieldErr[id]
-    ? <span className="login-field-error" id={`${id}-err`} role="alert">{tFieldErr[id]}</span>
-    : null
-
   // aria-invalid tells assistive tech the field is the problem; aria-describedby points at the
-  // message explaining why. Without both, an inline error is visible but not announced.
-  const trialFieldAria = (id) => ({
-    'aria-invalid': tFieldErr[id] ? 'true' : undefined,
-    'aria-describedby': tFieldErr[id] ? `${id}-err` : undefined,
-  })
+  // message explaining why. Without both, an inline error is visible but not announced. Both halves
+  // now come from the shared `FieldError` module — this page had the only copy in the product until
+  // 2026-08-23/S603, which is what made it a pattern nobody else could reach for.
+  const trialFieldError = (id) => <FieldError id={id} message={tFieldErr[id]} />
+  const trialFieldAria  = (id) => fieldAria(id, tFieldErr[id])
 
   return (
     <div className="login-page">
