@@ -30,6 +30,42 @@
         "value": "3px",
         "createdAt": "2026-08-19T10:10:42.042Z",
         "reason": "print-only stylesheet meta chip in buildGuidePrintHtml; theme-independent by design"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#e7e3d8",
+        "createdAt": "2026-08-22T15:58:39.389Z",
+        "reason": "guest-ground; user specified the bone/pine pair, documented in DESIGN.md guest-* block. Duplicated literal in the html:has() overscroll rule on purpose (see file comment) so a no-:has browser loses only the ground, not the palette."
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(0,70,67,0.30)",
+        "createdAt": "2026-08-22T15:58:39.562Z",
+        "reason": "alpha tint of documented guest-pine #004643 (tab-btn hover border); Layout.css hardcodes brass there so a token swap cannot reach it"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(0,70,67,0.45)",
+        "createdAt": "2026-08-22T15:58:39.745Z",
+        "reason": "alpha tint of documented guest-pine #004643 (order-confirmed glow keyframe)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(0,70,67,0.14)",
+        "createdAt": "2026-08-22T15:58:39.941Z",
+        "reason": "alpha tint of documented guest-pine #004643 (order-confirmed glow keyframe)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(47,107,42,0.11)",
+        "createdAt": "2026-08-22T15:58:40.096Z",
+        "reason": "alpha tint of documented guest-success #2F6B2A (badge fill on bone; Layout.css hardcodes the dark-theme tint)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(138,90,23,0.11)",
+        "createdAt": "2026-08-22T15:58:40.278Z",
+        "reason": "alpha tint of documented guest-warn #8A5A17 (badge fill on bone; Layout.css hardcodes the dark-theme tint)"
       }
     ]
   }

@@ -85,6 +85,39 @@ colors:
                              # the near-universal toggle convention; it sits on a colored track,
                              # never directly on the page background, so contrast holds on all
                              # ten presets
+  # GUEST MENU ONLY — the bone-and-pine printed-card palette, scoped to .guest-menu in
+  # src/modules/pos/guestmenu/guestMenu.css. Documented here rather than left as drift, on the
+  # same reasoning as the print ramp above: a deliberate, structurally-necessary variance from
+  # the ten presets, not a fourth accent leaking into the product.
+  #
+  # WHY IT IS EXEMPT FROM THE PRESET SYSTEM AT ALL: /pos/menu/:tableId is the one surface a
+  # paying customer sees, and PRODUCT.md already names it the deliberate brand-facing exception.
+  # Reading --theme-* there meant a guest got whichever preset the SCANNING PHONE had saved in
+  # localStorage (an owner or manager device rendered the public menu in Dracula), falling back
+  # to Crest back-office charcoal for everyone else. A public page cannot inherit a private
+  # staff setting, so this set is fixed and theme-independent by design.
+  #
+  # The two anchors are the client-specified pair and measure 9.17:1 against each other — AAA
+  # both ways. Every value below was measured on guest-paper; the ratios also sit in guestMenu.css.
+  # Pine is RATIONED exactly as Aged Brass is elsewhere (brand, price, category, active chip,
+  # call to action) and body copy is warm ink, so the One Accent Rule holds on this surface too.
+  # Do not reach for any of these from a staff screen.
+  guest-paper: "#F0EDE5"      # card/input ground — the dish is read on this
+  guest-ground: "#E7E3D8"     # page, one step behind the paper so a card can lift off it
+  guest-pine: "#004643"       # the accent: brand, price, category heading, active chip, CTA fill
+  guest-pine-deep: "#00312F"  # pressed/hover state of a pine fill
+  guest-ink: "#1C1B17"        # 14.8:1 — dish names and body-strength text
+  guest-sage: "#4A5C58"       #  6.1:1 — dish descriptions
+  guest-sage-lt: "#566762"    #  4.7:1 on guest-ground (the tighter of the two surfaces; this
+                              #  role lands on both), 5.1:1 on guest-paper — nutrition tags,
+                              #  covers line, table name, smallest meta
+  guest-rule: "#D3CCBC"       # structural hairline; recedes on purpose
+  guest-control: "#4A7A75"    #  4.1:1 — outlines a tappable control, clearing WCAG 1.4.11
+  guest-veg: "#4C7A2E"        #  4.3:1 — veg mark (a market convention, not a palette choice)
+  guest-nonveg: "#A63A2B"     #  5.5:1 — non-veg mark
+  guest-success: "#2F6B2A"    #  5.5:1 — ready to serve
+  guest-warn: "#8A5A17"       #  5.1:1 — allergens; a safety line, so never faint
+  guest-danger: "#A03328"     #  6.0:1 — order dismissed, submit failed
 typography:
   wordmark:
     fontFamily: "Georgia, serif"

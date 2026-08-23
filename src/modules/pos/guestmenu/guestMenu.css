@@ -1,0 +1,161 @@
+/* ============================================================================================
+   GUEST MENU — the printed-card palette
+   ============================================================================================
+   This is the only surface in the product a paying customer ever sees, and PRODUCT.md names it
+   the one deliberate brand-facing exception. Until now it rendered in `var(--theme-*)`, which
+   meant two things that were both wrong for a public page:
+
+     1. ThemeContext's defaultKeyForSurface() returns 'dark' for anything that is not
+        /hr/self-service, so every restaurant's QR menu was Crest's back-office charcoal-and-gold
+        — a diner in a bright cafe reading an ops-tool palette off a phone at noon.
+     2. Worse, the theme is read from localStorage BEFORE that default applies. A phone that had
+        ever opened the admin app — the owner's, a manager's, any staff device used to check the
+        QR — rendered the public menu in whatever preset that person had picked. The restaurant's
+        customer-facing surface inherited a private staff setting.
+
+   Both are fixed by scoping the token set here rather than reading the global one. `applyTheme`
+   writes the --theme-* properties as inline style on <html>; a rule on `.guest-menu` re-declares
+   them for its own subtree, which wins for every descendant regardless of that inline style
+   (specificity only contests declarations on the SAME element — these are two different ones).
+   The upshot is that every shared class the page borrows (.card / .btn / .tab-btn / .badge) and
+   every inline `var(--theme-*)` in GuestMenu.jsx re-skins from the block below, with no change
+   to Layout.css and no possible leak into the admin app.
+
+   Nothing here may be reached for from a staff screen. This is a menu card, not a theme.
+   ============================================================================================ */
+
+.guest-menu {
+  /* ── The two anchors ──────────────────────────────────────────────────────────────────────
+     Bone and pine, measured at 9.17:1 — AAA in both directions, so the pairing is safe whichever
+     one carries text. Bone is the PAPER (the item cards, where the food is actually read) and
+     the page sits one step behind it, so a card lifts off the page the way a menu card lifts off
+     a table. Putting bone on the page instead would have left the cards with nowhere to go. */
+  --gm-paper:      #F0EDE5;  /* card / input ground — the dish is read on this */
+  --gm-ground:     #E7E3D8;  /* page, one step behind the paper */
+  --gm-pine:       #004643;  /* brand, price, category, active chip, every call to action */
+  --gm-pine-deep:  #00312F;  /* pressed/hover state of a pine fill */
+
+  /* ── The ink ramp ─────────────────────────────────────────────────────────────────────────
+     Two colours alone read flat, so the type ramp is derived rather than literal. Pine is
+     RATIONED as the accent (brand / price / navigation / action) and body copy is a warm ink,
+     which is how a printed menu actually works — the ink does the reading, the colour does the
+     pointing. Measured on --gm-GROUND, not --gm-paper: the ground is a step darker, so it is the
+     tighter of the two surfaces, and --gm-sage-lt lands on BOTH (the covers line sits on a card,
+     the table name under the wordmark sits on the page). Measuring only the paper is how the
+     first pass shipped that one at 4.39:1 — it read as passing everywhere it was checked. */
+  --gm-ink:        #1C1B17;  /* 14.8:1 — dish names, body-strength text */
+  --gm-sage:       #4A5C58;  /*  6.1:1 — dish descriptions */
+  --gm-sage-lt:    #566762;  /*  4.7:1 — nutrition tags, covers line, table name, smallest meta */
+
+  /* ── Structure vs. actionability ──────────────────────────────────────────────────────────
+     Two border weights, and which one an element gets is a semantic decision, not a visual one:
+     a quiet rule for structure (section rules, card edges, the unreached dots on the order
+     tracker) and a pine outline for anything a thumb is meant to hit. That is what carries the
+     +Add / stepper / textarea over WCAG 1.4.11's 3:1 non-text floor — 4.1:1 measured — while
+     keeping the page from looking boxed-in. */
+  --gm-rule:       #D3CCBC;  /* structural hairline — recedes on purpose */
+  --gm-control:    #4A7A75;  /* 4.1:1 on paper — outlines a tappable control */
+
+  /* ── Signals ──────────────────────────────────────────────────────────────────────────────
+     Veg/non-veg is a market convention, not a palette choice, so those two stay green and red —
+     but retuned to sit on bone instead of charcoal, and warmed so they read as part of the same
+     printed world. All four measured on --gm-paper; the two dots clear the 3:1 graphic floor and
+     the two text roles clear 4.5:1. */
+  --gm-veg:        #4C7A2E;  /* 4.3:1 — veg mark */
+  --gm-nonveg:     #A63A2B;  /* 5.5:1 — non-veg mark */
+  --gm-success:    #2F6B2A;  /* 5.5:1 — ready to serve */
+  --gm-warn:       #8A5A17;  /* 5.1:1 — allergens; a safety line, so it is not allowed to be faint */
+  --gm-danger:     #A03328;  /* 6.0:1 — order dismissed, submit failed */
+  --gm-danger-tint: rgba(166,58,43,0.10);
+
+  /* ── Re-point the app's tokens at the palette above ───────────────────────────────────────
+     NOTE the one deliberate inversion: --theme-border-lt is the LIGHTER rule everywhere else in
+     the product, and here it is the STRONGER one. It is the token .btn-ghost borders with, and
+     on this surface every ghost button (+Add, Filters, Clear, Order again) is a control a thumb
+     has to find — so it takes the pine outline while --theme-border keeps the quiet structural
+     rule. Scoped to this file; do not carry the inversion anywhere else. */
+  --theme-bg:            var(--gm-ground);
+  --theme-card:          var(--gm-paper);
+  --theme-input-bg:      var(--gm-paper);
+  --theme-border:        var(--gm-rule);
+  --theme-border-lt:     var(--gm-control);
+  --theme-text1:         var(--gm-ink);
+  --theme-text2:         var(--gm-sage);
+  --theme-text3:         var(--gm-sage-lt);
+  --theme-accent:        var(--gm-pine);
+  --theme-accent-hover:  var(--gm-pine-deep);
+  --theme-accent-text:   var(--gm-paper);
+  --theme-accent-ink:    var(--gm-pine);
+  --theme-green:         var(--gm-veg);
+  --theme-green-text:    var(--gm-success);
+  --theme-red:           var(--gm-nonveg);
+  --theme-red-text:      var(--gm-danger);
+  --theme-amber:         var(--gm-warn);
+  --theme-amber-text:    var(--gm-warn);
+  --theme-table-hover:   rgba(0,70,67,0.04);
+  --theme-focus-ring:    rgba(0,70,67,0.12);
+  --theme-focus-outline: var(--gm-pine);
+  /* Paper casts a soft shadow, not the dark theme's 55%-black drop. Tinted pine so the shade
+     under a card is the same family as the ink on it, never a grey bruise on a warm ground. */
+  --theme-card-shadow:   0 1px 2px rgba(0,70,67,0.05), 0 10px 24px -10px rgba(0,70,67,0.13);
+
+  /* Without this the OS dark preference styles the filter sheet's checkbox and the kitchen-notes
+     textarea as dark native controls sitting in the middle of a bone card. */
+  color-scheme: light;
+}
+
+/* The page is minHeight:100vh, but iOS rubber-band overscroll exposes whatever is behind it —
+   which is <html>'s inline background from applyTheme, i.e. Crest's charcoal. Repainting the
+   document ground means a guest who flicks past the end of the menu sees paper, not a flash of
+   the admin app.
+
+   The literal is deliberately a second copy of --gm-ground rather than a var() reference: the
+   palette is declared on .guest-menu, not on :root, so that a browser without :has() still gets
+   the whole menu correctly and loses only the overscroll ground. Hoisting the tokens up to
+   html:has(...) would remove the duplication and make the ENTIRE surface fall back to Crest
+   charcoal on that browser, which is much the worse failure. */
+html:has(.guest-menu),
+body:has(.guest-menu) {
+  background: #E7E3D8;
+}
+
+/* The outlet name is the one moment this page belongs to the restaurant rather than to Crest, so
+   it takes full-strength pine while the dishes below it stay ink. Georgia is set inline in the
+   component (shared with the sidebar wordmark and the login screen); only the colour is here. */
+.guest-menu .gm-wordmark {
+  color: var(--gm-pine);
+}
+
+/* ── Overrides for values Layout.css hardcodes ────────────────────────────────────────────────
+   These rules exist only because the shared classes below bake in a literal Aged-Brass or
+   charcoal rgba rather than reading --theme-accent. A token swap alone cannot reach them, so a
+   brass border would have leaked onto the active category chip and a brass halo onto the
+   confirmation card. If those literals are ever tokenised in Layout.css, delete this block. */
+
+.guest-menu .tab-btn:hover {
+  border-color: rgba(0,70,67,0.30);
+}
+
+/* The one place the accent goes solid. A tinted chip is the app's convention and it is correct
+   on a dense staff screen, but this bar is how a diner moves around a menu one-handed at arm's
+   length — it needs to answer "where am I" in a glance, not on inspection. Bone on pine is the
+   same 9.17:1 the page is built on. */
+.guest-menu .tab-btn--active {
+  background: var(--gm-pine);
+  border-color: var(--gm-pine);
+  color: var(--gm-paper);
+}
+
+.guest-menu .badge-green { background: rgba(47,107,42,0.11); }
+.guest-menu .badge-amber { background: rgba(138,90,23,0.11); }
+.guest-menu .badge-red   { background: var(--gm-danger-tint); }
+
+@keyframes gm-order-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0,70,67,0.45); }
+  50%      { box-shadow: 0 0 0 6px rgba(0,70,67,0.14); }
+}
+/* Name only — Layout.css's prefers-reduced-motion block still kills this with
+   `animation: none !important`, which it could not do if this re-declared the shorthand. */
+.guest-menu .guest-order-glow {
+  animation-name: gm-order-glow-pulse;
+}

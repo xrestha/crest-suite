@@ -3,6 +3,9 @@ import { useParams } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { NUTRIENTS } from '../../../utils/nutrition'
 import Modal from '../../../components/Modal'
+// Scoped bone-and-pine palette for this surface only — see the header of guestMenu.css for why a
+// public menu must not read the global theme tokens.
+import './guestMenu.css'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const fmtNutrient = (def, value) => `${(Number(value) || 0).toFixed(def.dp)} ${def.unit}`
@@ -370,14 +373,14 @@ export default function GuestMenu() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--theme-bg)', color: 'var(--theme-text1)' }}>
+    <div className="guest-menu" style={{ minHeight: '100vh', background: 'var(--theme-bg)', color: 'var(--theme-text1)' }}>
       <div style={{ maxWidth: 640, margin: '0 auto', padding: '28px 20px 100px', '--guest-menu-nav-h': '52px' }}>
         {/* This is the one page PRODUCT.md names as the deliberate brand-facing exception — a
             guest's own leisurely browsing moment, not an ops screen — so the outlet name gets the
             same Georgia serif signature the sidebar wordmark and login screen use, rather than
             reading identically to every staff tool in the app. */}
         <div style={{ textAlign: 'center', marginBottom: 26 }}>
-          <h1 style={{ margin: '0 0 10px', fontSize: 30, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.01em' }}>{outletName}</h1>
+          <h1 className="gm-wordmark" style={{ margin: '0 0 10px', fontSize: 30, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.01em' }}>{outletName}</h1>
           {/* A short brass rule — the one restrained brand signature on this, the sole brand-facing
               page (PRODUCT.md), giving a diner's menu a touch more identity than a staff tool without
               breaking the One Accent Rule. */}
@@ -478,7 +481,7 @@ export default function GuestMenu() {
             maxWidth: 608, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '14px 18px', borderRadius: 10, border: 'none', cursor: 'pointer',
             background: 'var(--theme-accent)', color: 'var(--theme-accent-text)', fontSize: 14, fontWeight: 700,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            boxShadow: '0 6px 20px -6px rgba(0,70,67,0.38)',
           }}
         >
           <span>{cartCount} item{cartCount > 1 ? 's' : ''} · {fmtNpr(cartTotal)}</span>
@@ -505,7 +508,7 @@ export default function GuestMenu() {
                       style={{
                         padding: '6px 12px', borderRadius: 20, fontSize: 12.5, textTransform: 'capitalize', cursor: 'pointer',
                         border: `1px solid ${excludedAllergens.includes(a) ? 'var(--theme-red)' : 'var(--theme-border)'}`,
-                        background: excludedAllergens.includes(a) ? 'rgba(248,113,113,0.12)' : 'var(--theme-input-bg)',
+                        background: excludedAllergens.includes(a) ? 'var(--gm-danger-tint)' : 'var(--theme-input-bg)',
                         color: excludedAllergens.includes(a) ? 'var(--theme-red-text)' : 'var(--theme-text2)',
                       }}
                     >
@@ -554,7 +557,7 @@ export default function GuestMenu() {
                   rows={2}
                   style={{
                     marginTop: 8, width: '100%', resize: 'vertical', borderRadius: 6,
-                    border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)',
+                    border: '1px solid var(--theme-border-lt)', background: 'var(--theme-input-bg)',
                     color: 'var(--theme-text1)', padding: '8px 10px', fontSize: 13, boxSizing: 'border-box',
                   }}
                 />
@@ -639,7 +642,7 @@ function Stepper({ qty, onChange }) {
   // Matches posOrdersConstants.js's btnSm sizing — same widget, same touch-target standard,
   // and here on the guest's own phone there's no cramped side panel forcing a smaller size.
   const btn = {
-    width: 40, height: 40, borderRadius: 8, border: '1px solid var(--theme-border)',
+    width: 40, height: 40, borderRadius: 8, border: '1px solid var(--theme-border-lt)',
     background: 'var(--theme-input-bg)', color: 'var(--theme-text1)', cursor: 'pointer',
     fontSize: 18, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
   }
