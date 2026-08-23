@@ -15,12 +15,25 @@ export function fmtNutrient(def, value) {
 // vat_rate may be 0 (No VAT); don't use `|| 0.13` — parseFloat(0) is falsy and would coerce 0% back to 13%.
 export const vatOf = rec => (rec?.vat_rate === null || rec?.vat_rate === undefined) ? 0.13 : parseFloat(rec.vat_rate)
 
-// Cost of one output unit of a sub-recipe (recursively resolves nested sub-recipes).
-// `seen` guards against a cycle (A contains B, B is later edited to contain A — the UI only
-// blocks a sub-recipe from referencing itself directly, not an indirect cycle like this) turning
-// into unbounded recursion and crashing every page that costs a recipe. Matches the same-file
-// `recipeHasIngredient`'s existing seen-set pattern; a cyclic recipe just costs as 0 for the
-// ingredient that would re-enter the cycle, rather than climbing the stack until it overflows.
+// Cost of one output unit of a sub-recipe (recursively resolves nested sub-recipes to any depth).
+//
+// `seen` guards against a cycle (A contains B, B is later edited to contain A — the ingredient
+// picker only blocks a sub-recipe from referencing ITSELF directly, and Recipes.js's save-time
+// check only fires while editing a sub-recipe) turning into unbounded recursion and crashing every
+// page that costs a recipe.
+//
+// IT IS A PATH SET, NOT A VISITED SET — `delete` on the way out is load-bearing. It used to only
+// ever add, which is the correct shape for "have I been here before in this whole traversal" and
+// the WRONG shape for "am I inside myself right now". The difference is invisible with one level of
+// nesting and silently under-costs a DIAMOND, which is exactly what a third level makes likely:
+//
+//     Sauce → Roux  → Stock        Stock costed here…
+//           → Stock               …and returns 0 here, already "seen"
+//
+// A base used by two branches of the same tree is not a cycle — it is a base being used twice, and
+// it must be paid for twice. `explodeRecipeTree()` in utils/recipeCost.js has always counted it
+// twice (it has no seen set at all, only a depth cap), so before this fix the printed cost card and
+// the COGS/Variance figures disagreed about the same recipe, with nothing on either page saying so.
 export function calcSubRecipeCostPerUnit(subRecipe, allRecipes, seen = new Set()) {
   if (!subRecipe || seen.has(subRecipe.id)) return 0
   seen.add(subRecipe.id)
@@ -38,6 +51,7 @@ export function calcSubRecipeCostPerUnit(subRecipe, allRecipes, seen = new Set()
       }
     }
   })
+  seen.delete(subRecipe.id)   // leaving this node — a sibling branch may legitimately use it too
   const yieldQty = parseFloat(subRecipe.yield_qty) || 1
   return total / yieldQty
 }

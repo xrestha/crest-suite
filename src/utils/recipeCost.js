@@ -61,7 +61,14 @@ export async function explodeRecipeTree(supabase, recipeIds) {
   // dishes, never a sub-recipe id directly — never hit this path and computed correctly.
   const fetchedIngredientsFor = new Set(recipeIds)
   let frontier = [...new Set(allIng.map(r => r.sub_recipe_id).filter(Boolean))]
-  for (let round = 0; round < 5 && frontier.length > 0; round++) {
+  // Round 0 fetches level 2, so MAX_DEPTH_ROUNDS rounds resolves that many levels below the top
+  // dish. Raised from 5 to 12 when nested "micro" sub-recipes became a supported shape: running
+  // out of rounds does not error, it just stops descending, so the ingredients below the cut
+  // vanish from COGS and Variance as a believable smaller number. Each round is 2 queries against
+  // a frontier that shrinks fast, so the extra headroom costs nothing on a shallow tree.
+  const MAX_DEPTH_ROUNDS = 12
+  let round = 0
+  for (; round < MAX_DEPTH_ROUNDS && frontier.length > 0; round++) {
     // yield_qty (`sr`) is still fetched for the whole frontier every round — recipeMeta must
     // have an entry for every sub-recipe `explode()` might recurse into, including ones already
     // covered by `topIng`. Only the ingredient rows (`si`, the actual duplication risk) are
@@ -77,6 +84,16 @@ export async function explodeRecipeTree(supabase, recipeIds) {
     toFetchIngredients.forEach(id => fetchedIngredientsFor.add(id))
     allIng.push(...(si || []))
     frontier = [...new Set((si || []).map(r => r.sub_recipe_id).filter(Boolean))].filter(id => !recipeMeta[id])
+  }
+  // Loud rather than silent. If the frontier is still non-empty the tree is deeper than the cap
+  // (or cyclic despite Recipes.js's save-time check), and every figure derived from this walk is
+  // understated by whatever sits below the cut.
+  if (frontier.length > 0) {
+    console.error(
+      `explodeRecipeTree: sub-recipe nesting deeper than ${MAX_DEPTH_ROUNDS} levels, or a cycle — ` +
+      `${frontier.length} sub-recipe(s) not resolved. COGS/Variance from this walk are UNDERSTATED. ` +
+      `Unresolved ids: ${frontier.join(', ')}`
+    )
   }
 
   // `subs` is an out-param the caller passes in — pushing into it rather than returning a second

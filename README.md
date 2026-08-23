@@ -158,6 +158,35 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S602 — 2026-08-23 — A sub-recipe inside a sub-recipe, and the diamond that cost nothing
+
+Asked whether a sub-recipe can contain another sub-recipe — a "micro recipe". It already could: the
+picker excludes only the recipe being edited, both cost and explosion engines recurse, and indirect
+cycles are refused at save time. Nothing to build. But two things were wrong the moment a third
+level existed.
+
+**`calcSubRecipeCostPerUnit`'s cycle guard was a visited set, not a path set.** It only ever added
+to `seen`, so in a DIAMOND — `Sauce → Roux → Stock` and `Sauce → Stock` — the second branch found
+`Stock` already seen and costed it as **zero**. On the worked example in the new test that is NPR 40
+instead of NPR 140: the sauce reads 71% cheaper than it is, and every dish above it inherits that.
+Invisible at two levels, because `calcRecipeCost` starts a fresh `seen` per top-level ingredient;
+it needs a sub-recipe inside a sub-recipe to appear at all, which is exactly what was being asked
+about. `seen.delete(id)` on the way out is the fix — a base used by two branches is not a cycle, it
+is a base used twice.
+
+Worse, it made the two engines disagree: `explodeRecipeTree()` has no seen set (only a depth cap),
+so it always counted that base twice. The printed cost card and the COGS/Variance figures for the
+same recipe were different numbers, with nothing on either page saying so.
+
+**Running out of depth was silent.** `explodeRecipeTree`'s frontier loop stopped at 5 rounds and
+returned what it had, so anything below the cut vanished from COGS and Variance as a believable
+smaller number. Now 12 rounds, and an exhausted frontier logs the unresolved ids and states that the
+figures are understated.
+
+`recipeCostCalc.test.js` is new — 6 cases covering single level, compounding yields, the diamond,
+cycle termination, and `yield_pct` at depth. Verified the diamond case genuinely fails without the
+fix before committing it.
+
 ### S601b — 2026-08-22 — What the audit of the P&L found, and the race across every period page
 
 Follow-on from S601. A multi-agent audit of the ReportPage family confirmed 12 findings (2 refuted).
