@@ -205,9 +205,14 @@ and Ashwin into one "Ash" tick and now use `BS_MONTHS_SHORT`; and the Food Cost 
 vanishes — taking its own withheld-month explanation and screen-reader summary with it — when a client
 has only one closed month.
 
-Still open, deliberately: three minor `ConsolidatedPnl` issues (a blank month prints a full statement
-of NPR 0 instead of reaching its empty state; the Excel export keys outlet columns by name so
-same-named outlets collapse; an admin with no client selected hangs on "Building the statement…").
+The last three, since fixed: a blank month printed a full statement of NPR 0 because `loadSingle`
+set a statement unconditionally, so `empty` (`!pnl`) was unreachable — emptiness is now measured on
+the ROWS, since a real month whose figures net to zero still has rows and must still render; the
+Excel export keyed outlet columns by `clients.name`, so two same-named outlets silently overwrote
+each other into one column while Consolidated still counted both (a sheet that does not add up), and
+headers are now disambiguated once outside the row loop; and an admin session with no client selected
+returned silently from the load effect, leaving `loading` true from useState forever — it now says
+what is missing instead of sitting on "Building the statement…".
 
 ### S601 — 2026-08-22 — The Food Cost % chart read 391.8%, and four separate things had to be wrong for it to
 

@@ -115,7 +115,14 @@ export default function ConsolidatedPnl() {
   // authLoading is a real dependency: a hard load lands here while auth is still resolving, and
   // with [clientId] alone the guard fails once and nothing ever re-fires — the page sits on
   // Loading… forever (caught live, first smoke test of this page).
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The `effectiveClientId` guard is real — an admin session with no client selected has none —
+  // but returning silently left `loading` true from useState forever, so the page sat on
+  // "Building the statement…" with no error and no way out. Say what is missing instead.
+  useEffect(() => {
+    if (authLoading) return
+    if (!effectiveClientId) { setLoading(false); setLoadError('No client selected. Pick one from the outlet switcher in the sidebar.'); return }
+    init()
+  }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
     setLoading(true)
@@ -274,6 +281,18 @@ export default function ConsolidatedPnl() {
       labourPayroll = (slips || []).reduce((s, ps) => s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
     }
 
+    // `empty` is `!pnl`, and this used to set a statement unconditionally — so `pnl` was never
+    // null on a successful read and the empty state was unreachable. A month with nothing recorded
+    // printed a complete statement of NPR 0, which is the S594 rule inverted: a zero the page has
+    // not been given is not a zero it computed. Measured on the ROWS, not on the totals: a real
+    // month whose figures genuinely net to zero still has rows, and must still render.
+    const hasAnyData = (opening || []).length > 0 || (closing || []).length > 0 ||
+      (purchases || []).length > 0 || (returns || []).length > 0 ||
+      (wastages || []).length > 0 || (staffMealsData || []).length > 0 ||
+      (salesData || []).length > 0 || (overheadRows || []).length > 0 ||
+      (runs || []).length > 0
+    if (!hasAnyData) { setPnl(null); return }
+
     setPnl(buildStatement({
       revenue, openingVal, purchasesVal, returnsVal, wastageVal, staffMealsVal, closingVal,
       labourPayroll, labourBucket: buckets.labor, overheads: buckets.overhead, taxFees: buckets.tax_fees,
@@ -306,9 +325,19 @@ export default function ConsolidatedPnl() {
     const wb = XLSX.utils.book_new()
     let rows
     if (grouped && cols.length > 0) {
+      // Column headers must be unique: an object key silently overwrites, so two outlets with the
+      // same `clients.name` collapsed into ONE column while Consolidated still counted both — a
+      // sheet that visibly does not add up. Disambiguated once, outside the row loop, so every row
+      // uses the same header.
+      const seen = {}
+      const headerOf = c => {
+        seen[c.name] = (seen[c.name] || 0) + 1
+        return seen[c.name] === 1 ? c.name : `${c.name} (${seen[c.name]})`
+      }
+      const headers = cols.map(headerOf)
       rows = LINES.map(l => {
         const row = { 'Line': l.label }
-        cols.forEach(c => { row[c.name] = Math.round((l.cost ? -1 : 1) * (c.stmt[l.key] || 0)) })
+        cols.forEach((c, ci) => { row[headers[ci]] = Math.round((l.cost ? -1 : 1) * (c.stmt[l.key] || 0)) })
         row['Consolidated'] = Math.round((l.cost ? -1 : 1) * (consolidated[l.key] || 0))
         row['% of Revenue'] = l.key === 'revenue' ? '100.0%' : pctOf(consolidated[l.key], consolidated.revenue)
         return row
