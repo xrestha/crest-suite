@@ -31,7 +31,7 @@ function billAging(days) {
 // ΔE 5.7 under deuteranopia, both below the floor). Now the same fixed literal set
 // ClientDashboard's CHART_COLORS uses — theme-independent on purpose, which is correct for a
 // series palette and is NOT the undocumented-accent violation that rule is about.
-const VENDOR_SPLIT_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
+const VENDOR_SPLIT_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
 
 export default function VendorReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()

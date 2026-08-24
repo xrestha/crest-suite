@@ -159,6 +159,51 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S609 — 2026-08-24 — Can a colour-blind person actually use this?
+
+Asked directly, and answerable only by simulating it. Deuteranopia (~6% of men), protanopia (~2%)
+and tritanopia (~0.01%) run over every colour in the product that carries meaning — theme tokens,
+both fixed chart palettes, the cost-breakdown pie. **Before this session the answer was no.**
+
+**The worst finding was not in the themes at all.** `CHART_COLORS` — and its byte-identical twin
+`VENDOR_SPLIT_COLORS` — had its blue (`#60a5fa`) and violet (`#a78bfa`) slots at **ΔE 0.4** under
+deuteranopia. Not "similar": *indistinguishable*. Any chart drawing five or more series painted two
+lines a colour-blind reader could not tell apart, and it had been that way since the array was
+written. Gold and orange collided too under protanopia (ΔE 4.2). `#a78bfa` → `#8b5cf6` (already the
+Overheads slice colour, so nothing new enters the palette) and `#fb923c` → `#ea580c`; **all 28 pairs
+now clear for both deuteranopia and protanopia.** Brand gold stayed — it deliberately ties the Food
+Cost slice to its KPI card.
+
+The lesson generalises past charts: **these palettes exist precisely because semantic tokens are not
+validated for series separation, and nobody was validating the palettes either.** DESIGN.md's
+"never build a chart palette from the semantic tokens" rule had leaned on two concrete measurements
+and has now outlived both — the same-hex presets were retired in S607, and Light's `red`/`amber`
+collapse was fixed in this session. The rule survives on the reason underneath: the tokens move to
+serve legibility and branding, and series separation is a different constraint nothing checks for
+them. Its evidence has now been rewritten twice in two days, which is the actual finding — **a rule
+kept alive by whichever measurement is currently true is a rule nobody has stated the reason for.**
+
+**Light's danger and warning text were one colour.** `redText #c92323` and `amberText #a44c08`
+measured **ΔE 3.2** apart under deuteranopia, and Light is now the only light preset. Of 120 pairs
+searched, exactly three cleared both red-green axes at ≥8 while every variant held ≥4.5:1 on card
+and bg — and all three shared the same red. `#8f2440` / `#a85200` shipped.
+
+**The trade is stated rather than hidden.** That red sits at **ΔE 0 from `accentInk` under
+tritanopia**, which was previously clear. Eight accentInk nudges were tested and none recovered it
+without dropping red-green back below the floor: the palette's hue space cannot satisfy both axes at
+once. Tritanopia is ~0.01% and not sex-linked; deuteranopia and protanopia together are ~8% of men.
+The pairing matters less as well — red vs accent is error text beside a link, not two bands of one
+scale the way red vs amber is. Fixing the common case at the cost of the rare one is deliberate.
+
+Tritanopia is likewise not chased in the chart palette (7 pairs remain): separating on the
+blue-yellow axis fights separating on red-green, so closing it would re-break the 8% case to serve
+the 0.01% one.
+
+New in DESIGN.md: **The Signal Separation Rule** — two signal colours a reader compares must stay
+distinguishable *without hue*, measured rather than eyeballed; and where the signal is a scale
+rather than a status, colour is not sufficient alone at all (that is what S608's `✓`/`△`/`▲` marks
+are for). A figure a person reads and acts on carries the mark; a chart axis may take colour alone.
+
 ### S608 — 2026-08-24 — The band that was only ever a colour
 
 `fcBand()` has returned `{ key, label, color }` since S551. Every colour call site in the product

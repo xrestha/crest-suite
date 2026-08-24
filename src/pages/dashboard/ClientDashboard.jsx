@@ -25,7 +25,7 @@ import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCou
 import SalesPivot from '../../modules/dashboard/SalesPivot'
 import { useFoodBeverageSplit } from '../../modules/dashboard/useFoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
-const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#a78bfa', '#fb923c', '#22d3ee', '#f472b6']
+const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
 
 // Roving-tabindex tab row for in-card view switches — completes the tablist contract the bare
 // role="tablist"/"tab" markup used to promise without delivering (aria-controls, roving tabIndex,

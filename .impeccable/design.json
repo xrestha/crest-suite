@@ -989,6 +989,11 @@
         "name": "A report that states a scope must state it everywhere the report goes",
         "section": "components",
         "body": "Stock Ageing aged every fiscal year against new Date() while its selector accepted any past year, pushing every surviving batch into the 90+ band and reporting the whole stock value as stale — silently, in the alarming direction. It had no as-of date in the subtitle, the print title or the workbook, and its filter bar is no-print so a printed sheet showed a filtered table with no record of the filter. One scopeLine now feeds all four."
+      },
+      {
+        "name": "The Signal Separation Rule",
+        "section": "colors",
+        "body": "Two signal colours that a reader compares must stay distinguishable *without hue*. Measured under deuteranopia (~6% of men) and protanopia (~2%), not by eye. Light's `redText`/`amberText` shipped at ΔE 3.2 — danger and warning were one colour for a red-green colour-blind reader — and were retuned in S608 to `#8f2440`/`#a85200`, the only pair of 120 searched that clears both axes while every variant holds ≥4.5:1. Where a band is a *scale* rather than a status (food cost healthy/watch/too-high), colour is not enough on its own at all: `fcBand()` also returns a `✓`/`△`/`▲` shape mark, distinguished by fill rather than hue, so the band survives greyscale and a monochrome print. A figure a person reads and acts on carries the mark; a chart axis or sparkline may take colour alone."
       }
     ],
     "dos": [
@@ -1011,7 +1016,7 @@
       "Don't invent a stronger/different shadow to mean \"important\" or \"premium.\" Card elevation (`--theme-card-shadow`) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning (see Elevation).",
       "Don't hardcode white or black as text on an accent background - use the paired `accent-text` token.",
       "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (No exceptions remain; Bright's colorful KPI badges were the only named one, retired with that preset in S607.)",
-      "Don't build a multi-series chart palette from the semantic tokens — on Light, `red`/`amber` collapse to ΔE 3.1 and `accent`/`red` to ΔE 5.6 under deuteranopia (floor 8). The original evidence — accent and purple being the *same hex* on Dracula, Catppuccin and Latte — died with those presets in S607; the rule did not, because the tokens are five *roles*, not five distinguishable hues.",
+      "Don't build a multi-series chart palette from the semantic tokens — they are five *roles*, not five validated hues, and nothing measures them as a series set. Both earlier justifications have now expired (accent/purple being one hex died with those presets in S607; Light's `red`/`amber` ΔE 3.1 was fixed in S608), which is itself the argument: the tokens move for reasons that have nothing to do with series separation. Use the validated fixed-hex sets (`CHART_COLORS`, `COST_BREAKDOWN_COLORS`) and re-measure when you touch them — S608 found `CHART_COLORS` slots 3 and 5 at ΔE 0.4 under deuteranopia, i.e. two identical lines on any chart with five or more series, and nobody had noticed.",
       "Don't dim a row with `opacity` to de-emphasise it; opacity multiplies through the text colour and takes it below AA. Label the state instead.",
       "Don't put `role=\"button\"` on a `<tr>`. It removes the row from the table's structure, so the cells stop being associated with their column headers. Put a real `<button>` in the first cell (see Data Tables).",
       "Don't paint a verdict colour on a figure that has not settled yet — early in a period a lumpy-numerator ratio is arithmetic, not signal.",

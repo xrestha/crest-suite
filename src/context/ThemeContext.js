@@ -54,7 +54,19 @@ export const PRESETS = {
     accent: '#b07d2b', accentHover: '#946720', accentText: '#241a08',
     inputBg: '#fbf9f6', tableHover: '#f3ede6', focusRing: 'rgba(176,125,43,0.14)',
     green: '#15803d', red: '#dc2626', amber: '#b45309', purple: '#7c3aed',
-    greenText: '#137538', redText: '#c92323', amberText: '#a44c08', purpleText: '#7c3aed', accentInk: '#7a561e',
+    // redText/amberText retuned S608 for red-green colour blindness. At #c92323/#a44c08 they
+    // measured ΔE 3.2 apart under deuteranopia — danger and warning were effectively one colour
+    // for ~6% of men, and Light is now the only light preset. These two values are the ONLY pair
+    // (of 120 searched) that clears both deuteranopia and protanopia at ≥8 while every variant
+    // still holds ≥4.5:1 on card and bg. Don't "tidy" them back toward a conventional red.
+    //
+    // Known and accepted: this puts redText and accentInk at ΔE 0 under TRITANOPIA, which was
+    // previously clear. No accentInk nudge recovers it without dropping red-green back below the
+    // floor — the palette's hue space cannot satisfy both axes. Tritanopia is ~0.01% and not
+    // sex-linked; deuteranopia and protanopia together are ~8% of men. Fixing the common case at
+    // the cost of the rare one is the deliberate trade, and the pairing matters less too: red vs
+    // accent are error text vs links, not two bands of one scale the way red vs amber are.
+    greenText: '#137538', redText: '#8f2440', amberText: '#a85200', purpleText: '#7c3aed', accentInk: '#7a561e',
     cardShadow: '0 1px 2px rgba(28,25,23,0.06), 0 10px 24px -8px rgba(28,25,23,0.1)',
   },
 }
