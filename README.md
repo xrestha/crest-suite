@@ -158,6 +158,49 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S605 — 2026-08-24 — The context budget nobody had measured
+
+A `/doctor` pass over the whole Claude Code setup. Almost everything came back clean: one install
+(VS Code extension 2.1.241, current on the `latest` channel), every config file parsing, no agent
+definitions to collide, all four `SKILL.md` frontmatter blocks valid, auto mode already the default
+permission mode, and no `CLAUDE.local.md` anywhere to contradict the checked-in guidance. The 226
+user-scope plus 192 project-scope allow rules are why so little prompts — 24 distinct denial
+patterns across 50 transcripts (24.9 days), none above 4 occurrences, and none of them read-only
+commands worth pre-approving.
+
+The one real finding was size. `CLAUDE.md` had reached **142,776 characters — roughly 35,700
+estimated tokens, in context on every single request**, about 2.9× the point at which Claude Code
+starts warning about a memory file. Nothing in it was wrong. Read section by section, all 50
+headings were gotchas, failure contracts and design rationale — the categories worth paying for,
+because a fresh session cannot reconstruct them by reading the code. Even `## Stack`, the one
+section shaped like a derivable dependency list, turned out to be a constraint list wearing its
+clothes ("no Vite, no TypeScript" is a directive, not an observation). **So nothing was cut.**
+
+What changed is *when* it loads, using the pattern this repo already had: nine path-scoped
+`.claude/rules/*.md` files, each with a short pointer left behind in `CLAUDE.md`. Two more were
+added. `.claude/rules/design-system.md` (31,066 chars) took the seven purely visual sections — the
+CSS variable theme system, Motion (S533), Class names, and the four field-state/layout rules from
+S603 and S604 — scoped to `src/**` and `DESIGN.md`, so a migration or planning session no longer
+pays for them. `.claude/skills/new-feature-checklist/SKILL.md` (4,187 chars) took the eight-step
+feature checklist, which is consulted deliberately and never needed while debugging. `CLAUDE.md`
+went 142,776 → 108,944 chars, about **8,458 estimated tokens off every request**; the character
+accounting balances exactly — 35,253 moved out, 1,421 of pointers added back.
+
+Deliberately left in the always-loaded file: the four privilege invariants (S531), "a page reachable
+by URL needs the guard its nav item implies" (S601), multi-tenant isolation, access control,
+subscription access, the Supabase/DB notes and the S601 correctness rules. **A safety-critical
+prohibition must not be lazy-loaded** — the whole point of "never do X" is that it is present before
+anyone thinks to ask. That keeps the file above the warning threshold, and that is the correct trade.
+
+Two smaller results. `ui-ux-pro-max` was disabled — 4 uses since install, 1 in the window, the
+largest description in the skill listing, and functionally overlapping `impeccable` at 59 uses.
+`taste-skill` was kept despite zero use in the window, because it costs ~70 tokens and has a
+recorded scope of its own (marketing site, guest menu, public pages). And the impeccable detector
+hook was measured for the first time: median 654 ms across 395 fires, but **the Write path peaked at
+4,723 ms against its 5,000 ms timeout.** A hook that hits its timeout is cancelled silently rather
+than reported, so the detector would simply stop running on large files with nothing on screen to
+say so — the same shape of failure this file documents everywhere else. Flagged, not changed.
+
 ### S604b — 2026-08-23 — The admin preview that had never rendered in production
 
 Reported from a live screenshot immediately after S604 shipped: Guest Menu Preview showed an empty
