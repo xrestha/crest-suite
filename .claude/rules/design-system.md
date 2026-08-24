@@ -193,3 +193,30 @@ body no longer scrolls.
 **Verify by measurement, never by eye.** This is correct-looking in code and in review; only reading
 `getBoundingClientRect().top` across real scroll positions catches it. A harness that reproduces the
 two structural facts (the index.css rule + a sticky child) is enough — it does not need the app.
+
+### A nav icon is unique per route, because the command palette flattens the modules (S606)
+
+`CommandPalette.js:134` renders each nav item's `icon` and lists **every module's items in one
+searchable list**. The sidebar shows one module panel at a time, so an icon shared by two routes in
+different modules looks fine there and sits directly beside its twin in the palette. Sixteen such
+collisions had accumulated — `Users` was Customers *and* Employees, `Banknote` was Purchase 1L+
+Report *and* Payroll, `CalendarClock` was FIFO/Expiry *and* Staff Roster, `Building2` was three
+things.
+
+Audit by keying on `to:`, never on label — an item listed in two panels (Settings, Periods, Guest
+Menu) shares one route and is **not** a collision. Resolve by keeping the icon on whichever route it
+fits most literally and moving the other.
+
+**Not every repetition is a collision.** `LayoutDashboard` (Dashboard / HR Dashboard) and `Users2`
+(IMS / POS / HR Staff) are deliberately shared: they are one concept expressed once per module, and
+the labels disambiguate. Splitting those makes the palette harder to scan.
+
+Two related traps. **`AlertTriangle` is a deprecated alias of `TriangleAlert`** — in lucide-react
+1.24.0 `alert-triangle.mjs` is literally `export { default } from './triangle-alert.mjs'`, so both
+names render one SVG and a codebase using both looks inconsistent for no reason. And a **mirror-image
+pair** (`ArrowLeftRight` / `ArrowRightLeft`) used for one concept is worse than an exact duplicate:
+the reader cannot tell whether the difference is meaningful.
+
+Before adding a nav entry, check its icon is not already on another route, and verify the export
+exists (`grep "declare const <Name>:" node_modules/lucide-react/dist/lucide-react.d.ts`) — a
+misspelled icon name is a build failure, and a *wrong-but-real* one is silent.

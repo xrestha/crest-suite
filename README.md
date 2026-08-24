@@ -112,6 +112,7 @@ Starter: 1-month free trial. Annual = 25% off monthly.
 - **Done (S97):** PWA offline stock count — IndexedDB cache + sync queue; counts entered offline are queued and flushed automatically on reconnect
 - **Done (S93):** Staff meal & complimentary tracking — `staff_meals` table, new tab in Stock Count, deducted from Used/COGS separately from wastage. Staff Meals column added to Stock Summary and Monthly Summary. Variance updated. Growth plan, `staff_meals` flag. DB migration run ✓
 - **Done (S96):** Mobile-first stock count UX — responsive sidebar (hamburger + overlay), card list, category pill strip, progress bar, fixed Save All bar on mobile
+- **Open (S606):** White-label logo on public pages — `Login.js`, `ResetPassword.js` and `Pricing.js` render the `Hexagon` fallback unconditionally while still reading `settings.app_name`, so a white-labelled client sees their own brand name beside Crest’s generic mark on the page they log in through. The sidebar already has the `settings.logo_url` conditional; these three never adopted it.
 - **Deferred (client):** Owner Dashboard — mobile-first single-page P&L view
 - **Deferred (client):** Role-based users Owner/Manager
 
@@ -157,6 +158,64 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 ---
 
 ## Session Log
+
+### S606 — 2026-08-24 — Sixteen nav icons that each meant two things
+
+Asked to check iconbuddy.com with a view to replacing icons. It 403s `WebFetch`; Playwright renders
+it fine. It is a **search front-end over ~150 open-source icon sets** (~300k icons) exporting
+copy-paste SVG/PNG/JSX rather than a package — and **Lucide, which this app already uses, is one of
+the sets it indexes.** So the answer was not to switch. Copy-pasting SVGs would mean hand-maintaining
+88 components and losing the uniform `size`/`strokeWidth`/`color` props every call site relies on,
+and mixing sets destroys the one property an icon system exists to provide: a single grid, stroke
+weight and cap style. That is the argument `DESIGN.md` already makes about the closed radius and type
+scales — **an icon set is a closed scale too.**
+
+The audit that produced that answer is where the real findings were, and none of them needed a new
+library.
+
+**`AlertTriangle` was a deprecated alias.** In the installed lucide-react 1.24.0,
+`alert-triangle.mjs` is nothing but `export { default } from './triangle-alert.mjs'` — the identical
+SVG under an old name. `Layout.js` and `ClientDashboard.jsx` already used `TriangleAlert`; only HR
+Self-Service still carried the old one. `ArrowLeftRight` vs `ArrowRightLeft` was the same story one
+step removed: two genuinely different lucide glyphs, mirror images of each other, used for one
+"transfer/swap" concept in two modules — which is worse than an exact duplicate, because a reader
+cannot tell whether the difference is meaningful. Both unified; 90 distinct icons → 88.
+
+**Then the finding worth the session: sixteen nav icons each meant two unrelated things.** Parsing
+all 92 nav entries keyed on `to:` (so an item listed in two panels is not mistaken for a collision),
+`Users` was Customers *and* Employees; `Banknote` was Purchase 1L+ Report *and* Payroll;
+`CalendarClock` was FIFO/Expiry *and* Staff Roster; `ClipboardCheck` was Stock Count *and*
+Attendance; `Building2` was three different things. This matters more than it appears, because
+**`CommandPalette.js:134` renders each item's icon and flattens every module into one searchable
+list** — a collision that is invisible in the sidebar, which shows one module at a time, sits
+directly beside its twin in the palette.
+
+Fifteen reassignments, each keeping the icon on whichever item it fits most literally and moving the
+other: Supplier Contribution → `Handshake` (Vendors keeps `Truck`), POS Orders → `ConciergeBell`,
+Attendance → `UserCheck` (Stock Count genuinely is a clipboard count), Holiday Calendar →
+`CalendarHeart`, Stock Movements → `PackageOpen` (Audit Log keeps `History`, the chronological log),
+Price Tracker → `Activity`, FIFO/Expiry → `CalendarX2`, Purchase 1L+ → `FileDigit` (Payroll keeps
+`Banknote`, being literal money disbursement), Group Console → `Network` and Vendor Report →
+`BookUser` (admin Clients keeps `Building2`), Pay Setup → `SlidersHorizontal`, Customers → `Contact`,
+Overtime → `Timer`, HR Reports → `FileStack`, KOT Log → `Printer`.
+
+**Two collisions were deliberately left, and that is the transferable half.** `LayoutDashboard`
+(Dashboard / HR Dashboard) and `Users2` (IMS / POS / HR Staff) are not accidents — they are the same
+concept expressed once per module, and the labels already disambiguate. Splitting them would make the
+palette harder to scan, not easier. **Not every repetition is a collision.**
+
+**One open finding, deliberately not fixed here.** `Hexagon` is not a hardcoded Crest logo — in the
+sidebar it is the *white-label fallback* for `settings.logo_url`. But `Login.js`, `ResetPassword.js`
+and `Pricing.js` render it unconditionally while still reading `settings.app_name`, so **a
+white-labelled client sees their own brand name sitting beside Crest's generic hexagon on the page
+they log in through every day.** The sidebar already has the conditional; those three pages never
+adopted it. Logged in the Features Backlog rather than fixed mid-audit.
+
+Verified with `npm run build` ("Compiled successfully"), a static pass confirming all 90 imports in
+`Layout.js` are referenced and all 97 referenced icons are imported, and a re-run of the collision
+audit (83 routes, 80 distinct icons, 2 intentional collisions remaining). Worth recording that two
+of the verification passes reported false negatives from my own regex bugs before being re-done
+properly — **a check that reports everything absent is a broken check, not a finding.**
 
 ### S605 — 2026-08-24 — The context budget nobody had measured
 

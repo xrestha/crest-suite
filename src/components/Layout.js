@@ -15,18 +15,18 @@ import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS } from '../utils/bsCalendar'
 import {
-  LayoutDashboard, CalendarRange, Package, Truck, ShoppingCart, ClipboardList, ClipboardCheck,
-  ArrowRightLeft, TrendingUp, ChefHat, Tag, PieChart, Receipt,
-  FileBarChart, CalendarDays, GitCompare, Target, Boxes, RefreshCw, LineChart, Trash2, PackageX,
-  ArrowUpDown, CalendarClock, Hourglass, Sigma, PackageMinus, Percent, ReceiptText, Wallet, HandCoins, Banknote,
-  Trophy, PiggyBank, Combine, Tags, Building2, FileSignature,
-  Settings2, Utensils, LayoutGrid, Users, Clock, TriangleAlert, Undo2, BarChart3, ScrollText, Scale,
-  UtensilsCrossed, Users2,
-  Settings, Palmtree, Calculator, PartyPopper, Gift, CreditCard, Briefcase, Coins, FileCheck2,
-  ShieldCheck, Warehouse, Store,
-  HelpCircle, PanelLeftClose, PanelLeftOpen, LogOut,
-  Crown, History, QrCode, Hexagon, Search, ChevronDown,
-  ParkingSquare, IdCardLanyard, Landmark,
+  Activity, ArrowRightLeft, ArrowUpDown, Banknote, BarChart3, BookUser, Boxes, Briefcase,
+  Building2, Calculator, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
+  CalendarX2, ChefHat, ChevronDown, ClipboardCheck, ClipboardList, Clock, Coins, Combine,
+  ConciergeBell, Contact, CreditCard, Crown, FileBarChart, FileCheck2, FileDigit,
+  FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon,
+  History, Hourglass, IdCardLanyard, Landmark, LayoutDashboard, LayoutGrid, LineChart,
+  LogOut, Network, Package, PackageMinus, PackageOpen, PackageX, Palmtree, PanelLeftClose,
+  PanelLeftOpen, ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
+  Receipt, ReceiptText, RefreshCw, Scale, ScrollText, Search, Settings, Settings2,
+  ShieldCheck, ShoppingCart, Sigma, SlidersHorizontal, Store, Tag, Tags, Target, Timer,
+  Trash2, TrendingUp, TriangleAlert, Trophy, Truck, Undo2, UserCheck, Users, Users2,
+  Utensils, UtensilsCrossed, Wallet, Warehouse,
 } from 'lucide-react'
 import './Layout.css'
 
@@ -69,13 +69,13 @@ const REPORTS = [
   // Stock & variance
   { to: '/stock-report',         label: 'Stock Report',         icon: Boxes, featureKey: 'stock_report',         cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/reorder',              label: 'Reorder Report',       icon: RefreshCw, featureKey: 'reorder_report',       cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
-  { to: '/stock-movements',      label: 'Stock Movements',      icon: History, featureKey: 'stock_movement_log',  cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
+  { to: '/stock-movements',      label: 'Stock Movements',      icon: PackageOpen, featureKey: 'stock_movement_log',  cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   // Crest Suite Pro — see the Fixed Assets note above; gated in-page, not here.
   { to: '/demand-forecast',      label: 'Demand Forecast',      icon: LineChart, cat: 'stock', minImsRole: 'supervisor' },
   { to: '/wastage-report',       label: 'Wastage Report',       icon: Trash2, featureKey: 'wastage_report',       cat: 'stock', minImsRole: 'supervisor' },
   { to: '/dead-stock',           label: 'Dead Stock',           icon: PackageX, featureKey: 'dead_stock',           cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/variance',             label: 'Variance Report',      icon: ArrowUpDown, featureKey: 'variance_report',      cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
-  { to: '/fifo',                 label: 'FIFO / Expiry',        icon: CalendarClock, featureKey: 'fifo_report',           cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
+  { to: '/fifo',                 label: 'FIFO / Expiry',        icon: CalendarX2, featureKey: 'fifo_report',           cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
   { to: '/stock-ageing',         label: 'Stock Ageing',         icon: Hourglass, featureKey: 'stock_ageing',          cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
   { to: '/theoretical-variance', label: 'Theoretical Variance', icon: Sigma, featureKey: 'theoretical_variance', cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
   { to: '/shrinkage',            label: 'Shrinkage Report',     icon: PackageMinus, featureKey: 'shrinkage_report',     cat: 'stock', minPlan: 'pro', minImsRole: 'supervisor' },
@@ -84,15 +84,15 @@ const REPORTS = [
   { to: '/non-vat-report',      label: 'Non-VAT Report',       icon: ReceiptText, featureKey: 'non_vat_report',       cat: 'money', minImsRole: 'manager' },
   { to: '/payments',             label: 'Payment Summary',      icon: Wallet, featureKey: 'payment_summary',      cat: 'money', minPlan: 'starter', minImsRole: 'manager' },
   { to: '/payables',             label: 'Outstanding Payables', icon: HandCoins, featureKey: 'outstanding_payables', cat: 'money', minImsRole: 'manager' },
-  { to: '/purchase-one-lakh-report', label: 'Purchase 1L+ Report', icon: Banknote, featureKey: 'vat_report',       cat: 'money', minImsRole: 'manager' },
+  { to: '/purchase-one-lakh-report', label: 'Purchase 1L+ Report', icon: FileDigit, featureKey: 'vat_report',       cat: 'money', minImsRole: 'manager' },
   // Menu & vendors
   { to: '/best-sellers',         label: 'Best & Worst Sellers', icon: Trophy, featureKey: 'best_sellers',   cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
   { to: '/recipe-margin',        label: 'Recipe Margin',        icon: PiggyBank, featureKey: 'recipe_margin',  cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
   { to: '/combo-builder',        label: 'Combo Builder',        icon: Combine, featureKey: 'combo_builder',  cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
   { to: '/menu-repricing',       label: 'Menu Repricing',       icon: Tags, featureKey: 'menu_repricing', cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
-  { to: '/supplier-prices',      label: 'Price Tracker',        icon: LineChart, featureKey: 'price_tracker',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
-  { to: '/vendors-report',       label: 'Vendor Report',        icon: Building2, featureKey: 'vendor_report',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
-  { to: '/supplier-contribution', label: 'Supplier Contribution', icon: Truck, featureKey: 'supplier_contribution', cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
+  { to: '/supplier-prices',      label: 'Price Tracker',        icon: Activity, featureKey: 'price_tracker',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
+  { to: '/vendors-report',       label: 'Vendor Report',        icon: BookUser, featureKey: 'vendor_report',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
+  { to: '/supplier-contribution', label: 'Supplier Contribution', icon: Handshake, featureKey: 'supplier_contribution', cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
   { to: '/vendor-balance-confirmation', label: 'Vendor Balance Confirmation', icon: FileSignature, featureKey: 'vendor_balance_confirmation', cat: 'menu', minImsRole: 'manager' },
 ]
 
@@ -116,11 +116,11 @@ const POS_GROUPS = [
     { to: '/pos', label: 'POS Setup', icon: Settings2, minPosRole: 'manager' },
   ]},
   { key: 'pos-floor', label: 'Floor', items: [
-    { to: '/pos/orders', label: 'Orders', icon: ClipboardList, minPosRole: 'staff' },
+    { to: '/pos/orders', label: 'Orders', icon: ConciergeBell, minPosRole: 'staff' },
     { to: '/pos/kds', label: 'Kitchen Display', icon: Utensils, minPosRole: 'staff' },
     { to: '/pos/parking', label: 'Parking Slips', icon: ParkingSquare, minPosRole: 'staff' },
     { to: '/pos/tables', label: 'Tables', icon: LayoutGrid, minPosRole: 'manager' },
-    { to: '/pos/customers', label: 'Customers', icon: Users, minPosRole: 'supervisor' },
+    { to: '/pos/customers', label: 'Customers', icon: Contact, minPosRole: 'supervisor' },
     { to: '/pos/shifts', label: 'Shifts', icon: Clock, minPosRole: 'supervisor' },
   ]},
   { key: 'pos-menu', label: 'Menu', items: [
@@ -130,7 +130,7 @@ const POS_GROUPS = [
     { to: '/pos/exceptions', label: 'Exceptions', icon: TriangleAlert, minPosRole: 'manager' },
     { to: '/pos/credit-notes', label: 'Credit Notes', icon: Undo2, minPosRole: 'manager' },
     { to: '/pos/sales-report', label: 'Sales Report', icon: BarChart3, minPosRole: 'manager' },
-    { to: '/pos/kot-log', label: 'KOT Log', icon: ScrollText, minPosRole: 'manager' },
+    { to: '/pos/kot-log', label: 'KOT Log', icon: Printer, minPosRole: 'manager' },
     { to: '/pos/covers-report', label: 'Covers Report', icon: UtensilsCrossed, minPosRole: 'manager' },
   ]},
   { key: 'pos-admin', label: 'Admin', items: [
@@ -147,14 +147,14 @@ const KITCHEN_TEAM_ALLOWED_PATHS = ['/pos/kds']
 const HR_GROUPS = [
   { key: 'hr-people', label: 'People', items: [
     { to: '/hr/employees',  label: 'Employees',        icon: Users, minHrRole: 'manager' },
-    { to: '/hr/pay-setup',  label: 'Pay Setup',        icon: Settings2, minHrRole: 'manager' },
-    { to: '/hr/holidays',   label: 'Holiday Calendar', icon: CalendarDays, minHrRole: 'staff' },
+    { to: '/hr/pay-setup',  label: 'Pay Setup',        icon: SlidersHorizontal, minHrRole: 'manager' },
+    { to: '/hr/holidays',   label: 'Holiday Calendar', icon: CalendarHeart, minHrRole: 'staff' },
   ]},
   { key: 'hr-attendance', label: 'Attendance', items: [
     { to: '/hr/roster',     label: 'Staff Roster',     icon: CalendarClock, minHrRole: 'supervisor' },
-    { to: '/hr/attendance', label: 'Attendance',       icon: ClipboardCheck, minHrRole: 'supervisor' },
+    { to: '/hr/attendance', label: 'Attendance',       icon: UserCheck, minHrRole: 'supervisor' },
     { to: '/hr/leave',      label: 'Leave',            icon: Palmtree, minHrRole: 'supervisor' },
-    { to: '/hr/overtime',   label: 'Overtime',         icon: Clock, minHrRole: 'supervisor' },
+    { to: '/hr/overtime',   label: 'Overtime',         icon: Timer, minHrRole: 'supervisor' },
   ]},
   { key: 'hr-payroll', label: 'Payroll', items: [
     { to: '/hr/calculation', label: 'Calculation',       icon: Calculator, minHrRole: 'manager' },
@@ -165,7 +165,7 @@ const HR_GROUPS = [
     { to: '/hr/tada',       label: 'TADA Claims',        icon: Briefcase, minHrRole: 'supervisor' },
   ]},
   { key: 'hr-reports', label: 'Reports', items: [
-    { to: '/hr/reports',    label: 'HR Reports',       icon: BarChart3, minHrRole: 'manager' },
+    { to: '/hr/reports',    label: 'HR Reports',       icon: FileStack, minHrRole: 'manager' },
     { to: '/hr/gratuity',   label: 'Gratuity',         icon: Coins, minHrRole: 'manager' },
     { to: '/hr/settlement', label: 'Final Settlement', icon: FileCheck2, minHrRole: 'manager' },
   ]},
@@ -434,7 +434,7 @@ export default function Layout() {
           renderNavItem({ to: '/pnl', label: 'Profit & Loss', icon: Scale }, { pinnable: false })}
         {renderNavItem(dashNavItem, { pinnable: false })}
         {(isAdmin || isOwner) && outlets.length > 1 &&
-          renderNavItem({ to: '/group-dashboard', label: 'Group Console', icon: Building2 }, { pinnable: false })}
+          renderNavItem({ to: '/group-dashboard', label: 'Group Console', icon: Network }, { pinnable: false })}
       </>
     )
   }
@@ -526,7 +526,7 @@ export default function Layout() {
       ...tag('Suite', [
         { to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown },
         { to: '/owner-report', label: 'Monthly Owner/Manager Report', icon: ScrollText },
-        ...(outlets.length > 1 ? [{ to: '/group-dashboard', label: 'Group Console', icon: Building2 }] : []),
+        ...(outlets.length > 1 ? [{ to: '/group-dashboard', label: 'Group Console', icon: Network }] : []),
       ]),
       ...tag('IMS', NAV.slice(1)),
       ...tag('IMS', REPORTS),

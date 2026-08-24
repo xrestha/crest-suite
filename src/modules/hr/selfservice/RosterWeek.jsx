@@ -1,4 +1,4 @@
-import { ArrowLeftRight } from 'lucide-react'
+import { ArrowRightLeft } from 'lucide-react'
 import { isOffDay } from '../payrollConstants'
 import { dayKey } from './todayView'
 
@@ -70,7 +70,7 @@ export default function RosterWeek({ days, roster, publishMap, today, onRequestS
                   aria-label={`Request a swap for ${labelFor(d)}`}
                   style={{ flexShrink: 0, width: 44, minWidth: 44, padding: 0, justifyContent: 'center' }}
                 >
-                  <ArrowLeftRight size={16} aria-hidden="true" />
+                  <ArrowRightLeft size={16} aria-hidden="true" />
                 </button>
               )}
             </div>

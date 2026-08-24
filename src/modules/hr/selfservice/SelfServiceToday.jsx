@@ -1,4 +1,4 @@
-import { CalendarCheck, CalendarClock, Coffee, ArrowLeftRight, Wallet, AlertTriangle } from 'lucide-react'
+import { CalendarCheck, CalendarClock, Coffee, ArrowRightLeft, Wallet, TriangleAlert } from 'lucide-react'
 
 // The Home screen — the answer to "am I working, and when?", which is what an employee opens
 // this app for. Everything here comes from RPCs the Roster and Pay tabs already call; there is no
@@ -29,7 +29,7 @@ function LoadError({ text, onRetry }) {
   return (
     <div className="card" role="alert" style={{ padding: 14, borderColor: 'color-mix(in srgb, var(--theme-red) 35%, var(--theme-border))' }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-        <AlertTriangle size={17} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: 'var(--theme-red-text)' }} />
+        <TriangleAlert size={17} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: 'var(--theme-red-text)' }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55, color: 'var(--theme-text1)' }}>{text}</p>
           {onRetry && (
@@ -112,7 +112,7 @@ export default function SelfServiceToday({
             onClick={() => onGo('roster')}
             style={{ padding: 16, width: '100%', textAlign: 'left', font: 'inherit', cursor: 'pointer', display: 'flex', gap: 12, alignItems: 'center' }}
           >
-            <ArrowLeftRight size={20} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--theme-amber-text)' }} />
+            <ArrowRightLeft size={20} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--theme-amber-text)' }} />
             <span>
               <span style={{ display: 'block', fontSize: 15, fontWeight: 600, color: 'var(--theme-text1)' }}>
                 {swapsForMe.length} shift swap{swapsForMe.length === 1 ? '' : 's'} to answer
