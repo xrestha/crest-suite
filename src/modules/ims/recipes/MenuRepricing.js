@@ -23,6 +23,9 @@ export default function MenuRepricing() {
   // Was a hardcoded 30/38 scale in every one of these files, which disagreed with the client's
   // own configured fc_warning_pct/fc_critical_pct that Recipe Costing's filter pills use.
   const fcColor = pct => fcBand(pct, settings).color
+  // The band must not be carried by colour alone (S608) — see fcBand's note.
+  const fcLabel = pct => fcBand(pct, settings).label
+  const fcMark  = pct => fcBand(pct, settings).mark
 
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
@@ -267,7 +270,7 @@ export default function MenuRepricing() {
                   <td style={{ textAlign: 'right' }}>{r.qty ? Number(r.qty).toLocaleString() : '—'}</td>
                   <td style={{ textAlign: 'right' }}>NPR {r.cost.toFixed(2)}</td>
                   <td style={{ textAlign: 'right' }}>NPR {r.price.toFixed(0)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(r.currentFcPct) }}>{r.currentFcPct.toFixed(1)}%</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(r.currentFcPct) }} title={fcLabel(r.currentFcPct)}>{r.currentFcPct.toFixed(1)}% {fcMark(r.currentFcPct)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.targetPct.toFixed(0)}%</td>
                   <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-green-text)' }}>NPR {r.suggestedMenuPrice.toFixed(0)}</td>
                   <td style={{ textAlign: 'right', color: r.priceGap > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>

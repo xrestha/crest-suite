@@ -139,6 +139,9 @@ export default function AnnualSummary() {
 
   // Client-configured thresholds, same as every other FC% surface (src/shared/imsFormulas.js).
   const fcColor = pct => fcBand(pct, settings).color
+  // The band must not be carried by colour alone (S608) — see fcBand's note.
+  const fcLabel = pct => fcBand(pct, settings).label
+  const fcMark  = pct => fcBand(pct, settings).mark
 
   async function exportExcel() {
     if (!report) return
@@ -212,7 +215,7 @@ export default function AnnualSummary() {
               tip: 'Total net sales revenue across all months in this period.' },
             { label: 'Annual COGS',     value: fmt(report.totCogs),    color: 'var(--theme-accent-ink)',
               tip: `Total Cost of Goods Sold: ${COGS_FORMULA}, summed across all months.` },
-            { label: 'Annual FC%',      value: report.totFcPct != null ? `${report.totFcPct.toFixed(1)}%` : '—',
+            { label: 'Annual FC%',      value: report.totFcPct != null ? `${report.totFcPct.toFixed(1)}% ${fcMark(report.totFcPct)}` : '—',
               color: fcColor(report.totFcPct),
               tip: 'Annual COGS ÷ Annual Revenue. More accurate than averaging monthly FC% figures.' },
             { label: 'Annual Wastage',  value: fmt(report.totWaste),   color: 'var(--theme-red-text)',
@@ -272,8 +275,8 @@ export default function AnnualSummary() {
                       <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{row.netPurch !== 0 ? fmt(row.netPurch) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{row.wasteVal > 0 ? fmt(row.wasteVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{row.cogs !== 0 ? fmt(row.cogs) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(row.fcPct) }}>
-                        {row.fcPct != null ? `${row.fcPct.toFixed(1)}%` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(row.fcPct) }} title={fcLabel(row.fcPct)}>
+                        {row.fcPct != null ? `${row.fcPct.toFixed(1)}% ${fcMark(row.fcPct)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                       </td>
                       <td>
                         {trend != null && (
@@ -297,8 +300,8 @@ export default function AnnualSummary() {
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 14 }}>{fmt(report.totPurch - report.totRet)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>{fmt(report.totWaste)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', paddingTop: 14, fontSize: 14 }}>{fmt(report.totCogs)}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 800, paddingTop: 14, fontSize: 14, color: fcColor(report.totFcPct) }}>
-                    {report.totFcPct != null ? `${report.totFcPct.toFixed(1)}%` : '—'}
+                  <td style={{ textAlign: 'right', fontWeight: 800, paddingTop: 14, fontSize: 14, color: fcColor(report.totFcPct) }} title={fcLabel(report.totFcPct)}>
+                    {report.totFcPct != null ? `${report.totFcPct.toFixed(1)}% ${fcMark(report.totFcPct)}` : '—'}
                   </td>
                   <td style={{ paddingTop: 14 }} />
                 </tr>

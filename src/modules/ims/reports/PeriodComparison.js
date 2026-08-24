@@ -74,6 +74,9 @@ export default function PeriodComparison() {
   // Was a module-level hardcoded 30/38 scale; now the client's own thresholds, like every other
   // FC% surface (src/shared/imsFormulas.js).
   const fcColor = pct => fcBand(pct, settings).color
+  // The band must not be carried by colour alone (S608) — see fcBand's note.
+  const fcLabel = pct => fcBand(pct, settings).label
+  const fcMark  = pct => fcBand(pct, settings).mark
   const fcT = fcThresholds(settings)
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
@@ -325,8 +328,8 @@ export default function PeriodComparison() {
       <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">Latest FC%</div>
-          <div className="stat-value" style={{ color: fcColor(latestStats?.fcPct) }}>
-            {latestStats?.fcPct != null ? latestStats.fcPct.toFixed(1) + '%' : '—'}
+          <div className="stat-value" style={{ color: fcColor(latestStats?.fcPct) }} title={fcLabel(latestStats?.fcPct)}>
+            {latestStats?.fcPct != null ? `${latestStats.fcPct.toFixed(1)}% ${fcMark(latestStats.fcPct)}` : '—'}
           </div>
           {fcTrend != null && (
             <div className="stat-label" style={{ marginTop: 4, color: fcTrend < 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
@@ -587,8 +590,8 @@ export default function PeriodComparison() {
                       <DeltaRow pct={pctDelta(s.revenue, prev?.revenue)} suffix="vs prev" judge="good-up" />
                       {showYoy && <DeltaRow pct={pctDelta(s.revenue, lyS?.revenue)} suffix="vs LY" judge="good-up" />}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(s.fcPct) }}>
-                      {s.fcPct != null ? s.fcPct.toFixed(1) + '%' : '—'}
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(s.fcPct) }} title={fcLabel(s.fcPct)}>
+                      {s.fcPct != null ? `${s.fcPct.toFixed(1)}% ${fcMark(s.fcPct)}` : '—'}
                       {showYoy && <PpDeltaRow curr={s.fcPct} prev={lyS?.fcPct} suffix="vs LY" />}
                     </td>
                     <td style={{ textAlign: 'center', fontSize: 13 }}>

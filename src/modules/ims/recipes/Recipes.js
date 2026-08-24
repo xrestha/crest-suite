@@ -1062,7 +1062,8 @@ export default function Recipes() {
                       const cost = calcRecipeCost(recipe, recipes)
                       const price = parseFloat(recipe.selling_price) || 0
                       const fcPct = price > 0 ? (cost / price) * 100 : null
-                      const fcColor = fcBand(fcPct, settings).color
+                      const fcB = fcBand(fcPct, settings)
+                      const fcColor = fcB.color
                       const subIngCount = (recipe.recipe_ingredients || []).filter(ri => ri.sub_recipe_id).length
                       const rowHidden = selectedIds.size > 0 && !selectedIds.has(recipe.id)
                       return (
@@ -1088,8 +1089,8 @@ export default function Recipes() {
                           <td style={{ textAlign: 'right' }}>
                             {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toFixed(2)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor }}>
-                            {fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor }} title={fcPct != null ? fcB.label : undefined}>
+                            {fcPct != null ? `${fcPct.toFixed(1)}% ${fcB.mark}` : '—'}
                           </td>
                           <td>
                             <span className={`badge ${recipe.is_active ? 'badge-green' : 'badge-gray'}`}>
@@ -1479,7 +1480,8 @@ export default function Recipes() {
         const fcPct = price > 0 ? (cost / price) * 100 : null
         const yieldQty = parseFloat(selectedRecipe.yield_qty) || 1
         const costPerUnit = cost / yieldQty
-        const fcColor = fcBand(fcPct, settings).color
+        const fcB2 = fcBand(fcPct, settings)
+        const fcColor = fcB2.color
         const nutri = showNutrition ? calcRecipeNutrition(selectedRecipe, recipes) : null
         // Sub-recipes show the whole batch (mirrors "Total Batch Cost"); the per-unit value
         // still rolls up into parent recipes via calcSubRecipeNutritionPerUnit.
@@ -1529,7 +1531,7 @@ export default function Recipes() {
                 { label: 'Yield', value: `${selectedRecipe.yield_qty} ${selectedRecipe.yield_uom}`, color: 'var(--theme-text1)' },
               ] : [
                 { label: 'Food Cost', value: `NPR ${cost.toFixed(2)}`, color: 'var(--theme-accent-ink)' },
-                { label: 'Food Cost %', value: fcPct != null ? `${fcPct.toFixed(1)}%` : '—', color: fcColor },
+                { label: 'Food Cost %', value: fcPct != null ? `${fcPct.toFixed(1)}% ${fcB2.mark}` : '—', color: fcColor },
                 { label: 'Selling Price (ex. VAT)', value: price ? `NPR ${price.toFixed(2)}` : '—', color: 'var(--theme-text1)' },
                 { label: `Menu Price (incl. ${(vat*100).toFixed(0)}% VAT)`, value: price ? `NPR ${(price*(1+vat)).toFixed(0)}` : '—', color: 'var(--theme-text1)' },
                 { label: `Suggested @ ${selectedRecipe.target_fc_pct || 30}% FC`, value: `NPR ${getSuggestedPrice(cost, vat, (parseFloat(selectedRecipe.target_fc_pct) || 30) / 100)}`, color: 'var(--theme-green-text)' },

@@ -18,6 +18,9 @@ export default function RecipeMargin() {
   // Was a hardcoded 30/38 scale in every one of these files, which disagreed with the client's
   // own configured fc_warning_pct/fc_critical_pct that Recipe Costing's filter pills use.
   const fcColor = pct => fcBand(pct, settings).color
+  // The band must not be carried by colour alone (S608) — see fcBand's note.
+  const fcLabel = pct => fcBand(pct, settings).label
+  const fcMark  = pct => fcBand(pct, settings).mark
 
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
@@ -169,8 +172,8 @@ export default function RecipeMargin() {
           <div className="stat-label">
             <Tip text="Weighted average FC% = Total Food Cost ÷ Total Revenue across all recipes sold this period." width={280}>Weighted Avg FC%</Tip>
           </div>
-          <div className="stat-value" style={{ color: fcColor(avgFcPct) }}>
-            {avgFcPct ? avgFcPct.toFixed(1) + '%' : '—'}
+          <div className="stat-value" style={{ color: fcColor(avgFcPct) }} title={fcLabel(avgFcPct)}>
+            {avgFcPct ? `${avgFcPct.toFixed(1)}% ${fcMark(avgFcPct)}` : '—'}
           </div>
         </div>
         <div className="stat-card">
@@ -249,8 +252,8 @@ export default function RecipeMargin() {
                   <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)' }}>
                     {r.totalContribution ? fmtNPR(r.totalContribution) : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(r.fcPct) }}>
-                    {r.fcPct.toFixed(1)}%
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(r.fcPct) }} title={fcLabel(r.fcPct)}>
+                    {r.fcPct.toFixed(1)}% {fcMark(r.fcPct)}
                   </td>
                 </tr>
               ))}
@@ -260,7 +263,7 @@ export default function RecipeMargin() {
                 <td colSpan={6}>Total ({withSales.length} recipes sold)</td>
                 <td style={{ textAlign: 'right' }}>{withSales.reduce((s, r) => s + r.qty, 0).toLocaleString()}</td>
                 <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(totalContrib)}</td>
-                <td style={{ textAlign: 'right', color: fcColor(avgFcPct) }}>{avgFcPct.toFixed(1)}%</td>
+                <td style={{ textAlign: 'right', color: fcColor(avgFcPct) }} title={fcLabel(avgFcPct)}>{avgFcPct.toFixed(1)}% {fcMark(avgFcPct)}</td>
               </tr>
             </tfoot>
           </table>

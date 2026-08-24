@@ -51,15 +51,49 @@ export function fcThresholds(settings) {
  * Band a food cost % against the client's own thresholds.
  * Returns the `*-text` contrast variants, never the base tokens — these are always used as text,
  * and the base signal tokens fail WCAG AA on all five light presets (worst 2.05:1 on Rosé Dawn).
+ *
+ * `mark` exists because **the band must not be carried by colour alone** (S608). Every colour call
+ * site was doing `fcBand(pct, settings).color` and throwing `label` away, so which band a dish sat
+ * in was a hue and nothing else — on the one figure this product is sold on. That fails WCAG 1.4.1,
+ * and it is not theoretical: measured across the presets, `green`/`amber` collapsed to ΔE 2.3–4.4
+ * under deuteranopia on five of the ten themes, and the surviving Light preset still collapses
+ * `red`/`amber` to ΔE 3.1. Healthy and Too high rendered as the same colour for roughly 1 in 12 men.
+ *
+ * A `title` alone does NOT fix this — it serves hover and assistive tech, not a sighted colour-blind
+ * reader, who is the entire affected population. The marks are therefore distinguished by SHAPE and
+ * FILL, never by hue: ✓ (clear) → △ (hollow caution) → ▲ (filled caution). Rendered next to the
+ * figure they survive greyscale, a monochrome print, and every form of colour blindness.
+ *
+ * Use `label` for `title`, `mark` for the visible glyph, and `color` as before. A caller with no
+ * room for a glyph (a chart axis, a sparkline) may take colour alone, but a *figure a person reads
+ * and acts on* takes the mark too.
  */
 export function fcBand(pct, settings) {
   const { warn, critical } = fcThresholds(settings)
   if (pct == null || !isFinite(pct)) {
-    return { key: 'none', label: '—', color: 'var(--theme-text2)', warn, critical }
+    return { key: 'none', label: '—', mark: '', color: 'var(--theme-text2)', warn, critical }
   }
-  if (pct <= warn) return { key: 'good', label: `Healthy (≤${warn}%)`, color: 'var(--theme-green-text)', warn, critical }
-  if (pct <= critical) return { key: 'watch', label: `Watch (${warn}–${critical}%)`, color: 'var(--theme-amber-text)', warn, critical }
-  return { key: 'high', label: `Too high (>${critical}%)`, color: 'var(--theme-red-text)', warn, critical }
+  if (pct <= warn) return { key: 'good', label: `Healthy (≤${warn}%)`, mark: '✓', color: 'var(--theme-green-text)', warn, critical }
+  if (pct <= critical) return { key: 'watch', label: `Watch (${warn}–${critical}%)`, mark: '△', color: 'var(--theme-amber-text)', warn, critical }
+  return { key: 'high', label: `Too high (>${critical}%)`, mark: '▲', color: 'var(--theme-red-text)', warn, critical }
+}
+
+/**
+ * The rendered form of a banded food-cost figure: the number, its shape marker, and the band name
+ * as a `title`. One place, so a new call site cannot reintroduce the colour-only version.
+ *
+ * Returns `{ style, title, text }` — spread `style`/`title` onto the cell and render `text`.
+ * `pct` may be null; the caller decides what an absent figure looks like.
+ */
+export function fcFigure(pct, settings, { decimals = 1 } = {}) {
+  const b = fcBand(pct, settings)
+  const num = pct == null || !isFinite(pct) ? '—' : `${pct.toFixed(decimals)}%`
+  return {
+    style: { color: b.color },
+    title: b.key === 'none' ? undefined : b.label,
+    text: b.mark ? `${num} ${b.mark}` : num,
+    band: b,
+  }
 }
 
 /** Variance % beyond which the Variance Report flags an item. Admin-editable in Settings. */

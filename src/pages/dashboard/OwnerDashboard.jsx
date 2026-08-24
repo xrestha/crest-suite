@@ -490,8 +490,8 @@ export default function OwnerDashboard() {
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
               <Tip text={`Net purchases ÷ revenue × 100. Coloured against your own Settings thresholds — watch above ${fcBand(fcPct, settings).warn}%, too high above ${fcBand(fcPct, settings).critical}% — the same scale Variance and Recipes use. Nepal F&B benchmark: 28–35%.`} width={260}>Food Cost % (MTD)</Tip>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: fcBand(fcPct, settings).color }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
+            <div title={fcPct != null ? fcBand(fcPct, settings).label : undefined} style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: fcBand(fcPct, settings).color }}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}% ${fcBand(fcPct, settings).mark}` : '—'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Your target ≤{fcBand(fcPct, settings).warn}% →</div>
           </div>

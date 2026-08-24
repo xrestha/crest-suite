@@ -159,6 +159,54 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S608 — 2026-08-24 — The band that was only ever a colour
+
+`fcBand()` has returned `{ key, label, color }` since S551. Every colour call site in the product
+took `.color` and threw the label away — `const fcColor = pct => fcBand(pct, settings).color` — so
+**which band a dish sat in was a hue and nothing else**, on the one figure this product is sold on.
+That fails WCAG 1.4.1, and S607's audit had just measured how badly: `green`/`amber` collapsed to
+ΔE 2.3–4.4 under deuteranopia on five of the ten presets, and the surviving Light preset still
+collapses `redText`/`amberText` to **ΔE 3.2**. Healthy and Too high rendered as one colour for
+roughly 1 in 12 men.
+
+**A `title` alone would not have fixed it, and that was the first thing to get right.** A tooltip
+serves hover and assistive tech; the affected person here is a *sighted* colour-blind reader, who
+gets nothing from either. The band needs a non-colour **visual** signal. `fcBand()` now returns a
+`mark` — `✓` healthy, `△` watch, `▲` too high — distinguished by **shape and fill, never hue**, so
+it survives greyscale, a monochrome print, and every form of colour blindness. A figure reads
+`36.1% △` with the band name on the `title`. `fcFigure()` packages `{ style, title, text }` so a new
+call site cannot reintroduce the colour-only version.
+
+Seventeen banded figures across eight files. The one that mattered most was the ninth.
+
+**`MonthlyOwnerReport.jsx` was reported as "a fourth divergent copy of the banding logic". That was
+wrong, and the correction is the useful part.** Its `accent-ink` middle band is a deliberate,
+documented family of four — food cost, labour, prime cost, net margin — sharing one visual language
+across a single table, with `-text` variants because they land on `<td>`s as type. The comment above
+it even records why labour's green band was tuned to 30 rather than 37: a client at 34% was getting
+a reassuring green number sitting beside a target it failed by four points. Considered work, not
+drift, and preserved.
+
+**The real bug was narrower and worse.** That same comment claims these "match Owner Dashboard's live
+KPI cards exactly." It had quietly stopped being true. `OwnerDashboard.jsx` calls
+`fcBand(fcPct, settings)`, which resolves `fc_warning_pct`/`fc_critical_pct` from Settings;
+`MonthlyOwnerReport` hardcoded **35/45** — and those are precisely `fcThresholds()`'s *defaults*. The
+two pages therefore agreed **only for clients who never customised their thresholds.** A client on
+30/40 saw the same month banded two different ways on two pages, and no amount of testing on a
+default account would ever show it. Food cost now reads the client's own thresholds; labour, prime
+cost and net margin keep their literal bands, having no Settings equivalent. Net margin stays a
+separate bander because it is the one **inverted** band on the page — higher is better.
+
+Two method notes worth keeping. **A hardcoded constant that happens to equal a default is invisible
+drift** — it agrees with the source of truth for the majority and lies to everyone else, so it never
+shows up in testing. And when a comment states an invariant ("matches X exactly"), the invariant is
+worth *measuring* rather than trusting: this one had been false since the day Owner Dashboard moved
+to `fcBand()` and this file did not.
+
+Open and deliberately not taken in this pass: Light still collapses `redText`/`amberText` at
+ΔE 3.2. Only one candidate pair clears every colour-blindness floor (`#8f2440` / `#a85200`), and it
+visibly shifts the product's danger and warning colours — a call for the owner, not a silent fix.
+
 ### S607 — 2026-08-24 — Ten themes, measured for the first time, then cut to two
 
 The theme system had never been measured as a whole. A harness that parses `PRESETS` straight out of

@@ -4,6 +4,8 @@ import { TriangleAlert } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
+import { useSettings } from '../../context/SettingsContext'
+import { fcThresholds } from '../../shared/imsFormulas'
 import { BS_MONTHS } from '../../utils/bsCalendar'
 import SuiteGate from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
@@ -105,6 +107,7 @@ export default function MonthlyOwnerReport() {
   const { clientId, profile, isAdmin, isOwner, hasFeature } = useAuth()
   const canOverheads = hasFeature('overheads')
   const { scopedFrom } = useScopedDb()
+  const { settings } = useSettings()
 
   const [periods, setPeriods] = useState([])
   const [selectedPeriodId, setSelectedPeriodId] = useState(null)
@@ -219,11 +222,40 @@ export default function MonthlyOwnerReport() {
   // used to get a reassuring green number sitting immediately beside a target it fails by four
   // points. Cross-page consistency had been achieved; consistency within one row had not.
   // Owner Dashboard's laborPct band moved with it.
-  const fcColor = v => (v == null ? undefined : v <= 35 ? 'var(--theme-green-text)' : v <= 45 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
-  const lcColor = v => (v == null ? undefined : v <= 30 ? 'var(--theme-green-text)' : v <= 37 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
-  const pcColor = v => (v == null ? undefined : v <= 60 ? 'var(--theme-green-text)' : v <= 65 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
-  const nmColor = v => (!canOverheads || v == null ? undefined : v >= 20 ? 'var(--theme-green-text)' : v >= 10 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
-
+  //
+  // Two corrections, S608. **The band is no longer carried by colour alone** — each returns a
+  // ✓/△/▲ shape mark and a title, the same vocabulary `fcBand()` uses, because green and amber
+  // measured ΔE 3.1 apart under deuteranopia on the Light preset: Healthy and Needs-attention
+  // were one colour for roughly 1 in 12 men, on the four figures this report exists to deliver.
+  // The shapes differ by FILL, not hue, so they survive a monochrome print of this page too.
+  //
+  // And **food cost now reads the client's OWN thresholds** rather than a hardcoded 35/45. The
+  // note above says these match Owner Dashboard's live KPI cards exactly; that had quietly
+  // stopped being true. OwnerDashboard.jsx calls `fcBand(fcPct, settings)`, which resolves
+  // `fc_warning_pct`/`fc_critical_pct` from Settings — and 35/45 are merely `fcThresholds()`'s
+  // DEFAULTS, so the two pages agreed only for clients who never touched them. A client on 30/40
+  // saw the same month banded two different ways on two pages. Labour, prime cost and net margin
+  // keep their literal bands: those have no Settings equivalent, and the accent-ink middle step
+  // is this table's own four-metric language, deliberately not fcBand's amber (see above).
+  const GOOD = { color: 'var(--theme-green-text)', mark: '✓' }
+  const WATCH = { color: 'var(--theme-accent-ink)', mark: '△' }
+  const HIGH = { color: 'var(--theme-red-text)', mark: '▲' }
+  const NONE = { color: undefined, mark: '', title: undefined }
+  const mkBand = (good, watch, band) => v => {
+    if (v == null) return NONE
+    if (v <= good) return { ...GOOD, title: `Healthy (≤${good}%${band})` }
+    if (v <= watch) return { ...WATCH, title: `Watch (${good}–${watch}%${band})` }
+    return { ...HIGH, title: `Needs attention (>${watch}%${band})` }
+  }
+  const fcT = fcThresholds(settings)
+  const fcBandOf = mkBand(fcT.warn, fcT.critical, ' — your Settings thresholds')
+  const lcBandOf = mkBand(30, 37, '')
+  const pcBandOf = mkBand(60, 65, '')
+  // Net margin is the one inverted band on this page: higher is better.
+  const nmBandOf = v => (!canOverheads || v == null) ? NONE
+    : v >= 20 ? { ...GOOD, title: 'Healthy (≥20%)' }
+    : v >= 10 ? { ...WATCH, title: 'Watch (10–20%)' }
+    : { ...HIGH, title: 'Needs attention (<10%)' }
   return (
     <div>
       <div className="page-header owner-report-page-header">
@@ -334,28 +366,28 @@ export default function MonthlyOwnerReport() {
                     {snapshot.ims && (
                       <tr>
                         <td><Tip text="Net purchases ÷ revenue × 100." width={220}>Food Cost %</Tip></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(snapshot.combined?.foodCostPct) }}>{pct(snapshot.combined?.foodCostPct)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: fcBandOf(snapshot.combined?.foodCostPct).color }} title={fcBandOf(snapshot.combined?.foodCostPct).title}>{pct(snapshot.combined?.foodCostPct)} {fcBandOf(snapshot.combined?.foodCostPct).mark}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>28–35%</td>
                       </tr>
                     )}
                     {snapshot.hr && (
                       <tr>
                         <td><Tip text="Gross + overtime + employer SSF, as a % of revenue — the actual final figure for a closed period, not a proration." width={280}>Labor Cost %</Tip></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: lcColor(snapshot.combined?.laborCostPct) }}>{pct(snapshot.combined?.laborCostPct)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: lcBandOf(snapshot.combined?.laborCostPct).color }} title={lcBandOf(snapshot.combined?.laborCostPct).title}>{pct(snapshot.combined?.laborCostPct)} {lcBandOf(snapshot.combined?.laborCostPct).mark}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>25–30%</td>
                       </tr>
                     )}
                     {snapshot.ims && snapshot.hr && (
                       <tr>
                         <td><Tip text="Food Cost % + Labor Cost % — the number operators benchmark against." width={240}>Prime Cost %</Tip></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: pcColor(snapshot.combined?.primeCostPct) }}>{pct(snapshot.combined?.primeCostPct)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: pcBandOf(snapshot.combined?.primeCostPct).color }} title={pcBandOf(snapshot.combined?.primeCostPct).title}>{pct(snapshot.combined?.primeCostPct)} {pcBandOf(snapshot.combined?.primeCostPct).mark}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≤60–65%</td>
                       </tr>
                     )}
                     {snapshot.ims && snapshot.hr && (
                       <tr>
                         <td><Tip text="Revenue minus food cost, labor cost, and overheads, as a % of revenue." width={260}>Net Margin %</Tip></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: nmColor(snapshot.combined?.netMarginPct) }}>{!canOverheads ? 'Requires Overheads (Pro)' : pct(snapshot.combined?.netMarginPct)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: nmBandOf(snapshot.combined?.netMarginPct).color }} title={nmBandOf(snapshot.combined?.netMarginPct).title}>{!canOverheads ? 'Requires Overheads (Pro)' : `${pct(snapshot.combined?.netMarginPct)} ${nmBandOf(snapshot.combined?.netMarginPct).mark}`}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≥20%</td>
                       </tr>
                     )}

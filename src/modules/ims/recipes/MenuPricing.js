@@ -22,6 +22,9 @@ export default function MenuPricing() {
   // Was a hardcoded 30/38 scale in every one of these files, which disagreed with the client's
   // own configured fc_warning_pct/fc_critical_pct that Recipe Costing's filter pills use.
   const fcColor = pct => fcBand(pct, settings).color
+  // The band must not be carried by colour alone (S608) — see fcBand's note.
+  const fcLabel = pct => fcBand(pct, settings).label
+  const fcMark  = pct => fcBand(pct, settings).mark
 
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
@@ -616,8 +619,8 @@ export default function MenuPricing() {
                     <td style={{ textAlign: 'right' }}>
                       {r.inclVat > 0 ? `NPR ${r.inclVat.toFixed(0)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: r.exVat > 0 ? fcColor(r.fcPct) : 'var(--theme-text3)' }}>
-                      {r.exVat > 0 ? `${r.fcPct.toFixed(1)}%` : '—'}
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: r.exVat > 0 ? fcColor(r.fcPct) : 'var(--theme-text3)' }} title={r.exVat > 0 ? fcLabel(r.fcPct) : undefined}>
+                      {r.exVat > 0 ? `${r.fcPct.toFixed(1)}% ${fcMark(r.fcPct)}` : '—'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <input
@@ -645,8 +648,8 @@ export default function MenuPricing() {
                           names WHICH dish as well (S576's template-label rule). */}
                       <FieldError id={`menuprice-${r.id}`} message={errors[r.id]} />
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: newFcPct !== null ? 700 : 400, color: newFcPct !== null ? fcColor(newFcPct) : 'var(--theme-text3)' }}>
-                      {newFcPct !== null ? `${newFcPct.toFixed(1)}%` : '—'}
+                    <td style={{ textAlign: 'right', fontWeight: newFcPct !== null ? 700 : 400, color: newFcPct !== null ? fcColor(newFcPct) : 'var(--theme-text3)' }} title={newFcPct !== null ? fcLabel(newFcPct) : undefined}>
+                      {newFcPct !== null ? `${newFcPct.toFixed(1)}% ${fcMark(newFcPct)}` : '—'}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: diff !== null ? 600 : 400, color: diff === null ? 'var(--theme-text3)' : diff > 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                       {diff !== null ? `${diff > 0 ? '+' : ''}NPR ${Math.round(diff)}` : '—'}

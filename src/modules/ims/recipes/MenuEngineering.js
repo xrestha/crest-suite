@@ -484,11 +484,11 @@ export default function MenuEngineering() {
                       <td style={{ textAlign: 'right' }}>{r.sellingPrice > 0 ? r.sellingPrice.toLocaleString() : '—'}</td>
                       <td style={{ textAlign: 'right' }}>{r.ingredientCost.toFixed(2)}</td>
                       <td style={{ textAlign: 'right' }}>
-                        <span style={{
+                        <span title={r.sellingPrice > 0 ? fcBand(r.fcPct, settings).label : undefined} style={{
                           color: fcBand(r.fcPct, settings).color,
                           fontWeight: 600
                         }}>
-                          {r.sellingPrice > 0 ? r.fcPct.toFixed(1) + '%' : '—'}
+                          {r.sellingPrice > 0 ? `${r.fcPct.toFixed(1)}% ${fcBand(r.fcPct, settings).mark}` : '—'}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>{r.qtySold > 0 ? r.qtySold.toLocaleString() : <span style={{ color: 'var(--theme-text3)' }}>0</span>}</td>
@@ -552,11 +552,11 @@ export default function MenuEngineering() {
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{r.category}</div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{
+                      <div title={r.sellingPrice > 0 ? fcBand(r.fcPct, settings).label : undefined} style={{
                         fontSize: 12, fontWeight: 700,
                         color: fcBand(r.fcPct, settings).color
                       }}>
-                        {r.sellingPrice > 0 ? r.fcPct.toFixed(1) + '%' : '—'} FC
+                        {r.sellingPrice > 0 ? `${r.fcPct.toFixed(1)}% ${fcBand(r.fcPct, settings).mark}` : '—'} FC
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{r.qtySold} sold</div>
                     </div>
