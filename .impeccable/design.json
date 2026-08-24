@@ -571,8 +571,8 @@
       }
     ],
     "chartPalette": {
-      "purpose": "Chart series are fixed literal hex on purpose and are NOT theme tokens. Two independent reasons: CSS var() does not resolve inside SVG presentation attributes, and the five semantic tokens are five ROLES rather than five distinguishable hues — --theme-accent and --theme-purple are the same value on Dracula (retired S607; on the two remaining presets Light still collapses red/amber to ΔE 3.1 under deuteranopia, so the rule stands), Catppuccin Mocha and Latte. A hex appearing in a chart palette is not an accent-drift violation; the One Accent Rule governs UI chrome.",
-      "validatedAgainst": "Brute-forced across five card surfaces (three dark presets, two light) to a worst pair of dE 16.8 normal vision / 8.6 deuteranopia. Tritan lands at 7.7, acceptable only with the secondary encoding these charts already carry (paddingAngle gaps, on-slice percent labels, name+value legends).",
+      "purpose": "Chart series are fixed literal hex on purpose and are NOT theme tokens. Two independent reasons: CSS var() does not resolve inside SVG presentation attributes, and the five semantic tokens are five ROLES rather than five distinguishable hues — a constraint nothing measures for them, since they move to serve legibility and branding instead. Both concrete justifications this rule once cited have expired (accent/purple being one hex died with those presets in S607; Light's red/amber collapse was fixed in S609), which is the argument rather than a weakening of it. A hex appearing in a chart palette is not an accent-drift violation; the One Accent Rule governs UI chrome.",
+      "validatedAgainst": "Re-measured 2026-08-24/S609 over the two surviving presets. Worst pair: normal vision ΔE 37.9, deuteranopia 15.8, protanopia 21.0 — all 28 pairs clear the ΔE 8 CVD floor on both axes. Slots 5 and 6 were changed to get there: #a78bfa → #8b5cf6 (blue/violet had sat at ΔE 0.4 under deuteranopia, i.e. two indistinguishable lines on any chart with five or more series) and #fb923c → #ea580c (gold/orange 4.2 under protanopia). TRITANOPIA is deliberately not satisfied — worst pair #f87171/#f472b6 at ΔE 0.9 — because separating on the blue-yellow axis fights separating on red-green, and tritanopia is ~0.01% and not sex-linked against ~8% of men for red-green. Acceptable only because these charts carry secondary encoding: paddingAngle gaps, on-slice percent labels, and name+value legends.",
       "slots": [
         {
           "name": "Food Cost",
@@ -604,7 +604,18 @@
         "A legend swatch must equal the series it labels. Darkening the swatch for contrast while the line keeps the series colour desynchronises them, which is worse than the contrast it fixes; the adjacent label text carries the readable contrast.",
         "Prefer encoding a relationship over adding a hue. A metric's month-end projection repeats its metric's colour and is distinguished by a dash; a derived total reads as a dashed composite.",
         "Red is not spent on a merely-categorical slice. On these dashboards red means \"over threshold\", so using it for \"Overheads\" or for the Prime Cost line made a neutral fact read as an alarm."
-      ]
+      ],
+      "values": [
+        "#c9a84c",
+        "#34d399",
+        "#60a5fa",
+        "#f87171",
+        "#8b5cf6",
+        "#ea580c",
+        "#22d3ee",
+        "#f472b6"
+      ],
+      "knownConstraint": "The palette is tuned for the DARK card (#181c27), where every slot clears 4:1. On the Light card (#FCFAF6) six of eight fall below the WCAG 1.4.11 3:1 non-text floor — #22d3ee 1.81, #34d399 1.92, #c9a84c 2.29, #60a5fa 2.54, #f472b6 2.65, #f87171 2.77. Only #8b5cf6 (4.23) and #ea580c (3.56) clear it. This is survivable only because of the same secondary encoding above: the series are named and valued in the legend and labelled on-slice, so colour is reinforcement rather than the sole carrier. Fixing it properly means re-picking six hues that clear 3:1 on BOTH surfaces while still separating under deuteranopia and protanopia — a mid-tone palette with a different character from today's vivid-on-charcoal set. That is a design decision, not a correction."
     }
   },
   "components": [
@@ -994,6 +1005,11 @@
         "name": "The Signal Separation Rule",
         "section": "colors",
         "body": "Two signal colours that a reader compares must stay distinguishable *without hue*. Measured under deuteranopia (~6% of men) and protanopia (~2%), not by eye. Light's `redText`/`amberText` shipped at ΔE 3.2 — danger and warning were one colour for a red-green colour-blind reader — and were retuned in S608 to `#8f2440`/`#a85200`, the only pair of 120 searched that clears both axes while every variant holds ≥4.5:1. Where a band is a *scale* rather than a status (food cost healthy/watch/too-high), colour is not enough on its own at all: `fcBand()` also returns a `✓`/`△`/`▲` shape mark, distinguished by fill rather than hue, so the band survives greyscale and a monochrome print. A figure a person reads and acts on carries the mark; a chart axis or sparkline may take colour alone."
+      },
+      {
+        "name": "The Chart Palette Rule",
+        "section": "colors",
+        "body": "Chart series come from the validated fixed-hex sets (`CHART_COLORS` / `VENDOR_SPLIT_COLORS`, `COST_BREAKDOWN_COLORS`), never the semantic tokens — and the sets themselves get re-measured whenever a slot moves. As shipped 2026-08-24/S609 the 8-series set is `#c9a84c #34d399 #60a5fa #f87171 #8b5cf6 #ea580c #22d3ee #f472b6`, worst pair ΔE 37.9 normal / 15.8 deuteranopia / 21.0 protanopia — all 28 pairs clear. It reached that only by moving two slots: blue and violet had sat at ΔE 0.4 under deuteranopia since the array was written, drawing two indistinguishable lines on any chart with five or more series. Two limits are accepted rather than hidden, and both rest on the same mitigation — these charts carry secondary encoding: paddingAngle gaps, on-slice percent labels, and name+value legends, so colour reinforces rather than carries. Tritanopia is not satisfied (worst pair ΔE 0.9); separating on the blue-yellow axis fights separating on red-green, and it is ~0.01% against ~8%. And the palette is tuned for the dark card — on Light, six of eight slots fall under the 3:1 non-text floor (worst `#22d3ee` at 1.81). Closing that means re-picking six hues that clear 3:1 on both surfaces *and* still separate under both red-green axes: a mid-tone set with a different character from today's vivid-on-charcoal one. That is a design decision, not a correction — do not make it silently while fixing something else."
       }
     ],
     "dos": [

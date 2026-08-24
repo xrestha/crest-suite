@@ -346,6 +346,24 @@ For JS consumers, `useTheme()`'s `colors` object resolves the variants with base
 
 **A paired token is only correct while it is actually measured.** `--theme-accent-text` was plain `#ffffff` on all five light presets, and on three of them that failed: measured live 2026-08-13 (S551) at **2.84:1 on Rosé Dawn, 3.61:1 on Light and 3.68:1 on Solarized** — i.e. every `.btn-primary` in the product, on those three themes, for as long as they have existed. Fixed by giving those presets a dark hue-matched ink rather than darkening the accent itself, since the accent is a brand value that also serves as a tint, border and dot colour where it was already correct. The same pass found the inverse on the dark side: `--theme-accent-ink` now exists on **Tokyo Night, Dracula and Nord**, because a light accent on a dark card is not automatically safe once that card is tinted with the accent itself (see Tabs). Reach for the token, and then verify the token.
 
+**The Chart Palette Rule.** Chart series come from the validated fixed-hex sets (`CHART_COLORS` /
+`VENDOR_SPLIT_COLORS`, `COST_BREAKDOWN_COLORS`), never the semantic tokens — and the sets themselves
+get re-measured whenever a slot moves. As shipped 2026-08-24/S609 the 8-series set is
+`#c9a84c #34d399 #60a5fa #f87171 #8b5cf6 #ea580c #22d3ee #f472b6`, worst pair ΔE 37.9 normal /
+**15.8 deuteranopia / 21.0 protanopia** — all 28 pairs clear. It reached that only by moving two
+slots: blue and violet had sat at **ΔE 0.4** under deuteranopia since the array was written, drawing
+two indistinguishable lines on any chart with five or more series.
+
+Two limits are accepted rather than hidden, and both rest on the same mitigation — these charts
+carry **secondary encoding**: paddingAngle gaps, on-slice percent labels, and name+value legends, so
+colour reinforces rather than carries. **Tritanopia is not satisfied** (worst pair ΔE 0.9);
+separating on the blue-yellow axis fights separating on red-green, and it is ~0.01% against ~8%.
+And the palette is **tuned for the dark card** — on Light, six of eight slots fall under the 3:1
+non-text floor (worst `#22d3ee` at 1.81). Closing that means re-picking six hues that clear 3:1 on
+both surfaces *and* still separate under both red-green axes: a mid-tone set with a different
+character from today's vivid-on-charcoal one. **That is a design decision, not a correction — do not
+make it silently while fixing something else.**
+
 **The Signal Separation Rule.** Two signal colours that a reader compares must stay distinguishable *without hue*. Measured under deuteranopia (~6% of men) and protanopia (~2%), not by eye. Light's `redText`/`amberText` shipped at **ΔE 3.2** — danger and warning were one colour for a red-green colour-blind reader — and were retuned in S608 to `#8f2440`/`#a85200`, the only pair of 120 searched that clears both axes while every variant holds ≥4.5:1. Where a band is a *scale* rather than a status (food cost healthy/watch/too-high), colour is not enough on its own at all: `fcBand()` also returns a `✓`/`△`/`▲` shape mark, distinguished by fill rather than hue, so the band survives greyscale and a monochrome print. **A figure a person reads and acts on carries the mark; a chart axis or sparkline may take colour alone.**
 
 **The Accent-Text Pairing Rule.** Any element with an accent-colored background uses the theme's paired `accent-text` token for its foreground (`#0f1117` in the Dark preset, `#241a08` in Light), never a hardcoded white or black. Because the accent color changes per theme preset, a hardcoded foreground color will silently fail contrast on at least one of the two presets. This is a real bug the codebase shipped and fixed once already (a floating action button used a hardcoded white label) - treat it as the standing rule, not a one-off fix. A 2026-07-12 audit found the same class of bug in four more shared components (`SearchableSelect.js`, `BsCalendarPicker.js`, `PremiumGate.js`, `ProtectedRoute.js`) that had been hardcoding the Dark preset's exact hex values since before the theme system existed - fixed to read theme tokens, so they now actually respect every preset instead of only working by coincidence on Dark. **It recurred once more** (2026-08-05, `AdminClients.js`'s "Annual" badge, hardcoded `#000` on `var(--theme-accent)`) - fixed to `var(--theme-accent-text)`. Given it's now shipped-and-fixed twice, treat any hardcoded `#000`/`#fff`/`white`/`black` sitting next to `var(--theme-accent)` as a near-certain instance of this bug on sight, not just a style-review nit.

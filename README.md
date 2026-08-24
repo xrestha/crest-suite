@@ -159,6 +159,48 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S610 — 2026-08-24 — Documenting the palette found the thing the palette was hiding
+
+`/impeccable document` over a DESIGN.md that had been edited three times in two days. The frontmatter
+came back **clean** — every documented Dark token still matches `ThemeContext.js` exactly — which is
+the boring half. The sidecar did not.
+
+`.impeccable/design.json`'s `chartPalette` asserted that "Light still collapses red/amber to ΔE 3.1
+under deuteranopia, **so the rule stands**", and carried a `validatedAgainst` describing a
+brute-force over "five card surfaces (three dark presets, two light)". Both were true when written.
+Neither survived S607 (eight presets retired) or S609 (that exact collapse fixed). **A machine-
+readable sidecar that argues from measurements decays exactly as fast as the measurements do**, and
+unlike prose nobody re-reads it — so it sat there asserting a defect that had already been repaired,
+as justification for a rule that no longer needed it.
+
+Re-measuring the palette to write an honest `validatedAgainst` is what surfaced the real finding.
+**Six of the eight chart colours fall below the WCAG 1.4.11 3:1 non-text floor on the Light card** —
+`#22d3ee` at 1.81, `#34d399` 1.92, `#c9a84c` 2.29, `#60a5fa` 2.54, `#f472b6` 2.65, `#f87171` 2.77.
+Only `#8b5cf6` (4.23) and `#ea580c` (3.56) clear it. The set was tuned for the charcoal card, where
+every slot clears 4:1, back when Light was one of five light presets nobody charted against. It is
+now the only one.
+
+It is survivable, and the reason is worth stating because it is also the reason not to panic-fix it:
+these charts carry **secondary encoding** — paddingAngle gaps, on-slice percent labels, and
+name+value legends — so colour reinforces rather than carries. Closing the gap properly means
+re-picking six hues that clear 3:1 on *both* surfaces while still separating under deuteranopia and
+protanopia, which lands on a mid-tone set with a different character from today's vivid-on-charcoal
+one. **That is a design decision, not a correction, and it is recorded as one rather than made
+silently while documenting something else.**
+
+New Named Rule: **The Chart Palette Rule** — series come from the validated fixed-hex sets, never the
+semantic tokens, and the sets themselves get re-measured whenever a slot moves. It carries the
+current numbers (worst pair ΔE 37.9 normal / 15.8 deuteranopia / 21.0 protanopia, all 28 pairs clear)
+and both accepted limits: tritanopia unsatisfied at ΔE 0.9, and the light-card floor above. DESIGN.md
+now has seven Named Rules; the sidecar mirrors all of them, plus 12 do's and 13 don'ts, verified by
+diff rather than by eye.
+
+The method note, third time in three sessions: **a rule justified by a measurement needs the reason
+underneath it written down too.** The chart-palette rule has now had its evidence rewritten twice and
+its conclusion never changed, because the conclusion never depended on the evidence — semantic tokens
+move to serve legibility and branding, and series separation is a constraint nothing checks for them.
+That sentence is what should have been in the file all along.
+
 ### S609 — 2026-08-24 — Can a colour-blind person actually use this?
 
 Asked directly, and answerable only by simulating it. Deuteranopia (~6% of men), protanopia (~2%)
