@@ -13,7 +13,7 @@ import {
   BarChart, Bar
 } from 'recharts'
 import { chartMotion } from '../../shared/chartMotion'
-import { ArrowDown, ArrowUp, Percent, Receipt, Target, Lock, TriangleAlert, Clock, LayoutGrid, ChevronDown } from 'lucide-react'
+import { ArrowDown, Lock, TriangleAlert, Clock, LayoutGrid, ChevronDown } from 'lucide-react'
 import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
@@ -132,7 +132,7 @@ export default function ClientDashboard() {
   // instead of the front-of-house Revenue/Covers/Avg Check/Tables Occupied cards — they have no
   // more use for revenue figures on their landing dashboard than a POS-only staffer has for IMS's.
   const posIsStationTeam = posTeam === 'kitchen' || posTeam === 'bar'
-  const { colors, themeKey } = useTheme()
+  const { colors } = useTheme()
   const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
@@ -1075,33 +1075,13 @@ export default function ClientDashboard() {
   const kpiLabelStyle = { fontSize: 10, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }
   const kpiSubtextStyle = { fontSize: 10, color: 'var(--theme-text3)', marginTop: 4 }
 
-  // Colorful per-category icon badge on a headline KPI card — a deliberate exception to the One
-  // Accent Rule, scoped to the Bright preset only (see DESIGN.md's exception note). Every other
-  // preset keeps plain text-only stat cards, same as today. Not applied to every stat card on
-  // every page — just this dashboard's primary IMS row, matching what was actually mocked up.
-  function kpiIcon(Icon, hue) {
-    if (themeKey !== 'bright') return null
-    const hues = {
-      blue:  { bg: 'rgba(58,109,240,0.12)', fg: colors.accent },
-      green: { bg: 'rgba(22,163,74,0.12)',  fg: colors.green },
-      amber: { bg: 'rgba(217,119,6,0.12)',  fg: colors.amber },
-    }
-    const h = hues[hue] || hues.blue
-    return (
-      <div aria-hidden="true" style={{
-        width: 30, height: 30, borderRadius: 'var(--radius-md)', display: 'flex',
-        alignItems: 'center', justifyContent: 'center', marginBottom: 10,
-        background: h.bg, color: h.fg,
-      }}><Icon size={16} strokeWidth={2.25} /></div>
-    )
-  }
   const kpiValueStyle = (size, weight = 700) => ({ fontSize: size, fontWeight: weight, lineHeight: 1.1 })
 
   // Compact upsell card for a locked feature → links to /pricing. Only render when the
   // feature is locked; an admin grant flips hasFeature(...) → real KPI shows instead.
   // Uses var(--theme-purple) (the rationed 4th-color token) instead of a hardcoded indigo —
   // the old #818cf8/rgba(129,140,248,*) literal was unconditional across all 10 theme presets
-  // (unlike kpiIcon's bright-only hues above) and an unaudited contrast risk on light presets.
+  // (a Bright-preset-only exception, retired with that preset in S607) and an unaudited contrast risk on light presets.
   const UpsellCard = ({ label, tier, blurb }) => (
     <div
       onClick={() => navigate('/pricing')}
@@ -1209,7 +1189,6 @@ export default function ClientDashboard() {
   // the page. Gating/upsell logic per card is unchanged from before this split.
   const netPurchasesCard = (
     <div {...kpiCard(() => navigate('/purchases'))}>
-      {kpiIcon(ArrowDown, 'blue')}
       <div style={kpiLabelStyle}>Net Purchases</div>
       <div style={{ ...kpiValueStyle(18), color: 'var(--theme-accent-ink)' }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
@@ -1220,7 +1199,6 @@ export default function ClientDashboard() {
 
   const revenueCard = canSales ? (
     <div {...kpiCard(() => navigate('/sales'))}>
-      {kpiIcon(ArrowUp, 'green')}
       <div style={kpiLabelStyle}>Revenue</div>
       <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green-text)' }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
@@ -1231,7 +1209,6 @@ export default function ClientDashboard() {
 
   const foodCostCard = canSales ? (
     <div {...kpiCard(() => navigate(canVariance ? '/variance' : '/summary'))}>
-      {kpiIcon(Percent, 'amber')}
       <div style={kpiLabelStyle}>
         {/* Keeps the industry label — Owner Dashboard, the Group Console, the Monthly Owner Report,
             Period Comparison and Help's glossary all call this Food Cost %, and renaming it on one
@@ -1260,7 +1237,6 @@ export default function ClientDashboard() {
 
   const fixedCostsCard = canOverheads ? (
     <div {...kpiCard(() => navigate('/overheads'))}>
-      {kpiIcon(Receipt, 'blue')}
       <div style={kpiLabelStyle}>
         <Tip text="All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Target: under 60% combined. See Overheads page for the full breakdown." width={250}>Fixed Costs % of Revenue</Tip>
       </div>
@@ -1280,7 +1256,6 @@ export default function ClientDashboard() {
 
   const netMarginCard = canOverheads ? (
     <div {...kpiCard(null)}>
-      {kpiIcon(Target, 'green')}
       <div style={kpiLabelStyle}>
         <Tip text="Revenue minus food cost and every overhead bucket — including labor and tax & fees — as a % of revenue. This is what the business keeps after ingredient and fixed costs. Healthy Nepal F&B target: ≥20%." width={260}>Est. Net Margin %</Tip>
       </div>

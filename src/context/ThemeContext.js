@@ -47,80 +47,6 @@ export const PRESETS = {
     green: '#34d399', red: '#f87171', amber: '#fbbf24', purple: '#a78bfa',
     cardShadow: 'inset 0 1px 0 0 rgba(232,224,208,0.06), 0 10px 24px -8px rgba(15,17,23,0.55), 0 3px 8px -3px rgba(15,17,23,0.4)',
   },
-  tokyo: {
-    name: 'Tokyo Night', description: 'Deep indigo & blue',
-    bg: '#1a1b26', card: '#24283b', border: '#343a52', borderLt: '#222539', sidebar: '#16161e',
-    text1: '#c0caf5', text2: '#787c99', text3: '#9aa0c0',
-    accent: '#7aa2f7', accentHover: '#9bb8fa', accentText: '#16161e',
-    inputBg: '#1a1b26', tableHover: 'rgba(122,162,247,0.07)', focusRing: 'rgba(122,162,247,0.18)',
-    accentInk: '#93b4f9',
-    green: '#9ece6a', red: '#f7768e', amber: '#e0af68', purple: '#bb9af7',
-    cardShadow: 'inset 0 1px 0 0 rgba(192,202,245,0.06), 0 10px 24px -8px rgba(26,27,38,0.55), 0 3px 8px -3px rgba(26,27,38,0.4)',
-  },
-  dracula: {
-    name: 'Dracula', description: 'Purple & pink night',
-    bg: '#282a36', card: '#343746', border: '#44475a', borderLt: '#2f3240', sidebar: '#21222c',
-    text1: '#f8f8f2', text2: '#8a8ea8', text3: '#a8abc8',
-    accent: '#bd93f9', accentHover: '#d0b3fb', accentText: '#21222c',
-    inputBg: '#282a36', tableHover: 'rgba(189,147,249,0.08)', focusRing: 'rgba(189,147,249,0.2)',
-    accentInk: '#d3b6fc',
-    green: '#50fa7b', red: '#ff5555', amber: '#ffb86c', purple: '#bd93f9',
-    cardShadow: 'inset 0 1px 0 0 rgba(248,248,242,0.06), 0 10px 24px -8px rgba(40,42,54,0.55), 0 3px 8px -3px rgba(40,42,54,0.4)',
-  },
-  nord: {
-    name: 'Nord', description: 'Arctic frost blue',
-    bg: '#2e3440', card: '#3b4252', border: '#4c566a', borderLt: '#353c4a', sidebar: '#272c36',
-    text1: '#eceff4', text2: '#8a93a5', text3: '#aeb6c5',
-    accent: '#88c0d0', accentHover: '#9fd0dd', accentText: '#2e3440',
-    inputBg: '#2e3440', tableHover: 'rgba(136,192,208,0.08)', focusRing: 'rgba(136,192,208,0.2)',
-    accentInk: '#b3d8e2',
-    green: '#a3be8c', red: '#bf616a', amber: '#ebcb8b', purple: '#b48ead',
-    cardShadow: 'inset 0 1px 0 0 rgba(236,239,244,0.06), 0 10px 24px -8px rgba(46,52,64,0.55), 0 3px 8px -3px rgba(46,52,64,0.4)',
-  },
-  catppuccin: {
-    name: 'Catppuccin', description: 'Mocha pastel dark',
-    bg: '#1e1e2e', card: '#2a2b3c', border: '#45475a', borderLt: '#313244', sidebar: '#181825',
-    text1: '#cdd6f4', text2: '#8087a2', text3: '#a6adc8',
-    accent: '#cba6f7', accentHover: '#d8bef9', accentText: '#181825',
-    inputBg: '#1e1e2e', tableHover: 'rgba(203,166,247,0.08)', focusRing: 'rgba(203,166,247,0.2)',
-    green: '#a6e3a1', red: '#f38ba8', amber: '#f9e2af', purple: '#cba6f7',
-    cardShadow: 'inset 0 1px 0 0 rgba(205,214,244,0.06), 0 10px 24px -8px rgba(30,30,46,0.55), 0 3px 8px -3px rgba(30,30,46,0.4)',
-  },
-  latte: {
-    name: 'Latte', description: 'Soft pastel light',
-    bg: '#eff1f5', card: '#ffffff', border: '#ccd0da', borderLt: '#e6e9ef', sidebar: '#e6e9ef',
-    // Neutral ramp darkened 2026-08-12 for AA. Unlike the signal colours above, these tokens are
-    // ONLY ever text — there is no fill or chart use to preserve — so they are corrected in place
-    // rather than given variants. text3 failed on all five light presets (3.72–4.02:1); text2 also
-    // failed here on Latte. Targets keep three distinct tiers (~6.5 / ~5.6 / ~4.6) instead of
-    // flattening them all onto the 4.5 floor.
-    text1: '#4c4f69', text2: '#57596b', text3: '#64667a',
-    accent: '#8839ef', accentHover: '#7a2fd8', accentText: '#ffffff',
-    inputBg: '#f7f8fb', tableHover: '#e9ebf1', focusRing: 'rgba(136,57,239,0.12)',
-    green: '#40a02b', red: '#d20f39', amber: '#df8e1d', purple: '#8839ef',
-    greenText: '#2f7620', redText: '#b00d30', amberText: '#925d13', purpleText: '#7c33d9', accentInk: '#7c33d9',
-    cardShadow: '0 1px 2px rgba(76,79,105,0.06), 0 10px 24px -8px rgba(76,79,105,0.1)',
-  },
-  dawn: {
-    name: 'Rosé Dawn', description: 'Warm rose light',
-    bg: '#faf4ed', card: '#fffaf3', border: '#dfd9d3', borderLt: '#f2e9e1', sidebar: '#f2e9e1',
-    text1: '#524d72', text2: '#5c5971', text3: '#6c657a',
-    accent: '#d7827e', accentHover: '#c66e6a', accentText: '#2e1c1b',
-    inputBg: '#fffaf3', tableHover: '#f4ece4', focusRing: 'rgba(215,130,126,0.16)',
-    green: '#56949f', red: '#b4637a', amber: '#ea9d34', purple: '#907aa9',
-    greenText: '#417179', redText: '#965266', amberText: '#906020', purpleText: '#746389', accentInk: '#824e4b',
-    cardShadow: '0 1px 2px rgba(87,82,121,0.06), 0 10px 24px -8px rgba(87,82,121,0.1)',
-  },
-  solarized: {
-    name: 'Solarized', description: 'Cream & ocean blue',
-    bg: '#fdf6e3', card: '#fffbf0', border: '#e2dac0', borderLt: '#f0e9d6', sidebar: '#eee8d5',
-    text1: '#435359', text2: '#525c5c', text3: '#5c6a6a',
-    accent: '#268bd2', accentHover: '#1f6fa8', accentText: '#00131c',
-    inputBg: '#fffbf0', tableHover: '#f3edda', focusRing: 'rgba(38,139,210,0.12)',
-    green: '#859900', red: '#dc322f', amber: '#b58900', purple: '#6c71c4',
-    greenText: '#5f6d00', redText: '#c32c2a', amberText: '#816200', purpleText: '#5d61a8', accentInk: '#1b6193',
-    cardShadow: '0 1px 2px rgba(88,110,117,0.06), 0 10px 24px -8px rgba(88,110,117,0.1)',
-  },
   light: {
     name: 'Light', description: 'Clean warm white',
     bg: '#f6f3ef', card: '#ffffff', border: '#ddd6cf', borderLt: '#ece6df', sidebar: '#ece6dd',
@@ -130,16 +56,6 @@ export const PRESETS = {
     green: '#15803d', red: '#dc2626', amber: '#b45309', purple: '#7c3aed',
     greenText: '#137538', redText: '#c92323', amberText: '#a44c08', purpleText: '#7c3aed', accentInk: '#7a561e',
     cardShadow: '0 1px 2px rgba(28,25,23,0.06), 0 10px 24px -8px rgba(28,25,23,0.1)',
-  },
-  bright: {
-    name: 'Bright', description: 'Crisp cool-bright blue',
-    bg: '#f4f7fc', card: '#ffffff', border: '#dde4f0', borderLt: '#eaeff8', sidebar: '#eaf0fb',
-    text1: '#0f172a', text2: '#515f77', text3: '#5e6c86',
-    accent: '#3a6df0', accentHover: '#2f5cdb', accentText: '#ffffff',
-    inputBg: '#f8faff', tableHover: '#eaf0fc', focusRing: 'rgba(58,109,240,0.14)',
-    green: '#16a34a', red: '#dc2626', amber: '#d97706', purple: '#7c3aed',
-    greenText: '#117c38', redText: '#cf2424', amberText: '#a55a05', purpleText: '#7c3aed', accentInk: '#2f58c4',
-    cardShadow: '0 1px 2px rgba(15,23,42,0.05), 0 10px 26px -8px rgba(58,109,240,0.16), 0 3px 8px -3px rgba(15,23,42,0.06)',
   },
 }
 
@@ -240,6 +156,15 @@ function loadSaved() {
     // Merge over the current preset defaults rather than trusting the saved blob verbatim — a
     // snapshot captured before a field (e.g. cardShadow) existed would otherwise permanently miss
     // it, since switchPreset/updateColor both persist a full colors object to localStorage.
+    // A RETIRED preset (S607 cut eight of them) must not survive in localStorage. switchPreset
+    // persists the full colours object, so `{ ...base, ...saved.colors }` would let the saved blob
+    // override the fallback completely and keep rendering a theme that no longer exists — with
+    // nothing selected in the picker, and no way back to it once the user switched away. `custom`
+    // is deliberately exempt: it is not a preset key, and its colours ARE the user's own edits.
+    if (saved.key !== 'custom' && !PRESETS[saved.key]) {
+      const key = defaultKeyForSurface()
+      return { key, colors: resolveColors(key) }
+    }
     const base = PRESETS[saved.key] || PRESETS.dark
     return { key: saved.key, colors: { ...base, ...saved.colors } }
   } catch {

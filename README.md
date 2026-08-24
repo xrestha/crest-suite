@@ -159,6 +159,74 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S607 — 2026-08-24 — Ten themes, measured for the first time, then cut to two
+
+The theme system had never been measured as a whole. A harness that parses `PRESETS` straight out of
+`ThemeContext.js` and computes WCAG contrast, CIE76 ΔE and deuteranopia/protanopia simulation over
+every token found **30 real failures across 150 checks**, and they were not where the file's own
+comments assumed.
+
+**The neutral text ramp was inverted on all five dark presets.** `text3` outranked `text2` on every
+one of them — Dark 5.45 vs 6.70, Tokyo Night 3.57 vs 5.66, Nord 3.26 vs 4.93 — while all five light
+presets descended correctly. So the "secondary" neutral was the *least* legible of the three on half
+the themes, and `--theme-text2` is the **most-used token in the codebase at 1,192 references**, with
+`text3` second at 926. S549 had corrected the light ramp in place and reasoned that dark presets were
+safe because the signal colours already cleared AA there; that reasoning was about signals, and
+`text2`/`text3` are neutrals, so nobody measured them.
+
+**`applyTheme`'s fallback comment asserted something false.** It says a preset declaring no `*Text`
+variant "is a dark preset, where the base colour already clears AA against its own surfaces". True
+for Dark, Tokyo Night and Catppuccin. Not for **Nord**, whose `--theme-red-text` fell back to
+`#bf616a` and measured **2.46:1** on its own card — the worst number in the audit, on error text,
+with 524 references — nor Nord's purple (3.55) or Dracula's red (3.75). Nord's palette is
+authentically Nord; that is exactly why the shortcut failed. **Contrast is a property of the hue, not
+of the scheme.**
+
+**`green`/`amber` collapsed under colour blindness on five presets** (Tokyo Night ΔE 2.3, Solarized
+2.6, Latte 3.7, Catppuccin 4.4, Dracula 7.9 — floor 8), and Light failed `red`/`amber` at 3.1. Those
+are the food-cost bands. `fcBand()` returns `{ key, label, color }` and **every colour call site
+discards the label** (`const fcColor = pct => fcBand(pct, settings).color`), so the band is conveyed
+by colour alone on the product's core metric.
+
+Asked whether ten themes made the app heavy, the answer was measured and is **no**: all ten palettes
+are **1,815 bytes gzipped, 1.04% of `main.js`**, ~182 bytes per preset. There is zero CSS per theme —
+they are runtime custom properties, no `[data-theme]` blocks anywhere — and a switch costs one style
+recalc regardless of how many exist. `ThemeProvider` is the outermost provider and `App()` is a plain
+function with no hooks, so it only re-renders on an actual theme change; its unmemoized context value
+is harmless *today* and a trap the moment anyone adds state to `App()`. **The real cost of ten themes
+was never milliseconds — it was verification surface**, and the session log is full of "this looked
+fine on the theme I was using."
+
+So they were cut to **Dark and Light**, which are the two that cannot be removed anyway:
+`SYSTEM_PAIR` resolves between them for the employee PWA, `defaultKeyForSurface()` returns `dark`,
+`resolveColors()` falls back to `PRESETS.dark`, and `Settings.js` hardcodes both reset buttons. Both
+also measured **clean**, so the audit went from 30 failures to 0 without changing a single colour.
+
+Three things the removal needed that a naive delete would have missed. **A retired preset survives in
+localStorage**: `switchPreset` persists the full colours object and `loadSaved` merged
+`{ ...base, ...saved.colors }`, so the saved blob overrode the fallback entirely and anyone on Nord
+would have kept rendering Nord forever, with nothing selected in the picker and no way back — a guard
+now drops the blob when the key is gone, with `custom` deliberately exempt. **`ClientDashboard.jsx`'s
+`kpiIcon()` was gated on `themeKey === 'bright'`** and its hues were hardcoded from Bright's own
+accent blue, so it had no coherent home once that preset went; it and its five call sites were
+removed rather than re-tinted onto a bronze theme. And **the production build caught three dead
+bindings a grep had missed** — `Target` had 14 occurrences, all of them prose.
+
+`DESIGN.md` was merged rather than regenerated, because a scan reads current code and cannot recover
+*why* a token exists: the file carries 77 dated rationale lines and 5 Named Rules that a rebuild
+would have discarded. Eight targeted edits, plus a sidecar refresh that also picked up three don'ts
+missing since 2026-08-19. **One of them is the transferable lesson.** The chart-palette rule was
+justified by "accent and purple are the same hex on three of ten presets" — measured on the
+survivors, they are ΔE 108 and 140 apart, so the evidence was dead while the rule was still right.
+Deleting the justification would have left the rule looking unfounded until someone removed it, so it
+was re-evidenced on Light's live `red`/`amber` ΔE 3.1 collapse. **A rule whose stated reason has
+expired needs a new reason, not a deletion** — and every retired preset's measurements were kept and
+marked, because Rosé Dawn's 2.05:1 amber is *why* the `*-text` variants exist at all.
+
+Left open: Light's `red`/`amber` and `accent`/`red` still collide under deuteranopia — the one thing
+the cut did not fix. A measured replacement palette ("Bone & Honey", built from two supplied
+reference palettes, 21/21 contrast checks and all ten signal pairs clear) is proposed and not applied.
+
 ### S606 — 2026-08-24 — Sixteen nav icons that each meant two things
 
 Asked to check iconbuddy.com with a view to replacing icons. It 403s `WebFetch`; Playwright renders

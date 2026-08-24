@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-19T16:27:01.000Z",
+  "generatedAt": "2026-08-24T00:00:00.000Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -348,7 +348,7 @@
         "role": "text-variant",
         "displayName": "Warning Amber (as text)",
         "canonical": "#925d13",
-        "purpose": "Needs-attention wording: pending counts, an expiry countdown, .amber-action-btn's label. The worst measured base-token failure in the product was this role on Rosé Dawn at 2.05:1. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.signal-warning} unchanged. Per-preset: latte #925d13, dawn #906020, solarized #816200, light #a44c08, bright #a55a05.",
+        "purpose": "Needs-attention wording: pending counts, an expiry countdown, .amber-action-btn's label. The worst measured base-token failure in the product was this role on Rosé Dawn (a preset retired in S607; the measurement is why this variant exists) at 2.05:1. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.signal-warning} unchanged. Per-preset: latte #925d13, dawn #906020, solarized #816200, light #a44c08, bright #a55a05.",
         "tonalRamp": [
           "#442b09",
           "#754b0f",
@@ -396,7 +396,7 @@
         "role": "primary",
         "displayName": "Accent Ink (on-fill)",
         "canonical": "#0f1117",
-        "purpose": "The foreground that sits ON an accent-coloured fill — the label of a primary button, an active pill. Per preset: near-black on Dark, #ffffff on Bright, and a dark hue-match on Latte/Rose Dawn/Solarized where plain white measured 2.84-3.68:1 and failed AA on every .btn-primary in the product. Never hardcode a white or black here; reach for the token, then verify the token.",
+        "purpose": "The foreground that sits ON an accent-coloured fill — the label of a primary button, an active pill. Per preset: near-black on Dark, #241a08 on Light, (Latte/Rose Dawn/Solarized, retired S607, each needed a dark hue-match where plain white measured 2.84-3.68:1 and failed AA on every .btn-primary in the product — which is why this token exists at all.) Never hardcode a white or black here; reach for the token, then verify the token.",
         "tonalRamp": [
           "#05060a",
           "#0a0c11",
@@ -412,7 +412,7 @@
         "role": "neutral",
         "displayName": "Focus Ring (tint)",
         "canonical": "rgba(201,168,76,0.15)",
-        "purpose": "A TINT, not a focus indicator. It doubles as the active-state background for rail buttons, module tabs and sidebar links, so its alpha must stay low — measured alone on Rose Dawn it composited to 1.15:1, 2.6x below WCAG 2.2's 3:1 focus floor. Always paired with focus-outline; the ring by itself is decoration."
+        "purpose": "A TINT, not a focus indicator. It doubles as the active-state background for rail buttons, module tabs and sidebar links, so its alpha must stay low — measured alone on Rose Dawn (retired S607) it composited to 1.15:1, 2.6x below WCAG 2.2's 3:1 focus floor. Always paired with focus-outline; the ring by itself is decoration."
       },
       "focus-outline": {
         "role": "primary",
@@ -571,7 +571,7 @@
       }
     ],
     "chartPalette": {
-      "purpose": "Chart series are fixed literal hex on purpose and are NOT theme tokens. Two independent reasons: CSS var() does not resolve inside SVG presentation attributes, and the five semantic tokens are five ROLES rather than five distinguishable hues — --theme-accent and --theme-purple are the same value on Dracula, Catppuccin Mocha and Latte. A hex appearing in a chart palette is not an accent-drift violation; the One Accent Rule governs UI chrome.",
+      "purpose": "Chart series are fixed literal hex on purpose and are NOT theme tokens. Two independent reasons: CSS var() does not resolve inside SVG presentation attributes, and the five semantic tokens are five ROLES rather than five distinguishable hues — --theme-accent and --theme-purple are the same value on Dracula (retired S607; on the two remaining presets Light still collapses red/amber to ΔE 3.1 under deuteranopia, so the rule stands), Catppuccin Mocha and Latte. A hex appearing in a chart palette is not an accent-drift violation; the One Accent Rule governs UI chrome.",
       "validatedAgainst": "Brute-forced across five card surfaces (three dark presets, two light) to a worst pair of dE 16.8 normal vision / 8.6 deuteranopia. Tritan lands at 7.7, acceptable only with the secondary encoding these charts already carry (paddingAngle gaps, on-slice percent labels, name+value legends).",
       "slots": [
         {
@@ -787,10 +787,10 @@
   ],
   "narrative": {
     "northStar": "The Back-of-House Command Center",
-    "overview": "Crest Suite is operated, not visited. An owner is checking margin between service rushes; an accountant is reconciling TDS figures before a filing deadline. Neither has time for the interface to perform. The system is built around legibility under pressure: dense tables that stay scannable, a single restrained accent, and status communicated through color and position rather than decoration.\n\nThis deliberately rejects two things named in PRODUCT.md: the dated, hierarchy-less density of legacy Nepali ERP software, and the templated purple-gradient look of generic AI-generated SaaS. The system solves density the same problem legacy ERPs were trying to solve, but with real typographic hierarchy, a single accent used sparingly, and consistent spacing instead of cramming.\n\nThe product runs across ten interchangeable theme presets (dark charcoal-and-gold is the shipped default; Tokyo Night, Dracula, Nord, Catppuccin, Latte, Rosé Dawn, Solarized, and Light are the other nine; Bright — a crisp cool-blue light theme, added 2026-07-12 — is the newest). All ten are built from the same token set. Every rule is written against the default preset's values, but the relationships between tokens hold across all ten, even where the literal shape values (radius, shadow) no longer do.",
+    "overview": "Crest Suite is operated, not visited. An owner is checking margin between service rushes; an accountant is reconciling TDS figures before a filing deadline. Neither has time for the interface to perform. The system is built around legibility under pressure: dense tables that stay scannable, a single restrained accent, and status communicated through color and position rather than decoration.\n\nThis deliberately rejects two things named in PRODUCT.md: the dated, hierarchy-less density of legacy Nepali ERP software, and the templated purple-gradient look of generic AI-generated SaaS. The system solves density the same problem legacy ERPs were trying to solve, but with real typographic hierarchy, a single accent used sparingly, and consistent spacing instead of cramming.\n\nThe product runs across two interchangeable theme presets — Dark (charcoal-and-gold, the shipped default) and Light (warm white, the same design in a light scheme). Eight others (Tokyo Night, Dracula, Nord, Catppuccin, Latte, Rosé Dawn, Solarized, Bright) were retired on 2026-08-24/S607: every theme is an independent surface needing re-verification for every signal colour, badge and focus style, and a measured audit found 30 contrast failures concentrated in the four dark presets nobody had checked. Dark and Light both measured clean, and they are the pair system mode resolves between for the employee app — so they are also the two that cannot be removed. Both are built from the same token set. Every rule is written against the default preset's values, but the relationships between tokens hold across all ten, even where the literal shape values (radius, shadow) no longer do.",
     "keyCharacteristics": [
-      "Depth comes primarily from a one-step background-lightness shift, with a per-preset shadow as a secondary cue",
-      "One accent color per screen, applied sparingly (buttons, active states, focus rings) never as a wash — Bright is a deliberate, scoped exception",
+      "Depth comes primarily from a one-step background-lightness shift, with a per-preset shadow as a secondary cue (added 2026-07-12 — see Elevation; previously flat-only, see that section's history note)",
+      "One accent color per screen, applied sparingly (buttons, active states, focus rings) never as a wash — no exceptions remain (Bright carried the only scoped one; retired with that preset in S607)",
       "A serif wordmark is the one deliberate ornamental choice in an otherwise all-sans, all-functional system",
       "Status (paid / pending / overdue, veg / non-veg, stock health) is color-coded consistently: green success, red danger, amber caution, gray neutral, with a rationed 4th color (purple) reserved for a genuine fourth or fifth category when green/red/amber aren't enough"
     ],
@@ -891,9 +891,9 @@
         "body": "A signal colour used as TEXT takes the *-text variant; used as a FILL it takes the base token. One value cannot do both jobs on a light preset. Three exceptions, each found by applying the rule too broadly: a legend swatch keeps the series colour, a prop that receives a series colour keeps it, and a colour: inside a ternary is still a colour: — about half the real sites are ternaries a property-level regex silently skips."
       },
       {
-        "name": "Rosé Dawn is the floor, not Latte",
+        "name": "Rosé Dawn and Solarized were the floor, not Latte (history; Light is now the only light preset)",
         "section": "colors",
-        "body": "Failing signal-colour/surface combinations per light preset: Rosé Dawn 10/10, Solarized 10/10, Bright 6/10, Latte 4/10, Warm Light 3/10. Spot-check colour work on Rosé Dawn, not on the preset that is easiest to recall."
+        "body": "History (all four light presets named here were retired in S607; Light is now the only light preset, so spot-check there). Failing signal-colour/surface combinations per light preset were: Rosé Dawn 10/10, Solarized 10/10, Bright 6/10, Latte 4/10, Warm Light 3/10. Spot-check colour work on Rosé Dawn, not on the preset that is easiest to recall."
       },
       {
         "name": "Never build a multi-series chart palette from the semantic tokens",
@@ -928,12 +928,12 @@
       {
         "name": "A paired token is only correct while it is actually measured",
         "section": "colors",
-        "body": "--theme-accent-text was plain #ffffff on all five light presets and failed on three of them: 2.84:1 on Rose Dawn, 3.61:1 on Light, 3.68:1 on Solarized — i.e. every .btn-primary in the product on those themes, for as long as they have existed. Fixed by giving those presets a dark hue-matched ink rather than darkening the accent, which also serves as a tint, border and dot where it was already correct. Reach for the token, then verify the token."
+        "body": "--theme-accent-text was plain #ffffff on all five light presets of the time (four retired in S607) and failed on three of them: 2.84:1 on Rose Dawn, 3.61:1 on Light, 3.68:1 on Solarized — i.e. every .btn-primary in the product on those themes, for as long as they have existed. Fixed by giving those presets a dark hue-matched ink rather than darkening the accent, which also serves as a tint, border and dot where it was already correct. Reach for the token, then verify the token."
       },
       {
         "name": "A wrapper being new does not put the thing it wraps in scope",
         "section": "colors",
-        "body": "ModuleGuideTab.jsx rendered its whole 'Watch out for' list in --theme-amber as body text — 2.05:1 on Rose Dawn, the worst measurement in the system — and survived because only its wrapper GuidesTab.jsx was in the changed-file set, so the hook never ran on it. When a critique or audit targets a page, include the components it composes, not just the files git reports (S594; the S521 stale-file lesson restated)."
+        "body": "ModuleGuideTab.jsx rendered its whole 'Watch out for' list in --theme-amber as body text — 2.05:1 on Rose Dawn (preset retired S607; the measurement is why the *-text variants exist), the worst measurement in the system — and survived because only its wrapper GuidesTab.jsx was in the changed-file set, so the hook never ran on it. When a critique or audit targets a page, include the components it composes, not just the files git reports (S594; the S521 stale-file lesson restated)."
       },
       {
         "name": "A tier or add-on above the module set takes the accent plus a mark, not a fourth hue",
@@ -992,7 +992,7 @@
       }
     ],
     "dos": [
-      "Do use the theme's `accent-text` token as the foreground on any accent-colored background - it changes per preset and a hardcoded color will fail contrast on at least one of the ten themes.",
+      "Do use the theme's `accent-text` token as the foreground on any accent-colored background - it changes per preset and a hardcoded color will fail contrast on at least one of the two presets.",
       "Do keep tonal alpha-tints (`table-hover`, `focus-ring`, badge backgrounds) at 2-18% opacity - enough to register as a state, never opaque enough to compete with real content.",
       "Do wrap every wide table in the horizontal-scroll container rather than shrinking columns.",
       "Do reserve the rationed 4th color (purple) for a genuine 4th/5th categorical need, not as a second accent.",
@@ -1002,19 +1002,23 @@
       "Do keep a legend swatch identical to the series it labels, and let the adjacent label text carry the readable contrast.",
       "Do give any modal the full dialog contract: role, `aria-modal`, a labelled title, initial focus, a Tab trap, Escape, and focus restored to the trigger.",
       "Do disclose an estimate where it is read, inline and visible, not in a hover tooltip — a figure carrying a red/amber/green verdict has to say what it is built from.",
-      "Do render a report's could-not-load state as its own thing, never as the empty state, and never above a KPI strip that is still showing zeros (added 2026-08-19/S594 — see Report shell)."
+      "Do render a report's could-not-load state as its own thing, never as the empty state, and never above a KPI strip that is still showing zeros (added 2026-08-19/S594 — see Report shell).",
+      "Do put a validation message under the box it names, with `aria-invalid` on the control and `aria-describedby` pointing at the message — one string for the whole form tells a screen-reader user that a save failed and never which control to fix (added 2026-08-23/S603 — see Inputs / Fields)."
     ],
     "donts": [
       "Don't build dense, hierarchy-less layouts in the name of \"fitting more in\" - that's the legacy-ERP failure mode this product is explicitly positioned against.",
       "Don't reach for purple gradients, Inter-everywhere, or a templated hero-plus-three-cards layout - the generic-AI-SaaS look PRODUCT.md names directly as an anti-reference.",
       "Don't invent a stronger/different shadow to mean \"important\" or \"premium.\" Card elevation (`--theme-card-shadow`) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning (see Elevation).",
       "Don't hardcode white or black as text on an accent background - use the paired `accent-text` token.",
-      "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (Bright's colorful KPI badges on `ClientDashboard.jsx` are the one named exception - see Badges / Status Chips.)",
-      "Don't build a multi-series chart palette from the semantic tokens — accent and purple are the same hex on three of ten presets.",
+      "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (No exceptions remain; Bright's colorful KPI badges were the only named one, retired with that preset in S607.)",
+      "Don't build a multi-series chart palette from the semantic tokens — on Light, `red`/`amber` collapse to ΔE 3.1 and `accent`/`red` to ΔE 5.6 under deuteranopia (floor 8). The original evidence — accent and purple being the *same hex* on Dracula, Catppuccin and Latte — died with those presets in S607; the rule did not, because the tokens are five *roles*, not five distinguishable hues.",
       "Don't dim a row with `opacity` to de-emphasise it; opacity multiplies through the text colour and takes it below AA. Label the state instead.",
       "Don't put `role=\"button\"` on a `<tr>`. It removes the row from the table's structure, so the cells stop being associated with their column headers. Put a real `<button>` in the first cell (see Data Tables).",
       "Don't paint a verdict colour on a figure that has not settled yet — early in a period a lumpy-numerator ratio is arithmetic, not signal.",
-      "Don't let a page compute a number it then shows before the read has returned. A KPI painted during load is a claim the page cannot yet support, and on a green token it reads as a healthy one."
+      "Don't let a page compute a number it then shows before the read has returned. A KPI painted during load is a claim the page cannot yet support, and on a green token it reads as a healthy one.",
+      "Don't signal a failing field with colour alone, and don't give it a styling hook separate from `aria-invalid` — the two drift, and a form that looks validated then reads as unlabelled.",
+      "Don't put a `position: sticky` element in the body flow and assume it sticks — `index.css`'s `html, body { overflow-x: hidden }` makes body its own scrollport, and it had silently killed three of them. Give the page root its own scroll container and measure it (see Layout).",
+      "Don't dim a disabled *field* the way a disabled button is dimmed. A button's label is a verb; a field's content is data, and a locked period's figures have to stay legible precisely because they can no longer be corrected — flatten the surface instead (see Inputs / Fields)."
     ]
   }
 }
