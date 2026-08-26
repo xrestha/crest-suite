@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 
@@ -62,13 +64,17 @@ export default function VatReport() {
   const [entries, setEntries]         = useState([])
   const [vatReturns, setVatReturns]   = useState([])
   const [loading, setLoading]         = useState(false)
+  const [loadError, setLoadError]     = useState(null)
   const [tab, setTab]                 = useState('entries')
 
   useEffect(() => {
     if (!effectiveClientId) return
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // A statutory report must never mistake a failed read for "no periods yet" — the figures
+        // on this page are what gets filed with the IRD (S607, the silent-NPR-0 class).
+        if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data && data.length > 0) setSelected(data[0])
       })
@@ -80,7 +86,8 @@ export default function VatReport() {
 
   async function fetchData(periodId) {
     setLoading(true)
-    const [{ data: entData }, { data: retData }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       fetchAllRows(() => supabase
         .from('purchase_entries')
         .select('*, items(name, uom, categories(name)), vendors(name, pan_vat_no)')
@@ -92,6 +99,12 @@ export default function VatReport() {
         .eq('period_id', periodId)
         .order('bs_day'),
     ])
+    // A failed read must never reach the arithmetic below: everything flows through `|| []`, so an
+    // RLS rejection or a stalled token would render a complete, confident VAT return of NPR 0 —
+    // and this is a figure an accountant files on. See shared/queryError.js.
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setEntries([]); setVatReturns([]); setLoading(false); return }
+    const [{ data: entData }, { data: retData }] = results
     setEntries(entData || [])
     setVatReturns((retData || []).filter(r => r.purchase_entries?.vat_inclusive))
     setLoading(false)
@@ -226,7 +239,11 @@ export default function VatReport() {
         </div>
       </div>
 
-      {/* Summary cards */}
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
+          yet is NPR 0 wearing the confidence of a real figure (S594 rule). */}
+      {!loadError && !loading && (
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: 24 }}>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Total net purchases this period (non-VAT + VAT-inclusive net of returns)." width={240}>Total Net Purchases</Tip></div>
@@ -261,15 +278,18 @@ export default function VatReport() {
           <div className="stat-sub">Actual cost basis</div>
         </div>
       </div>
+      )}
 
       {/* Tabs */}
+      {!loadError && (
       <div className="tab-bar" style={{ marginBottom: 20 }}>
         <button className={`tab-btn${tab === 'entries' ? ' tab-btn--active' : ''}`} onClick={() => setTab('entries')}>Entries</button>
         <button className={`tab-btn${tab === 'ca' ? ' tab-btn--active' : ''}`} onClick={() => setTab('ca')}>CA Summary</button>
       </div>
+      )}
 
       {/* ── ENTRIES TAB ── */}
-      {tab === 'entries' && (
+      {!loadError && tab === 'entries' && (
         <>
           {/* Purchases */}
           <div className="card" style={{ marginBottom: 16 }}>
@@ -433,7 +453,7 @@ export default function VatReport() {
       )}
 
       {/* ── CA SUMMARY TAB ── */}
-      {tab === 'ca' && (
+      {!loadError && tab === 'ca' && (
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
             <div>

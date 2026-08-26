@@ -26,3 +26,17 @@ export function firstError(results) {
   if (!bad) return null
   return bad.error.message || bad.error.details || String(bad.error)
 }
+
+/**
+ * The throwing form, for compute functions that run inside a try/catch harness rather than a
+ * React component — the Monthly Owner Report's `runSection()` being the motivating case (S607):
+ * its sections already degrade a THROWN failure to a named `sectionErrors` entry the page shows
+ * as "couldn't be generated", but a Supabase read does not throw — it returns `error` and the
+ * arithmetic runs on `|| []`, freezing zeros into the immutable snapshot with no trace. Call this
+ * on every batch (and wrap single reads) inside such functions so a failed read becomes a caught,
+ * named failure instead of a permanent wrong number.
+ */
+export function throwFirstError(results) {
+  const msg = firstError(results)
+  if (msg) throw new Error(msg)
+}

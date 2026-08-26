@@ -6,6 +6,7 @@
 // CURRENT live classification with whatever period happens to be regenerated last.
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
+import { throwFirstError } from '../../shared/queryError'
 import { computeRecipeCosts } from '../../utils/recipeCost'
 
 const FC_CUTOFF = 35
@@ -27,11 +28,15 @@ function classify(fcPct, qtySold, medianQty) {
 }
 
 export async function computeMenuEngineeringSection(clientId, period) {
-  const [{ data: recipes }, { data: salesData }] = await Promise.all([
+  const results = await Promise.all([
     scopedFrom('recipes', clientId, 'id, name, category, selling_price')
       .neq('is_active', false).neq('category', 'Sub-Recipe'),
     supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp'),
   ])
+  // Throw on a failed read so runSection() names this section as failed instead of freezing a
+  // matrix of all-Dogs into the immutable snapshot (S607).
+  throwFirstError(results)
+  const [{ data: recipes }, { data: salesData }] = results
 
   const recipeIds = (recipes || []).map(r => r.id)
   const costMap = recipeIds.length > 0 ? await computeRecipeCosts(supabase, recipeIds) : {}

@@ -7,6 +7,7 @@
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
+import { throwFirstError } from '../../shared/queryError'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 
 const WINDOW_SIZE = 6
@@ -20,9 +21,13 @@ function shrinkageStatus(shrinkCount, coveredPeriods) {
 }
 
 export async function computeInventoryShrinkageTrend(clientId, period) {
-  const { data: closedPeriods } = await scopedFrom('monthly_periods', clientId, 'id, bs_year, bs_month')
+  const closedPeriodsRes = await scopedFrom('monthly_periods', clientId, 'id, bs_year, bs_month')
     .eq('status', 'closed')
     .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+  // Throw on a failed read: this section returns null for "fewer than 2 closed periods", and a
+  // failed read must not wear that legitimate absence as a disguise (S607).
+  throwFirstError([closedPeriodsRes])
+  const { data: closedPeriods } = closedPeriodsRes
 
   const thisKey = period.bs_year * 100 + period.bs_month
   const window = (closedPeriods || [])
@@ -31,7 +36,7 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
   if (window.length < 2) return null
 
   const windowIds = window.map(p => p.id)
-  const [{ data: opening }, { data: purchases }, { data: returns }, { data: wastages }, { data: closing }, { data: staffMeals }, { data: salesData }, { data: items }, { data: recipes }] = await Promise.all([
+  const results = await Promise.all([
     supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', windowIds),
     fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty').in('period_id', windowIds).order('id')),
     supabase.from('vendor_returns').select('period_id, item_id, qty').in('period_id', windowIds),
@@ -46,6 +51,8 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
     scopedFrom('items', clientId, 'id, name, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
     scopedFrom('recipes', clientId, 'id'),
   ])
+  throwFirstError(results)
+  const [{ data: opening }, { data: purchases }, { data: returns }, { data: wastages }, { data: closing }, { data: staffMeals }, { data: salesData }, { data: items }, { data: recipes }] = results
 
   const recipeIds = (recipes || []).map(r => r.id)
   const ingredientBreakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}

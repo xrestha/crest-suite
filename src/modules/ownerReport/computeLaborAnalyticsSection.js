@@ -6,10 +6,11 @@
 // board's laborForecast.js verbatim rather than re-deriving the shift-hours fallback chain.
 import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
+import { throwFirstError } from '../../shared/queryError'
 import { shiftHours } from '../hr/roster/laborForecast'
 
 export async function computeLaborAnalyticsSection(clientId, period, { hr, ims } = {}) {
-  const [{ data: attendanceRows }, { data: rosterRows }, { data: shiftTypes }] = await Promise.all([
+  const results = await Promise.all([
     // Both paged: attendance is one row per employee per day and roster one per employee per
     // scheduled day, so each crosses the silent 1000-row cap at ~34 staff — and a truncated read
     // would understate Actual and Scheduled Hours independently, quietly moving the variance
@@ -18,6 +19,10 @@ export async function computeLaborAnalyticsSection(clientId, period, { hr, ims }
     fetchAllRows(() => scopedFrom('hr_roster', clientId, 'shift_type_id').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month).order('id')),
     scopedFrom('hr_shift_types', clientId, 'id, hours, start_time, end_time'),
   ])
+  // Throw on a failed read so runSection() names this section as failed instead of freezing
+  // zero labour hours into the immutable snapshot (S607).
+  throwFirstError(results)
+  const [{ data: attendanceRows }, { data: rosterRows }, { data: shiftTypes }] = results
 
   const actualHoursWorked = (attendanceRows || []).reduce((s, a) => s + (parseFloat(a.hours_worked) || 0), 0)
 

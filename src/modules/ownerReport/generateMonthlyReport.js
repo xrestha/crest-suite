@@ -9,8 +9,13 @@ import { computeMonthlyReport, CURRENT_SCHEMA_VERSION } from './computeMonthlyRe
 // clientModules, since Periods.js's adminCloseAndAdvance loops over an arbitrary client id that
 // isn't necessarily the admin's own "currently viewed" client.
 export async function generateMonthlyReport({ clientId, period }) {
-  const { data: client } = await supabase.from('clients')
+  const { data: client, error } = await supabase.from('clients')
     .select('ims_enabled, hr_enabled, pos_enabled').eq('id', clientId).single()
+  // A failed read here used to fall through to { ims: true, hr: false, pos: false } — an HR+POS
+  // client's snapshot silently frozen with two modules missing, permanently. Throw instead: the
+  // period-close callers already treat generation as best-effort (try/catch, the close proceeds),
+  // and the lazy-generate path on the report page surfaces the message (S607).
+  if (error) throw new Error(`Could not resolve the client's modules: ${error.message}`)
   const modulesIncluded = {
     ims: client?.ims_enabled !== false,
     hr: !!client?.hr_enabled,

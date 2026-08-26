@@ -1,4 +1,5 @@
 import NoPeriodState from './NoPeriodState'
+import ReportLoadError from './ReportLoadError'
 
 /**
  * The shell every IMS/Suite report page renders inside — header, KPI strip, and the six states a
@@ -78,14 +79,7 @@ export default function ReportPage({
           {loadingText}
         </p>
       ) : error ? (
-        <div className="card report-error" role="alert">
-          <div className="report-error-title">Could not load this report</div>
-          <p className="report-error-body">{error}</p>
-          <p className="report-error-hint">
-            Nothing here is a real figure — this is a failed read, not an empty period. Reload the
-            page, and if it keeps happening send this message to support.
-          </p>
-        </div>
+        <ReportLoadError error={error} />
       ) : empty ? (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="empty-state" style={{ padding: 32 }}>

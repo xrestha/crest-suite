@@ -8,10 +8,11 @@
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
+import { throwFirstError } from '../../shared/queryError'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 
 export async function computeInventoryVariance(clientId, period) {
-  const [{ data: opening }, { data: purchases }, { data: returns }, { data: wastages }, { data: closing }, { data: items }, { data: recipes }, { data: salesData }] = await Promise.all([
+  const results = await Promise.all([
     supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id),
     fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', period.id).order('id')),
     supabase.from('vendor_returns').select('item_id, qty').eq('period_id', period.id),
@@ -23,6 +24,10 @@ export async function computeInventoryVariance(clientId, period) {
     // computeInventoryShrinkageTrend.js; Variance.js (which this mirrors) has never filtered them.
     supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id),
   ])
+  // Throw on a failed read so the section is named as failed instead of freezing a variance
+  // table built on zeros into the immutable snapshot (S607).
+  throwFirstError(results)
+  const [{ data: opening }, { data: purchases }, { data: returns }, { data: wastages }, { data: closing }, { data: items }, { data: recipes }, { data: salesData }] = results
 
   const sum = (rows, key) => { const m = {}; (rows || []).forEach(r => { m[r.item_id] = (m[r.item_id] || 0) + (parseFloat(r[key]) || 0) }); return m }
   const openMap = sum(opening, 'qty'), purchMap = sum(purchases, 'qty'), retMap = sum(returns, 'qty')

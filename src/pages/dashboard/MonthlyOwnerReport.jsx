@@ -135,8 +135,10 @@ export default function MonthlyOwnerReport() {
   }, [clientId])
 
   async function loadPeriods() {
-    const { data } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
+    const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+    // A failed read must not impersonate "no periods yet" (S607, the silent-zero class).
+    if (error) { setGenError(`Could not load periods: ${error.message}`); setLoading(false); return }
     const rows = data || []
     setPeriods(rows)
     setSelectedPeriodId(prev => prev || rows.find(p => p.status === 'closed')?.id || rows[0]?.id || null)
@@ -148,7 +150,10 @@ export default function MonthlyOwnerReport() {
     setLoading(true)
     setGenError('')
 
-    const { data: existing } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
+    const { data: existing, error: existingErr } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
+    // A failed read here used to fall straight through to the lazy-generate path — treating
+    // "could not read the snapshot" as "no snapshot exists" (S607). Refuse instead.
+    if (existingErr) { setGenError(`Could not load the report: ${existingErr.message}`); setReport(null); setLoading(false); return }
     if (existing) {
       setReport(existing)
       if (existing.generated_by) {
@@ -169,7 +174,8 @@ export default function MonthlyOwnerReport() {
     try {
       const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId, period })
       await saveGeneratedReport({ clientId, period, snapshot, modulesIncluded, actorId: profile?.id, source: 'backfill' })
-      const { data: fresh } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
+      const { data: fresh, error: freshErr } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
+      if (freshErr) throw new Error(freshErr.message)
       setReport(fresh)
       setGeneratorName(profile?.full_name || '—')
     } catch (e) {
@@ -193,7 +199,8 @@ export default function MonthlyOwnerReport() {
     try {
       const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId, period })
       await regenerateReport({ clientId, periodId: period.id, snapshot, modulesIncluded, actorId: profile?.id })
-      const { data: fresh } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
+      const { data: fresh, error: freshErr } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
+      if (freshErr) throw new Error(freshErr.message)
       setReport(fresh)
       setGeneratorName(profile?.full_name || '—')
     } catch (e) {

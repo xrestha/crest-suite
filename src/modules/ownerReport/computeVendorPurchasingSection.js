@@ -6,6 +6,7 @@
 // supposed to be frozen. No `vendors.credit_terms`/due-date column exists anywhere in the schema —
 // this is bill-age-since-purchase, not true payment-terms-SLA compliance.
 import { supabase } from '../../supabaseClient'
+import { throwFirstError } from '../../shared/queryError'
 import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { bsToAd } from '../../utils/bsCalendar'
@@ -20,7 +21,7 @@ function billAgingBucket(daysOld) {
 }
 
 export async function computeVendorPurchasingSection(clientId, period, generatedAt) {
-  const [{ data: purchases }, { data: returns }, { data: vendors }] = await Promise.all([
+  const results = await Promise.all([
     // Paged — feeds a FROZEN snapshot, so a truncated read becomes the permanent record (S529).
     fetchAllRows(() => supabase.from('purchase_entries')
       .select('id, vendor_id, qty, rate, payment_method, discount_amount, purchase_group_id, invoice_ref, bs_day')
@@ -29,11 +30,17 @@ export async function computeVendorPurchasingSection(clientId, period, generated
     supabase.from('vendor_returns').select('vendor_id, qty, rate, purchase_entry_id').eq('period_id', period.id),
     scopedFrom('vendors', clientId, 'id, name').eq('is_active', true),
   ])
+  // Throw on a failed read so runSection() names this section as failed instead of freezing a
+  // vendor ledger of zeros into the immutable snapshot (S607).
+  throwFirstError(results)
+  const [{ data: purchases }, { data: returns }, { data: vendors }] = results
 
   const creditIds = (purchases || []).filter(p => p.payment_method === 'Credit').map(p => p.id)
-  const { data: payments } = creditIds.length > 0
+  const paymentsRes = creditIds.length > 0
     ? await scopedFrom('payable_payments', clientId, 'purchase_entry_id, amount').in('purchase_entry_id', creditIds)
     : { data: [] }
+  throwFirstError([paymentsRes])
+  const { data: payments } = paymentsRes
   const paidByEntry = {}
   ;(payments || []).forEach(p => { paidByEntry[p.purchase_entry_id] = (paidByEntry[p.purchase_entry_id] || 0) + parseFloat(p.amount || 0) })
 

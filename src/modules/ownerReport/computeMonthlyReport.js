@@ -5,6 +5,7 @@
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
+import { throwFirstError } from '../../shared/queryError'
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 import { calcAmount, hourlyRateOf, tallyAttendance } from '../hr/payroll/payrollCompute'
 import { SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
@@ -53,6 +54,9 @@ async function computeImsSection(clientId, period) {
     supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id),
     scopedFrom('payable_payments', clientId, 'purchase_entry_id, amount'),
   ])
+  // A failed read must THROW so runSection() records it as a section error the page names —
+  // otherwise it flows through `|| []` and freezes zeros into the immutable snapshot (S607).
+  throwFirstError(results)
   const [
     { data: purchases }, { data: returns }, { data: salesData }, { data: consumptionSales }, { data: recipes },
     { data: overheadsData }, { data: wastagesData }, { data: items }, { data: parLevels },
@@ -158,6 +162,7 @@ async function computeHrSection(clientId, period) {
     scopedFrom('hr_leave_types', clientId, 'id, name'),
     scopedFrom('hr_payroll_runs', clientId, 'id').eq('period_id', period.id).eq('status', 'finalized').maybeSingle(),
   ])
+  throwFirstError(results)
   const [
     { data: employees }, { data: components }, { data: otEntries }, { data: leaveRequests },
     { data: attendanceRows }, { data: leaveTypes }, { data: finalizedRun },
@@ -193,8 +198,12 @@ async function computeHrSection(clientId, period) {
   // finalized yet) — matches Owner Dashboard's live MTD estimate for the still-open case.
   let payroll, payrollSource
   if (finalizedRun?.id) {
-    const { data: payslips } = await scopedFrom('hr_payslips', clientId, 'gross, ot_hours, ot_amount, ssf_employer')
+    const payslipRes = await scopedFrom('hr_payslips', clientId, 'gross, ot_hours, ot_amount, ssf_employer')
       .eq('run_id', finalizedRun.id)
+    // A finalized run whose payslips cannot be read must fail the section, not freeze a payroll
+    // of NPR 0 under payrollSource:'finalized' — the label would vouch for the wrong figure.
+    throwFirstError([payslipRes])
+    const { data: payslips } = payslipRes
     const gross = (payslips || []).reduce((s, p) => s + (parseFloat(p.gross) || 0), 0)
     const otHours = (payslips || []).reduce((s, p) => s + (parseFloat(p.ot_hours) || 0), 0)
     const otAmount = (payslips || []).reduce((s, p) => s + (parseFloat(p.ot_amount) || 0), 0)
@@ -305,21 +314,25 @@ async function computePosSection(clientId, period) {
   const fromTs = fromDate.toISOString()
   const toTs = toDate.toISOString()
 
-  const [{ data: settings }, { data: orderData }] = await Promise.all([
+  const posResults = await Promise.all([
     supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
     scopedFrom('pos_orders', clientId, 'id, discount_amount, closed_at, credit_note_id, payment_method, covers')
       .eq('close_type', 'paid').gte('closed_at', fromTs).lte('closed_at', toTs),
   ])
+  throwFirstError(posResults)
+  const [{ data: settings }, { data: orderData }] = posResults
   const vatReg = settings?.is_vat_registered ?? true
   const orders = (orderData || []).filter(o => !o.credit_note_id)
 
   const orderIds = orders.map(o => o.id)
-  const { data: itemRows } = orderIds.length > 0
+  const itemRowsRes = orderIds.length > 0
     // Paged: a month of bill lines runs to thousands. This one is written into a FROZEN snapshot,
     // so a truncated read wouldn't just be wrong once — it would be preserved as the permanent
     // record of that period, with no later recompute to correct it (S529).
     ? await fetchAllRows(() => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no').in('order_id', orderIds).order('id'))
     : { data: [] }
+  throwFirstError([itemRowsRes])
+  const { data: itemRows } = itemRowsRes
 
   const byOrder = {}
   const compedItems = []
@@ -363,13 +376,15 @@ async function computePosSection(clientId, period) {
     compedCount = compGroups.size
   }
 
-  const { data: voidRows } = await scopedFrom('pos_orders', clientId, 'id')
+  const voidRowsRes = await scopedFrom('pos_orders', clientId, 'id')
     .in('close_type', ['void', 'writeoff']).gte('closed_at', fromTs).lte('closed_at', toTs)
-  const voidOrderIds = (voidRows || []).map(o => o.id)
+  throwFirstError([voidRowsRes])
+  const voidOrderIds = (voidRowsRes.data || []).map(o => o.id)
   let voidsAmount = 0
   if (voidOrderIds.length > 0) {
-    const { data: voidItems } = await fetchAllRows(() => scopedFrom('pos_order_items', clientId, 'order_id, qty, unit_price').in('order_id', voidOrderIds).order('id'))
-    voidsAmount = (voidItems || []).reduce((s, i) => s + i.qty * i.unit_price, 0)
+    const voidItemsRes = await fetchAllRows(() => scopedFrom('pos_order_items', clientId, 'order_id, qty, unit_price').in('order_id', voidOrderIds).order('id'))
+    throwFirstError([voidItemsRes])
+    voidsAmount = (voidItemsRes.data || []).reduce((s, i) => s + i.qty * i.unit_price, 0)
   }
 
   return {
@@ -410,12 +425,19 @@ function computeCombinedMetrics({ ims, hr }) {
 // view of THAT period." BS years always have exactly 12 months, so month rollover is plain
 // integer arithmetic — no bsToAd round-trip needed (this doesn't need day-level AD precision).
 async function lookupPriorSnapshot(clientId, bsYear, bsMonth) {
-  const { data: priorPeriod } = await scopedFrom('monthly_periods', clientId, 'id, status')
+  // Failed reads throw rather than masquerading as reason:'no_period'/'no_report' — a frozen
+  // trend claiming "no prior data exists" is an assertion about the client's history, and it
+  // must not be made off a network blip (S607).
+  const priorPeriodRes = await scopedFrom('monthly_periods', clientId, 'id, status')
     .eq('bs_year', bsYear).eq('bs_month', bsMonth).maybeSingle()
+  throwFirstError([priorPeriodRes])
+  const priorPeriod = priorPeriodRes.data
   if (!priorPeriod) return { available: false, reason: 'no_period', period: null, snapshot: null }
   if (priorPeriod.status !== 'closed') return { available: false, reason: 'not_closed', period: { bs_year: bsYear, bs_month: bsMonth }, snapshot: null }
-  const { data: report } = await scopedFrom('monthly_owner_reports', clientId, 'snapshot')
+  const reportRes = await scopedFrom('monthly_owner_reports', clientId, 'snapshot')
     .eq('period_id', priorPeriod.id).maybeSingle()
+  throwFirstError([reportRes])
+  const report = reportRes.data
   if (!report) return { available: false, reason: 'no_report', period: { bs_year: bsYear, bs_month: bsMonth }, snapshot: null }
   return { available: true, reason: null, period: { bs_year: bsYear, bs_month: bsMonth }, snapshot: report.snapshot }
 }
