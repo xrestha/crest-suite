@@ -105,7 +105,7 @@ export default function StockMovements() {
       // sales_entries is period_id-scoped, not client_id-scoped — stays on raw supabase.from() (see scopedDb notes).
       // No source filter: manual Sales Entry saves deplete stock too (S492), same as POS, so a
       // recipe with no BOM is a gap regardless of which one sold it.
-      supabase.from('sales_entries').select('recipe_id').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id').eq('period_id', periodId).order('id')),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 ledger (S612 silent-zero rule).

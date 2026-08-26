@@ -84,13 +84,13 @@ export default function AnnualSummary() {
       supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', periodIds),
       fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty, rate').in('period_id', periodIds).order('id')),
       scopedFrom('vendor_returns', 'period_id, item_id, qty, rate').in('period_id', periodIds),
-      supabase.from('wastages').select('period_id, item_id, qty').in('period_id', periodIds),
+      fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       // Staff meals were missing here entirely, so this page's COGS (and therefore its Food Cost %
       // and every trend arrow off it) sat systematically below MonthlySummary's figure for the
       // exact same month, with nothing on either page saying so. See src/shared/imsFormulas.js.
       supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', periodIds),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount').in('period_id', periodIds).neq('source', 'pos_comp'),
+      fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount').in('period_id', periodIds).neq('source', 'pos_comp').order('id')),
       scopedFrom('recipes', 'id, selling_price'),
     ])
     // A failed read must not render as a quiet year of NPR 0 (S612 silent-zero rule).

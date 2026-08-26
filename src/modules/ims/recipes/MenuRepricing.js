@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { getSuggestedPrice, computeRecipeCosts } from '../../../utils/recipeCost'
 import { firstError } from '../../../shared/queryError'
 import Tip from '../../../components/Tip'
@@ -63,7 +64,7 @@ export default function MenuRepricing() {
     const results = await Promise.all([
       // Repricing suggestions weigh recipes by sales volume/revenue at the current price —
       // comps (source='pos_comp') never generated revenue at that price, so they're excluded.
-      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp'),
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
       scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, target_fc_pct')
         .neq('category', 'Sub-Recipe')
         .eq('is_active', true),

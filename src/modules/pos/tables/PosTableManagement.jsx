@@ -293,12 +293,14 @@ export default function PosTableManagement() {
     if (!clientId) return   // guard the admin "no client selected" window: client_id:null would write the global-defaults row
     setRoutingSaving(true); setRoutingMsg('')
     const botArr = Array.from(botCats)
-    const { data: existing } = await supabase
+    const { data: existing, error: existErr } = await supabase
       .from('settings').select('id').eq('client_id', clientId).maybeSingle()
-    let error
-    if (existing?.id) {
+    let error = existErr || null
+    if (!error && existing?.id) {
       ;({ error } = await supabase.from('settings').update({ pos_bot_categories: botArr }).eq('id', existing.id))
-    } else {
+    } else if (!error) {
+      // A failed existing-row read must NOT fall into insert (S613) — that writes a second
+      // settings row for the client and splits every settings read after it.
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_bot_categories: botArr }))
     }
     setRoutingSaving(false)
@@ -336,12 +338,14 @@ export default function PosTableManagement() {
   async function saveNotePresets() {
     if (!clientId) return
     setNotesSaving(true); setNotesMsg('')
-    const { data: existing } = await supabase
+    const { data: existing, error: existErr } = await supabase
       .from('settings').select('id').eq('client_id', clientId).maybeSingle()
-    let error
-    if (existing?.id) {
+    let error = existErr || null
+    if (!error && existing?.id) {
       ;({ error } = await supabase.from('settings').update({ pos_note_presets: notePresets }).eq('id', existing.id))
-    } else {
+    } else if (!error) {
+      // A failed existing-row read must NOT fall into insert (S613) — that writes a second
+      // settings row for the client and splits every settings read after it.
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_note_presets: notePresets }))
     }
     setNotesSaving(false)
@@ -405,12 +409,14 @@ export default function PosTableManagement() {
   async function saveDiscReasons() {
     if (!clientId) return
     setDiscSaving(true); setDiscMsg('')
-    const { data: existing } = await supabase
+    const { data: existing, error: existErr } = await supabase
       .from('settings').select('id').eq('client_id', clientId).maybeSingle()
-    let error
-    if (existing?.id) {
+    let error = existErr || null
+    if (!error && existing?.id) {
       ;({ error } = await supabase.from('settings').update({ pos_discount_reasons: discReasons }).eq('id', existing.id))
-    } else {
+    } else if (!error) {
+      // A failed existing-row read must NOT fall into insert (S613) — that writes a second
+      // settings row for the client and splits every settings read after it.
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_discount_reasons: discReasons }))
     }
     setDiscSaving(false)
@@ -471,12 +477,14 @@ export default function PosTableManagement() {
       }))
       .filter(p => p.name)
     const payload = { pos_delivery_partners: cleaned }
-    const { data: existing } = await supabase
+    const { data: existing, error: existErr } = await supabase
       .from('settings').select('id').eq('client_id', clientId).maybeSingle()
-    let error
-    if (existing?.id) {
+    let error = existErr || null
+    if (!error && existing?.id) {
       ;({ error } = await supabase.from('settings').update(payload).eq('id', existing.id))
-    } else {
+    } else if (!error) {
+      // A failed existing-row read must NOT fall into insert (S613) — that writes a second
+      // settings row for the client and splits every settings read after it.
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, ...payload }))
     }
     setPartners(cleaned)

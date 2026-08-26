@@ -136,10 +136,10 @@ export default function OwnerDashboard() {
     const results = await Promise.all([
       period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, payment_method').eq('period_id', period.id).order('id')) : { data: [] },
       period ? supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id) : { data: [] },
-      period ? supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
+      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').order('id')) : { data: [] },
       scopedFrom('recipes', 'id, selling_price'),
       period ? supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead') : { data: [] },
-      period ? supabase.from('wastages').select('item_id, qty').eq('period_id', period.id) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
       scopedFrom('items', 'id, per_uom_rate'),
     ])
     setLoadErrors(prev => ({ ...prev, ims: results.some(r => r.error) ? 'Revenue/food cost figures failed to load — may be incomplete or stale.' : '' }))
@@ -184,7 +184,7 @@ export default function OwnerDashboard() {
       scopedFrom('items', 'id, per_uom_rate, yield_pct').eq('is_active', true).eq('is_sub_recipe', false),
       scopedFrom('par_levels', 'item_id, par_qty'),
       scopedFrom('recipes', 'id, selling_price'),
-      period ? supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id).neq('source', 'pos_comp') : { data: [] },
+      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id).neq('source', 'pos_comp').order('id')) : { data: [] },
     ])
     setLoadErrors(prev => ({ ...prev, reorder: results.some(r => r.error) ? 'Reorder figures failed to load — may be incomplete or stale.' : '' }))
     const [{ data: purchases }, { data: returns }, { data: opening }, { data: closing }, { data: items }, { data: parLevels }, { data: recipes }, { data: sales }] = results

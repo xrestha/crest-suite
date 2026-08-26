@@ -94,9 +94,9 @@ export default function ReorderReport() {
       scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
-      supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
-      supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       // Both paged rather than bare selects — either can exceed PostgREST's silent 1000-row cap
       // on a busy period, and a truncated read here understates theoretical usage and Book Stock
       // with no error to notice. Book Stock is a figure people place orders against, so a

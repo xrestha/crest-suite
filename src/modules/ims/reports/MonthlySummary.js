@@ -61,11 +61,11 @@ export default function MonthlySummary() {
         .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
         .eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId),
-      supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for. See
       // migration 20260706170000 for why sales_entries now carries that source separately.
-      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
       scopedFrom('recipes', 'id, selling_price')
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded — a stale load's failure must not clobber the current view either

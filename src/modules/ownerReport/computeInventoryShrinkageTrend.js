@@ -40,14 +40,14 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
     supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', windowIds),
     fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty').in('period_id', windowIds).order('id')),
     supabase.from('vendor_returns').select('period_id, item_id, qty').in('period_id', windowIds),
-    supabase.from('wastages').select('period_id, item_id, qty').in('period_id', windowIds),
+    fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', windowIds).order('id')),
     supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', windowIds),
     supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', windowIds),
     // Comps are deliberately INCLUDED here, unlike every revenue query in this report. A comped
     // dish collected no money but its ingredients were still consumed, so excluding it understates
     // theoretical usage and inflates apparent shrinkage. Matches ShrinkageReport.js, which this
     // section mirrors, and the same reasoning PosOrders.jsx documents for the consumption reports.
-    supabase.from('sales_entries').select('period_id, recipe_id, qty_sold').in('period_id', windowIds),
+    fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold').in('period_id', windowIds).order('id')),
     scopedFrom('items', clientId, 'id, name, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
     scopedFrom('recipes', clientId, 'id'),
   ])

@@ -4,6 +4,7 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { getBsToday, daysInBsMonth } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -177,8 +178,11 @@ export default function Sales() {
   }
 
   async function loadAllDaySums(periodId) {
-    const { data } = await supabase
-      .from('sales_entries').select('recipe_id, qty_sold, discount, unit_price').eq('period_id', periodId).neq('source', 'pos_comp')
+    // Paged (S613): POS writes one row per bill per recipe, so a month crosses the silent
+    // 1000-row cap — and allDaySums doubles as a save-time fallback baseline, so a truncated
+    // read here would not just misreport, it could be written back.
+    const { data } = await fetchAllRows(() => supabase
+      .from('sales_entries').select('recipe_id, qty_sold, discount, unit_price').eq('period_id', periodId).neq('source', 'pos_comp').order('id'))
     const agg = {}
     const discAgg = {}
     const pricedAgg = {}
@@ -202,8 +206,8 @@ export default function Sales() {
 
   async function loadMonthlyEntries(periodId) {
     setMonthlyLoading(true)
-    const { data } = await supabase
-      .from('sales_entries').select('recipe_id, bs_day, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp')
+    const { data } = await fetchAllRows(() => supabase
+      .from('sales_entries').select('recipe_id, bs_day, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp').order('id'))
     setMonthlyEntries(data || [])
     setMonthlyLoading(false)
   }

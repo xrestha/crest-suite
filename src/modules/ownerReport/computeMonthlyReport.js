@@ -36,11 +36,11 @@ async function computeImsSection(clientId, period) {
     // used). This was a single comp-excluding query feeding both, so theoretical usage — and the
     // reorder shortfall built on it below — silently understated by the comp volume, and the
     // section disagreed with the live Variance/Reorder pages, which have never filtered comps.
-    supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp'),
-    supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id),
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').order('id')),
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id).order('id')),
     scopedFrom('recipes', clientId, 'id, selling_price'),
     supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead'),
-    supabase.from('wastages').select('item_id, qty').eq('period_id', period.id),
+    fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')),
     // .eq('is_active', true) matches Stock.js's own Summary tab exactly (its `items` state is
     // loaded with this same filter) — omitting it here previously let a leftover opening_stock
     // row on a deactivated item inflate Opening Stock Value above what Stock Count itself shows

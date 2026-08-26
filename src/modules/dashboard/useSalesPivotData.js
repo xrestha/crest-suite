@@ -28,7 +28,7 @@ export async function loadFromSalesEntries(period, scopedFrom) {
     // Excludes both pos_comp (never billed) and pos (already counted by the POS-sourced pivot —
     // PosOrders.jsx stamps a source:'pos' row per bill at close) so this "manual" pivot and the
     // POS pivot can render side by side without double-counting the same revenue.
-    supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').neq('source', 'pos'),
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').neq('source', 'pos').order('id')),
     scopedFrom('recipes', 'id, category, selling_price'),
   ])
   const priceMap = {}, catMap = {}

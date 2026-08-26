@@ -172,7 +172,7 @@ export default function Overheads() {
       fetchAllRows(() => supabase.from('purchase_entries').select('qty, rate').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'qty, rate').eq('period_id', periodId),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
       scopedFrom('recipes', 'id, selling_price')
     ])
     // The reference figures (revenue, food cost) must not print as NPR 0 off a failed read (S612).

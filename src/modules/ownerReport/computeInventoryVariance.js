@@ -16,13 +16,13 @@ export async function computeInventoryVariance(clientId, period) {
     supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id),
     fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', period.id).order('id')),
     supabase.from('vendor_returns').select('item_id, qty').eq('period_id', period.id),
-    supabase.from('wastages').select('item_id, qty').eq('period_id', period.id),
+    fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')),
     supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id),
     scopedFrom('items', clientId, 'id, name, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
     scopedFrom('recipes', clientId, 'id'),
     // Comps INCLUDED — this is a consumption figure, not a revenue one. See the same note in
     // computeInventoryShrinkageTrend.js; Variance.js (which this mirrors) has never filtered them.
-    supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id),
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id).order('id')),
   ])
   // Throw on a failed read so the section is named as failed instead of freezing a variance
   // table built on zeros into the immutable snapshot (S612).

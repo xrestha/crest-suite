@@ -121,7 +121,7 @@ export default function PeriodComparison() {
     const results = await Promise.all([
       fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', ids).order('id')),
       scopedFrom('vendor_returns', 'period_id, qty, rate').in('period_id', ids),
-      supabase.from('wastages').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
+      fetchAllRows(() => supabase.from('wastages').select('period_id, qty, items(per_uom_rate)').in('period_id', ids).order('id')),
       // Staff meals belong in COGS (src/shared/imsFormulas.js) — omitted here until 2026-08-13,
       // which put this page's COGS and FC% below MonthlySummary's for the identical month.
       supabase.from('staff_meals').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),

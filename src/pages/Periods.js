@@ -170,7 +170,13 @@ export default function Periods() {
   async function performAdminCloseAndAdvance(period, cid, nextYear, nextMonth) {
     setActionClientId(cid)
     await scopedUpdateRaw('monthly_periods', cid, { status: 'closed' }).eq('id', period.id)
-    const { data: newPeriod } = await scopedInsertRaw('monthly_periods', cid, { bs_year: nextYear, bs_month: nextMonth, status: 'open' }, { single: true })
+    const { data: newPeriod, error: newErr } = await scopedInsertRaw('monthly_periods', cid, { bs_year: nextYear, bs_month: nextMonth, status: 'open' }, { single: true })
+    // A dropped error here closed the month and silently opened NOTHING — the client is blocked
+    // from recording data with no explanation anywhere (S613, the silent-data-loss class). 23505
+    // means the next period already exists (a retried click) and is benign.
+    if (newErr && newErr.code !== '23505') {
+      window.alert(`${BS_MONTHS[period.bs_month - 1]} closed, but the next period could not be created: ${newErr.message}\n\nUse "+ Create Period" for this client, then "Resync Opening Stock" to carry the closing count forward.`)
+    }
     if (newPeriod?.id) await carryForwardOpeningStock(period.id, newPeriod.id)
     await generateReportBestEffort(cid, { ...period, status: 'closed' })
     await loadAllClientPeriods()

@@ -87,7 +87,7 @@ export default function Variance() {
       supabase.from('closing_stock').select('*').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
-      supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       // source + bs_day are needed for selectDepletingSales' POS-supersedes-manual dedup below.
       // Paged: a POS-heavy period's sales_entries crosses PostgREST's silent 1000-row cap, which

@@ -149,7 +149,7 @@ export default function TheoreticalVariance() {
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
-      supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view

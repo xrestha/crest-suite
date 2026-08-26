@@ -51,7 +51,7 @@ export default function DeadStock() {
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
-      supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       // Staff meals count as consumption (src/shared/imsFormulas.js). Without them an item only
       // ever eaten by staff read as "Dead — no movement", which is the opposite of true.
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),

@@ -6,6 +6,7 @@
 // CURRENT live classification with whatever period happens to be regenerated last.
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { computeRecipeCosts } from '../../utils/recipeCost'
 
@@ -31,7 +32,7 @@ export async function computeMenuEngineeringSection(clientId, period) {
   const results = await Promise.all([
     scopedFrom('recipes', clientId, 'id, name, category, selling_price')
       .neq('is_active', false).neq('category', 'Sub-Recipe'),
-    supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp'),
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').order('id')),
   ])
   // Throw on a failed read so runSection() names this section as failed instead of freezing a
   // matrix of all-Dogs into the immutable snapshot (S612).

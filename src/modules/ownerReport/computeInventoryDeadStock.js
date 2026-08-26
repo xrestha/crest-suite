@@ -14,7 +14,7 @@ export async function computeInventoryDeadStock(clientId, period) {
     supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id),
     fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', period.id).order('id')),
     supabase.from('vendor_returns').select('item_id, qty').eq('period_id', period.id),
-    supabase.from('wastages').select('item_id, qty').eq('period_id', period.id),
+    fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')),
     supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id),
     scopedFrom('items', clientId, 'id, name, category_id, per_uom_rate, is_active, is_sub_recipe').eq('is_active', true),
   ])

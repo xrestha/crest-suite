@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -57,7 +58,7 @@ export default function RecipeMargin() {
     const results = await Promise.all([
       // Margin is revenue-based — comps (source='pos_comp') never sold at menu price and would
       // understate the true margin percentage if counted as if they had.
-      supabase.from('sales_entries').select('recipe_id, qty_sold, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
       scopedFrom('recipes', 'id, name, category, selling_price')
         .neq('category', 'Sub-Recipe')
         .eq('is_active', true),

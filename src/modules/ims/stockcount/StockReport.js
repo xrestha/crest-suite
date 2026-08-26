@@ -68,10 +68,10 @@ export default function StockReport() {
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
-      supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       scopedFrom('recipes', 'id'),
-      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).order('id')),
       scopedFrom('par_levels', 'item_id, par_qty'),
       supabase.from('requisition_lines').select('item_id, qty_issued, requisitions!inner(period_id, status)').eq('requisitions.period_id', periodId).eq('requisitions.status', 'issued'),
     ])

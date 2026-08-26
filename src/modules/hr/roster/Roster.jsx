@@ -237,7 +237,10 @@ export default function Roster() {
       }
 
       if (shifts.length === 0) {
-        const { data: seeded } = await scopedInsert('hr_shift_types', DEFAULT_SHIFTS)
+        const { data: seeded, error: seedErr } = await scopedInsert('hr_shift_types', DEFAULT_SHIFTS)
+        // A dropped WRITE error is silent data loss, not a silent zero (S613): a failed seed left
+        // the board with no shift types and nothing painted, with no explanation anywhere.
+        if (seedErr) { console.error('shift-type seed failed:', seedErr); window.alert('Could not set up the default shift types: ' + seedErr.message) }
         shifts = seeded || []
       }
       setShiftTypes(shifts)
@@ -424,14 +427,30 @@ export default function Roster() {
 
     if (shiftTypeId === null) {
       const ids = existingRows.map(r => r.id).filter(Boolean)
-      if (ids.length > 0) await scopedDelete('hr_roster').in('id', ids)
+      if (ids.length > 0) {
+        const { error: clearErr } = await scopedDelete('hr_roster').in('id', ids)
+        if (clearErr) {
+          console.error('roster clear failed:', clearErr)
+          window.alert('Could not clear that shift: ' + clearErr.message)
+          loadRoster()
+          return
+        }
+      }
     } else {
       const rows = cells.map(c => ({
         employee_id: c.empId,
         shift_type_id: shiftTypeId,
         bs_year: c.year, bs_month: c.month, bs_day: c.day,
       }))
-      const { data } = await scopedUpsert('hr_roster', rows, { onConflict: 'client_id,employee_id,bs_year,bs_month,bs_day' })
+      const { data, error: paintErr } = await scopedUpsert('hr_roster', rows, { onConflict: 'client_id,employee_id,bs_year,bs_month,bs_day' })
+      // The paint above is optimistic — on a dropped error the board showed the shift as saved
+      // while nothing was written (S613, the silent-data-loss class). Say so and reload the truth.
+      if (paintErr) {
+        console.error('roster paint failed:', paintErr)
+        window.alert('Could not save that roster change: ' + paintErr.message)
+        loadRoster()
+        return
+      }
       if (data) {
         setRoster(prev => {
           const next = { ...prev }

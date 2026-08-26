@@ -71,7 +71,7 @@ export default function ShrinkageReport() {
       supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', periodIds),
       fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       scopedFrom('vendor_returns', 'period_id, item_id, qty').in('period_id', periodIds),
-      supabase.from('wastages').select('period_id, item_id, qty').in('period_id', periodIds),
+      fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', periodIds),
       // source + bs_day feed the per-period POS-supersedes-manual dedup below; paged because a
       // multi-period sales_entries read crosses the silent 1000-row cap readily.

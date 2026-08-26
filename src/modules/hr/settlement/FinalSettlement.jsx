@@ -410,13 +410,22 @@ export default function FinalSettlement() {
 
     // 2. The final month already paid by payroll — otherwise that month is paid about 1.5 times:
     //    once in full by the run, and again as partial salary here.
-    const { data: per } = await scopedFrom('monthly_periods', 'id')
+    // Every read in this gate REFUSES when it cannot run (S613): these guards used to drop their
+    // errors, so a failed payslips read meant "no payroll covers this month" — the gate passing
+    // vacuously on exactly the double-payment it exists to block. Unverifiable ≠ clear.
+    const { data: per, error: perErr } = await scopedFrom('monthly_periods', 'id')
       .eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).maybeSingle()
+    if (perErr) {
+      out.push('Could not verify whether payroll already covers the final month (' + perErr.message + '). Try again — finalizing without this check could pay that month twice.')
+    }
     if (per?.id) {
-      const { data: slips } = await scopedFrom('hr_payslips', 'id, hr_payroll_runs!inner(status, period_id)')
+      const { data: slips, error: slipsErr } = await scopedFrom('hr_payslips', 'id, hr_payroll_runs!inner(status, period_id)')
         .eq('employee_id', empId)
         .eq('hr_payroll_runs.period_id', per.id)
         .eq('hr_payroll_runs.status', 'finalized')
+      if (slipsErr) {
+        out.push('Could not verify whether payroll already covers the final month (' + slipsErr.message + '). Try again — finalizing without this check could pay that month twice.')
+      }
       if ((slips || []).length > 0) {
         out.push('A finalized payroll run already covers ' + BS_MONTH_NAMES[lastDate.month - 1] + ' ' + lastDate.year
           + ' for ' + emp.full_name + ', so their pay for that month has been issued once already.'
@@ -426,7 +435,10 @@ export default function FinalSettlement() {
 
     // 3. Concurrent finalize — `busy` guards one tab, not two.
     if (current?.id) {
-      const { data: fresh } = await scopedFrom('hr_final_settlements', 'status').eq('id', current.id).maybeSingle()
+      const { data: fresh, error: freshErr } = await scopedFrom('hr_final_settlements', 'status').eq('id', current.id).maybeSingle()
+      if (freshErr) {
+        out.push('Could not verify this settlement\'s current status (' + freshErr.message + '). Try again before finalizing.')
+      }
       if (fresh?.status === 'finalized') {
         out.push('This settlement was finalized somewhere else while it was open here. Reload the page to see it.')
       }
@@ -545,10 +557,14 @@ export default function FinalSettlement() {
   // never an advance another process closed.
   async function reopen(row) {
     setBusy(true); setMsg('')
-    const { data: ownReps } = await scopedFrom('hr_advance_repayments', 'advance_id').eq('final_settlement_id', row.id)
+    // Refuse on a failed read (S613): dropping this error meant the reopen proceeded WITHOUT
+    // reactivating the advances this settlement had closed — the ledgers silently diverge.
+    const { data: ownReps, error: repsErr } = await scopedFrom('hr_advance_repayments', 'advance_id').eq('final_settlement_id', row.id)
+    if (repsErr) { setBusy(false); setMsg('error:Could not read this settlement\'s advance recoveries (' + repsErr.message + '). Nothing was changed — try again.'); return }
     const touched = [...new Set((ownReps || []).map(r => r.advance_id))]
 
-    await scopedDelete('hr_advance_repayments').eq('final_settlement_id', row.id)
+    const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('final_settlement_id', row.id)
+    if (delErr) { setBusy(false); setMsg('error:Could not remove the settlement\'s advance recoveries (' + delErr.message + '). Nothing else was changed — try again.'); return }
 
     if (touched.length > 0) {
       const [{ data: advs }, { data: reps }] = await Promise.all([

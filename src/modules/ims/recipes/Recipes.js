@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { withTimeout } from '../../../utils/withTimeout'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
@@ -141,7 +142,7 @@ export default function Recipes() {
         scopedFrom('overheads', 'amount').eq('period_id', openPeriodId).eq('bucket', 'overhead'),
         // Excludes comps (source='pos_comp') — never actually paid for, shouldn't earn a
         // revenue share of overhead. Matches the exclusion Overheads.js/OwnerDashboard.jsx use.
-        supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', openPeriodId).neq('source', 'pos_comp')
+        fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', openPeriodId).neq('source', 'pos_comp').order('id'))
       ])
       const totalOverheads = (ohRows || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
 
