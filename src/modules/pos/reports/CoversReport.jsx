@@ -6,6 +6,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
+import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
@@ -56,6 +58,8 @@ export default function CoversReport() {
   const [staffNames,   setStaffNames]   = useState({})
   const [totalSeats,   setTotalSeats]   = useState(0)
   const [loading,      setLoading]      = useState(true)
+  // S607 silent-zero rule: a failed read must render as a failure, never as an empty range.
+  const [loadError,    setLoadError]    = useState(null)
   const [bizInfo,      setBizInfo]      = useState({ name: '' })
 
   // Operating hours — used only for RevPASH; NULL/unset just hides that one card rather than
@@ -69,16 +73,21 @@ export default function CoversReport() {
   useEffect(() => {
     if (!clientId) return
     supabase.from('clients').select('name').eq('id', clientId).single()
-      .then(({ data }) => setBizInfo({ name: data?.name || '' }))
+      // S607 silent-zero rule: a dropped error here would just blank the export letterhead.
+      .then(({ data, error }) => {
+        if (error) { setLoadError(error.message); return }
+        setBizInfo({ name: data?.name || '' })
+      })
   }, [clientId])
 
   const loadRange = useCallback(async () => {
     if (!clientId) return
     setLoading(true)
+    setLoadError(null)
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
-    const [{ data: orderData }, { data: settings }, { data: profs }, { data: tbls }] = await Promise.all([
+    const results = await Promise.all([
       // Paged: every figure on this page (covers, RevPASH, turnover) divides by a count taken
       // from this read, so a truncation doesn't just shrink a total — it skews the averages.
       fetchAllRows(() => scopedFrom('pos_orders', 'id, table_id, table_name, covers, opened_at, closed_at, opened_by, discount_amount, credit_note_id')
@@ -89,6 +98,16 @@ export default function CoversReport() {
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
       scopedFrom('pos_tables', 'id, capacity'),
     ])
+    // S607 silent-zero rule: a failed read here would render a confident report of 0 covers,
+    // visually identical to a genuinely quiet range.
+    const failed = firstError(results)
+    if (failed) {
+      setLoadError(failed)
+      setOrders([]); setItemsByOrder({})
+      setLoading(false)
+      return
+    }
+    const [{ data: orderData }, { data: settings }, { data: profs }, { data: tbls }] = results
     setVatReg(settings?.is_vat_registered ?? true)
     setSettingsId(settings?.id || null)
     setOpenTime(settings?.pos_open_time || '')
@@ -104,7 +123,15 @@ export default function CoversReport() {
     let byOrder = {}
     if (orderList.length > 0) {
       // Paged — a month of bill lines runs to thousands, past the silent 1000-row cap (S529).
-      const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', orderList.map(o => o.id)).order('id'))
+      const { data: items, error: itemsError } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', orderList.map(o => o.id)).order('id'))
+      // S607 silent-zero rule: with orders loaded but their lines dropped, every Net/RevPASH
+      // figure would be a believable zero.
+      if (itemsError) {
+        setLoadError(itemsError.message || String(itemsError))
+        setOrders([]); setItemsByOrder({})
+        setLoading(false)
+        return
+      }
       byOrder = (items || []).filter(i => !i.comped).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
@@ -293,7 +320,10 @@ export default function CoversReport() {
         )}
       </div>
 
-      {loading ? (
+      {/* S607: a failed read renders as a failure — never as the empty state or a zero table. */}
+      {loadError ? (
+        <ReportLoadError error={loadError} />
+      ) : loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : isEmpty ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>

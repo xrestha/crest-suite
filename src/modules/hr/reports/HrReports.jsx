@@ -4,6 +4,7 @@ import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
 import { fiscalYearOf } from '../payroll/tds'
 import { SSF_CAP } from '../payrollConstants'
@@ -36,12 +37,16 @@ export default function HrReports() {
   const [employees, setEmployees] = useState([])
   const [ytdTds,    setYtdTds]    = useState({})   // employee_id -> YTD tds (incl this period)
   const [loading,   setLoading]   = useState(true)
+  // S607 silent-zero rule: a failed read must render as a failure, never as "no payroll run" or
+  // a challan of zeros — these are figures an accountant files on.
+  const [loadError, setLoadError] = useState(null)
   const [tab,       setTab]       = useState('summary')
   const [rosterRetiringOnly, setRosterRetiringOnly] = useState(false)
   const [certFy,      setCertFy]      = useState(null)   // { fyStart, label }
   const [certEmpId,   setCertEmpId]   = useState('')
   const [certSlips,   setCertSlips]   = useState([])
   const [certLoading, setCertLoading] = useState(false)
+  const [certError,   setCertError]   = useState(null)   // cert tab has its own load lifecycle
   const [clientName,  setClientName]  = useState('')
   const [clientPan,   setClientPan]   = useState('')
 
@@ -52,12 +57,15 @@ export default function HrReports() {
     if (!clientId) return
     async function init() {
       setLoading(true)
-      const { data: p } = await scopedFrom('monthly_periods')
+      setLoadError(null)
+      const { data: p, error: pErr } = await scopedFrom('monthly_periods')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+      if (pErr) { setLoadError(pErr.message); setLoading(false); return }
       setPeriods(p || [])
       // Employee master loads independently of any payroll run (powers the Roster tab).
-      const { data: emps } = await scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, employment_type, supervisor_id, retirement_date, join_date, pay_basis, bank_name, bank_account_no, bank_branch, ssf_no, ssf_enrolled, pan_no, life_insurance_premium, health_insurance_premium, status')
+      const { data: emps, error: empErr } = await scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, employment_type, supervisor_id, retirement_date, join_date, pay_basis, bank_name, bank_account_no, bank_branch, ssf_no, ssf_enrolled, pan_no, life_insurance_premium, health_insurance_premium, status')
         .order('full_name')
+      if (empErr) { setLoadError(empErr.message); setLoading(false); return }
       setEmployees(emps || [])
       const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
       if (open) { setPeriod(open); await loadAll(open.id, open) }
@@ -85,10 +93,14 @@ export default function HrReports() {
   useEffect(() => {
     if (tab !== 'cert' || !certFy || !certEmpId) { setCertSlips([]); return }
     setCertLoading(true)
+    setCertError(null)
     scopedFrom('hr_payslips', '*, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
       .eq('employee_id', certEmpId)
       .eq('hr_payroll_runs.status', 'finalized')
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // S607: a failed read must not render as "no finalized payslips found for this FY" —
+        // that sentence is a claim about the employee's tax record.
+        if (error) { setCertError(error.message); setCertSlips([]); setCertLoading(false); return }
         const slips = (data || [])
           .filter(r => {
             const mp = r.hr_payroll_runs?.monthly_periods
@@ -107,11 +119,17 @@ export default function HrReports() {
   }, [tab, certFy, certEmpId, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadAll(periodId, p) {
-    const { data: runRow } = await scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle()
+    setLoadError(null)
+    const { data: runRow, error: runErr } = await scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle()
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // S607 silent-zero rule: a failed read here would wear the "no payroll run this period"
+    // empty state — and the challan/TDS sheets on this page are figures an accountant files on.
+    if (runErr) { setLoadError(runErr.message); setRun(null); setPayslips([]); return }
     setRun(runRow || null)
     if (runRow) {
-      const { data: slips } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
+      const { data: slips, error: slipErr } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
+      if (!periodReq.isCurrent(periodId)) return
+      if (slipErr) { setLoadError(slipErr.message); setPayslips([]); return }
       setPayslips(slips || [])
     } else {
       setPayslips([])
@@ -123,8 +141,10 @@ export default function HrReports() {
   async function loadYtd(p) {
     if (!p) { setYtdTds({}); return }
     const cur = fiscalYearOf(p.bs_year, p.bs_month)
-    const { data } = await scopedFrom('hr_payslips', 'employee_id, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+    const { data, error } = await scopedFrom('hr_payslips', 'employee_id, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
       .eq('hr_payroll_runs.status', 'finalized')
+    // A failed read must not zero every YTD TDS figure on the filing sheets (S607).
+    if (error) { setLoadError(error.message); setYtdTds({}); return }
     const map = {}
     ;(data || []).forEach(r => {
       if (r.hr_payroll_runs?.status !== 'finalized') return
@@ -236,6 +256,8 @@ export default function HrReports() {
 
       {loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : (
         <>
           <div className="tab-bar no-print" style={{ marginBottom: 18 }}>
@@ -273,6 +295,8 @@ export default function HrReports() {
               </div>
               {(!certFy || !certEmpId) ? (
                 <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text2)' }}>Select a fiscal year and employee above to generate the TDS certificate.</div>
+              ) : certError ? (
+                <ReportLoadError error={certError} />
               ) : certLoading ? (
                 <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
               ) : certSlips.length === 0 ? (

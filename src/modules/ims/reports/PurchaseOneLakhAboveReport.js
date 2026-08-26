@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { getBsFiscalYear } from '../../../utils/bsCalendar'
 import { buildVendorSummary } from './VatReport'
 import { Navigate } from 'react-router-dom'
@@ -21,11 +23,13 @@ export default function PurchaseOneLakhAboveReport() {
   const [selectedFy, setSelectedFy] = useState('')
   const [vendors, setVendors] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
 
   useEffect(() => {
     if (!effectiveClientId) return
     scopedFrom('monthly_periods')
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) { setLoadError(error.message); return }
         const list = data || []
         setPeriods(list)
         const fys = [...new Set(list.map(p => getBsFiscalYear(p.bs_year, p.bs_month)))]
@@ -44,7 +48,8 @@ export default function PurchaseOneLakhAboveReport() {
 
     if (periodIds.length === 0) { setVendors([]); setLoading(false); return }
 
-    const [{ data: entData }, { data: retData }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       // Paged: this spans a whole BS fiscal year (12 periods), so it is one of the largest
       // purchase reads in the app — and it decides which vendors cross the IRD Annexure 13
       // one-lakh disclosure threshold, so a truncated read could omit a vendor that legally
@@ -53,6 +58,10 @@ export default function PurchaseOneLakhAboveReport() {
         .select('*, vendors(name, pan_vat_no)').in('period_id', periodIds).order('id')),
       fetchAllRows(() => scopedFrom('vendor_returns', '*, vendors(name, pan_vat_no), purchase_entries(vat_inclusive)').in('period_id', periodIds).order('id')),
     ])
+    // A statutory disclosure must not render a failed read as "no vendors" (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setVendors([]); setLoading(false); return }
+    const [{ data: entData }, { data: retData }] = results
     const entries = entData || []
 
     const billGroups = {}
@@ -113,6 +122,8 @@ export default function PurchaseOneLakhAboveReport() {
         </p>
       </div>
 
+      {loadError && <ReportLoadError error={loadError} />}
+
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         <div>
           <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="purcha-f1">Fiscal Year (BS)</label>
@@ -123,7 +134,7 @@ export default function PurchaseOneLakhAboveReport() {
         <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={rows.length === 0}>Export Excel</button>
       </div>
 
-      {loading ? (
+      {loadError ? null : loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : rows.length === 0 ? (
         <div className="card">

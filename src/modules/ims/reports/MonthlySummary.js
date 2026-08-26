@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
@@ -22,14 +24,17 @@ export default function MonthlySummary() {
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [report, setReport] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
     setLoading(true)
-    const { data: p } = await scopedFrom('monthly_periods')
+    setLoadError(null)
+    const { data: p, error } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
+    if (error) { setLoadError(error.message); setLoading(false); return }
     setPeriods(p || [])
     const open = (p || []).find(x => x.status === 'open')
     if (open) { setSelectedPeriod(open); await buildReport(open.id) }
@@ -46,18 +51,8 @@ export default function MonthlySummary() {
   }
 
   async function buildReport(periodId) {
-    const [
-      { data: categories },
-      { data: items },
-      { data: opening },
-      { data: closing },
-      { data: purchases },
-      { data: returns },
-      { data: wastages },
-      { data: staffMealsData },
-      { data: salesData },
-      { data: recipes }
-    ] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('categories').order('sort_order'),
       scopedFrom('items', '*, categories(id, name)').eq('is_active', true).eq('is_sub_recipe', false),
       supabase.from('opening_stock').select('*').eq('period_id', periodId),
@@ -73,6 +68,22 @@ export default function MonthlySummary() {
       supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, selling_price')
     ])
+    if (!periodReq.isCurrent(periodId)) return   // superseded — a stale load's failure must not clobber the current view either
+    // A failed read must not render as a quiet month of NPR 0 (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setReport(null); return }
+    const [
+      { data: categories },
+      { data: items },
+      { data: opening },
+      { data: closing },
+      { data: purchases },
+      { data: returns },
+      { data: wastages },
+      { data: staffMealsData },
+      { data: salesData },
+      { data: recipes }
+    ] = results
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
@@ -168,7 +179,7 @@ export default function MonthlySummary() {
   const clientName = profile?.clients?.name || 'Property'
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="the monthly summary" />
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the monthly summary" />
 
   return (
     <div>
@@ -193,7 +204,9 @@ export default function MonthlySummary() {
         </div>
       </div>
 
-      {loading ? (
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {loadError ? null : loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Building report…</p></div>
       ) : !report ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No data for this period yet.</p></div>

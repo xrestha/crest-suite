@@ -9,6 +9,8 @@ import { viewPosBill } from '../../../utils/viewPosBill'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
 import { loadSubRecipeUsage, usageForSource, subRecipeHasIngredient, EMPTY_USAGE } from './subRecipeUsage'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
@@ -26,6 +28,7 @@ export default function StockMovements() {
   const [rows, setRows] = useState([])
   const [staffNames, setStaffNames] = useState({})
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [search, setSearch] = useState('')
   const [filterSource, setFilterSource] = useState('all')
   const [dayFrom, setDayFrom] = useState('')
@@ -44,8 +47,11 @@ export default function StockMovements() {
 
   async function init() {
     setLoading(true)
-    const { data: p } = await scopedFrom('monthly_periods')
+    setLoadError(null)
+    const { data: p, error: pErr } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+    if (pErr) { setLoadError(pErr.message); setLoading(false); return }
     setPeriods(p || [])
 
     // Arriving from Reorder Report's "Book Stock" link (?period=&item=) lands on that same
@@ -70,14 +76,22 @@ export default function StockMovements() {
   }
 
   async function loadReport(periodId, presetItemId) {
+    setLoadError(null)
     // Sub-recipe usage is derived from sales_entries, not from the ledger below — see
     // subRecipeUsage.js. Loaded alongside rather than lazily on tab switch: it shares the period
     // and feeds the reconciliation note, which has to be right the moment the page paints.
     loadSubRecipeUsage(supabase, scopedFrom, periodId)
-      .then(setUsage)
-      .catch(err => { console.error('sub-recipe usage failed:', err); setUsage(EMPTY_USAGE) })
+      .then(u => { if (periodReq.isCurrent(periodId)) setUsage(u) })
+      .catch(err => {
+        console.error('sub-recipe usage failed:', err)
+        if (!periodReq.isCurrent(periodId)) return   // a stale load's failure must not clobber the current view
+        // The helper now throws on a failed read — degrading to EMPTY_USAGE rendered a believable
+        // "quiet period" over an error (S607 silent-zero rule).
+        setUsage(EMPTY_USAGE)
+        setLoadError(err?.message || String(err))
+      })
 
-    const [{ data: movements }, { data: profs }, { data: soldEntries }] = await Promise.all([
+    const results = await Promise.all([
       // Paged, not a bare select: a busy period exceeds PostgREST's 1000-row cap, which returns
       // silently truncated data and understated every stat card below (S528 — found live at
       // exactly "1000 movements"). `id` is the unique tiebreaker that makes the paging stable,
@@ -94,6 +108,10 @@ export default function StockMovements() {
       supabase.from('sales_entries').select('recipe_id').eq('period_id', periodId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 ledger (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setRows([]); return }
+    const [{ data: movements }, { data: profs }, { data: soldEntries }] = results
     setStaffNames(Object.fromEntries((profs || []).map(s => [s.id, s.full_name])))
 
     // Cross-reference recipes actually sold this period against ones with zero recipe_ingredients
@@ -102,11 +120,15 @@ export default function StockMovements() {
     // otherwise vanish silently.
     const soldRecipeIds = [...new Set((soldEntries || []).map(s => s.recipe_id).filter(Boolean))]
     if (soldRecipeIds.length > 0) {
-      const [{ data: ingRows }, { data: recipeRows }] = await Promise.all([
+      const bomResults = await Promise.all([
         supabase.from('recipe_ingredients').select('recipe_id').in('recipe_id', soldRecipeIds),
         scopedFrom('recipes', 'id, name').in('id', soldRecipeIds),
       ])
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+      // S607: a failed read here would silently hide the no-BOM warning banner.
+      const bomFailed = firstError(bomResults)
+      if (bomFailed) { setLoadError(bomFailed); setRows([]); setNoBomRecipes([]); return }
+      const [{ data: ingRows }, { data: recipeRows }] = bomResults
       const withIngredients = new Set((ingRows || []).map(r => r.recipe_id))
       setNoBomRecipes((recipeRows || []).filter(r => !withIngredients.has(r.id)).map(r => r.name).sort())
     } else {
@@ -243,7 +265,9 @@ export default function StockMovements() {
   const maxDay = selectedPeriod ? daysInBsMonth(selectedPeriod.bs_year, selectedPeriod.bs_month) : 32
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="the stock movement log" />
+  // !loadError: a failed periods read leaves periods empty, and NoPeriodState would wear the
+  // failure as "no periods yet" (S607 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the stock movement log" />
 
   return (
     <div>
@@ -266,6 +290,9 @@ export default function StockMovements() {
           </select>
         </div>
       </div>
+
+      {/* A failed read renders as a failure — never as a quiet ledger of zeros (S607). */}
+      {loadError ? <ReportLoadError error={loadError} /> : <>
 
       {tab === 'subs' ? (
         <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 24 }}>
@@ -589,6 +616,7 @@ export default function StockMovements() {
         )}
       </div>
       )}
+      </>}
     </div>
   )
 }

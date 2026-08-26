@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { chartMotion } from '../../../shared/chartMotion'
 import Tip from '../../../components/Tip'
 import ChartCard from '../../../components/ChartCard'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
 
@@ -35,12 +38,14 @@ export default function BestSellers() {
   const [sortBy, setSortBy]           = useState('revenue') // 'revenue' | 'qty' | 'margin'
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [loading, setLoading]         = useState(false)
+  const [loadError, setLoadError]     = useState(null)
 
   useEffect(() => {
     if (!effectiveClientId) return
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data && data.length > 0) setSelected(data[0])
       })
@@ -53,12 +58,18 @@ export default function BestSellers() {
 
   async function fetchData(periodId) {
     setLoading(true)
-    const [{ data: entries }, { data: recipes }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       // "Best seller" ranks by real demand — comps (source='pos_comp') never sold at menu
       // price and would misleadingly inflate a heavily-comped item's qty/revenue rank.
-      supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
+      // Paged: a busy month's sales_entries can cross PostgREST's silent 1000-row cap (S528).
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
       scopedFrom('recipes', 'id, name, category, selling_price').neq('category', 'Sub-Recipe'),
     ])
+    // A failed read must not rank a confident NPR 0 (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
+    const [{ data: entries }, { data: recipes }] = results
 
     // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
     // hand-rolled costMap reading only direct item_id ingredients (as this used to) silently
@@ -135,6 +146,8 @@ export default function BestSellers() {
         </div>
       </div>
 
+      {loadError && <ReportLoadError error={loadError} />}
+
       {/* Filters */}
       <div style={{ display: 'flex', gap: 20, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -158,7 +171,7 @@ export default function BestSellers() {
         )}
       </div>
 
-      {loading ? (
+      {loadError ? null : loading ? (
         <p style={{ color: MUTED, fontSize: 13 }}>Loading…</p>
       ) : rows.length === 0 ? (
         <div className="card">

@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared/imsFormulas'
 import { useSettings } from '../../../context/SettingsContext'
@@ -29,6 +31,7 @@ export default function AnnualSummary() {
   const [selectedYear, setSelectedYear] = useState(null)
   const [report, setReport]             = useState(null)
   const [loading, setLoading]           = useState(true)
+  const [loadError, setLoadError]       = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
   useEffect(() => { if (allPeriods.length) rebuildYearOptions() }, [allPeriods, fiscalMode]) // eslint-disable-line
@@ -36,8 +39,10 @@ export default function AnnualSummary() {
 
   async function init() {
     setLoading(true)
-    const { data: p } = await scopedFrom('monthly_periods')
+    setLoadError(null)
+    const { data: p, error } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+    if (error) { setLoadError(error.message); setLoading(false); return }
     setAllPeriods(p || [])
     setLoading(false)
   }
@@ -62,6 +67,7 @@ export default function AnnualSummary() {
   async function buildReport() {
     if (selectedYear === null) return
     setLoading(true)
+    setLoadError(null)
 
     const yearPeriods = allPeriods.filter(p =>
       fiscalMode
@@ -72,11 +78,7 @@ export default function AnnualSummary() {
     if (!yearPeriods.length) { setReport(null); setLoading(false); return }
     const periodIds = yearPeriods.map(p => p.id)
 
-    const [
-      { data: items }, { data: opening }, { data: closing },
-      { data: purchases }, { data: returns }, { data: wastages },
-      { data: staffMeals }, { data: sales }, { data: recipes }
-    ] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('items', 'id, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
       supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', periodIds),
       supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', periodIds),
@@ -91,6 +93,14 @@ export default function AnnualSummary() {
       supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount').in('period_id', periodIds).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, selling_price'),
     ])
+    // A failed read must not render as a quiet year of NPR 0 (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setReport(null); setLoading(false); return }
+    const [
+      { data: items }, { data: opening }, { data: closing },
+      { data: purchases }, { data: returns }, { data: wastages },
+      { data: staffMeals }, { data: sales }, { data: recipes }
+    ] = results
 
     const rateMap = {}
     ;(items || []).forEach(i => { rateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
@@ -208,7 +218,9 @@ export default function AnnualSummary() {
         </div>
       </div>
 
-      {report && (
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {!loading && !loadError && report && (
         <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
           {[
             { label: 'Annual Revenue',  value: fmt(report.totRevenue), color: 'var(--theme-green-text)',
@@ -229,6 +241,7 @@ export default function AnnualSummary() {
         </div>
       )}
 
+      {!loadError && (
       <div className="card">
         {loading ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Building annual report…</p>
@@ -313,6 +326,7 @@ export default function AnnualSummary() {
           COGS = {COGS_FORMULA} · Revenue from sales entries · Annual FC% = Total COGS ÷ Total Revenue
         </div>
       </div>
+      )}
     </div>
   )
 }

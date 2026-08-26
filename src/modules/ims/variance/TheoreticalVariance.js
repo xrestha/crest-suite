@@ -8,6 +8,8 @@ import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import ReportLoadError from '../../../components/ReportLoadError'
+import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
@@ -28,6 +30,7 @@ export default function TheoreticalVariance() {
   const [recipes,         setRecipes]         = useState([])
   const [rows,            setRows]            = useState([])
   const [loading,         setLoading]         = useState(true)
+  const [loadError,       setLoadError]       = useState(null)
   const [computing,       setComputing]       = useState(false)
   const [filterCat,       setFilterCat]       = useState('all')
   const [filterType,      setFilterType]      = useState('all') // all | over | under
@@ -38,15 +41,20 @@ export default function TheoreticalVariance() {
 
   async function init() {
     setLoading(true)
-    const [{ data: p }, { data: i }, { data: c }, { data: r }] = await Promise.all([
+    setLoadError(null)
+    const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
       scopedFrom('categories').order('sort_order'),
       scopedFrom('recipes', 'id, name, yield_qty'),
     ])
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+    const initFailed = firstError(initResults)
+    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
+    const [{ data: p }, { data: i }, { data: c }, { data: r }] = initResults
 
     const tvRecipeIds = (r || []).map(x => x.id)
-    const [{ data: ri }, { data: allItems }] = await Promise.all([
+    const ingResults = await Promise.all([
       tvRecipeIds.length > 0
         ? supabase.from('recipe_ingredients').select('recipe_id, item_id, sub_recipe_id, qty_per_portion').in('recipe_id', tvRecipeIds)
         : Promise.resolve({ data: [] }),
@@ -55,6 +63,10 @@ export default function TheoreticalVariance() {
       // trim loss is still real. Filtering here is what made yield_pct silently default to 100%.
       scopedFrom('items', 'id, yield_pct'),
     ])
+    // S607: a failed ingredient/yield read silently understates theoretical usage — surface it.
+    const ingFailed = firstError(ingResults)
+    if (ingFailed) { setLoadError(ingFailed); setLoading(false); return }
+    const [{ data: ri }, { data: allItems }] = ingResults
     const ym = {}
     ;(allItems || []).forEach(x => { ym[x.id] = x.yield_pct })
     yieldMapRef.current = ym
@@ -128,7 +140,8 @@ export default function TheoreticalVariance() {
   }
 
   async function computeVariance(periodId, itemList, allRecipes) {
-    const [{ data: sales }, { data: opening }, { data: closing }, { data: purch }, { data: rets }, { data: wast }, { data: staffMeals }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       // source + bs_day feed selectDepletingSales' POS-supersedes-manual dedup; paged so a busy
       // POS period's sales_entries can't truncate theoretical usage at 1000 rows.
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
@@ -139,6 +152,11 @@ export default function TheoreticalVariance() {
       supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
     ])
+    if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setRows([]); return }
+    const [{ data: sales }, { data: opening }, { data: closing }, { data: purch }, { data: rets }, { data: wast }, { data: staffMeals }] = results
 
     // Sales map: recipe_id → total qty sold. Deduplicated via the shared POS-supersedes-manual
     // rule so a client running POS *and* manual bulk entry doesn't double-count the same dish and
@@ -244,7 +262,7 @@ export default function TheoreticalVariance() {
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="this comparison" />
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="this comparison" />
 
   return (
     <div>
@@ -268,6 +286,9 @@ export default function TheoreticalVariance() {
         </select>
       </div>
 
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {!loadError && <>
       {!loading && !computing && selectedPeriod && !hasClosing && (
         <div style={{ background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.30)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>Closing stock hasn’t been counted for {periodLabel} yet.</strong>{' '}
@@ -428,6 +449,7 @@ export default function TheoreticalVariance() {
           </div>
         </div>
       )}
+      </>}
     </div>
   )
 }

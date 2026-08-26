@@ -3,8 +3,10 @@ import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import ChartCard from '../../../components/ChartCard'
 import StatPill from '../../../components/StatPill'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -84,13 +86,17 @@ export default function PeriodComparison() {
   const [stats, setStats]     = useState({})
   const [limit, setLimit]     = useState(12)
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(null)
   const [showYoy, setShowYoy] = useState(false)
 
   useEffect(() => {
     if (!effectiveClientId) return
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data }) => setPeriods(data || []))
+      .then(({ data, error }) => {
+        if (error) { setLoadError(error.message); return }
+        setPeriods(data || [])
+      })
   }, [effectiveClientId, scopedFrom])
 
   useEffect(() => {
@@ -103,6 +109,7 @@ export default function PeriodComparison() {
 
   async function fetchData() {
     setLoading(true)
+    setLoadError(null)
     const shownList = periods.slice(0, limit)
     // Always pull each shown period's same-month-last-year twin too (if it exists) so toggling
     // "Compare vs last year" on doesn't need a re-fetch — it's the same bulk .in() queries either
@@ -111,15 +118,7 @@ export default function PeriodComparison() {
     const ids = Array.from(new Set([...shownList.map(p => p.id), ...yoyList.map(p => p.id)]))
     if (!ids.length) { setLoading(false); return }
 
-    const [
-      { data: purchases },
-      { data: returns },
-      { data: wastes },
-      { data: staffMeals },
-      { data: openings },
-      { data: closings },
-      { data: sales },
-    ] = await Promise.all([
+    const results = await Promise.all([
       fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', ids).order('id')),
       scopedFrom('vendor_returns', 'period_id, qty, rate').in('period_id', ids),
       supabase.from('wastages').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
@@ -129,8 +128,22 @@ export default function PeriodComparison() {
       supabase.from('opening_stock').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
       supabase.from('closing_stock').select('period_id, physical_qty, items(per_uom_rate)').in('period_id', ids),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      supabase.from('sales_entries').select('period_id, qty_sold, unit_price, discount, recipes(selling_price, category)').in('period_id', ids).neq('source', 'pos_comp'),
+      // Paged like its purchase_entries sibling above: sales across up to 24 periods crosses
+      // PostgREST's silent 1000-row cap easily (S528).
+      fetchAllRows(() => supabase.from('sales_entries').select('period_id, qty_sold, unit_price, discount, recipes(selling_price, category)').in('period_id', ids).neq('source', 'pos_comp').order('id')),
     ])
+    // A failed read must not render as a quiet run of NPR 0 periods (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setStats({}); setLoading(false); return }
+    const [
+      { data: purchases },
+      { data: returns },
+      { data: wastes },
+      { data: staffMeals },
+      { data: openings },
+      { data: closings },
+      { data: sales },
+    ] = results
 
     const result = {}
     for (const pid of ids) {
@@ -324,7 +337,11 @@ export default function PeriodComparison() {
         </div>
       </div>
 
-      {/* Stat cards */}
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {/* Stat cards — gated on !loading too: a stat computed from rows that have not arrived
+          is NPR 0 wearing the confidence of a real figure (S594 rule). */}
+      {!loadError && !loading && (
       <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">Latest FC%</div>
@@ -382,9 +399,10 @@ export default function PeriodComparison() {
           )}
         </div>
       </div>
+      )}
 
       {/* Trend charts */}
-      {!loading && hasChartData && (
+      {!loadError && !loading && hasChartData && (
         <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14, marginBottom: 14 }}>
           <ChartCard
             title="Revenue vs Net Purchases — Period Trend"
@@ -499,7 +517,7 @@ export default function PeriodComparison() {
         </div>
       )}
 
-      {!loading && categories.length > 0 && (
+      {!loadError && !loading && categories.length > 0 && (
         <div className="no-print" style={{ marginBottom: 20 }}>
           <ChartCard
             title="Revenue by Category — Period Trend"
@@ -527,7 +545,7 @@ export default function PeriodComparison() {
         </div>
       )}
 
-      {loading ? (
+      {loadError ? null : loading ? (
         <div className="loading-state">Loading...</div>
       ) : shown.length === 0 ? (
         <div className="empty-state">No periods found.</div>

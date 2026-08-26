@@ -10,6 +10,8 @@ import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import ReportLoadError from '../../../components/ReportLoadError'
+import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
@@ -34,6 +36,7 @@ export default function Variance() {
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [report, setReport] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [filterCat, setFilterCat] = useState('all')
   const [filterFlag, setFilterFlag] = useState('all')
   const [categories, setCategories] = useState([])
@@ -46,10 +49,15 @@ export default function Variance() {
 
   async function init() {
     setLoading(true)
-    const [{ data: p }, { data: c }] = await Promise.all([
+    setLoadError(null)
+    const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order')
     ])
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+    const initFailed = firstError(initResults)
+    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
+    const [{ data: p }, { data: c }] = initResults
     setPeriods(p || [])
     setCategories(c || [])
     // Default to the most recent CLOSED period, not the open one. Closing stock is counted at
@@ -72,17 +80,8 @@ export default function Variance() {
   }
 
   async function buildReport(periodId) {
-    const [
-      { data: items },
-      { data: opening },
-      { data: closing },
-      { data: purchases },
-      { data: returns },
-      { data: wastages },
-      { data: staffMealsData },
-      { data: sales },
-      { data: clientRecipes }
-    ] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
       supabase.from('opening_stock').select('*').eq('period_id', periodId),
       supabase.from('closing_stock').select('*').eq('period_id', periodId),
@@ -96,6 +95,21 @@ export default function Variance() {
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
       scopedFrom('recipes', 'id')
     ])
+    if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setReport([]); setSummary(null); return }
+    const [
+      { data: items },
+      { data: opening },
+      { data: closing },
+      { data: purchases },
+      { data: returns },
+      { data: wastages },
+      { data: staffMealsData },
+      { data: sales },
+      { data: clientRecipes }
+    ] = results
 
     const recipeIds = (clientRecipes || []).map(r => r.id)
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
@@ -199,7 +213,7 @@ export default function Variance() {
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="the variance report" />
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the variance report" />
 
   return (
     <div>
@@ -221,6 +235,9 @@ export default function Variance() {
         </select>
       </div>
 
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {!loadError && <>
       {!loading && selectedPeriod && !hasClosing && (
         <div style={{ background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.30)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>Closing stock hasn’t been counted for {periodLabel} yet.</strong>{' '}
@@ -230,7 +247,8 @@ export default function Variance() {
         </div>
       )}
 
-      {summary && (
+      {/* KPI strip waits for the load — a stale period's figures under the new period's label is the S594 trap */}
+      {!loading && summary && (
         <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
           <div className="stat-card">
             <div className="stat-label">Items Analysed</div>
@@ -359,6 +377,7 @@ export default function Variance() {
           </div>
         )}
       </div>
+      </>}
     </div>
   )
 }

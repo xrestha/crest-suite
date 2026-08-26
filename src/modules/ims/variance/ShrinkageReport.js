@@ -6,6 +6,8 @@ import { supabase } from '../../../supabaseClient'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
+import { firstError } from '../../../shared/queryError'
 import { Navigate } from 'react-router-dom'
 
 // `badge` rather than a hand-rolled chip: the previous inline version built its border as
@@ -33,40 +35,37 @@ export default function ShrinkageReport() {
   const [report, setReport]           = useState([])
   const [summary, setSummary]         = useState(null)
   const [loading, setLoading]         = useState(true)
+  const [loadError, setLoadError]     = useState(null)
   const [periodsUsed, setPeriodsUsed] = useState(0)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
   useEffect(() => { if (periods.length) buildReport() }, [periodCount, periods]) // eslint-disable-line
 
   async function init() {
-    const [{ data: p }, { data: c }] = await Promise.all([
+    setLoadError(null)
+    const initResults = await Promise.all([
       scopedFrom('monthly_periods')
         .eq('status', 'closed')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order'),
     ])
+    // A failed read is not "no closed periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+    const initFailed = firstError(initResults)
+    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
+    const [{ data: p }, { data: c }] = initResults
     setCategories(c || [])
     setPeriods(p || [])
   }
 
   async function buildReport() {
     setLoading(true)
+    setLoadError(null)
     const selected = periods.slice(0, periodCount)
     if (!selected.length) { setReport([]); setSummary(null); setLoading(false); return }
     const periodIds = selected.map(p => p.id)
     setPeriodsUsed(selected.length)
 
-    const [
-      { data: items },
-      { data: opening },
-      { data: closing },
-      { data: purchases },
-      { data: returns },
-      { data: wastages },
-      { data: staffMeals },
-      { data: sales },
-      { data: clientRecipes },
-    ] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
       supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', periodIds),
       supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', periodIds),
@@ -79,6 +78,20 @@ export default function ShrinkageReport() {
       fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, source').in('period_id', periodIds).order('id')),
       scopedFrom('recipes', 'id'),
     ])
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setReport([]); setSummary(null); setLoading(false); return }
+    const [
+      { data: items },
+      { data: opening },
+      { data: closing },
+      { data: purchases },
+      { data: returns },
+      { data: wastages },
+      { data: staffMeals },
+      { data: sales },
+      { data: clientRecipes },
+    ] = results
 
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
     // this page used to read recipe_ingredients flat with `.not('item_id','is',null)`, which
@@ -234,13 +247,17 @@ export default function ShrinkageReport() {
         </select>
       </div>
 
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {!loadError && <>
       <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         <strong style={{ color: 'var(--theme-accent-ink)' }}>What this shows:</strong> Items where actual usage consistently exceeded theoretical (recipe-based) usage across multiple closed periods.
         Unlike wastage — which is <em style={{ color: 'var(--theme-text1)' }}>logged</em> — shrinkage is <em style={{ color: 'var(--theme-red-text)' }}>unexplained</em>. Possible causes: theft, over-portioning, unlogged spillage, or data entry errors.
         Only items linked to recipes (with sales data) are analysed.
       </div>
 
-      {summary && (
+      {/* KPI strip waits for the load — a stale run's figures under a new period-count label is the S594 trap */}
+      {!loading && summary && (
         <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
           <div className="stat-card">
             <div className="stat-label">Periods Analysed</div>
@@ -349,6 +366,7 @@ export default function ShrinkageReport() {
           </div>
         )}
       </div>
+      </>}
     </div>
   )
 }

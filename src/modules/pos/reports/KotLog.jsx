@@ -4,6 +4,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
+import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { formatAd, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
@@ -65,6 +67,10 @@ export default function KotLog() {
   const [tab, setTab] = useState('register') // 'register' | 'reconciliation' | 'trail' | 'pulled'
   const [fromIso, setFromIso] = useState(formatAd(new Date()))
   const [toIso,   setToIso]   = useState(formatAd(new Date()))
+  // S607 silent-zero rule: a failed read must render as a failure, never as an empty range —
+  // worst here on Reconciliation, whose empty state actively celebrates a quiet report. One
+  // shared state is enough: each tab's loader re-runs on activation and clears/sets it.
+  const [loadError, setLoadError] = useState(null)
 
   /* ── Register ── */
   const [logRows, setLogRows] = useState([])
@@ -74,10 +80,11 @@ export default function KotLog() {
   const loadRegister = useCallback(async () => {
     if (!clientId) return
     setRegisterLoading(true)
+    setLoadError(null)
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
-    const [{ data: logs }, { data: profs }] = await Promise.all([
+    const results = await Promise.all([
       // Paged: the Reconciliation and Bill Trail tabs below were already wrapped, and this — the
       // KOT Register, the one tab whose entire purpose is being a COMPLETE log — was not. A busy
       // outlet's month silently showed the most recent 1000 tickets as if that were all of them.
@@ -90,6 +97,10 @@ export default function KotLog() {
       // whoever was logged in.
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
+    // S607 silent-zero rule: a failed read would render an empty Register as if no tickets went out.
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setLogRows([]); setRegisterLoading(false); return }
+    const [{ data: logs }, { data: profs }] = results
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
     setLogRows(logs || [])
     setRegisterLoading(false)
@@ -104,12 +115,16 @@ export default function KotLog() {
   const loadReconciliation = useCallback(async () => {
     if (!clientId) return
     setReconLoading(true)
+    setLoadError(null)
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
-    const { data: orders } = await scopedFrom('pos_orders', 'id, status, close_type, table_name, order_no, closed_at')
+    const { data: orders, error: ordersError } = await scopedFrom('pos_orders', 'id, status, close_type, table_name, order_no, closed_at')
       .in('status', ['billed', 'voided'])
       .gte('closed_at', fromTs).lte('closed_at', toTs)
+    // S607 silent-zero rule: a failed read here would render the celebratory "no discrepancies"
+    // empty state over an anti-fraud check that never ran.
+    if (ordersError) { setLoadError(ordersError.message); setDiscrepancies([]); setReconLoading(false); return }
     const orderList = orders || []
     if (orderList.length === 0) { setDiscrepancies([]); setReconLoading(false); return }
     const orderIds = orderList.map(o => o.id)
@@ -118,10 +133,15 @@ export default function KotLog() {
     // Both paged: one row per ticket send and one per bill line respectively, so a month of
     // service pushes both past PostgREST's silent 1000-row cap. Truncated, the sent-vs-current
     // comparison below would flag phantom discrepancies from missing rows alone (S529).
-    const [{ data: logs }, { data: currentItems }] = await Promise.all([
+    const reconResults = await Promise.all([
       fetchAllRows(() => scopedFrom('pos_kot_log', 'order_id, items').in('order_id', orderIds).order('id')),
       fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, name, qty').in('order_id', orderIds).order('id')),
     ])
+    // S607: worse than a zero here — a failed pos_order_items read would flag EVERY sent line as
+    // a discrepancy, and a failed pos_kot_log read would clear the report entirely.
+    const reconFailed = firstError(reconResults)
+    if (reconFailed) { setLoadError(reconFailed); setDiscrepancies([]); setReconLoading(false); return }
+    const [{ data: logs }, { data: currentItems }] = reconResults
 
     const sentByOrderItem = sumSentQtyByOrderItem(logs)
     // Sum, not assign — a partially-comped line (apply_pos_item_comps splits it into two
@@ -148,18 +168,21 @@ export default function KotLog() {
   const loadBillTrail = useCallback(async () => {
     if (!clientId) return
     setBillTrailLoading(true)
+    setLoadError(null)
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
-    const { data: orders } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, status, close_type, table_name, closed_at, buyer_name')
+    const { data: orders, error: ordersError } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, status, close_type, table_name, closed_at, buyer_name')
       .in('status', ['billed', 'voided'])
       .gte('closed_at', fromTs).lte('closed_at', toTs)
+    // S607 silent-zero rule: a failed read is not "no paid or voided bills in this range".
+    if (ordersError) { setLoadError(ordersError.message); setBillTrailRows([]); setBillTrailLoading(false); return }
     const orderList = orders || []
     if (orderList.length === 0) { setBillTrailRows([]); setBillTrailLoading(false); return }
     const orderIds = orderList.map(o => o.id)
     const orderById = Object.fromEntries(orderList.map(o => [o.id, o]))
 
-    const [{ data: logs }, { data: currentItems }, { data: profs }] = await Promise.all([
+    const trailResults = await Promise.all([
       // Paged, same as the summary load above. `id` follows sent_at as the unique tiebreaker —
       // several tickets can share a timestamp, and paging a non-unique sort can repeat a row on
       // one page and skip it on the next.
@@ -172,6 +195,10 @@ export default function KotLog() {
       // whoever was logged in.
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
+    // S607: a failed ticket-log read would badge every bill "No KOT" — the alarming direction.
+    const trailFailed = firstError(trailResults)
+    if (trailFailed) { setLoadError(trailFailed); setBillTrailRows([]); setBillTrailLoading(false); return }
+    const [{ data: logs }, { data: currentItems }, { data: profs }] = trailResults
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
 
     const logsByOrder = {}
@@ -212,9 +239,10 @@ export default function KotLog() {
   const loadPulled = useCallback(async () => {
     if (!clientId) return
     setPulledLoading(true)
+    setLoadError(null)
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
-    const [{ data: rows }, { data: profs }] = await Promise.all([
+    const pulledResults = await Promise.all([
       // Paged like every other tab here: one row per pulled line, so a busy month crosses 1000
       // sooner than the ticket log does on a client that edits orders a lot.
       fetchAllRows(() => scopedFrom('pos_kot_removals',
@@ -223,6 +251,10 @@ export default function KotLog() {
         .order('removed_at', { ascending: false }).order('id')),
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
+    // S607 silent-zero rule: a failed read would render the celebratory "nothing pulled" state.
+    const pulledFailed = firstError(pulledResults)
+    if (pulledFailed) { setLoadError(pulledFailed); setPulledRows([]); setPulledLoading(false); return }
+    const [{ data: rows }, { data: profs }] = pulledResults
     setStaffNames(prev => ({ ...prev, ...Object.fromEntries((profs || []).map(p => [p.id, p.full_name])) }))
     setPulledRows(rows || [])
     setPulledLoading(false)
@@ -336,7 +368,10 @@ export default function KotLog() {
         <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
       </div>
 
-      {loading ? (
+      {/* S607: a failed read renders as a failure — never as the empty state or a zero table. */}
+      {loadError ? (
+        <ReportLoadError error={loadError} />
+      ) : loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : isEmpty ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>

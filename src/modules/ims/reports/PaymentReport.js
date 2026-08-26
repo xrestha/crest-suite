@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -27,13 +29,16 @@ export default function PaymentReport() {
   const [purchases, setPurchases] = useState([])
   const [returns, setReturns] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [viewMode, setViewMode] = useState('summary')
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
     setLoading(true)
-    const { data: p } = await scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+    setLoadError(null)
+    const { data: p, error } = await scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+    if (error) { setLoadError(error.message); setLoading(false); return }
     setPeriods(p || [])
     const open = (p || []).find(x => x.status === 'open')
     if (open) { setSelectedPeriod(open); await loadData(open.id) }
@@ -50,11 +55,16 @@ export default function PaymentReport() {
   }
 
   async function loadData(periodId) {
-    const [{ data: p }, { data: r }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       fetchAllRows(() => supabase.from('purchase_entries').select('*, items(name, categories(name)), vendors(name)').eq('period_id', periodId).order('bs_day').order('id')),
       fetchAllRows(() => scopedFrom('vendor_returns', '*, items(name), vendors(name)').eq('period_id', periodId).order('bs_day').order('id'))
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read must not render as a quiet period of NPR 0 (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setPurchases([]); setReturns([]); return }
+    const [{ data: p }, { data: r }] = results
     setPurchases(p || [])
     setReturns(r || [])
   }
@@ -126,7 +136,7 @@ export default function PaymentReport() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="the payment report" />
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the payment report" />
 
   return (
     <div>
@@ -143,7 +153,11 @@ export default function PaymentReport() {
         </div>
       </div>
 
-      {/* Summary cards */}
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
+          is NPR 0 wearing the confidence of a real figure (S594 rule). */}
+      {!loadError && !loading && (
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(5,1fr)', marginBottom: 24 }}>
         <div className="stat-card">
           <div className="stat-label">
@@ -174,9 +188,10 @@ export default function PaymentReport() {
           </div>
         ))}
       </div>
+      )}
 
       {/* Visual split */}
-      {grandNet > 0 && (
+      {!loadError && !loading && grandNet > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 10 }}>Payment Method Split (Net)</div>
           <div style={{ display: 'flex', height: 20, borderRadius: 'var(--radius-sm)', overflow: 'hidden', gap: 2 }}>
@@ -207,6 +222,8 @@ export default function PaymentReport() {
       )}
 
       {/* Tabs */}
+      {!loadError && (
+      <>
       <div className="panel-tab-bar" role="tablist" aria-label="Payment report views">
         {['summary', 'daily'].map(m => (
           <button key={m} type="button" role="tab" aria-selected={viewMode === m}
@@ -289,6 +306,8 @@ export default function PaymentReport() {
             </div>
           )}
       </div>
+      </>
+      )}
     </div>
   )
 }

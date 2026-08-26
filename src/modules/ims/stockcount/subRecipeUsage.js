@@ -1,6 +1,7 @@
 import { explodeRecipeTree, computeRecipeCosts } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { throwFirstError } from '../../../shared/queryError'
 
 // Sub-recipe consumption for one period, derived from sales_entries.
 //
@@ -36,7 +37,7 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
   // as Recipes.js counts its own "N sub-recipes" header (Recipes.js:177). Fetched up front so the
   // unused-this-period diff is available on every return path below, including the ones that bail
   // out early: "nothing sold, so all of them are unused" is a legitimate answer, not a blank.
-  const [{ data: salesRows }, { data: allSubs }] = await Promise.all([
+  const baseResults = await Promise.all([
     // Paged: a period's sales_entries can exceed PostgREST's 1000-row cap, and a truncated read
     // here would understate every batch figure with no error to notice (see fetchAllRows.js).
     fetchAllRows(() => supabase
@@ -46,6 +47,10 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
       .order('id')),
     scopedFrom('recipes', 'id, name').eq('category', 'Sub-Recipe'),
   ])
+  // A failed read must not degrade to EMPTY_USAGE — "nothing consumed" is a real answer this
+  // helper legitimately returns, so it must never also be the error shape (S607 silent-zero rule).
+  throwFirstError(baseResults)
+  const [{ data: salesRows }, { data: allSubs }] = baseResults
 
   const subMaster = allSubs || []
   const noneUsed = () => ({
@@ -92,7 +97,7 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
   // subTree is each sub-recipe exploded on its own — whole-batch quantities of the raw items it
   // is made from. Needed for the "find ingredient" search on the page: a sub-recipe's own
   // ingredients are not otherwise knowable from `tree` above, which is keyed by the DISHES sold.
-  const [{ data: recipeMeta }, batchCosts, subTree] = await Promise.all([
+  const [recipeMetaRes, batchCosts, subTree] = await Promise.all([
     scopedFrom('recipes', 'id, name, yield_qty, yield_uom, category').in('id', subIds),
     // Whole-BATCH cost — computeRecipeCosts does not divide by yield_qty (unlike
     // calcSubRecipeCostPerUnit in recipeCostCalc.js, which returns per-output-unit), so
@@ -100,6 +105,9 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
     computeRecipeCosts(supabase, subIds),
     explodeRecipeTree(supabase, subIds),
   ])
+  // Only the first element is a Supabase result; the other two are util outputs (S607).
+  throwFirstError([recipeMetaRes])
+  const { data: recipeMeta } = recipeMetaRes
 
   // One items fetch covering both jobs: valuing the derived raw-item total (reconciliation) and
   // naming each sub-recipe's ingredients (search). Two separate queries would fetch overlapping
@@ -164,8 +172,10 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
 // id → { name, rate } for valuing and naming items in one round trip.
 async function fetchItemMap(supabase, itemIds) {
   if (itemIds.length === 0) return {}
-  const { data: items } = await supabase.from('items').select('id, name, per_uom_rate').in('id', itemIds)
-  return Object.fromEntries((items || []).map(i => [i.id, { name: i.name, rate: parseFloat(i.per_uom_rate) || 0 }]))
+  const res = await supabase.from('items').select('id, name, per_uom_rate').in('id', itemIds)
+  // A failed read here silently zeroed every valuation built from this map (S607 silent-zero rule).
+  throwFirstError([res])
+  return Object.fromEntries((res.data || []).map(i => [i.id, { name: i.name, rate: parseFloat(i.per_uom_rate) || 0 }]))
 }
 
 // True if any of this sub-recipe's raw ingredients matches the (already lowercased) query —

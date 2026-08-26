@@ -4,6 +4,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
+import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
@@ -33,6 +35,9 @@ export default function PosExceptionReport() {
 
   const [rows,    setRows]    = useState([])   // enriched exception rows
   const [loading, setLoading] = useState(true)
+  // S607 silent-zero rule: a failed read must render as a failure, never as a quiet report —
+  // this page's empty state actively celebrates one.
+  const [loadError, setLoadError] = useState(null)
   const [typeFilter,  setTypeFilter]  = useState('all')  // 'all' | 'discount' | 'void' | 'writeoff'
   const [staffFilter, setStaffFilter] = useState('all')
   const [staffNames,  setStaffNames]  = useState({})     // { profileId: full_name }
@@ -40,11 +45,12 @@ export default function PosExceptionReport() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
 
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
-    const [{ data: orders }, { data: profs }, { data: settings }, { data: itemComps }] = await Promise.all([
+    const results = await Promise.all([
       // Paged: this is the fraud/exception audit trail, so a truncated read hides exactly the
       // rows someone would be looking for — and reports a smaller total as if it were complete.
       fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, invoice_fy, close_type, close_reason, discount_amount, discount_reason, paid_amount, table_name, closed_at, closed_by')
@@ -67,6 +73,11 @@ export default function PosExceptionReport() {
       fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, qty, unit_price, vat_rate, comped_by, comped_at, comp_reason, comp_no')
         .eq('comped', true).gte('comped_at', fromTs).lte('comped_at', toTs).order('id')),
     ])
+    // S607 silent-zero rule: a failed read would render "no exceptions — a quiet report is a
+    // healthy one" over an audit trail that never loaded.
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
+    const [{ data: orders }, { data: profs }, { data: settings }, { data: itemComps }] = results
 
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
     setBillingSettings({
@@ -80,8 +91,10 @@ export default function PosExceptionReport() {
     let itemsByOrder = {}
     let costMap = {}
     if (needItems.length > 0) {
-      const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, recipe_id')
+      const { data: items, error: itemsError } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, recipe_id')
         .in('order_id', needItems.map(o => o.id)).order('id'))
+      // S607: without the lines, every void/comp values at a believable NPR 0.
+      if (itemsError) { setLoadError(itemsError.message || String(itemsError)); setRows([]); setLoading(false); return }
       itemsByOrder = (items || []).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
@@ -116,7 +129,9 @@ export default function PosExceptionReport() {
     let itemCompRows = []
     if ((itemComps || []).length > 0) {
       const orderIds = [...new Set(itemComps.map(i => i.order_id))]
-      const { data: parentOrders } = await scopedFrom('pos_orders', 'id, order_no, table_name, invoice_no, invoice_fy').in('id', orderIds)
+      const { data: parentOrders, error: parentsError } = await scopedFrom('pos_orders', 'id, order_no, table_name, invoice_no, invoice_fy').in('id', orderIds)
+      // S607: a dropped error here would strip every item-comp of its parent bill reference.
+      if (parentsError) { setLoadError(parentsError.message); setRows([]); setLoading(false); return }
       const parentById = Object.fromEntries((parentOrders || []).map(o => [o.id, o]))
       const recipeIds = [...new Set(itemComps.map(i => i.recipe_id).filter(Boolean))]
       const itemCostMap = recipeIds.length > 0 ? await computeRecipeCosts(supabase, recipeIds) : {}
@@ -245,7 +260,10 @@ export default function PosExceptionReport() {
         </button>
       </div>
 
-      {loading ? (
+      {/* S607: a failed read renders as a failure — never as zero stat cards or a quiet report. */}
+      {loadError ? (
+        <ReportLoadError error={loadError} />
+      ) : loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : (
         <>

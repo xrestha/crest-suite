@@ -8,6 +8,8 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import ReportLoadError from '../../../components/ReportLoadError'
+import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
@@ -24,6 +26,7 @@ export default function StockReport() {
   const [rows, setRows] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [filterCat, setFilterCat] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [search, setSearch] = useState('')
@@ -32,10 +35,15 @@ export default function StockReport() {
 
   async function init() {
     setLoading(true)
-    const [{ data: p }, { data: c }] = await Promise.all([
+    setLoadError(null)
+    const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order')
     ])
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+    const initFailed = firstError(initResults)
+    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
+    const [{ data: p }, { data: c }] = initResults
     setPeriods(p || [])
     setCategories(c || [])
     const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
@@ -53,11 +61,8 @@ export default function StockReport() {
   }
 
   async function loadReport(periodId) {
-    const [
-      { data: items }, { data: opening }, { data: closing }, { data: purchases },
-      { data: returns }, { data: wastages }, { data: staffMeals }, { data: clientRecipes },
-      { data: sales }, { data: pars }, { data: reqLines }
-    ] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
@@ -70,6 +75,15 @@ export default function StockReport() {
       scopedFrom('par_levels', 'item_id, par_qty'),
       supabase.from('requisition_lines').select('item_id, qty_issued, requisitions!inner(period_id, status)').eq('requisitions.period_id', periodId).eq('requisitions.status', 'issued'),
     ])
+    if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 valuation (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setRows([]); return }
+    const [
+      { data: items }, { data: opening }, { data: closing }, { data: purchases },
+      { data: returns }, { data: wastages }, { data: staffMeals }, { data: clientRecipes },
+      { data: sales }, { data: pars }, { data: reqLines }
+    ] = results
 
     const recipeIds = (clientRecipes || []).map(r => r.id)
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
@@ -173,7 +187,7 @@ export default function StockReport() {
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="the stock report" />
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the stock report" />
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const statusBadge = (st) => st === 'out'
@@ -196,6 +210,11 @@ export default function StockReport() {
         </div>
       </div>
 
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {!loadError && <>
+      {/* KPI strip waits for the load — an unloaded valuation is NPR 0 in confident type (S594) */}
+      {!loading && (
       <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label"><Tip text="On-hand quantity × unit rate, summed across all items. What your current stock is worth." width={240}>Total Stock Value</Tip></div>
@@ -218,6 +237,7 @@ export default function StockReport() {
           <div className="stat-sub">{selectedPeriod?.status === 'open' ? 'Open period' : 'Closed period'}</div>
         </div>
       </div>
+      )}
 
       {negativeCount > 0 && (
         <div className="no-print" style={{ background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
@@ -305,6 +325,7 @@ export default function StockReport() {
           </div>
         )}
       </div>
+      </>}
     </div>
   )
 }

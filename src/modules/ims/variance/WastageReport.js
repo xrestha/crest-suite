@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 
@@ -18,12 +19,15 @@ export default function WastageReport() {
   const [reasons, setReasons]           = useState([])
   const [catFilter, setCatFilter]       = useState('All')
   const [loading, setLoading]           = useState(false)
+  const [loadError, setLoadError]       = useState(null)
 
   useEffect(() => {
     if (!effectiveClientId) return
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // A failed read is not "no periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+        if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
       })
@@ -35,10 +39,13 @@ export default function WastageReport() {
 
   async function fetchData(periodId) {
     setLoading(true)
-    const { data } = await supabase
+    setLoadError(null)
+    const { data, error } = await supabase
       .from('wastages')
       .select('item_id, qty, bs_day, reason, items(name, uom, per_uom_rate, categories(name))')
       .eq('period_id', periodId)
+    // A failed read must never flow through the `|| []` below into a confident NPR-0 report (S607 silent-zero rule).
+    if (error) { setLoadError(error.message); setRows([]); setReasons([]); setLoading(false); return }
 
     // Aggregate by item — an item can now have many rows (monthly catch-all + dated daily entries).
     const byItem = {}
@@ -138,7 +145,11 @@ export default function WastageReport() {
         </div>
       </div>
 
-      {/* Stat cards */}
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {!loadError && <>
+      {/* Stat cards — gated on !loading: a figure summed from rows that have not arrived is NPR 0 in confident type (S594) */}
+      {!loading && (
       <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">Total Wastage Value</div>
@@ -154,6 +165,7 @@ export default function WastageReport() {
           {topCat && <div className="stat-label" style={{ marginTop: 4 }}>{fmt(topCat[1])}</div>}
         </div>
       </div>
+      )}
 
       {/* By Reason breakdown */}
       {reasons.length > 0 && (
@@ -245,6 +257,7 @@ export default function WastageReport() {
           </table>
         </div>
       )}
+      </>}
     </div>
   )
 }

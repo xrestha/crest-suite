@@ -4,11 +4,13 @@ import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import { getBsFiscalYear, getBsFiscalYearStart, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { printWithTitle } from '../../../utils/printTitle'
 import { getFiscalYearAdRange, computeVendorBalance } from './vendorBalanceHelpers'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import VendorBalanceConfirmationPrint from './VendorBalanceConfirmationPrint'
 
 // Nepal IRD Annexure 13 (अनुसूची १३) balance confirmation — per-vendor, per-fiscal-year printable
@@ -29,16 +31,22 @@ export default function VendorBalanceConfirmation() {
   const [loading, setLoading] = useState(true)
   const [computing, setComputing] = useState(false)
   const [result, setResult] = useState(null)
+  const [loadError, setLoadError] = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [effectiveClientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
     setLoading(true)
-    const [{ data: v }, { data: p }, { data: client }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('vendors').eq('is_active', true).order('name'),
       scopedFrom('monthly_periods').order('bs_year').order('bs_month'),
       supabase.from('clients').select('name').eq('id', effectiveClientId).single(),
     ])
+    // A failed read must not render as "no vendors / no periods" (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setLoading(false); return }
+    const [{ data: v }, { data: p }, { data: client }] = results
     setVendors(v || [])
     setPeriods(p || [])
     setBusinessName(client?.name || '')
@@ -58,6 +66,7 @@ export default function VendorBalanceConfirmation() {
   const load = useCallback(async () => {
     if (!effectiveClientId || !selectedVendorId || !selectedFy || periods.length === 0) { setResult(null); return }
     setComputing(true)
+    setLoadError(null)
 
     const fyPeriods = periods.filter(pr => getBsFiscalYear(pr.bs_year, pr.bs_month) === selectedFy)
     const fyPeriodIds = fyPeriods.map(pr => pr.id)
@@ -70,19 +79,20 @@ export default function VendorBalanceConfirmation() {
     // the whole point of an opening-balance carry-forward — and therefore a prime candidate for
     // PostgREST's silent 1000-row cap. A truncated read would understate the balance on a
     // document sent to the vendor for signature (S529).
-    const { data: creditData } = await fetchAllRows(() => supabase
+    const { data: creditData, error: creditErr } = await fetchAllRows(() => supabase
       .from('purchase_entries')
       .select('id, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, vendor_id, payment_method, monthly_periods!inner(client_id, bs_year, bs_month)')
       .eq('monthly_periods.client_id', effectiveClientId)
       .eq('vendor_id', selectedVendorId)
       .eq('payment_method', 'Credit')
       .order('id'))
+    if (creditErr) { setLoadError(creditErr.message); setResult(null); setComputing(false); return }
     const creditEntries = creditData || []
 
     // Cash/FonePay bills never carry a balance, so only the selected FY's periods matter for them.
     let cashEntries = []
     if (fyPeriodIds.length > 0) {
-      const { data: cashData } = await fetchAllRows(() => supabase
+      const { data: cashData, error: cashErr } = await fetchAllRows(() => supabase
         .from('purchase_entries')
         .select('id, bs_day, qty, rate, invoice_ref, vat_inclusive, discount_amount, purchase_group_id, vendor_id, payment_method, monthly_periods!inner(client_id, bs_year, bs_month, id)')
         .eq('monthly_periods.client_id', effectiveClientId)
@@ -90,6 +100,7 @@ export default function VendorBalanceConfirmation() {
         .neq('payment_method', 'Credit')
         .in('monthly_periods.id', fyPeriodIds)
         .order('id'))
+      if (cashErr) { setLoadError(cashErr.message); setResult(null); setComputing(false); return }
       cashEntries = cashData || []
     }
 
@@ -109,6 +120,8 @@ export default function VendorBalanceConfirmation() {
         ? scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate, bs_day, monthly_periods(bs_year, bs_month)').in('purchase_entry_id', allEntryIds)
         : Promise.resolve({ data: [] }),
     ])
+    const pmtRetFailed = firstError([pmtsRes, retsRes])
+    if (pmtRetFailed) { setLoadError(pmtRetFailed); setResult(null); setComputing(false); return }
     payments = pmtsRes.data || []
     returns = retsRes.data || []
 
@@ -173,6 +186,8 @@ export default function VendorBalanceConfirmation() {
         )}
       </div>
 
+      {loadError && <ReportLoadError error={loadError} />}
+
       <div className="card no-print" style={{ marginBottom: 20 }}>
         <div className="form-grid form-grid-3">
           <div className="form-field">
@@ -191,7 +206,7 @@ export default function VendorBalanceConfirmation() {
         </div>
       </div>
 
-      {loading ? (
+      {loadError ? null : loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
       ) : !selectedVendorId ? (
         <div className="card">

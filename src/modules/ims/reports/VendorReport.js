@@ -2,9 +2,11 @@ import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import Modal from '../../../components/Modal'
 import { bsToAd } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
@@ -44,6 +46,7 @@ export default function VendorReport() {
   const [returns, setReturns] = useState([])
   const [vendors, setVendors] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [viewMode, setViewMode] = useState('summary')
   const [vendorSearch, setVendorSearch] = useState('')
   const [showVendorDrop, setShowVendorDrop] = useState(false)
@@ -56,10 +59,15 @@ export default function VendorReport() {
 
   async function init() {
     setLoading(true)
-    const [{ data: p }, { data: v }] = await Promise.all([
+    setLoadError(null)
+    const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('vendors').eq('is_active', true).order('name')
     ])
+    // A failed read must never render as an empty period or NoPeriodState (S607 silent-zero rule).
+    const initFailed = firstError(initResults)
+    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
+    const [{ data: p }, { data: v }] = initResults
     setPeriods(p || [])
     setVendors(v || [])
     const open = (p || []).find(x => x.status === 'open')
@@ -77,18 +85,27 @@ export default function VendorReport() {
   }
 
   async function loadData(periodId) {
-    const [{ data: p }, { data: r }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       fetchAllRows(() => supabase.from('purchase_entries').select('*, items(name, categories(name)), vendors(name), payment_method').eq('period_id', periodId).order('bs_day').order('id')),
       fetchAllRows(() => scopedFrom('vendor_returns', '*, items(name), vendors(name), payment_method').eq('period_id', periodId).order('bs_day').order('id'))
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 vendor
+    // ledger (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setPurchases([]); setReturns([]); setPaymentsMap({}); return }
+    const [{ data: p }, { data: r }] = results
     setPurchases(p || [])
     setReturns(r || [])
 
     const creditIds = (p || []).filter(e => e.payment_method === 'Credit').map(e => e.id)
     if (creditIds.length > 0) {
-      const { data: pmts } = await scopedFrom('payable_payments').in('purchase_entry_id', creditIds)
+      const { data: pmts, error: pmtErr } = await scopedFrom('payable_payments').in('purchase_entry_id', creditIds)
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+      // Cash/Credit splits and the payment-status column derive from this map — refuse rather
+      // than render every credit bill as unpaid (S607).
+      if (pmtErr) { setLoadError(pmtErr.message); setPurchases([]); setReturns([]); setPaymentsMap({}); return }
       const map = {}
       ;(pmts || []).forEach(pm => {
         if (!map[pm.purchase_entry_id]) map[pm.purchase_entry_id] = []
@@ -333,7 +350,9 @@ export default function VendorReport() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="the vendor report" />
+  // !loadError: a failed periods read leaves periods empty, and NoPeriodState would wear the
+  // failure as "no periods yet" (S607 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the vendor report" />
 
   return (
     <div>
@@ -346,9 +365,12 @@ export default function VendorReport() {
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
-          <button className="btn btn-ghost" onClick={exportExcel}>Export Excel</button>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={!!loadError}>Export Excel</button>
         </div>
       </div>
+
+      {/* A failed read renders as a failure — never as a confident NPR-0 vendor ledger (S607). */}
+      {loadError ? <ReportLoadError error={loadError} /> : <>
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(5,1fr)', marginBottom: 24 }}>
         <div className="stat-card">
@@ -908,6 +930,7 @@ export default function VendorReport() {
           )}
         </Modal>
       )}
+      </>}
     </div>
   )
 }

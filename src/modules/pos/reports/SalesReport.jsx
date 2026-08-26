@@ -6,6 +6,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
+import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
@@ -76,7 +78,12 @@ export default function SalesReport() {
       supabase.from('clients').select('name').eq('id', clientId).single(),
       supabase.from('settings').select('vat_number, property_address, pos_delivery_partners').eq('client_id', clientId).maybeSingle(),
       scopedFrom('recipes', 'id, is_veg, recipe_code'),
-    ]).then(([{ data: client }, { data: settings }, { data: recipeRows }]) => {
+    ]).then(results => {
+      // S607 silent-zero rule: a failed read here isn't cosmetic — it blanks the letterhead and
+      // silently drops every Agreed % commission check on the Delivery Partners tab.
+      const failed = firstError(results)
+      if (failed) { setRangeError(failed); return }
+      const [{ data: client }, { data: settings }, { data: recipeRows }] = results
       setBizInfo({ name: client?.name || '', vat: settings?.vat_number || '', address: settings?.property_address || '' })
       // The CONTRACTED commission rate per partner (Table Management -> Delivery Partners). It is
       // the only thing a settled bill's actual commission can be checked against - without it the
@@ -103,14 +110,19 @@ export default function SalesReport() {
   const [botCategories, setBotCategories] = useState(new Set(['Beverage']))
   const [staffNames, setStaffNames] = useState({})
   const [rangeLoading, setRangeLoading] = useState(true)
+  // S607 silent-zero rule: a failed read must render as a failure, never as an empty range.
+  // Two error states because the page runs two independent pipelines (date-range vs 1L+ FY),
+  // mirroring the rangeLoading/oneLakhLoading split below.
+  const [rangeError, setRangeError] = useState(null)
 
   const loadRange = useCallback(async () => {
     if (!clientId) return
     setRangeLoading(true)
+    setRangeError(null)
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
 
-    const [{ data: orderData }, { data: settings }, { data: profs }] = await Promise.all([
+    const results = await Promise.all([
       // Paged: the child pos_order_items read below was already wrapped (S529) while this parent
       // was not, so on a busy month every one of this page's ten tabs silently reported the first
       // 1000 bills as if they were all of them — a believable total, not an error.
@@ -125,6 +137,16 @@ export default function SalesReport() {
       // whoever was logged in.
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
+    // S607 silent-zero rule: a failed read here would run every tab's arithmetic over `|| []`
+    // and render a confident report of NPR 0, visually identical to a quiet range.
+    const rangeFailed = firstError(results)
+    if (rangeFailed) {
+      setRangeError(rangeFailed)
+      setOrders([]); setItemsByOrder({}); setCompsByOrder({})
+      setRangeLoading(false)
+      return
+    }
+    const [{ data: orderData }, { data: settings }, { data: profs }] = results
     setVatReg(settings?.is_vat_registered ?? true)
     setBotCategories(new Set(Array.isArray(settings?.pos_bot_categories) && settings.pos_bot_categories.length > 0
       ? settings.pos_bot_categories : ['Beverage']))
@@ -142,7 +164,15 @@ export default function SalesReport() {
       // bill, so a month of ordinary service runs to thousands and blows straight past
       // PostgREST's silent 1000-row cap. Truncated, every figure on this page would be built
       // from roughly the first tenth of the month while looking like a full month (S529).
-      const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, comp_reason').in('order_id', orderList.map(o => o.id)).order('id'))
+      const { data: items, error: itemsError } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, comp_reason').in('order_id', orderList.map(o => o.id)).order('id'))
+      // S607 silent-zero rule: with the parent orders loaded but the lines dropped, every figure
+      // built from itemsByOrder would be a believable zero.
+      if (itemsError) {
+        setRangeError(itemsError.message || String(itemsError))
+        setOrders([]); setItemsByOrder({}); setCompsByOrder({})
+        setRangeLoading(false)
+        return
+      }
       byOrder = (items || []).filter(i => !i.comped).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
@@ -460,6 +490,7 @@ export default function SalesReport() {
   const [selectedFy, setSelectedFy] = useState(currentFy)
   const [parties, setParties] = useState([])
   const [oneLakhLoading, setOneLakhLoading] = useState(true)
+  const [oneLakhError, setOneLakhError] = useState(null)
 
   useEffect(() => {
     if (!clientId) return
@@ -467,7 +498,9 @@ export default function SalesReport() {
     // simply not appear as options — the 1L+ report for a past year then can't be opened at all.
     // One narrow column, once per page load, so the extra round trips are cheap.
     fetchAllRows(() => scopedFrom('pos_orders', 'invoice_fy').not('invoice_fy', 'is', null).order('id'))
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // S607 silent-zero rule: a failed read here silently drops past fiscal years from the picker.
+        if (error) { setOneLakhError(error.message || String(error)); return }
         const fys = [...new Set((data || []).map(r => r.invoice_fy))].sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
         if (fys.length > 0) {
           setFyOptions(fys.includes(currentFy) ? fys : [currentFy, ...fys])
@@ -480,7 +513,8 @@ export default function SalesReport() {
   const loadOneLakh = useCallback(async () => {
     if (!clientId) return
     setOneLakhLoading(true)
-    const [{ data: fyOrders }, { data: settings }] = await Promise.all([
+    setOneLakhError(null)
+    const results = await Promise.all([
       // Paged for the same reason the item read below it already was: this feeds the IRD
       // Annexure 13 one-lakh threshold over a whole fiscal year, so a truncated read drops a
       // party below the threshold and understates a statutory disclosure.
@@ -492,6 +526,16 @@ export default function SalesReport() {
         .order('id')),
       supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
     ])
+    // S607 silent-zero rule — and this one feeds an IRD Annexure 13 disclosure, where a silent
+    // zero reads as "no party crossed one lakh".
+    const oneLakhFailed = firstError(results)
+    if (oneLakhFailed) {
+      setOneLakhError(oneLakhFailed)
+      setParties([])
+      setOneLakhLoading(false)
+      return
+    }
+    const [{ data: fyOrders }, { data: settings }] = results
     const vr = settings?.is_vat_registered ?? true
     const list = fyOrders || []
 
@@ -501,7 +545,14 @@ export default function SalesReport() {
       // party actually paid, so it can't count toward their Annexure 13 one-lakh threshold.
       // Paged for the same reason as loadRange above — and this one feeds an IRD Annexure 13
       // threshold, so a truncated read could drop a customer below one lakh incorrectly (S529).
-      const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', list.map(o => o.id)).order('id'))
+      const { data: items, error: itemsError } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', list.map(o => o.id)).order('id'))
+      // S607 silent-zero rule: lines missing means every party's net reads zero — below threshold.
+      if (itemsError) {
+        setOneLakhError(itemsError.message || String(itemsError))
+        setParties([])
+        setOneLakhLoading(false)
+        return
+      }
       byOrder = (items || []).filter(i => !i.comped).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
@@ -720,6 +771,8 @@ export default function SalesReport() {
   }
 
   const loading = tab === 'onelakh' ? oneLakhLoading : rangeLoading
+  // Same per-pipeline split as `loading`: the tab decides which pipeline's failure it must report.
+  const loadError = tab === 'onelakh' ? oneLakhError : rangeError
   const isEmpty =
     (tab === 'daily' && dailyRows.length === 0) ||
     (tab === 'hourly' && hourlyTotals.bills === 0) ||
@@ -782,7 +835,10 @@ export default function SalesReport() {
         <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
       </div>
 
-      {loading ? (
+      {/* S607: a failed read renders as a failure — never as the empty state or a zero table. */}
+      {loadError ? (
+        <ReportLoadError error={loadError} />
+      ) : loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : isEmpty ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
