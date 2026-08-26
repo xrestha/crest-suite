@@ -215,6 +215,38 @@ export default function Variance() {
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the variance report" />
 
+  // "The money report" was the one variance page with no export while both its siblings have one
+  // (S613). Mirrors TheoreticalVariance's sheet, plus a status line — the workbook must carry the
+  // same no-closing-count caveat the screen shows, or the confident numbers travel without it.
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet([
+      [`Variance Report — ${periodLabel}`],
+      [hasClosing
+        ? `Flag threshold ±${flagPct}% · theoretical = sales × recipe qty · actual = ${COGS_FORMULA}`
+        : 'NO CLOSING COUNT ENTERED — these figures treat everything still on hand as used; finish the Stock Count before acting on them'],
+      [],
+    ])
+    XLSX.utils.sheet_add_json(ws, filtered.map(r => ({
+      'Item':                 r.item.name,
+      'Category':             r.category,
+      'UOM':                  r.item.uom,
+      'Opening':              +(r.openQty || 0).toFixed(3),
+      'Net Purchased':        +(r.purchQty || 0).toFixed(3),
+      'Wastage':              +(r.wasteQty || 0).toFixed(3),
+      'Closing':              +(r.closeQty || 0).toFixed(3),
+      'Actual Used':          +(r.actualUsed || 0).toFixed(3),
+      'Theoretical':          +(r.theoreticalUsed || 0).toFixed(3),
+      'Variance':             +(r.variance || 0).toFixed(3),
+      'Variance %':           r.variancePct == null ? '' : +r.variancePct.toFixed(1),
+      'Variance Value (NPR)': Math.round(r.value || 0),
+      'Flag':                 hasClosing ? r.flag : 'not measurable',
+    })), { origin: 'A4' })
+    XLSX.utils.book_append_sheet(wb, ws, 'Variance')
+    XLSX.writeFile(wb, `Variance-Report-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
+  }
+
   return (
     <div>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -222,17 +254,20 @@ export default function Variance() {
           <h1 className="page-title">Variance Report</h1>
           <p className="page-subtitle">Theoretical vs actual usage — the money report — {periodLabel}</p>
         </div>
-        <select aria-label="Period"
-          className="form-select"
-          value={selectedPeriod?.id || ''}
-          onChange={e => handlePeriodChange(e.target.value)}
-        >
-          {periods.map(p => (
-            <option key={p.id} value={p.id}>
-              {BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}
-            </option>
-          ))}
-        </select>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <select aria-label="Period"
+            className="form-select"
+            value={selectedPeriod?.id || ''}
+            onChange={e => handlePeriodChange(e.target.value)}
+          >
+            {periods.map(p => (
+              <option key={p.id} value={p.id}>
+                {BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}
+              </option>
+            ))}
+          </select>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || filtered.length === 0}>Export Excel</button>
+        </div>
       </div>
 
       {loadError && <ReportLoadError error={loadError} />}
@@ -289,12 +324,17 @@ export default function Variance() {
         </div>
       )}
 
+      {/* Note + filters wait for the load, same as the KPI strip above — the S594 rule ReportPage
+          enforces for its adopters, applied by hand here (S613). */}
+      {!loading && (
       <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> Theoretical = what should have been used based on sales × recipe qty. Actual = {COGS_FORMULA}.
         <span style={{ color: 'var(--theme-red-text)' }}> Over variance</span> = more used than sold (waste, theft, over-portioning).
         <span style={{ color: 'var(--theme-amber-text)' }}> Under variance</span> = less used than expected (under-portioning or data gap).
       </div>
+      )}
 
+      {!loading && (
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <select aria-label="Filter by category" className="form-select"
@@ -312,6 +352,7 @@ export default function Variance() {
         </div>
         <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 'auto' }}>{filtered.length} items</span>
       </div>
+      )}
 
       <div className="card">
         {loading ? (

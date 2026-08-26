@@ -847,7 +847,7 @@ export default function OutstandingPayables() {
                                               <th style={{ padding: '0 16px 5px 0' }}>
                                                 <input type="checkbox" checked={selectedHere.length === paymentIds.length}
                                                   onChange={ev => { ev.stopPropagation(); toggleSelectPayments(paymentIds) }}
-                                                  onClick={ev => ev.stopPropagation()} title="Select all payments in this bill" />
+                                                  onClick={ev => ev.stopPropagation()} aria-label="Select all payments in this bill" title="Select all payments in this bill" />
                                               </th>
                                               <th /><th /><th /><th />
                                             </tr>
@@ -858,7 +858,7 @@ export default function OutstandingPayables() {
                                                 <td style={{ padding: '5px 16px 5px 0' }}>
                                                   <input type="checkbox" checked={selectedPayments.has(p.id)}
                                                     onChange={ev => { ev.stopPropagation(); toggleSelectPayment(p.id) }}
-                                                    onClick={ev => ev.stopPropagation()} />
+                                                    onClick={ev => ev.stopPropagation()} aria-label={`Select payment of ${fmt(p.amount)} on ${fmtBsDate(p.paid_at) || p.paid_at}`} />
                                                 </td>
                                                 <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-green-text)' }}>{fmtBsDate(p.paid_at)}</td>
                                                 <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(p.amount)}</td>
@@ -890,6 +890,7 @@ export default function OutstandingPayables() {
                                           <div>
                                             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Amount (NPR)</div>
                                             <input type="number" style={{ ...INPUT, width: 150 }} placeholder={`full: ${fmt(b.remaining)}`}
+                                              aria-label={`Payment amount in NPR for ${b.vendorName}'s bill`}
                                               value={payForm.amount}
                                               onChange={ev => setPayForm(f => ({ ...f, amount: ev.target.value }))}
                                               onClick={ev => ev.stopPropagation()} />

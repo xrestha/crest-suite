@@ -426,7 +426,7 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
         })()}
       </div>
 
-      {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
+      {error && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
       {/* Cancel is plain ghost: it carried the red tint + red border DESIGN.md reserves for
           destructive actions, on a fully reversible action on an unsaved form — the same treatment
           Purchases' real "Delete All" uses. And the row is one group at the right edge rather than

@@ -661,8 +661,19 @@ export default function PayrollRun() {
                 </table>
               </div>
             </div>
+            {/* One topic per line, not a 180-word wall (S613) — the reader is looking up ONE of
+                these rules mid-payroll, never reading all four. The stray \' this block used to
+                render on screen went with it (JSX text takes a plain apostrophe). */}
             <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-              {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can override any TDS value inline.'} SSF is deducted only for employees who are marked SSF-enrolled AND have an SSF registration number — an enrolled employee with no number is flagged in the list and contributes nothing, since a contribution with no number cannot be filed on the challan. TDS is computed automatically from the fiscal-year tax slabs using year-to-date projection; finalize earlier months first so each month\'s tax builds on the last. TADA (travel/daily allowance) auto-fills from that employee's Approved TADA Claims for this period (🔗 marks a claim-linked amount) and is added after TDS as a non-taxable reimbursement, not part of taxable gross — you can still hand-edit or clear it. Finalize marks linked claims Paid in TADA Claims; Reopen reverts them to Approved. Active advance installments are auto-deducted; repayment rows are written to Advances & Loans on Finalize.
+              <p style={{ margin: 0, fontWeight: 600 }}>
+                {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can override any TDS value inline.'}
+              </p>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 16 }}>
+                <li><strong>SSF</strong> deducts only for employees marked SSF-enrolled AND holding an SSF number — an enrolled employee with no number is flagged in the list and contributes nothing, since a contribution with no number cannot be filed on the challan.</li>
+                <li><strong>TDS</strong> comes from the fiscal-year tax slabs by year-to-date projection — finalize earlier months first so each month's tax builds on the last.</li>
+                <li><strong>TADA</strong> (travel/daily allowance) auto-fills from this period's Approved TADA Claims (🔗 marks a claim-linked amount) and is added after TDS as a non-taxable reimbursement — hand-edit or clear it freely. Finalize marks linked claims Paid; Reopen reverts them to Approved.</li>
+                <li><strong>Advances</strong>: active installments are auto-deducted, and repayment rows are written to Advances &amp; Loans on Finalize.</li>
+              </ul>
             </div>
           </>
         )}

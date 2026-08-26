@@ -825,15 +825,17 @@ export default function Stock() {
                     const fmtVal   = (qty) => rate > 0 && qty !== 0
                       ? `NPR ${Math.round(qty * rate).toLocaleString('en-NP')}`
                       : '—'
-                    // The row's own opacity dimming (hasData ? 1 : 0.4) can't live on the sticky
-                    // cells' background — a sticky cell needs a fully OPAQUE background so
-                    // horizontally-scrolled-away columns don't show through underneath it, so the
-                    // dimming is applied to each sticky cell's own content/border instead of via
-                    // the shared row-level opacity every other cell already gets for free.
+                    // No-activity rows are muted by WEIGHT and the anchor cells' colour, never by row
+                    // opacity — DESIGN.md's own Don't: opacity multiplies through every cell's text
+                    // colour and takes the row below AA (S613; this row was the product's one
+                    // violation of it). The body cells already read as quiet — every one shows an
+                    // em-dash when empty — so only the two loud sticky anchors (name, COGS) need
+                    // stepping down. A sticky cell still needs its fully OPAQUE background so
+                    // scrolled-away columns don't show through underneath it.
                     const stickyBg = 'var(--theme-card)'
                     return (
-                      <tr key={item.id} style={{ opacity: hasData ? 1 : 0.4 }}>
-                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)', position: 'sticky', left: 0, zIndex: 1, background: stickyBg, opacity: hasData ? 1 : 0.4 }}>{item.name}</td>
+                      <tr key={item.id}>
+                        <td style={{ fontWeight: hasData ? 600 : 400, color: hasData ? 'var(--theme-text1)' : 'var(--theme-text3)', position: 'sticky', left: 0, zIndex: 1, background: stickyBg }}>{item.name}</td>
                         <td><span className="badge badge-yellow">{item.categories?.name}</span></td>
                         <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
                         <td style={{ textAlign: 'right' }}>{row.opening !== '' ? Number(row.opening).toLocaleString() : '—'}</td>
@@ -853,7 +855,7 @@ export default function Stock() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmtVal(wastQty)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>{fmtVal(staffQty)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{fmtVal(closeQty)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: used < 0 ? 'var(--theme-red-text)' : 'var(--theme-accent-ink)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 1, background: stickyBg, opacity: hasData ? 1 : 0.4 }}>
+                        <td style={{ textAlign: 'right', fontWeight: hasData ? 700 : 400, color: used < 0 ? 'var(--theme-red-text)' : hasData ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 1, background: stickyBg }}>
                           {hasData ? fmtVal(used) : '—'}
                         </td>
                       </tr>

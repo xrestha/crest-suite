@@ -501,7 +501,7 @@ export default function Periods() {
             <p className="page-subtitle">
               Manage BS periods across all properties
               {needsAttention.length > 0 && (
-                <span style={{ marginLeft: 12, color: 'var(--theme-amber)', fontWeight: 600 }}>
+                <span style={{ marginLeft: 12, color: 'var(--theme-amber-text)', fontWeight: 600 }}>
                   · {needsAttention.length} need{needsAttention.length === 1 ? 's' : ''} attention
                 </span>
               )}
@@ -562,18 +562,18 @@ export default function Periods() {
                               >
                                 {BS_MONTHS.map((m, i) => <option key={i} value={i + 1}>{i + 1} — {m}</option>)}
                               </select>
-                              {editAllError && <span style={{ color: 'var(--theme-red)', fontSize: 11 }}>{editAllError}</span>}
+                              {editAllError && <span style={{ color: 'var(--theme-red-text)', fontSize: 11 }}>{editAllError}</span>}
                             </div>
                           </td>
                         ) : (
                           <>
-                            <td style={{ color: expired ? 'var(--theme-amber)' : 'var(--theme-text1)' }}>
+                            <td style={{ color: expired ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
                               {openPeriod ? `${BS_MONTHS[openPeriod.bs_month - 1]} ${openPeriod.bs_year}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                             </td>
                             <td>
                               {openPeriod
                                 ? expired
-                                  ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: 'var(--theme-amber)', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)' }}>EXPIRED</span>
+                                  ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: 'var(--theme-amber-text)', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)' }}>EXPIRED</span>
                                   : <span className="badge badge-green">OPEN</span>
                                 : <span className="badge badge-gray">NO PERIOD</span>
                               }
@@ -603,14 +603,14 @@ export default function Periods() {
                                   <button
                                     title="Edit period"
                                     onClick={() => { setEditingAllClientId(c.id); setEditAllForm({ bs_year: openPeriod.bs_year, bs_month: openPeriod.bs_month }); setEditAllError('') }}
-                                    style={{ fontSize: 13, padding: '4px 9px', borderRadius: 5, cursor: 'pointer', background: 'rgba(201,168,76,0.07)', border: '1px solid rgba(201,168,76,0.35)', color: 'var(--theme-accent)' }}
+                                    style={{ fontSize: 13, padding: '4px 9px', borderRadius: 5, cursor: 'pointer', background: 'rgba(201,168,76,0.07)', border: '1px solid rgba(201,168,76,0.35)', color: 'var(--theme-accent-ink)' }}
                                   >✏</button>
                                 )}
                                 {openPeriod ? (
                                   <>
                                     <button
                                       onClick={() => adminCloseAndAdvance(openPeriod, c.id)}
-                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 5, cursor: 'pointer', background: 'rgba(248,113,113,0.07)', border: '1px solid rgba(248,113,113,0.3)', color: 'var(--theme-red)' }}
+                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 5, cursor: 'pointer', background: 'rgba(248,113,113,0.07)', border: '1px solid rgba(248,113,113,0.3)', color: 'var(--theme-red-text)' }}
                                     >
                                       Close & Start Next
                                     </button>
@@ -628,7 +628,7 @@ export default function Periods() {
                                 ) : (
                                   <button
                                     onClick={() => adminCreatePeriod(c.id)}
-                                    style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 5, cursor: 'pointer', background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.3)', color: 'var(--theme-green)' }}
+                                    style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 5, cursor: 'pointer', background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.3)', color: 'var(--theme-green-text)' }}
                                   >
                                     + Create Period
                                   </button>
@@ -694,7 +694,7 @@ export default function Periods() {
               </select>
             </div>
           </div>
-          {error && <p style={{ color: 'var(--theme-red)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
+          {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
           <div className="form-actions">
             <button className="btn btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
             <button className="btn btn-primary" onClick={createPeriod} disabled={creating}>
@@ -708,7 +708,7 @@ export default function Periods() {
         <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(251,191,36,0.35)', background: 'rgba(251,191,36,0.04)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
             <div>
-              <p style={{ color: 'var(--theme-amber)', margin: 0, fontSize: 14, fontWeight: 600 }}>
+              <p style={{ color: 'var(--theme-amber-text)', margin: 0, fontSize: 14, fontWeight: 600 }}>
                 ◷ {BS_MONTHS[openPeriod.bs_month - 1]} {openPeriod.bs_year} has ended
               </p>
               <p style={{ color: 'var(--theme-text2)', margin: '4px 0 0', fontSize: 12 }}>
@@ -719,7 +719,7 @@ export default function Periods() {
               onClick={() => closeAndAdvance(openPeriod)}
               style={{
                 flexShrink: 0, background: 'rgba(251,191,36,0.12)',
-                border: '1px solid rgba(251,191,36,0.4)', color: 'var(--theme-amber)',
+                border: '1px solid rgba(251,191,36,0.4)', color: 'var(--theme-amber-text)',
                 borderRadius: 6, padding: '8px 18px', cursor: 'pointer',
                 fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap'
               }}
@@ -748,7 +748,7 @@ export default function Periods() {
 
       {openCount > 1 && (
         <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(251,191,36,0.3)' }}>
-          <p style={{ color: 'var(--theme-amber)', fontSize: 13, margin: 0 }}>
+          <p style={{ color: 'var(--theme-amber-text)', fontSize: 13, margin: 0 }}>
             ⚠ You have {openCount} open periods. It's recommended to keep only one open at a time.
           </p>
         </div>
@@ -812,7 +812,7 @@ export default function Periods() {
                                 ))}
                               </select>
                               {editError && (
-                                <span style={{ color: 'var(--theme-red)', fontSize: 12 }}>{editError}</span>
+                                <span style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>{editError}</span>
                               )}
                             </div>
                           </td>
@@ -867,7 +867,7 @@ export default function Periods() {
                                 <button
                                   className="btn btn-ghost"
                                   title="Edit period"
-                                  style={{ fontSize: 13, padding: '5px 10px', lineHeight: 1, color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.35)', background: 'rgba(201,168,76,0.07)' }}
+                                  style={{ fontSize: 13, padding: '5px 10px', lineHeight: 1, color: 'var(--theme-accent-ink)', borderColor: 'rgba(201,168,76,0.35)', background: 'rgba(201,168,76,0.07)' }}
                                   onClick={() => startEdit(p)}
                                 >
                                   ✏
@@ -893,7 +893,7 @@ export default function Periods() {
                               {isAdmin && (p.status === 'open' ? (
                                 <button
                                   className="btn btn-ghost"
-                                  style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}
+                                  style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}
                                   onClick={() => closeAndAdvance(p)}
                                 >
                                   Close &amp; Start Next
@@ -903,7 +903,7 @@ export default function Periods() {
                                   <Tip text="Fix a mistake in this closed period directly (Stock Count already lets admin edit a closed period), then use this to push the correction into the next period's opening stock — no reopening needed.">
                                     <button
                                       className="btn btn-ghost"
-                                      style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-accent)', borderColor: 'rgba(201,168,76,0.35)', background: 'rgba(201,168,76,0.07)' }}
+                                      style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-accent-ink)', borderColor: 'rgba(201,168,76,0.35)', background: 'rgba(201,168,76,0.07)' }}
                                       onClick={() => resyncOpeningStock(p)}
                                     >
                                       Resync Opening Stock →
@@ -912,7 +912,7 @@ export default function Periods() {
                                   <Tip text="Resumes full data entry for this month — blocked whenever a later period is already open (only one period can be open per client). Use Resync Opening Stock above for a one-off correction instead.">
                                     <button
                                       className="btn btn-ghost"
-                                      style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-green)', borderColor: 'rgba(52,211,153,0.35)', background: 'rgba(52,211,153,0.07)' }}
+                                      style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-green-text)', borderColor: 'rgba(52,211,153,0.35)', background: 'rgba(52,211,153,0.07)' }}
                                       onClick={() => reopenPeriod(p.id)}
                                     >
                                       Reopen
