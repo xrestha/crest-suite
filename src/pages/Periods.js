@@ -6,6 +6,7 @@ import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { getBsToday } from '../utils/bsCalendar'
 import { useNavigate, Navigate } from 'react-router-dom'
 import Tip from '../components/Tip'
+import ConfirmModal from '../components/ConfirmModal'
 import { generateMonthlyReport, saveGeneratedReport } from '../modules/ownerReport/generateMonthlyReport'
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { withTimeout } from '../utils/withTimeout'
@@ -22,6 +23,10 @@ export default function Periods() {
   const navigate = useNavigate()
   const [periods, setPeriods] = useState([])
   const [backfillBusy, setBackfillBusy] = useState(null) // period id currently posting POS bills
+  // One shared ConfirmModal for the page's consequential actions (S575 rule — period close is that
+  // rule's #1 named case, and this page ran it on window.confirm until S607). Shape:
+  // { title, body, confirmLabel, danger, run }. Rendered in BOTH returns below — this page has two.
+  const [pendingConfirm, setPendingConfirm] = useState(null)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ bs_year: 2082, bs_month: 1 })
@@ -106,10 +111,18 @@ export default function Periods() {
     }
   }
 
-  async function adminCloseAndAdvance(period, cid) {
+  function adminCloseAndAdvance(period, cid) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
-    if (!window.confirm(`Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} and open ${BS_MONTHS[nextMonth - 1]} ${nextYear}?`)) return
+    setPendingConfirm({
+      title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
+      confirmLabel: 'Close & Start Next',
+      body: `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} locks for the client's own logins and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`,
+      run: () => performAdminCloseAndAdvance(period, cid, nextYear, nextMonth),
+    })
+  }
+
+  async function performAdminCloseAndAdvance(period, cid, nextYear, nextMonth) {
     setActionClientId(cid)
     await scopedUpdateRaw('monthly_periods', cid, { status: 'closed' }).eq('id', period.id)
     const { data: newPeriod } = await scopedInsertRaw('monthly_periods', cid, { bs_year: nextYear, bs_month: nextMonth, status: 'open' }, { single: true })
@@ -119,8 +132,17 @@ export default function Periods() {
     setActionClientId(null)
   }
 
-  async function adminEndPeriod(period, cid) {
-    if (!window.confirm(`End ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} for this client without starting a new period?\n\nThe client will be blocked from recording data until a new period is created.`)) return
+  function adminEndPeriod(period, cid) {
+    setPendingConfirm({
+      title: `End ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
+      confirmLabel: 'End Period',
+      danger: true,
+      body: `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} closes with no new period started — the client is blocked from recording any data until one is created. The frozen Monthly Report is generated from the figures as they stand now.`,
+      run: () => performAdminEndPeriod(period, cid),
+    })
+  }
+
+  async function performAdminEndPeriod(period, cid) {
     setActionClientId(cid)
     await scopedUpdateRaw('monthly_periods', cid, { status: 'closed' }).eq('id', period.id)
     await generateReportBestEffort(cid, { ...period, status: 'closed' })
@@ -193,12 +215,18 @@ export default function Periods() {
     setCreating(false)
   }
 
-  async function closeAndAdvance(period) {
+  function closeAndAdvance(period) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
-    if (!window.confirm(
-      `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} and open ${BS_MONTHS[nextMonth - 1]} ${nextYear}?`
-    )) return
+    setPendingConfirm({
+      title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
+      confirmLabel: 'Close & Start Next',
+      body: `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} locks and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now — enter this month's closing count first.`,
+      run: () => performCloseAndAdvance(period, nextYear, nextMonth),
+    })
+  }
+
+  async function performCloseAndAdvance(period, nextYear, nextMonth) {
     await scopedUpdate('monthly_periods', { status: 'closed' }).eq('id', period.id)
     const { data: newPeriod, error } = await scopedInsert('monthly_periods', {
       bs_year: nextYear,
@@ -262,11 +290,23 @@ export default function Periods() {
         window.alert(`No unposted POS bills for ${label}.`)
         return
       }
-      if (!window.confirm(
-        `Post ${waiting} POS bill${waiting === 1 ? '' : 's'} from ${label} into Inventory?\n\n` +
-        'Their revenue and ingredient usage will be added to this period, so Inventory reports and stock levels catch up with what the till already sold.'
-      )) return
+      setPendingConfirm({
+        title: 'Post POS bills into Inventory',
+        confirmLabel: `Post ${waiting} bill${waiting === 1 ? '' : 's'}`,
+        body: `${waiting} POS bill${waiting === 1 ? '' : 's'} from ${label} post${waiting === 1 ? 's' : ''} into Inventory — their revenue and ingredient usage are added to this period, so Inventory reports and stock levels catch up with what the till already sold.`,
+        run: () => performPosBackfill(period, label),
+      })
+    } catch (err) {
+      console.error('POS backfill failed:', err)
+      window.alert(`Could not post POS bills for ${label}: ${err?.message || err}\n\nNothing was left half-written — each bill is posted and stamped one at a time, so re-running picks up wherever it stopped.`)
+    } finally {
+      setBackfillBusy(null)
+    }
+  }
 
+  async function performPosBackfill(period, label) {
+    setBackfillBusy(period.id)
+    try {
       // Generous: this walks every unposted bill, exploding recipes and writing two tables per
       // order, so a large backfill is legitimately slow — but it must still end.
       const { posted, skipped, error } = await withTimeout(
@@ -294,11 +334,18 @@ export default function Periods() {
       window.alert(`No ${BS_MONTHS[nextMonth - 1]} ${nextYear} period exists yet for this client — nothing to sync into.`)
       return
     }
-    if (!window.confirm(
-      `Copy ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}'s closing stock into ${BS_MONTHS[nextMonth - 1]} ${nextYear}'s opening stock?\n\nThis overwrites ${BS_MONTHS[nextMonth - 1]} ${nextYear}'s existing opening stock for any item that has a closing count in ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}.`
-    )) return
-    await carryForwardOpeningStock(period.id, nextPeriod.id)
-    window.alert(`Opening stock re-synced into ${BS_MONTHS[nextMonth - 1]} ${nextYear}.`)
+    const fromLabel = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
+    const toLabel = `${BS_MONTHS[nextMonth - 1]} ${nextYear}`
+    setPendingConfirm({
+      title: 'Resync Opening Stock',
+      confirmLabel: 'Overwrite & Resync',
+      danger: true,
+      body: `${fromLabel}'s closing stock copies into ${toLabel}'s opening stock. ${toLabel}'s existing opening stock is overwritten for every item that has a closing count in ${fromLabel}.`,
+      run: async () => {
+        await carryForwardOpeningStock(period.id, nextPeriod.id)
+        window.alert(`Opening stock re-synced into ${toLabel}.`)
+      },
+    })
   }
 
   function startEdit(p) {
@@ -364,6 +411,21 @@ export default function Periods() {
     (openPeriod.bs_year === bsToday.year && openPeriod.bs_month < bsToday.month)
   )
   const nextAdvMonth = openPeriod ? (openPeriod.bs_month === 12 ? 1 : openPeriod.bs_month + 1) : null
+
+  // Rendered in BOTH returns below — this page has two (admin all-clients view and the per-client
+  // view), and a modal that lives in only one of them silently never opens from the other (the
+  // S578 PosOrders two-returns trap).
+  const confirmModalEl = pendingConfirm && (
+    <ConfirmModal
+      title={pendingConfirm.title}
+      confirmLabel={pendingConfirm.confirmLabel}
+      danger={pendingConfirm.danger}
+      onCancel={() => setPendingConfirm(null)}
+      onConfirm={() => { const run = pendingConfirm.run; setPendingConfirm(null); run() }}
+    >
+      {pendingConfirm.body}
+    </ConfirmModal>
+  )
 
   // ── Admin all-clients view ───────────────────────────────────────────────
   if (isAdmin && !clientId) {
@@ -527,6 +589,7 @@ export default function Periods() {
             </div>
           )}
         </div>
+        {confirmModalEl}
       </div>
     )
   }
@@ -813,6 +876,7 @@ export default function Periods() {
           </div>
         )}
       </div>
+      {confirmModalEl}
     </div>
   )
 }

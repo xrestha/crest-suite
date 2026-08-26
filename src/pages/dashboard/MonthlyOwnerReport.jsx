@@ -9,6 +9,7 @@ import { fcThresholds } from '../../shared/imsFormulas'
 import { BS_MONTHS } from '../../utils/bsCalendar'
 import SuiteGate from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
+import ConfirmModal from '../../components/ConfirmModal'
 import { printWithTitle } from '../../utils/printTitle'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
@@ -115,6 +116,7 @@ export default function MonthlyOwnerReport() {
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false)
   const [generatorName, setGeneratorName] = useState('')
   const [genError, setGenError] = useState('')
   const [bizInfo, setBizInfo] = useState({ name: '', vat: '', address: '', vatReg: true })
@@ -192,9 +194,11 @@ export default function MonthlyOwnerReport() {
   useEffect(() => { if (selectedPeriodId) loadReport() }, [selectedPeriodId, loadReport])
 
   async function handleRegenerate() {
+    // Confirmed through ConfirmModal (S575 rule — this overwrites frozen figures, the one
+    // deliberate exception to the snapshot freeze). Rendered at the end of the main return.
     const period = periods.find(p => p.id === selectedPeriodId)
     if (!period) return
-    if (!window.confirm(`This overwrites the frozen figures for ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}. Continue?`)) return
+    setConfirmRegenerate(false)
     setRegenerating(true)
     try {
       const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId, period })
@@ -296,7 +300,7 @@ export default function MonthlyOwnerReport() {
                 Print / Save as PDF
               </button>
               {isAdmin && (
-                <button className="btn btn-ghost" onClick={handleRegenerate} disabled={regenerating}>
+                <button className="btn btn-ghost" onClick={() => setConfirmRegenerate(true)} disabled={regenerating}>
                   {regenerating ? 'Regenerating…' : 'Regenerate Snapshot'}
                 </button>
               )}
@@ -734,6 +738,20 @@ export default function MonthlyOwnerReport() {
               </div>
             )}
           </div>
+        )}
+        {confirmRegenerate && selectedPeriod && (
+          <ConfirmModal
+            title="Regenerate this snapshot?"
+            confirmLabel="Regenerate"
+            danger
+            onConfirm={handleRegenerate}
+            onCancel={() => setConfirmRegenerate(false)}
+          >
+            The frozen figures for {BS_MONTHS[selectedPeriod.bs_month - 1]} {selectedPeriod.bs_year} are
+            overwritten with a fresh computation from the data as it stands today. The original
+            snapshot is not kept — if the underlying entries changed since it froze, the report's
+            figures change with them.
+          </ConfirmModal>
         )}
       </SuiteGate>
     </div>

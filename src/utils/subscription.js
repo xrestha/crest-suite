@@ -17,7 +17,10 @@ function statusFromDays(days) {
   if (days < 0)   return { label: 'Expired',  days, color: 'var(--theme-red-text)',   bg: 'rgba(248,113,113,0.12)', border: 'rgba(248,113,113,0.3)'  }
   if (days <= 7)  return { label: fmt(days),   days, color: 'var(--theme-red-text)',   bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.25)' }
   if (days <= 30) return { label: fmt(days),   days, color: 'var(--theme-amber-text)', bg: 'rgba(251,191,36,0.10)',  border: 'rgba(251,191,36,0.25)'  }
-  return            { label: fmt(days),   days, color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.10)',  border: 'rgba(52,211,153,0.25)'  }
+  // Green tint at 0.06, not 0.10: green-text sits closest to the AA line of the three variants,
+  // and at 0.10 the healthy chip measured 4.42:1 on the Light preset — the one state that renders
+  // for months on end (S607). The fainter wash keeps the hue while the text carries the meaning.
+  return            { label: fmt(days),   days, color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.06)',  border: 'rgba(52,211,153,0.2)'   }
 }
 
 // Per-date status helper — pass any date string directly

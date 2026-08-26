@@ -231,24 +231,9 @@ export default function PayrollRun() {
 
   async function regenerate() {
     if (!run || run.status === 'finalized') return
-    // Regenerate rebuilds from LIVE employees, so a payslip belonging to someone who has since
-    // been settled or deactivated is deleted and never re-inserted. That payslip is real — they
-    // worked part of the month — and losing it is silent, which is why this asks rather than the
-    // staleness banner merely mentioning it.
-    if (freshness.departed?.length > 0) {
-      const names = freshness.departed.map(nameOf)
-      const proceed = window.confirm(
-        `${names.slice(0, 8).join(', ')}${names.length > 8 ? `, +${names.length - 8} more` : ''} `
-        + `${names.length === 1 ? 'has a payslip' : 'have payslips'} in this run but ${names.length === 1 ? 'is' : 'are'} no longer active `
-        + `(settled or deactivated).
-
-Regenerating rebuilds the run from active employees only, so `
-        + `${names.length === 1 ? 'that payslip' : 'those payslips'} will be deleted and not restored.
-
-Continue?`
-      )
-      if (!proceed) return
-    }
+    // The departed-payslip warning lives in the regenerate ConfirmModal's own body below (S607) —
+    // it used to be a second window.confirm raised on top of that modal's confirm, so the same
+    // action asked twice through two different kinds of dialog.
     setConfirmAction(null)
     setBusy(true); setMsg('')
     const ytdMap = await fetchYtdMap(scopedFrom, period)
@@ -700,21 +685,37 @@ Continue?`
         </div>
       )}
 
-      {confirmAction === 'regenerate' && (
-        <ConfirmModal
-          title="Regenerate this payroll draft?"
-          confirmLabel="Regenerate"
-          busy={busy} busyLabel="Recomputing…"
-          onConfirm={regenerate}
-          onCancel={() => setConfirmAction(null)}
-        >
-          <p style={{ margin: 0 }}>
-            Every payslip is recomputed from current salary, attendance, overtime and tax data.
-            Manual TDS and TADA overrides are reset — TADA re-fills from the claims currently
-            Approved for this period. Nothing is finalized by this step.
-          </p>
-        </ConfirmModal>
-      )}
+      {confirmAction === 'regenerate' && (() => {
+        // Regenerate rebuilds from LIVE employees, so a payslip belonging to someone since settled
+        // or deactivated is deleted and never re-inserted. That payslip is real — they worked part
+        // of the month — and losing it is silent, which is why the modal names them (S600 gate;
+        // folded in here from a second window.confirm that used to stack on top of this one, S607).
+        const departedNames = (freshness.departed || []).map(nameOf)
+        return (
+          <ConfirmModal
+            title="Regenerate this payroll draft?"
+            confirmLabel="Regenerate"
+            danger={departedNames.length > 0}
+            busy={busy} busyLabel="Recomputing…"
+            onConfirm={regenerate}
+            onCancel={() => setConfirmAction(null)}
+          >
+            <p style={{ margin: 0 }}>
+              Every payslip is recomputed from current salary, attendance, overtime and tax data.
+              Manual TDS and TADA overrides are reset — TADA re-fills from the claims currently
+              Approved for this period. Nothing is finalized by this step.
+            </p>
+            {departedNames.length > 0 && (
+              <p style={{ margin: '10px 0 0', color: 'var(--theme-red-text)' }}>
+                {departedNames.slice(0, 8).join(', ')}{departedNames.length > 8 ? `, +${departedNames.length - 8} more` : ''}{' '}
+                {departedNames.length === 1 ? 'has a payslip' : 'have payslips'} in this run but{' '}
+                {departedNames.length === 1 ? 'is' : 'are'} no longer active (settled or deactivated) —{' '}
+                {departedNames.length === 1 ? 'that payslip' : 'those payslips'} will be deleted and not restored.
+              </p>
+            )}
+          </ConfirmModal>
+        )
+      })()}
       {confirmAction === 'finalize' && period && (() => {
         const netTotal  = payslips.reduce((s, p) => s + (p.net_pay || 0), 0)
         const tadaCount = payslips.reduce((n, p) => n + ((p.tada_amount || 0) > 0 && Array.isArray(p.tada_claim_ids) ? p.tada_claim_ids.length : 0), 0)

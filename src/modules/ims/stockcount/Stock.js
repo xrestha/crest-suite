@@ -9,6 +9,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import SearchableSelect from '../../../components/SearchableSelect'
+import ConfirmModal from '../../../components/ConfirmModal'
 import QtyInput from '../../../components/QtyInput'
 import './Stock.css'
 import { cacheItems, getCachedItems, cacheCategories, getCachedCategories, cachePeriods, getCachedPeriods, cacheStockData, getCachedStockData, enqueue, getQueue, dequeue } from '../../../utils/offlineQueue'
@@ -57,6 +58,9 @@ export default function Stock() {
   const [search, setSearch] = useState('')
   const [saveAllLoading, setSaveAllLoading] = useState(false)
   const [saved, setSaved] = useState(false)
+  // Shared ConfirmModal for the page's bulk writes (S575 rule; these three ran on window.confirm
+  // until S607): { title, body, confirmLabel, danger, run }.
+  const [pendingConfirm, setPendingConfirm] = useState(null)
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
   const [pendingSync, setPendingSync] = useState(0)
@@ -351,14 +355,24 @@ export default function Stock() {
       if (negativeItems.length > 0) {
         const names = negativeItems.map(i => i.name).join(', ')
         if (isAdmin) {
-          if (!window.confirm(`${negativeItems.length} item(s) show negative usage (more used than was ever bought or on hand): ${names}.\n\nSave anyway?`)) return
-        } else {
-          alert(`Can't save — ${negativeItems.length} item(s) show negative usage (more used than was ever bought or on hand): ${names}.\n\nFix the counts before saving.`)
+          setPendingConfirm({
+            title: 'Negative usage detected',
+            confirmLabel: 'Save Anyway',
+            danger: true,
+            body: `${negativeItems.length} item(s) show negative usage — more used than was ever bought or on hand: ${names}. Saving records these figures as the period's counts.`,
+            run: () => performSaveAll(visibleItems),
+          })
           return
         }
+        alert(`Can't save — ${negativeItems.length} item(s) show negative usage (more used than was ever bought or on hand): ${names}.\n\nFix the counts before saving.`)
+        return
       }
     }
 
+    await performSaveAll(visibleItems)
+  }
+
+  async function performSaveAll(visibleItems) {
     setSaveAllLoading(true)
     for (const item of visibleItems) { await saveRow(item.id) }
     setSaveAllLoading(false)
@@ -389,11 +403,20 @@ export default function Stock() {
     setWBusy(false)
   }
 
-  async function clearAll() {
+  function clearAll() {
     const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
     const label = TABS.find(t => t.id === activeTab)?.label || 'these'
     const visibleItems = filteredItems()
-    if (!window.confirm(`Clear all entered ${label} values for the ${visibleItems.length} item(s) currently shown? This cannot be undone.`)) return
+    setPendingConfirm({
+      title: `Clear ${label} values`,
+      confirmLabel: 'Clear All',
+      danger: true,
+      body: `Every entered ${label} value for the ${visibleItems.length} item(s) currently shown is set to 0 and saved. This cannot be undone.`,
+      run: () => performClearAll(fieldKey, visibleItems),
+    })
+  }
+
+  async function performClearAll(fieldKey, visibleItems) {
     setSaveAllLoading(true)
     for (const item of visibleItems) { await persistValue(item.id, fieldKey, 0) }
     setStockData(prev => {
@@ -427,10 +450,18 @@ export default function Stock() {
       alert(`${prevLabel} has no saved closing counts to pull.`)
       return
     }
-    if (!window.confirm(`Copy ${counted.length} item closing count(s) from ${prevLabel} into ${periodLabel}'s Opening Stock?\n\nExisting opening entries for those items will be overwritten.`)) {
-      setSaveAllLoading(false)
-      return
-    }
+    setSaveAllLoading(false)
+    setPendingConfirm({
+      title: 'Pull last month’s closing stock',
+      confirmLabel: 'Overwrite Opening Stock',
+      danger: true,
+      body: `${counted.length} item closing count(s) from ${prevLabel} copy into ${periodLabel}'s Opening Stock. Existing opening entries for those items are overwritten.`,
+      run: () => performPullFromLastMonth(counted),
+    })
+  }
+
+  async function performPullFromLastMonth(counted) {
+    setSaveAllLoading(true)
     const rows = counted.map(r => ({ period_id: selectedPeriod.id, item_id: r.item_id, qty: r.physical_qty }))
     await supabase.from('opening_stock').upsert(rows, { onConflict: 'period_id,item_id' })
     setStockData(prev => {
@@ -699,12 +730,17 @@ export default function Stock() {
                                   ? <Tip text="Items with no category set, or pointing at a category that no longer exists. They are included in the Totals below and in the item table — assign them a category in Item Master to file them properly." width={280}>{name}</Tip>
                                   : name}
                               </td>
+                              {/* *-text variants (accent-ink for accent): these are TEXT on the
+                                  card, and the base tokens fail AA on the light presets — the
+                                  tfoot below already used the variants while these body cells
+                                  did not (S607; the tdStyle() argument shape is exactly what a
+                                  property-level color: grep cannot see). */}
                               <td style={tdStyle('var(--theme-text3)')}>{s.opening > 0 ? fmt(s.opening) : '—'}</td>
-                              <td style={tdStyle('var(--theme-accent)')}>{s.purchases > 0 ? fmt(s.purchases) : '—'}</td>
-                              <td style={tdStyle('var(--theme-red)')}>{(s.returns || 0) > 0 ? fmt(s.returns) : '—'}</td>
-                              <td style={tdStyle('var(--theme-green)')}>{s.closing > 0 ? fmt(s.closing) : '—'}</td>
-                              <td style={tdStyle('var(--theme-red)')}>{s.wastage > 0 ? fmt(s.wastage) : '—'}</td>
-                              <td style={tdStyle('var(--theme-purple)')}>{(s.staffMeals || 0) > 0 ? fmt(s.staffMeals) : '—'}</td>
+                              <td style={tdStyle('var(--theme-accent-ink)')}>{s.purchases > 0 ? fmt(s.purchases) : '—'}</td>
+                              <td style={tdStyle('var(--theme-red-text)')}>{(s.returns || 0) > 0 ? fmt(s.returns) : '—'}</td>
+                              <td style={tdStyle('var(--theme-green-text)')}>{s.closing > 0 ? fmt(s.closing) : '—'}</td>
+                              <td style={tdStyle('var(--theme-red-text)')}>{s.wastage > 0 ? fmt(s.wastage) : '—'}</td>
+                              <td style={tdStyle('var(--theme-purple-text)')}>{(s.staffMeals || 0) > 0 ? fmt(s.staffMeals) : '—'}</td>
                               <td style={{ textAlign: 'right', fontWeight: 600, color: s.cogs < 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{fmt(s.cogs)}</td>
                             </tr>
                           )
@@ -1269,6 +1305,17 @@ export default function Stock() {
           </>
         )
       })()}
+      {pendingConfirm && (
+        <ConfirmModal
+          title={pendingConfirm.title}
+          confirmLabel={pendingConfirm.confirmLabel}
+          danger={pendingConfirm.danger}
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => { const run = pendingConfirm.run; setPendingConfirm(null); run() }}
+        >
+          {pendingConfirm.body}
+        </ConfirmModal>
+      )}
     </div>
   )
 }

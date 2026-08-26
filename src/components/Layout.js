@@ -14,6 +14,7 @@ import { usePosIdleLock } from '../modules/pos/usePosIdleLock'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS } from '../utils/bsCalendar'
+import { colorTint } from '../data/pricingPlans'
 import {
   Activity, ArrowRightLeft, ArrowUpDown, Banknote, BarChart3, BookUser, Boxes, Briefcase,
   Building2, Calculator, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
@@ -598,10 +599,11 @@ export default function Layout() {
     const nextTier  = plan === 'growth' ? 'pro' : 'growth'
     const tierLabel = nextTier === 'growth' ? 'Growth' : 'Pro'
     // Tokens, not the Dark preset's own hex — this CTA was painting brass/green literals on all
-    // ten presets. The companion alpha tints stay rgba literals per DESIGN.md's tint convention,
-    // so they are declared alongside rather than derived by string-concatenating the token.
-    const tierColor = nextTier === 'growth' ? 'var(--theme-green)' : 'var(--theme-accent)'
-    const tierTint  = nextTier === 'growth' ? 'rgba(52,211,153,' : 'rgba(201,168,76,'
+    // ten presets. Text takes the *-text/-ink variants (the base tokens fail AA on the light
+    // presets); the tints derive from the PRESET's own base token via colorTint, because the old
+    // rgba literals were the DARK preset's green/brass frozen under every light theme (S607).
+    const tierColor = nextTier === 'growth' ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)'
+    const tierTint  = pct => colorTint(nextTier === 'growth' ? 'var(--theme-green)' : 'var(--theme-accent)', pct)
     const locked = [...NAV.slice(1), ...REPORTS].filter(
       item => item.featureKey && !hasFeature(item.featureKey) && item.minPlan === nextTier
     )
@@ -610,7 +612,7 @@ export default function Layout() {
     const more  = locked.length - shown.length
 
     return (
-      <div style={{ margin: '4px 8px 2px', border: `1px solid ${tierTint}0.15)`, borderRadius: 'var(--radius-lg)', padding: '10px 12px', background: `${tierTint}0.04)` }}>
+      <div style={{ margin: '4px 8px 2px', border: `1px solid ${tierTint(15)}`, borderRadius: 'var(--radius-lg)', padding: '10px 12px', background: tierTint(4) }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
           <span style={{ fontSize: 9, fontWeight: 800, color: tierColor, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{tierLabel} Plan</span>
           <span style={{ fontSize: 9, color: 'var(--theme-text3)' }}>{locked.length} features</span>
@@ -624,7 +626,7 @@ export default function Layout() {
         {more > 0 && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 2, paddingLeft: 16 }}>and {more} more…</div>}
         <button
           onClick={() => navigate('/pricing')}
-          style={{ marginTop: 10, width: '100%', fontSize: 12, fontWeight: 700, color: tierColor, background: `${tierTint}0.12)`, border: `1px solid ${tierTint}0.3)`, borderRadius: 'var(--radius-md)', padding: '7px 0', cursor: 'pointer', letterSpacing: '0.04em' }}
+          style={{ marginTop: 10, width: '100%', fontSize: 12, fontWeight: 700, color: tierColor, background: tierTint(12), border: `1px solid ${tierTint(30)}`, borderRadius: 'var(--radius-md)', padding: '7px 0', cursor: 'pointer', letterSpacing: '0.04em' }}
         >
           Upgrade to {tierLabel} ↑
         </button>
@@ -1001,8 +1003,11 @@ export default function Layout() {
               style={{
                 width: '100%', fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
                 color: plan === 'growth' ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)',
-                background: plan === 'growth' ? 'rgba(201,168,76,0.1)' : 'rgba(52,211,153,0.1)',
-                border: `1px solid ${plan === 'growth' ? 'rgba(201,168,76,0.25)' : 'rgba(52,211,153,0.25)'}`,
+                // Tint from the preset's own token — the old rgba literals froze the DARK
+                // preset's green/brass under every light theme, and the chip measured 4.42:1
+                // on Light (S607).
+                background: colorTint(plan === 'growth' ? 'var(--theme-accent)' : 'var(--theme-green)', 10),
+                border: `1px solid ${colorTint(plan === 'growth' ? 'var(--theme-accent)' : 'var(--theme-green)', 25)}`,
                 borderRadius: 'var(--radius-md)', padding: '7px 8px', cursor: 'pointer', display: 'block'
               }}
             >
