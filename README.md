@@ -159,6 +159,56 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S612 — 2026-08-26 — The product-wide re-run scored 32/40, and every finding was the same finding
+
+A `/impeccable critique` product-wide re-run against the 2026-08-18 baseline (34/40): **32/40, 0 P0
+/ 2 P1 / 3 P2**, snapshot at `.impeccable/critique/2026-08-26T09-59-51Z__crest-suite-all-modules.md`.
+The drop is evidence-depth, not regression — this run measured the Light preset (Dark measures
+clean; Light had 4 real failures), injected the live detector, and grepped adoption of the
+product's own new patterns. Which produced the run's actual thesis: **every P1/P2 was a rule the
+product itself had written, enforced on 3 pages and absent on ~19.** The fix pass ("fix all") then
+shipped everything in 8 commits:
+
+- **The silent-zero P1, closed product-wide.** 69 error-dropping destructures in `src/modules`;
+  `firstError`/`ReportPage` were adopted by exactly 3 files while `VatReport`/`NonVatReport` — the
+  IRD filing pair — had no error handling at all, and the Monthly Owner Report's compute sections
+  could freeze a failed read into the immutable snapshot as zeros (`runSection` only catches
+  THROWN failures; a Supabase error isn't one — the new `throwFirstError()` makes it one). Every
+  report-class page in IMS/HR/POS now renders the shared `ReportLoadError` card (extracted from
+  `ReportPage`) on a failed read, gates its KPI strip on `!loading && !loadError`, and never lets
+  a failure wear `NoPeriodState` or an empty state. Two shapes were worse than wrong figures:
+  `Overheads`' failed read fell into the carry-forward branch, where Save would overwrite real
+  rows with a seeded draft (a data-loss shape — the form now blocks outright), and
+  `MonthlyOwnerReport` treated a failed snapshot read as "no snapshot exists" and lazy-generated.
+- **The S601 race guard was still missing from the two pages the rule was written about.**
+  `ConsolidatedPnl` and `StockAgeing` — CLAUDE.md documented the sweep as covering them; grep said
+  otherwise. Wired, and the claim corrected to the measured 21 pages.
+- **Period close ran entirely on `window.confirm`** — the S575 ConfirmModal rule's #1 named case,
+  in `Periods.js` ×5 (both returns of the page carry the modal — the S578 two-returns trap), plus
+  Stock Count's three bulk writes, Monthly Owner Report's Regenerate, and PayrollRun's
+  departed-payslip warning, which used to stack an OS confirm ON TOP of the ConfirmModal.
+- **Light-preset contrast + truncation stragglers + minors:** Layout's tier CTA/upgrade chip had
+  the Dark preset's green frozen under every light theme (now `colorTint()` of the preset's own
+  token); Stock Count's rollup cells passed base tokens through `tdStyle()` — the argument shape a
+  property-level grep cannot see, and exactly where the two assessment agents disagreed; the
+  sub-status chip's green tint dropped to 0.06 (measured 4.42:1); 4 unpaged S528-class reads incl.
+  `Items.js`'s `checkAllUsage`, which feeds the force-delete guard; 12 plain-case 10px literals on
+  the dashboard raised to 11 (uppercase micro-caps and chart ticks deliberately stay on the
+  documented micro step); ~17 bare row controls named; the group matrix keyed by position (two
+  outlets can share a name); Vendor Balance Confirmation moved to Finance Reports (it's an IRD
+  letter, not menu analysis); `rate=0` no longer saves ("0" is a truthy string); dead
+  `src/auth/PinEntry.js` deleted (zero importers, pre-auth-model `shared_users`).
+
+Method notes, both re-learned: all three fix subagents were killed mid-run by a session limit —
+the checkpoint-to-disk rule meant the three files caught mid-edit (`VendorReport`,
+`StockMovements`, `HrReports`) were identifiable in seconds as "modified but uncheckpointed", and
+everything else was finishable inline. And the session-number collision: this session's comments
+initially said S607, which already names the preset-retirement session — 124 references relabelled
+to S612 before they fossilized. **Verified by CI build per commit; not smoke-tested live** — the
+error branches need a forced failed read to exercise, which is a follow-up for a dummy-client
+session. Not claimed as finished: an unenumerated tail of bare table-cell inputs beyond the
+critique's named worst offenders.
+
 ### S611 — 2026-08-26 — The sidebar's row density, and the floor that stopped it
 
 Asked from a screenshot: less space between the nav items. `.sidebar-link` was `padding: 8px 12px`
