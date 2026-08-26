@@ -159,6 +159,30 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S611 — 2026-08-26 — The sidebar's row density, and the floor that stopped it
+
+Asked from a screenshot: less space between the nav items. `.sidebar-link` was `padding: 8px 12px`
+plus a `1px` vertical margin — a ~38px row for a 13px label — and the fix was two passes, 8px → 6px
+→ 4px with the margin dropped to 0, landing at ~28px. `.sidebar-divider`'s top margin (8px → 4px)
+and `.sidebar-section-label`'s vertical padding (4px → 2px) moved with it, or the groups would have
+kept their old gaps around newly-tight rows and the sidebar would read as *more* uneven, not less.
+
+**The reason this was safe to tighten at all is the one thing worth writing down.** The
+`@media (pointer: coarse)` block added in S574 holds `.sidebar-link` at `min-height: 40px`, so the
+desktop padding is not what a finger hits — a tablet keeps its 40px rows no matter what the padding
+says. Density and touch target are already separate controls here, which is exactly what that block
+was for. Tightening padding without it would have taken a thumb target to 28px, under the 44px
+WCAG 2.5.8 goal and under the 24px hard floor.
+
+**Where the next 4px would have to come from.** Asked what the font size was: 13px
+(`--font-size-nav-item`), which is the **bottom of DESIGN.md's closed type scale** — so the label is
+not a lever, and shrinking it would put an undocumented size in the shell that every other size in
+the product is measured against. The remaining slack is the 18px `.sidebar-icon` box and the 10px
+section label (itself hardcoded rather than tokenised). Padding is spent.
+
+`CACHE_NAME` bumped twice, `crest-v126` → `v128` — once per pass. A CSS-only change is exactly the
+kind the cache-first service worker would otherwise never deliver.
+
 ### S610 — 2026-08-24 — Documenting the palette found the thing the palette was hiding
 
 `/impeccable document` over a DESIGN.md that had been edited three times in two days. The frontmatter
