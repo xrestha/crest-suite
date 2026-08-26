@@ -330,6 +330,7 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
                     <td style={{ padding: '6px 4px 4px', verticalAlign: 'middle', textAlign: 'center' }}>
                       <input
                         type="checkbox"
+                        aria-label={`VAT-inclusive line for ${selItem?.name || 'new line'}`}
                         checked={line.vat_inclusive}
                         onChange={() => updateBillLine(line._key, 'vat_inclusive', !line.vat_inclusive)}
                         style={{ cursor: 'pointer', width: 15, height: 15, accentColor: 'var(--theme-amber)' }}
@@ -339,6 +340,7 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
                       <input
                         type="number" min="0" step="any"
+                        aria-label={`Line total for ${selItem?.name || 'new line'}`}
                         value={line._amtDraft}
                         placeholder={lineAmount > 0 ? lineAmount.toFixed(2) : ''}
                         onChange={e => setLineTotal(line._key, e.target.value)}
@@ -360,12 +362,12 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
                       )}
                     </td>
                     <td style={{ padding: '6px 8px 6px', verticalAlign: 'middle' }}>
-                      <input type="date" value={line.expiry_date}
+                      <input type="date" aria-label={`Expiry date for ${selItem?.name || 'new line'}`} value={line.expiry_date}
                         onChange={e => updateBillLine(line._key, 'expiry_date', e.target.value)}
                         style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 8px', fontSize: 12, color: 'var(--theme-text2)', outline: 'none', width: '100%' }} />
                     </td>
                     <td style={{ padding: '6px 8px 6px', verticalAlign: 'middle' }}>
-                      <input type="number" min="0" value={line.shelf_life} placeholder="Days"
+                      <input type="number" min="0" aria-label={`Shelf life in days for ${selItem?.name || 'new line'}`} value={line.shelf_life} placeholder="Days"
                         onChange={e => updateBillLine(line._key, 'shelf_life', e.target.value)}
                         title="Enter days to auto-fill expiry date"
                         style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 8px', fontSize: 12, color: 'var(--theme-text2)', outline: 'none', width: '100%', textAlign: 'right' }} />

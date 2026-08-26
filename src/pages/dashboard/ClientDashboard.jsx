@@ -1073,7 +1073,7 @@ export default function ClientDashboard() {
   // 15+ inline style objects. kpiValueStyle keeps the hero (bigger/bolder) vs secondary two-tier
   // hierarchy explicit via its params, rather than one flattened size for every card.
   const kpiLabelStyle = { fontSize: 10, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }
-  const kpiSubtextStyle = { fontSize: 10, color: 'var(--theme-text3)', marginTop: 4 }
+  const kpiSubtextStyle = { fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }
 
   const kpiValueStyle = (size, weight = 700) => ({ fontSize: size, fontWeight: weight, lineHeight: 1.1 })
 
@@ -1571,9 +1571,9 @@ export default function ClientDashboard() {
                       return (
                         <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                           <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
-                          <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{entry.name}</span>
-                          {big && <span style={{ fontSize: 10, color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString()}</span>}
-                          <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
+                          <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{entry.name}</span>
+                          {big && <span style={{ fontSize: 11, color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString()}</span>}
+                          <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
                         </div>
                       )
                     })}
@@ -1805,7 +1805,7 @@ export default function ClientDashboard() {
             <ChartCard
               title="Food Cost % — Monthly Trend"
               footer={<>
-                <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 11, flexWrap: 'wrap' }}>
                   <span style={{ color: 'var(--theme-green-text)' }}>● ≤{fcBands.warn}% Good</span>
                   <span style={{ color: 'var(--theme-amber-text)' }}>● {fcBands.warn}–{fcBands.critical}% Watch</span>
                   <span style={{ color: 'var(--theme-red-text)' }}>● &gt;{fcBands.critical}% High</span>
@@ -1814,7 +1814,7 @@ export default function ClientDashboard() {
                 {/* A withheld month is stated, not silently dropped — otherwise the chart quietly
                     claims the current month has no figure at all. */}
                 {fcOpenTooEarly && (
-                  <div style={{ fontSize: 10, marginTop: 6, color: 'var(--theme-text2)' }}>
+                  <div style={{ fontSize: 11, marginTop: 6, color: 'var(--theme-text2)' }}>
                     {fcOpenPoint.label} in progress — Day {dayOfPeriod} of {periodDays}. A part-month
                     usually buys stock for the whole month, so its ratio is arithmetic rather than a
                     signal; it joins the line from Day {SETTLE_DAY}.
@@ -1895,11 +1895,11 @@ export default function ClientDashboard() {
                   {/* Percentages below the slices are a share of whatever the pie actually contains,
                       which flips with the sign of the margin — say which, rather than leaving a bare
                       "23.4%" to be read against the wrong denominator. */}
-                  <div style={{ fontSize: 10, marginTop: 2, color: 'var(--theme-text3)' }}>
+                  <div style={{ fontSize: 11, marginTop: 2, color: 'var(--theme-text3)' }}>
                     {netMarginPct != null && netMarginPct > 0 ? '% of revenue' : '% of total cost'} · from Overheads page buckets
                   </div>
                   {laborBucketMissing && (
-                    <div style={{ fontSize: 10, marginTop: 4, color: 'var(--theme-amber-text)' }}>
+                    <div style={{ fontSize: 11, marginTop: 4, color: 'var(--theme-amber-text)' }}>
                       Labor not included — the Labor bucket on Overheads is empty this period, but HR payroll is NPR {Math.round(hrStats.payroll).toLocaleString('en-NP')}.
                     </div>
                   )}
@@ -2073,7 +2073,7 @@ export default function ClientDashboard() {
           <div className="card" style={{ padding: '14px 16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Top Variance Items</h3>
-              <button className="btn btn-ghost" style={{ fontSize: 10, padding: '9px 12px' }} onClick={() => navigate('/variance')}>Full Report →</button>
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '9px 12px' }} onClick={() => navigate('/variance')}>Full Report →</button>
             </div>
             {topVariance.length === 0 ? (
               <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
@@ -2115,7 +2115,7 @@ export default function ClientDashboard() {
           <div className="card" style={{ padding: '14px 16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Items to Reorder</h3>
-              <button className="btn btn-ghost" style={{ fontSize: 10, padding: '9px 12px' }} onClick={() => navigate('/reorder')}>Full Report →</button>
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '9px 12px' }} onClick={() => navigate('/reorder')}>Full Report →</button>
             </div>
             {reorderItems.length === 0 ? (
               <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
@@ -2131,11 +2131,11 @@ export default function ClientDashboard() {
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: i < reorderItems.length - 1 ? '1px solid var(--theme-bg)' : 'none' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</div>
-                      <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>Stock: {item.currentStock} · Par: {item.par} {item.uom}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>Stock: {item.currentStock} · Par: {item.par} {item.uom}</div>
                     </div>
                     <div style={{ textAlign: 'right', marginLeft: 12, flexShrink: 0 }}>
                       <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}><ArrowDown size={11} aria-hidden="true" /> {item.shortfall} {item.uom}</div>
-                      <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>NPR {item.estValue.toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>NPR {item.estValue.toLocaleString()}</div>
                     </div>
                   </div>
                 ))}

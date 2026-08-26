@@ -294,7 +294,7 @@ export default function MenuPricing() {
                 <tr key={r.id} style={{ opacity: r.pos_enabled ? 1 : 0.45 }}>
                   <td style={{ color: 'var(--theme-text2)' }}>{i + 1}</td>
                   <td style={{ textAlign: 'center' }}>
-                    <input type="checkbox" checked={r.pos_enabled} disabled={toggling[r.id]}
+                    <input type="checkbox" aria-label={`Show ${r.name} on the POS menu`} checked={r.pos_enabled} disabled={toggling[r.id]}
                       onChange={() => togglePos(r)}
                       style={{ cursor: 'pointer', width: 15, height: 15, accentColor: 'var(--theme-green)' }} />
                   </td>
@@ -597,6 +597,7 @@ export default function MenuPricing() {
                     <td style={{ textAlign: 'center' }}>
                       <input
                         type="checkbox"
+                        aria-label={`Show ${r.name} on the POS menu`}
                         checked={r.pos_enabled}
                         disabled={toggling[r.id]}
                         onChange={() => togglePos(r)}

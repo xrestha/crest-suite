@@ -233,7 +233,7 @@ export default function VatReport() {
             {periods.map(p => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
           </select>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn btn-ghost" onClick={() => printWithTitle(`VAT Report - ${periodLabel(selectedPeriod)}`)}>Print</button>
+            <button className="btn btn-ghost" onClick={() => printWithTitle(`VAT Report - ${periodLabel(selectedPeriod)}`)} disabled={!vatEntries.length || !!loadError}>Print</button>
             <button className="btn btn-ghost" onClick={exportExcel} disabled={!vatEntries.length}>Export Excel</button>
           </div>
         </div>

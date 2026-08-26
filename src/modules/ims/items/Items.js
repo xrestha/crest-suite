@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
@@ -79,7 +80,10 @@ export default function Items() {
     // reliable fix across all 8 is to intersect on this client's own item ids instead — an
     // item_id can only ever belong to one client, so this is exactly as tight as a client_id
     // filter would be, without needing per-table-specific scoping logic.
-    const { data: myItems } = await scopedFrom('items', 'id')
+    const { data: myItems, error: myItemsErr } = await scopedFrom('items', 'id')
+    // A failed read must not blank the usage map — it feeds the delete guard, and an empty map
+    // reads as "nothing references this item" (S607 silent-zero class).
+    if (myItemsErr) return
     const myItemIds = (myItems || []).map(i => i.id)
     if (myItemIds.length === 0) { setUsageMap({}); return }
 
@@ -97,7 +101,11 @@ export default function Items() {
     ]
     const map = {}
     for (const { table, label, qtyCol } of referenceTables) {
-      const { data, error } = await supabase.from(table).select(qtyCol ? `item_id, ${qtyCol}` : 'item_id').in('item_id', myItemIds)
+      // Paged (S528/S529): purchase_entries alone crosses PostgREST's silent 1000-row cap on any
+      // real client, and a truncated read here reported a used item as unused — feeding both the
+      // "unused" filter and the force-delete guard.
+      const { data, error } = await fetchAllRows(() => supabase.from(table)
+        .select(qtyCol ? `item_id, ${qtyCol}` : 'item_id').in('item_id', myItemIds).order('id'))
       if (error || !data) continue // table may not exist for this client/plan — skip quietly
       data.forEach(row => {
         if (!row.item_id) return
@@ -288,7 +296,9 @@ export default function Items() {
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return false }
     const fe = {}
     if (!form.name.trim()) fe.name = 'Item name is required.'
-    if (!form.rate) fe.rate = `Price per ${form.uom} is required — type it in, or use "Bought a pack?" to work it out.`
+    // parseFloat, not truthiness: "0" is truthy as a string, and a price of NPR 0 stored here
+    // misprices the item in every valuation at once with nothing to flag it (S607).
+    if (!form.rate || !(parseFloat(form.rate) > 0)) fe.rate = `Price per ${form.uom} is required and must be above zero — type it in, or use "Bought a pack?" to work it out.`
     setFieldErr(fe)
     if (fe.name || fe.rate) { setActiveTab('details'); return false }
 
@@ -670,6 +680,7 @@ export default function Items() {
               padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260
             }}
             placeholder="Search by name or code…"
+            aria-label="Search items by name or code"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />

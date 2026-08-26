@@ -527,8 +527,10 @@ export default function ConsolidatedPnl() {
               <thead>
                 <tr>
                   <th>Line</th>
-                  {cols.map(c => (
-                    <th key={c.name} style={{ textAlign: 'right' }}>
+                  {/* Keyed by position, not name — two outlets can legitimately share a display
+                      name (Excel dedupes them; React keys must not collide, S607). */}
+                  {cols.map((c, ci) => (
+                    <th key={ci} style={{ textAlign: 'right' }}>
                       {c.name}
                       {!c.hasPeriod ? <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--theme-text3)' }}>no period</span>
                         : c.status === 'open' ? <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--theme-amber-text)' }}>open</span> : null}
@@ -546,8 +548,8 @@ export default function ConsolidatedPnl() {
                     <td style={{ fontWeight: l.strong ? 700 : 500, color: 'var(--theme-text1)' }}>
                       {l.tip ? <Tip text={l.tip} width={300}>{l.label}</Tip> : l.label}
                     </td>
-                    {cols.map(c => (
-                      <td key={c.name} style={{
+                    {cols.map((c, ci) => (
+                      <td key={ci} style={{
                         textAlign: 'right',
                         color: c.hasPeriod ? lineColor(l, c.stmt[l.key]) : 'var(--theme-text3)',
                       }}>

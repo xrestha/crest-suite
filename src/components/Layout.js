@@ -86,6 +86,9 @@ const REPORTS = [
   { to: '/payments',             label: 'Payment Summary',      icon: Wallet, featureKey: 'payment_summary',      cat: 'money', minPlan: 'starter', minImsRole: 'manager' },
   { to: '/payables',             label: 'Outstanding Payables', icon: HandCoins, featureKey: 'outstanding_payables', cat: 'money', minImsRole: 'manager' },
   { to: '/purchase-one-lakh-report', label: 'Purchase 1L+ Report', icon: FileDigit, featureKey: 'vat_report',       cat: 'money', minImsRole: 'manager' },
+  // Finance, not Menu & Vendors (S607 IA fix): this is an IRD Annexure 13 balance letter — an
+  // accountant filing artifact like the VAT reports beside it, not a menu/vendor analysis.
+  { to: '/vendor-balance-confirmation', label: 'Vendor Balance Confirmation', icon: FileSignature, featureKey: 'vendor_balance_confirmation', cat: 'money', minImsRole: 'manager' },
   // Menu & vendors
   { to: '/best-sellers',         label: 'Best & Worst Sellers', icon: Trophy, featureKey: 'best_sellers',   cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
   { to: '/recipe-margin',        label: 'Recipe Margin',        icon: PiggyBank, featureKey: 'recipe_margin',  cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
@@ -94,7 +97,6 @@ const REPORTS = [
   { to: '/supplier-prices',      label: 'Price Tracker',        icon: Activity, featureKey: 'price_tracker',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
   { to: '/vendors-report',       label: 'Vendor Report',        icon: BookUser, featureKey: 'vendor_report',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
   { to: '/supplier-contribution', label: 'Supplier Contribution', icon: Handshake, featureKey: 'supplier_contribution', cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
-  { to: '/vendor-balance-confirmation', label: 'Vendor Balance Confirmation', icon: FileSignature, featureKey: 'vendor_balance_confirmation', cat: 'menu', minImsRole: 'manager' },
 ]
 
 // Collapsible nav groups for the IMS sidebar (Dashboard stays pinned above; Settings below).

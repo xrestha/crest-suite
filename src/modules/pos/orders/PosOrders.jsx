@@ -2314,7 +2314,7 @@ export default function PosOrders() {
                 title="bill-preview"
                 srcDoc={previewHtml}
                 scrolling="no"
-                style={{ width: 378, height: 820, border: '1px solid var(--theme-border)', borderRadius: 8, background: '#fff', display: 'block', overflow: 'hidden' }}
+                style={{ width: 378, height: 820, border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', background: '#fff', display: 'block', overflow: 'hidden' }}
               />
             ) : billingTab === 'void' && (
               <p style={{ fontSize: 12, color: 'var(--theme-text3)', fontStyle: 'italic' }}>
@@ -2588,7 +2588,7 @@ export default function PosOrders() {
                       </div>
                     )}
                     {QR_PAY_METHODS.includes(payMethod) && billQrUrl && (
-                      <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8 }}>
+                      <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)' }}>
                         <img src={billQrUrl} alt="Scan to pay" style={{ width: 110, height: 110, background: '#fff', borderRadius: 6, padding: 4, flexShrink: 0 }} />
                         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.6 }}>
                           Customer scans to pay <strong>{fmtNpr(payTotal)}</strong> — the amount arrives pre-filled and locked
@@ -2599,7 +2599,7 @@ export default function PosOrders() {
                   </>
                 ) : (
                   <>
-                    <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
+                    <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', marginBottom: 12 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                         <span style={{ color: 'var(--theme-text2)' }}>Remaining</span>
                         <span style={{ fontWeight: 700, color: remaining > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{fmtNpr(remaining)}</span>
@@ -2655,7 +2655,7 @@ export default function PosOrders() {
                           </p>
                         )}
                         {QR_PAY_METHODS.includes(tenderMethod) && billQrUrl && (
-                          <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8 }}>
+                          <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)' }}>
                             <img src={billQrUrl} alt="Scan to pay" style={{ width: 100, height: 100, background: '#fff', borderRadius: 6, padding: 4, flexShrink: 0 }} />
                             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.6 }}>
                               Customer scans to pay <strong>{fmtNpr(parseFloat(tenderAmtStr) || remaining)}</strong> for this portion.
@@ -2886,7 +2886,7 @@ export default function PosOrders() {
             style={{
               display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
               background: 'color-mix(in srgb, var(--theme-accent) 16%, transparent)', border: '1px solid var(--theme-accent)',
-              borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13.5, fontWeight: 700,
+              borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13.5, fontWeight: 700,
               color: 'var(--theme-accent-ink)',
             }}
           >
@@ -2898,7 +2898,7 @@ export default function PosOrders() {
       })()}
 
       {!isOnline && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber-text)' }}>
           <span>📵</span>
           <span><strong>Offline</strong> — orders are saved on this device and will sync when you reconnect. Billing stays disabled until then.</span>
           {pendingOrderIds.size > 0 && (
@@ -2909,7 +2909,7 @@ export default function PosOrders() {
         </div>
       )}
       {syncingOffline && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green-text)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green-text)' }}>
           ⟳ Syncing {pendingOrderIds.size} {pendingOrderIds.size === 1 ? 'order' : 'orders'}…
         </div>
       )}
@@ -2917,7 +2917,7 @@ export default function PosOrders() {
         <div style={{
           background: floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 8%, transparent)' : 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
           border: `1px solid ${floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 25%, transparent)' : 'color-mix(in srgb, var(--theme-green) 25%, transparent)'}`,
-          borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
+          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,
           color: floorMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
         }}>
           {floorMsg.replace(/^(error|ok):/, '')}
@@ -2931,7 +2931,7 @@ export default function PosOrders() {
         <div role="alert" style={{
           background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
           border: '1px solid color-mix(in srgb, var(--theme-amber) 28%, transparent)',
-          borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
+          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,
           color: 'var(--theme-text2)',
         }}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>
@@ -2945,7 +2945,7 @@ export default function PosOrders() {
         </div>
       )}
       {conflictOrders.map(c => (
-        <div key={c.order_id} style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
+        <div key={c.order_id} style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           <span>⚠</span>
           <span>
             <strong>{c.table_name}</strong>'s bill was closed on another device while you were offline —

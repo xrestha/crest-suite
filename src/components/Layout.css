@@ -707,17 +707,19 @@
 .sidebar-pin:focus-visible {
   opacity: 1;
 }
+/* accent-ink, not accent: the star is a glyph read as text, and the base accent measured 4.07:1
+   at 14px on the light presets' active row (S607). accent-ink falls back to accent on dark. */
 .sidebar-pin:hover {
-  color: var(--theme-accent);
+  color: var(--theme-accent-ink);
 }
 .sidebar-pin:focus-visible {
   outline: none;
-  color: var(--theme-accent);
+  color: var(--theme-accent-ink);
   box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 .sidebar-pin--active {
   opacity: 1;
-  color: var(--theme-accent);
+  color: var(--theme-accent-ink);
 }
 
 .sidebar-link {

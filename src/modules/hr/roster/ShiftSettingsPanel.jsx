@@ -173,7 +173,7 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{s.end_time   ? fmtTime(s.end_time)   : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{dispH != null ? `${dispH}h` : '—'}</td>
                       <td style={{ textAlign: 'center' }}>
-                        <input type="checkbox" checked={s.active !== false} onChange={() => toggleActive(s)} />
+                        <input type="checkbox" aria-label={`${s.name} active`} checked={s.active !== false} onChange={() => toggleActive(s)} />
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 6 }}>
@@ -192,26 +192,26 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
             {adding && (
               <tr>
                 <td>
-                  <input type="color" value={form.color}
+                  <input type="color" aria-label="Shift colour" value={form.color}
                     onChange={e => setForm(p => ({ ...p, color: e.target.value }))}
                     style={{ width: 34, height: 28, border: 'none', borderRadius: 4, cursor: 'pointer', padding: 2, background: 'none' }} />
                 </td>
                 <td>
-                  <input style={{ ...INP, minWidth: 120 }} placeholder="e.g. Morning"
+                  <input style={{ ...INP, minWidth: 120 }} placeholder="e.g. Morning" aria-label="Shift name"
                     value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
                 </td>
                 <td>
-                  <input type="time" style={{ ...INP, width: 112 }} value={form.start_time}
+                  <input type="time" aria-label="Shift start time" style={{ ...INP, width: 112 }} value={form.start_time}
                     onChange={e => setForm(p => ({ ...p, start_time: e.target.value }))} />
                 </td>
                 <td>
-                  <input type="time" style={{ ...INP, width: 112 }} value={form.end_time}
+                  <input type="time" aria-label="Shift end time" style={{ ...INP, width: 112 }} value={form.end_time}
                     onChange={e => setForm(p => ({ ...p, end_time: e.target.value }))} />
                 </td>
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                     <HoursHint startT={form.start_time} endT={form.end_time} val={form.hours} />
-                    <input type="number" style={{ ...INP, width: 64 }} step="0.5" min="0" max="24"
+                    <input type="number" aria-label="Shift hours (blank to auto-calculate)" style={{ ...INP, width: 64 }} step="0.5" min="0" max="24"
                       placeholder="auto" value={form.hours}
                       onChange={e => setForm(p => ({ ...p, hours: e.target.value }))} />
                   </div>
