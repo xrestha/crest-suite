@@ -334,7 +334,10 @@ whatever was clicked last**. On Consolidated P&L that label drives the subtitle,
 Excel `scopeLine` AND the downloaded filename, so one month's figures could leave the building inside
 another month's workbook.
 
-`src/shared/hooks/useLatestRequest.js` is the one guard, now on 19 pages. Call `periodReq.begin(id)`
+`src/shared/hooks/useLatestRequest.js` is the one guard, now on **21 pages (measured by grep,
+2026-08-26)** — the S601 sweep claimed 19 while never wiring `ConsolidatedPnl.jsx` or
+`StockAgeing.js`, the two pages this rule's own text is about; both were caught by the S607
+critique re-run and wired then. Call `periodReq.begin(id)`
 synchronously in `handlePeriodChange` before any await, and
 `if (!periodReq.isCurrent(periodId)) return` after the last await and before the first setter.
 

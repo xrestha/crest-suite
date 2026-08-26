@@ -32,6 +32,7 @@ import { firstError } from '../../shared/queryError'
 import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
 import { sheetWithLetterhead } from '../../shared/excelLetterhead'
 import { useBizInfo } from '../../shared/hooks/useBizInfo'
+import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import SuiteGate from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
 import ReportPage from '../../components/ReportPage'
@@ -101,6 +102,10 @@ export default function ConsolidatedPnl() {
 
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
+  // S601's own motivating example, wired last: arrowing the period select fires overlapping loads,
+  // and the last response to land would win the figures while subtitle, print title, Excel
+  // scopeLine AND filename follow whatever was clicked last.
+  const periodReq = useLatestRequest()
   const [pnl, setPnl] = useState(null)             // single-outlet statement
   const [groupCols, setGroupCols] = useState(null) // [{ name, status, hasPeriod, stmt }] for included outlets
   const [excludedNames, setExcludedNames] = useState([])
@@ -138,6 +143,7 @@ export default function ConsolidatedPnl() {
   }
 
   async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -156,6 +162,7 @@ export default function ConsolidatedPnl() {
     const { data, error } = await supabase.rpc('get_group_pnl', {
       p_bs_year: period.bs_year, p_bs_month: period.bs_month,
     })
+    if (!periodReq.isCurrent(period.id)) return   // superseded by a newer period selection
     // A failed RPC must not masquerade as the no-Suite-Pro empty state — 'nothing to show' and
     // 'could not load' are different facts, and only one of them should send someone to billing.
     if (error) { console.error('get_group_pnl failed:', error); setGroupCols([]); setLoadError(error.message || 'Could not load the group statement.'); return }
@@ -205,6 +212,7 @@ export default function ConsolidatedPnl() {
       scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', periodId).eq('status', 'finalized'),
     ])
 
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // The group path above already refused to let a failed RPC masquerade as an empty state. This
     // path did not, and every result below flows through `|| []` — so an RLS rejection or a stalled
     // token produced a complete P&L reading NPR 0 revenue, NPR 0 COGS, NPR 0 net profit.
@@ -274,6 +282,7 @@ export default function ConsolidatedPnl() {
     if (runIds.length > 0) {
       const { data: slips, error: slipErr } = await supabase.from('hr_payslips')
         .select('gross, ssf_employer').in('run_id', runIds)
+      if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
       // A finalized run exists but its payslips could not be read — falling through to the
       // Overheads bucket here would quietly substitute a DIFFERENT labour source for the one this
       // statement says it used, so refuse rather than print a plausible number.

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
@@ -72,6 +73,10 @@ export default function StockAgeing() {
   const [asOf, setAsOf] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
+  // Overlapping-load guard (S601 class): arrowing the FY select fires a whole-fiscal-year load per
+  // keypress, and the last response to land would win the figures while `selectedFy` — which drives
+  // the subtitle, the print title and the workbook's scopeLine — is whatever was picked last.
+  const fyReq = useLatestRequest()
 
   // authLoading is a real dependency: a hard load lands here while auth is still resolving, and
   // with [clientId] alone the guard fails once and nothing ever re-fires — the page sits on the
@@ -100,6 +105,7 @@ export default function StockAgeing() {
   }
 
   async function handleFyChange(fy) {
+    fyReq.begin(fy)   // claim the page before any await
     setSelectedFy(fy)
     setLoading(true)
     await buildReport(fy, periods)
@@ -136,6 +142,7 @@ export default function StockAgeing() {
       scopedFrom('recipes', 'id'),
     ])
 
+    if (!fyReq.isCurrent(fy)) return   // superseded by a newer FY selection
     // A failed read must never reach the arithmetic below: every one of these results flows
     // through `|| []`, so an RLS rejection or a stalled token would produce a complete, confident
     // report of NPR 0 rather than an error. See shared/queryError.js.
@@ -196,6 +203,7 @@ export default function StockAgeing() {
     // which here would make real stock vanish from the shelf rather than merely skew a variance.
     const recipeIds = (clientRecipes || []).map(r => r.id)
     const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    if (!fyReq.isCurrent(fy)) return   // superseded while the recipe walk was in flight
     const soldByRecipe = {}
     for (const s of selectDepletingSales(sales || [])) {
       soldByRecipe[s.recipe_id] = (soldByRecipe[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0)
