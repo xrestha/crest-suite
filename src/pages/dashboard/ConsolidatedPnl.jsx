@@ -424,7 +424,7 @@ export default function ConsolidatedPnl() {
   // owner opens the page at all, rendered as the ninth row of a 13px table with no more weight
   // than Staff Meals. The statement below is still the document; this is the answer.
   const headline = stmt ? (
-    <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 20 }}>
+    <div className="stat-grid" style={{ marginBottom: 20 }}>
       <div className="stat-card">
         <div className="stat-label">Revenue</div>
         <div className="stat-value gold" style={{ fontSize: 18 }}>{npr(stmt.revenue)}</div>

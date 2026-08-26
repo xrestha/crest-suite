@@ -220,7 +220,7 @@ export default function FifoReport() {
       {/* A failed read renders as a failure — never as a quiet expiry report (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 20 }}>
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">Items Tracked</div>
           <div className="stat-value">{rows.length}</div>

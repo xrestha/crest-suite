@@ -307,7 +307,7 @@ export default function TheoreticalVariance() {
 
       {/* Stat cards */}
       {!loading && !computing && rows.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 24 }}>
           {[
             { label: 'Theoretical Cost',  value: fmtNPR(totalTheorVal),    sub: 'Based on recipes × sales',      color: 'var(--theme-text3)' },
             { label: 'Actual Cost',        value: fmtNPR(totalActualVal),   sub: 'From stock movements',          color: 'var(--theme-text1)' },

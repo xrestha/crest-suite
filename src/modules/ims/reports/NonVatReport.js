@@ -180,7 +180,7 @@ export default function NonVatReport() {
       {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
           yet is NPR 0 wearing the confidence of a real figure (S594 rule). */}
       {!loadError && !loading && (
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 24 }}>
+      <div className="stat-grid" style={{ marginBottom: 24 }}>
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Net value of all non-VAT purchases this period, after any bill-level discounts and after deducting goods returned to the vendor." width={260}>Total Non-VAT Purchases</Tip>

@@ -371,7 +371,7 @@ export default function Overheads() {
       )}
 
       {/* KPI cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 14, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 24 }}>
         {[
           {
             label: 'Fixed Overheads', value: fmt(totals.overhead),
@@ -668,7 +668,7 @@ export default function Overheads() {
           })()}
 
           {/* Per-bucket category breakdown */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 24 }}>
             {Object.entries(BUCKET_CONFIG).map(([key, cfg]) => {
               const bucketRows = rows[key].filter(r => parseFloat(r.amount) > 0)
               const total = totals[key]

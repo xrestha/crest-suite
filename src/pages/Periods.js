@@ -111,13 +111,58 @@ export default function Periods() {
     }
   }
 
-  function adminCloseAndAdvance(period, cid) {
+  // ── Closing-count preflight ────────────────────────────────────────────────
+  // Closing a period is the product's highest-stakes action: it locks the month AND mints the
+  // frozen Monthly Report, and COGS subtracts closing stock — so a period closed without a count
+  // freezes "closing = 0 for every item" into the immutable artifact. Payroll Finalize earned a
+  // data-derived gate (S570); the close only ever had advisory prose. This is that gate (S613):
+  // the confirm now states how much of the month's count exists, in red when none does. It never
+  // BLOCKS — an admin correcting history legitimately closes uncounted months — it makes the
+  // consequence unmissable at the moment of commitment.
+  async function closingCountPreflight(periodId, cid) {
+    try {
+      const [countedRes, itemsRes] = await withTimeout(Promise.all([
+        // Rows with a real physical count only — carryForwardOpeningStock uses the same test.
+        supabase.from('closing_stock').select('item_id', { count: 'exact', head: true })
+          .eq('period_id', periodId).not('physical_qty', 'is', null),
+        supabase.from('items').select('id', { count: 'exact', head: true })
+          .eq('client_id', cid).eq('is_active', true).eq('is_sub_recipe', false),
+      ]), 10000, 'Checking closing counts')
+      if (countedRes.error || itemsRes.error) return null
+      return { counted: countedRes.count ?? 0, items: itemsRes.count ?? 0 }
+    } catch {
+      return null // a failed preflight must not block the close — the note says it couldn't check
+    }
+  }
+
+  function closingCountNote(pre) {
+    if (!pre) return { danger: false, text: "Couldn't check this month's closing count — make sure Closing Stock is entered before closing." }
+    if (pre.counted === 0) return { danger: true, text: `No closing stock has been counted for this month (0 of ${pre.items} active items). Closed like this, every item's closing stock counts as ZERO in COGS and in the frozen Monthly Report.` }
+    if (pre.counted < pre.items) return { danger: false, text: `${pre.counted} of ${pre.items} active items have a closing count — items without one are treated as zero stock in COGS and the frozen Monthly Report.` }
+    return { danger: false, text: `All ${pre.items} active items have a closing count.` }
+  }
+
+  // Body = main consequence copy + the preflight line (red when the count is missing entirely).
+  const closeBody = (main, note) => (
+    <>
+      <p style={{ margin: 0 }}>{main}</p>
+      <p style={{ margin: '10px 0 0', fontWeight: note.danger ? 700 : 400, color: note.danger ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
+        {note.text}
+      </p>
+    </>
+  )
+
+  async function adminCloseAndAdvance(period, cid) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
+    setActionClientId(cid)
+    const note = closingCountNote(await closingCountPreflight(period.id, cid))
+    setActionClientId(null)
     setPendingConfirm({
       title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
       confirmLabel: 'Close & Start Next',
-      body: `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} locks for the client's own logins and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`,
+      danger: note.danger,
+      body: closeBody(`${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} locks for the client's own logins and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`, note),
       run: () => performAdminCloseAndAdvance(period, cid, nextYear, nextMonth),
     })
   }
@@ -132,12 +177,15 @@ export default function Periods() {
     setActionClientId(null)
   }
 
-  function adminEndPeriod(period, cid) {
+  async function adminEndPeriod(period, cid) {
+    setActionClientId(cid)
+    const note = closingCountNote(await closingCountPreflight(period.id, cid))
+    setActionClientId(null)
     setPendingConfirm({
       title: `End ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
       confirmLabel: 'End Period',
       danger: true,
-      body: `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} closes with no new period started — the client is blocked from recording any data until one is created. The frozen Monthly Report is generated from the figures as they stand now.`,
+      body: closeBody(`${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} closes with no new period started — the client is blocked from recording any data until one is created. The frozen Monthly Report is generated from the figures as they stand now.`, note),
       run: () => performAdminEndPeriod(period, cid),
     })
   }
@@ -215,13 +263,15 @@ export default function Periods() {
     setCreating(false)
   }
 
-  function closeAndAdvance(period) {
+  async function closeAndAdvance(period) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
+    const note = closingCountNote(await closingCountPreflight(period.id, clientId || profile?.client_id))
     setPendingConfirm({
       title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
       confirmLabel: 'Close & Start Next',
-      body: `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} locks and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now — enter this month's closing count first.`,
+      danger: note.danger,
+      body: closeBody(`${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} locks and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`, note),
       run: () => performCloseAndAdvance(period, nextYear, nextMonth),
     })
   }

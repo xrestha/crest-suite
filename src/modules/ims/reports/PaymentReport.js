@@ -158,7 +158,7 @@ export default function PaymentReport() {
       {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
           is NPR 0 wearing the confidence of a real figure (S594 rule). */}
       {!loadError && !loading && (
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(5,1fr)', marginBottom: 24 }}>
+      <div className="stat-grid" style={{ marginBottom: 24 }}>
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Total purchase spend for the period, before returns. This is money paid to suppliers — not sales revenue." width={260}>Gross Purchases</Tip>

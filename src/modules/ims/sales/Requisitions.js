@@ -705,7 +705,7 @@ export default function Requisitions() {
         /* ── Requisitions List ───────────────────────────────────────────── */
         <div>
           {/* Stat cards */}
-          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
+          <div className="stat-grid" style={{ marginBottom: 24 }}>
             <div className="stat-card">
               <div className="stat-label">Total Requisitions</div>
               <div className="stat-value">{reqs.length}</div>

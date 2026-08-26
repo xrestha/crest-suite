@@ -570,7 +570,7 @@ export default function OutstandingPayables() {
       )}
 
       {!loadError && !loading && (
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 24 }}>
+      <div className="stat-grid" style={{ marginBottom: 24 }}>
         {activeTab === 'outstanding' ? (<>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills, less any payments already recorded. Bill amounts match the vendor's invoice: net of goods returned and any bill discount, plus 13% VAT on VAT-inclusive lines." width={280}>Total Remaining</Tip></div>

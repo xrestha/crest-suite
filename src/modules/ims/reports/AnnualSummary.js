@@ -221,7 +221,7 @@ export default function AnnualSummary() {
       {loadError && <ReportLoadError error={loadError} />}
 
       {!loading && !loadError && report && (
-        <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
+        <div className="stat-grid" style={{ marginBottom: 24 }}>
           {[
             { label: 'Annual Revenue',  value: fmt(report.totRevenue), color: 'var(--theme-green-text)',
               tip: 'Total net sales revenue across all months in this period.' },

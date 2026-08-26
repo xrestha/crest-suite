@@ -249,7 +249,7 @@ export default function Variance() {
 
       {/* KPI strip waits for the load — a stale period's figures under the new period's label is the S594 trap */}
       {!loading && summary && (
-        <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
+        <div className="stat-grid" style={{ marginBottom: 24 }}>
           <div className="stat-card">
             <div className="stat-label">Items Analysed</div>
             <div className="stat-value">{filtered.length}</div>

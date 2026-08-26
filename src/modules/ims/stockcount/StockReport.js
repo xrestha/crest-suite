@@ -215,7 +215,7 @@ export default function StockReport() {
       {!loadError && <>
       {/* KPI strip waits for the load — an unloaded valuation is NPR 0 in confident type (S594) */}
       {!loading && (
-      <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 20 }}>
+      <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label"><Tip text="On-hand quantity × unit rate, summed across all items. What your current stock is worth." width={240}>Total Stock Value</Tip></div>
           <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {npr(totalValue)}</div>

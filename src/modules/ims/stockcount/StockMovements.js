@@ -295,7 +295,7 @@ export default function StockMovements() {
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
       {tab === 'subs' ? (
-        <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 24 }}>
+        <div className="stat-grid" style={{ marginBottom: 24 }}>
           <div className="stat-card">
             <div className="stat-label">Sub-Recipes Used</div>
             <div className="stat-value">{subRows.length}</div>
@@ -313,7 +313,7 @@ export default function StockMovements() {
           </div>
         </div>
       ) : (
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
+      <div className="stat-grid" style={{ marginBottom: 24 }}>
         <div className="stat-card">
           <div className="stat-label">Movements</div>
           <div className="stat-value">{filtered.length}</div>

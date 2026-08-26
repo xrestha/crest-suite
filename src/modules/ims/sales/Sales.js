@@ -536,7 +536,7 @@ export default function Sales() {
         </div>
       )}
       {/* Stat cards */}
-      <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 20 }}>
+      <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           {/* Was labelled "Total Covers" — this is Σ qty_sold across recipes, i.e. dishes, not
               guests. A cover is a guest served (what CoversReport and Demand Forecast both mean by

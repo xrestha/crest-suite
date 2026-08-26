@@ -369,7 +369,7 @@ export default function ReorderReport() {
       {/* A failed read renders as a failure — Book Stock is ordered against (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
-      <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
+      <div className="stat-grid no-print" style={{ marginBottom: 24 }}>
         <div className="stat-card">
           <div className="stat-label">Items to Reorder</div>
           <div className="stat-value" style={{ color: reorderCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{reorderCount}</div>

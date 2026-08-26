@@ -467,7 +467,7 @@ export default function Purchases() {
       </div>
 
       {/* Stats */}
-      <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: 20 }}>
+      <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">Total Entries</div>
           <div className="stat-value">{purchases.length}</div>

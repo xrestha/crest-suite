@@ -276,7 +276,7 @@ export default function MenuEngineering() {
       </div>
 
       {/* Quadrant summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 20 }}>
         {Object.entries(QUADRANTS).map(([name, q]) => (
           <div
             key={name}
@@ -349,7 +349,7 @@ export default function MenuEngineering() {
               </div>
             }
             footer={
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginTop: 4 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 4 }}>
                 {[
                   { q: 'Star',      pos: 'right + top (high qty, low FC%)',     hint: 'Keep, feature prominently' },
                   { q: 'Plowhorse', pos: 'left + top (low qty, low FC%)',       hint: 'Good margin — promote harder' },
