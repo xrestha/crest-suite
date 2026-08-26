@@ -3,8 +3,10 @@ import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -22,6 +24,7 @@ export default function FifoReport() {
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [filterFlag, setFilterFlag] = useState('all')
   const [filterCat, setFilterCat] = useState('all')
   const [categories, setCategories] = useState([])
@@ -32,10 +35,15 @@ export default function FifoReport() {
 
   async function init() {
     setLoading(true)
-    const [{ data: p }, { data: c }] = await Promise.all([
+    setLoadError(null)
+    const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories')
     ])
+    // A failed read must never render as NoPeriodState or an empty report (S607 silent-zero rule).
+    const initFailed = firstError(initResults)
+    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
+    const [{ data: p }, { data: c }] = initResults
     setPeriods(p || [])
     setCategories(c || [])
     const open = (p || []).find(x => x.status === 'open')
@@ -53,6 +61,7 @@ export default function FifoReport() {
   }
 
   async function buildReport(periodId) {
+    setLoadError(null)
     // This used to net batches against returns ONLY — never against anything actually sold,
     // wasted, or used in a recipe since purchase, so a batch bought months ago and long since
     // fully used still showed its full original qty as "at risk," wildly overstating expiry
@@ -63,7 +72,7 @@ export default function FifoReport() {
     // plus wastage and staff meals) against that item's own batches oldest-first (by bs_day),
     // which is the standard FIFO assumption and the same level of precision every other report
     // in this app already works at.
-    const [{ data: purchases }, { data: returns }, { data: sales }, { data: wastages }, { data: staffMeals }, { data: clientRecipes }] = await Promise.all([
+    const results = await Promise.all([
       fetchAllRows(() => supabase.from('purchase_entries')
         .select('*, items(name, uom, per_uom_rate, categories(name))')
         .eq('period_id', periodId)
@@ -72,11 +81,19 @@ export default function FifoReport() {
         .order('id')),
       scopedFrom('vendor_returns', 'purchase_entry_id, qty')
         .eq('period_id', periodId),
-      supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId),
-      supabase.from('wastages').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      // Paged (S528/S529): sales_entries is the documented realistic 1000-crosser for a POS-heavy
+      // period, and wastages is one row per item per day — truncating either understates the
+      // consumption netted off each batch below, overstating expiry exposure as believable rows.
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('recipes', 'id'),
     ])
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read must never flow through the `|| []`s below into a confident report (S607).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setRows([]); return }
+    const [{ data: purchases }, { data: returns }, { data: sales }, { data: wastages }, { data: staffMeals }, { data: clientRecipes }] = results
 
     // Build a map of returned qty per purchase entry
     const returnedMap = {}
@@ -182,7 +199,8 @@ export default function FifoReport() {
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="the FIFO / expiry report" />
+  // !loadError: a failed periods read must not wear NoPeriodState (S607 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the FIFO / expiry report" />
 
   return (
     <div>
@@ -195,9 +213,12 @@ export default function FifoReport() {
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
-          <button className="btn btn-ghost" onClick={exportExcel}>Export Excel</button>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={!!loadError}>Export Excel</button>
         </div>
       </div>
+
+      {/* A failed read renders as a failure — never as a quiet expiry report (S607). */}
+      {loadError ? <ReportLoadError error={loadError} /> : <>
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 20 }}>
         <div className="stat-card">
@@ -291,6 +312,7 @@ export default function FifoReport() {
             </div>
           )}
       </div>
+      </>}
     </div>
   )
 }

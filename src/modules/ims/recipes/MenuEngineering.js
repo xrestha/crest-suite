@@ -4,6 +4,7 @@ import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcBand } from '../../../shared/imsFormulas'
 import ChartCard from '../../../components/ChartCard'
@@ -92,6 +93,7 @@ export default function MenuEngineering() {
   const [periodId, setPeriodId]   = useState('')
   const [items, setItems]         = useState([])   // enriched recipe rows
   const [loading, setLoading]     = useState(false)
+  const [loadError, setLoadError] = useState(null)
   // This page's `loading` starts false (it only covers loadData), so the no-period state needs
   // its own "have we fetched periods yet" flag or it flashes on every first paint.
   const [periodsLoaded, setPeriodsLoaded] = useState(false)
@@ -105,9 +107,11 @@ export default function MenuEngineering() {
   const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
   async function loadPeriods() {
-    const { data } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
+    const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
+    // A failed read must not impersonate "no periods yet" (S607 silent-zero rule).
+    if (error) { setLoadError(error.message); setPeriodsLoaded(true); return }
     const withLabel = (data || []).map(p => ({
       ...p,
       label: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}`
@@ -120,11 +124,14 @@ export default function MenuEngineering() {
 
   async function loadData() {
     setLoading(true)
+    setLoadError(null)
 
     // Load recipes (menu items only — exclude sub-recipes)
-    const { data: recipes } = await scopedFrom('recipes', 'id, name, category, selling_price')
+    const { data: recipes, error: recErr } = await scopedFrom('recipes', 'id, name, category, selling_price')
       .neq('is_active', false)
       .neq('category', 'Sub-Recipe')
+    // S607 silent-zero rule: a failed read must not render the "no menu items found" empty state.
+    if (recErr) { setLoadError(recErr.message); setItems([]); setLoading(false); return }
 
     // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
     // hand-rolled ingMap reading only direct item_id ingredients (as this used to) silently
@@ -137,11 +144,13 @@ export default function MenuEngineering() {
     // Load sales for this period — comps (source='pos_comp') excluded, since the BCG-style
     // revenue/margin quadrant below is about what actually sold at menu price, not what was
     // given away.
-    const { data: sales } = await supabase
+    const { data: sales, error: salesErr } = await supabase
       .from('sales_entries')
       .select('recipe_id, qty_sold, discount')
       .eq('period_id', periodId)
       .neq('source', 'pos_comp')
+    // A failed sales read would classify every dish as a zero-sale Dog (S607).
+    if (salesErr) { setLoadError(salesErr.message); setItems([]); setLoading(false); return }
 
     if (!recipes) { setLoading(false); return }
 
@@ -240,7 +249,8 @@ export default function MenuEngineering() {
   }, [items])
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
-  if (periodsLoaded && periods.length === 0) return <NoPeriodState what="menu engineering" />
+  // !loadError: a failed periods read must not wear NoPeriodState (S607 silent-zero rule).
+  if (periodsLoaded && !loadError && periods.length === 0) return <NoPeriodState what="menu engineering" />
 
   return (
     <div>
@@ -309,6 +319,8 @@ export default function MenuEngineering() {
 
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p></div>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : items.length === 0 ? (
         <div className="card">
           <div className="empty-state">

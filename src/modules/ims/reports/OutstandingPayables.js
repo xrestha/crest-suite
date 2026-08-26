@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import RowDisclosure from '../../../components/RowDisclosure'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd, adToBs } from '../../../utils/bsCalendar'
 import { calcBillTotals, billKeyOf, aging } from '../purchases/purchasesHelpers'
@@ -45,6 +46,7 @@ export default function OutstandingPayables() {
   const [entries, setEntries]           = useState([])
   const [paymentsMap, setPaymentsMap]   = useState({})
   const [loading, setLoading]           = useState(true)
+  const [loadError, setLoadError]       = useState(null)
   const [setupNeeded, setSetupNeeded]   = useState(false)
   const [filterVendor, setFilterVendor] = useState('all')
   const [filterAging, setFilterAging]   = useState('all')
@@ -97,6 +99,7 @@ export default function OutstandingPayables() {
 
   async function load(tab = activeTab) {
     setLoading(true)
+    setLoadError(null)
     setFilterVendor('all')
     setFilterAging('all')
     setFilterPeriod('all')
@@ -128,7 +131,10 @@ export default function OutstandingPayables() {
     const { data, error } = await fetchAllRows(buildQuery)
 
     if (error) {
+      // 42703 is the real "migration not applied yet" setup state; anything else is a failed read
+      // and must say so — an empty payables list is a claim that nothing is owed (S607).
       if (error.code === '42703' || error.message?.includes('paid_at')) setSetupNeeded(true)
+      else { setLoadError(error.message); setEntries([]); setPaymentsMap({}) }
       setLoading(false)
       return
     }
@@ -151,9 +157,11 @@ export default function OutstandingPayables() {
 
     let pmtMap = {}
     if (ids.length > 0) {
-      const { data: pmts } = await scopedFrom('payable_payments')
+      const { data: pmts, error: pmtErr } = await scopedFrom('payable_payments')
         .in('purchase_entry_id', ids)
         .order('paid_at', { ascending: true })
+      // A failed payments read would render every credit bill as fully unpaid (S607).
+      if (pmtErr) { setLoadError(pmtErr.message); setEntries([]); setPaymentsMap({}); setLoading(false); return }
       ;(pmts || []).forEach(p => {
         if (!pmtMap[p.purchase_entry_id]) pmtMap[p.purchase_entry_id] = []
         pmtMap[p.purchase_entry_id].push(p)
@@ -166,8 +174,10 @@ export default function OutstandingPayables() {
     // Credit bill is always attributable to the exact line it cancels — no allocation guesswork.
     let returnedByEntry = {}
     if (ids.length > 0) {
-      const { data: rets } = await scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate')
+      const { data: rets, error: retErr } = await scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate')
         .in('purchase_entry_id', ids)
+      // A failed returns read would overstate what's owed on every returned bill (S607).
+      if (retErr) { setLoadError(retErr.message); setEntries([]); setPaymentsMap({}); setLoading(false); return }
       ;(rets || []).forEach(r => {
         returnedByEntry[r.purchase_entry_id] =
           (returnedByEntry[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0)
@@ -546,6 +556,9 @@ export default function OutstandingPayables() {
         <button className={`tab-btn${activeTab === 'paid'        ? ' tab-btn--active' : ''}`} onClick={() => switchTab('paid')}>Paid History</button>
       </div>
 
+      {/* A failed read renders as a failure — an empty payables list claims nothing is owed (S607). */}
+      {loadError && <ReportLoadError error={loadError} />}
+
       {setupNeeded && (
         <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 24, fontSize: 13 }}>
           <div style={{ fontWeight: 700, color: 'var(--theme-red-text)', marginBottom: 8 }}>⚠ One-time setup required</div>
@@ -556,6 +569,7 @@ export default function OutstandingPayables() {
         </div>
       )}
 
+      {!loadError && !loading && (
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: 24 }}>
         {activeTab === 'outstanding' ? (<>
           <div className="stat-card">
@@ -591,7 +605,9 @@ export default function OutstandingPayables() {
           </div>
         </>)}
       </div>
+      )}
 
+      {!loadError && (
       <div style={{ display: 'flex', gap: 20, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <select aria-label="Filter by vendor" className="form-select" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
@@ -619,8 +635,9 @@ export default function OutstandingPayables() {
           )}
         </div>
       </div>
+      )}
 
-      {activeTab === 'outstanding' && selectedBills.size > 0 && (
+      {!loadError && activeTab === 'outstanding' && selectedBills.size > 0 && (
         <div className="card" style={{
           marginBottom: 20, padding: '14px 20px', display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap',
           border: '1px solid color-mix(in srgb, var(--theme-accent) 40%, transparent)',
@@ -660,7 +677,7 @@ export default function OutstandingPayables() {
 
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading payables…</p></div>
-      ) : setupNeeded ? null : filteredBills.length === 0 ? (
+      ) : loadError ? null : setupNeeded ? null : filteredBills.length === 0 ? (
         <div className="card">
           <div className="empty-state">
             <div className="empty-state-icon">✓</div>

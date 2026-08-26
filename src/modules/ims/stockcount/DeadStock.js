@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
@@ -23,12 +25,15 @@ export default function DeadStock() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [catFilter, setCatFilter]       = useState('All')
   const [loading, setLoading]           = useState(false)
+  const [loadError, setLoadError]       = useState(null)
 
   useEffect(() => {
     if (!effectiveClientId) return
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // A failed read must not impersonate "no periods yet" (S607 silent-zero rule).
+        if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
       })
@@ -40,15 +45,8 @@ export default function DeadStock() {
 
   async function fetchData(periodId) {
     setLoading(true)
-    const [
-      { data: itemsData },
-      { data: openings },
-      { data: purchases },
-      { data: rets },
-      { data: wastes },
-      { data: staffMealRows },
-      { data: closings },
-    ] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
@@ -59,6 +57,19 @@ export default function DeadStock() {
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
     ])
+    // A failed read must never flow through the `|| []`s below — every item would read as "Dead"
+    // or vanish, both believable (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
+    const [
+      { data: itemsData },
+      { data: openings },
+      { data: purchases },
+      { data: rets },
+      { data: wastes },
+      { data: staffMealRows },
+      { data: closings },
+    ] = results
 
     function sumField(arr, field, itemId) {
       return (arr || []).filter(r => r.item_id === itemId).reduce((s, r) => s + parseFloat(r[field] || 0), 0)
@@ -224,6 +235,8 @@ export default function DeadStock() {
 
       {loading ? (
         <div className="loading-state">Loading...</div>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : rows.length === 0 ? (
         <div className="empty-state">No dead or slow-moving stock this period.</div>
       ) : filtered.length === 0 ? (

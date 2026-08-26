@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
+import { firstError } from '../../../shared/queryError'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd } from '../../../utils/bsCalendar'
 import { runForecast } from '../../../utils/demandForecastData'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -20,6 +22,7 @@ export default function DemandForecast() {
   const [recipeNames, setRecipeNames] = useState({})
   const [expandedItemsIdx, setExpandedItemsIdx] = useState(null) // which row's item preview is showing the FULL list instead of the top-3
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [recomputing, setRecomputing] = useState(false)
   const [msg, setMsg] = useState('')
   const [lastRun, setLastRun] = useState(null)
@@ -38,13 +41,18 @@ export default function DemandForecast() {
   const loadStored = useCallback(async () => {
     if (!clientId) return
     setLoading(true)
-    const [{ data: rows }, { data: runs }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('demand_forecast_daily')
         .eq('horizon_days', horizon)
         .order('bs_year').order('bs_month').order('bs_day'),
       scopedFrom('demand_forecast_run_log')
         .order('run_at', { ascending: false }).limit(1),
     ])
+    // A failed read must not wear the "no forecast yet — click Recompute" empty state (S607).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setForecast([]); setLoading(false); return }
+    const [{ data: rows }, { data: runs }] = results
     setLastRun(runs?.[0] || null)
 
     // Reshape stored rows (one covers-level row + N recipe-level rows per day) back into the
@@ -147,6 +155,8 @@ export default function DemandForecast() {
 
       {loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : forecast.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
           No forecast yet for this horizon — click "Recompute Forecast" to generate one.

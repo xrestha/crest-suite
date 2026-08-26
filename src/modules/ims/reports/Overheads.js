@@ -2,8 +2,10 @@ import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -77,6 +79,7 @@ export default function Overheads() {
   const [activeBucket, setActiveBucket] = useState('overhead')
   const [periodData, setPeriodData] = useState(null)
   const [loading, setLoading]       = useState(true)
+  const [loadError, setLoadError]   = useState(null)
   const [saving, setSaving]         = useState(false)
   const [saved, setSaved]           = useState(false)
 
@@ -84,9 +87,11 @@ export default function Overheads() {
   useEffect(() => { if (periodId) loadAll() }, [periodId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadPeriods() {
-    const { data } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
+    const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
+    // A failed read must not impersonate "no periods yet" (S607 silent-zero rule).
+    if (error) { setLoadError(error.message); setLoading(false); return }
     const withLabel = (data || []).map(p => ({ ...p, label: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` }))
     setPeriods(withLabel)
     const open = withLabel.find(p => p.status === 'open') || withLabel[0]
@@ -95,14 +100,19 @@ export default function Overheads() {
 
   async function loadAll() {
     setLoading(true)
+    setLoadError(null)
     await Promise.all([loadOverheads(), loadPeriodData()])
     setLoading(false)
   }
 
   async function loadOverheads() {
-    const { data } = await scopedFrom('overheads')
+    const { data, error } = await scopedFrom('overheads')
       .eq('period_id', periodId)
       .order('created_at')
+    // A failed read must NOT fall into the carry-forward branch below: it would seed an editable
+    // draft over a period that may have real saved rows, and Save would replace them (S607 —
+    // on a data-entry page the silent-zero class is a data-loss class).
+    if (error) { setLoadError(error.message); return }
 
     if (data && data.length > 0) {
       const grouped = { overhead: [], labor: [], tax_fees: [] }
@@ -125,7 +135,9 @@ export default function Overheads() {
     // stays disabled on a closed period — until the user actually hits Save).
     const currentIdx = periods.findIndex(p => p.id === periodId)
     const priorPeriods = currentIdx >= 0 ? periods.slice(currentIdx + 1) : []
-    const priorRows = await findMostRecentOverheads(priorPeriods)
+    const prior = await findMostRecentOverheads(priorPeriods)
+    if (prior.error) { setLoadError(prior.error); return }
+    const priorRows = prior.rows
 
     const grouped = { overhead: [], labor: [], tax_fees: [] }
     if (priorRows) {
@@ -146,25 +158,32 @@ export default function Overheads() {
   // one's saved overhead rows, or null if none of them ever had any.
   async function findMostRecentOverheads(candidatePeriods) {
     for (const p of candidatePeriods) {
-      const { data } = await scopedFrom('overheads').eq('period_id', p.id).order('created_at')
-      if (data && data.length > 0) return data
+      const { data, error } = await scopedFrom('overheads').eq('period_id', p.id).order('created_at')
+      // A failed read mid-walk must not read as "that period had nothing" — the caller would
+      // carry forward from an older period than the truth, as an editable draft (S607).
+      if (error) return { rows: null, error: error.message }
+      if (data && data.length > 0) return { rows: data, error: null }
     }
-    return null
+    return { rows: null, error: null }
   }
 
   async function loadPeriodData() {
-    const [
-      { data: purchases },
-      { data: returns },
-      { data: salesData },
-      { data: recipes }
-    ] = await Promise.all([
+    const results = await Promise.all([
       fetchAllRows(() => supabase.from('purchase_entries').select('qty, rate').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'qty, rate').eq('period_id', periodId),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
       supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, selling_price')
     ])
+    // The reference figures (revenue, food cost) must not print as NPR 0 off a failed read (S607).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setPeriodData(null); return }
+    const [
+      { data: purchases },
+      { data: returns },
+      { data: salesData },
+      { data: recipes }
+    ] = results
 
     const gross  = (purchases || []).reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
     const ret    = (returns  || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
@@ -316,7 +335,8 @@ export default function Overheads() {
   const bucketTotal = totals[activeBucket]
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="fixed cost tracking" />
+  // !loadError: a failed periods read must not wear NoPeriodState (S607 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="fixed cost tracking" />
 
   return (
     <div>
@@ -334,11 +354,15 @@ export default function Overheads() {
           >
             {periods.map(p => <option key={p.id} value={p.id}>{p.label}{p.status === 'open' ? ' (open)' : ''}</option>)}
           </select>
-          <button className="btn btn-primary" onClick={save} disabled={saving || isLocked}>
+          <button className="btn btn-primary" onClick={save} disabled={saving || isLocked || !!loadError}>
             {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save'}
           </button>
         </div>
       </div>
+
+      {/* A failed read blocks the whole form: on a data-entry page, saving over rows the page
+          could not read is a data-loss shape, not just a wrong figure (S607). */}
+      {loadError ? <ReportLoadError error={loadError} /> : <>
 
       {isLocked && (
         <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
@@ -853,6 +877,7 @@ export default function Overheads() {
           💡 <strong style={{ color: 'var(--theme-accent-ink)' }}>How overhead is allocated to recipes:</strong> Only <strong style={{ color: 'var(--theme-text1)' }}>Fixed Overheads</strong> (not labor or tax) are distributed across menu items proportionally by each item's share of period revenue. This gives you the true overhead-per-portion in Recipe Costing. Labor and Tax & Fees are period-level costs tracked separately.
         </p>
       </div>
+      </>}
     </div>
   )
 }

@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -22,16 +24,22 @@ export default function BudgetVsActual() {
   const [budgets, setBudgets] = useState({})   // { category_id: amount }
   const [saving, setSaving] = useState({})     // { category_id: bool }
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
     setLoading(true)
-    const [{ data: p }, { data: cats }] = await Promise.all([
+    setLoadError(null)
+    const initResults = await Promise.all([
       scopedFrom('monthly_periods')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order'),
     ])
+    // A failed read must not wear NoPeriodState or an empty budget sheet (S607 silent-zero rule).
+    const initFailed = firstError(initResults)
+    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
+    const [{ data: p }, { data: cats }] = initResults
     setPeriods(p || [])
     setCategories(cats || [])
     const open = (p || []).find(x => x.status === 'open')
@@ -41,12 +49,19 @@ export default function BudgetVsActual() {
 
   async function loadData(periodId, cats) {
     const catList = cats || categories
-    const [{ data: items }, { data: purchases }, { data: returns }, { data: budgetRows }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('items', 'id, category_id').eq('is_active', true),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate').eq('period_id', periodId).order('id')),
       supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', periodId),
       supabase.from('budgets').select('*').eq('period_id', periodId).eq('client_id', effectiveClientId),
     ])
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read must not render NPR-0 actuals beside real budgets — or blank budget boxes a
+    // save would then write zeros over (S607).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setActuals({}); setBudgets({}); return }
+    const [{ data: items }, { data: purchases }, { data: returns }, { data: budgetRows }] = results
 
     // NPR value per item from purchase_entries (qty × rate — both base units)
     const purchMap = {}
@@ -109,7 +124,8 @@ export default function BudgetVsActual() {
   const fmtPct = v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%'
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="this budget report" />
+  // !loadError: a failed periods read must not wear NoPeriodState (S607 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="this budget report" />
 
   return (
     <div>
@@ -137,6 +153,8 @@ export default function BudgetVsActual() {
 
       {loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : (
         <div className="card">
           <div className="table-wrap">

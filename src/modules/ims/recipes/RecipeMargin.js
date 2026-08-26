@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
+import { firstError } from '../../../shared/queryError'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcBand } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -31,12 +33,15 @@ export default function RecipeMargin() {
   const [catFilter, setCatFilter]     = useState('All')
   const [onlyWithSales, setOnlyWithSales] = useState(true)
   const [loading, setLoading]         = useState(false)
+  const [loadError, setLoadError]     = useState(null)
 
   useEffect(() => {
     if (!effectiveClientId) return
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // A failed read must not impersonate "no periods yet" (S607 silent-zero rule).
+        if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
       })
@@ -48,7 +53,8 @@ export default function RecipeMargin() {
 
   async function fetchData(periodId) {
     setLoading(true)
-    const [{ data: salesData }, { data: recipes }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       // Margin is revenue-based — comps (source='pos_comp') never sold at menu price and would
       // understate the true margin percentage if counted as if they had.
       supabase.from('sales_entries').select('recipe_id, qty_sold, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
@@ -56,6 +62,10 @@ export default function RecipeMargin() {
         .neq('category', 'Sub-Recipe')
         .eq('is_active', true),
     ])
+    // A failed read must not zero every margin and contribution figure (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
+    const [{ data: salesData }, { data: recipes }] = results
 
     // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
     // hand-rolled costMap reading only direct item_id ingredients (as this used to) silently
@@ -209,6 +219,8 @@ export default function RecipeMargin() {
 
       {loading ? (
         <div className="loading-state">Loading...</div>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : display.length === 0 ? (
         <div className="empty-state">
           No recipes found.{onlyWithSales ? ' Try unchecking "Only recipes with sales".' : ''}

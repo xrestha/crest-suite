@@ -3,6 +3,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import RowDisclosure from '../../../components/RowDisclosure'
+import ReportLoadError from '../../../components/ReportLoadError'
+import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -21,6 +23,7 @@ export default function SupplierPriceTracker() {
   const [periods, setPeriods]           = useState([])
   const [allPurchases, setAllPurchases] = useState([])
   const [loading, setLoading]           = useState(true)
+  const [loadError, setLoadError]       = useState(null)
 
   const [selectedVendorId, setSelectedVendorId] = useState('all')
   const [selectedPeriodId, setSelectedPeriodId] = useState('all')
@@ -36,7 +39,8 @@ export default function SupplierPriceTracker() {
 
   async function init() {
     setLoading(true)
-    const [{ data: v }, { data: i }, { data: p }, { data: pu }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('vendors', 'id, name').eq('is_active', true).order('name'),
       scopedFrom('items', 'id, name, item_code, uom, rate, per_uom_rate, purchase_qty, purchase_unit, conversion_factor, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       scopedFrom('monthly_periods').order('bs_year').order('bs_month'),
@@ -48,6 +52,11 @@ export default function SupplierPriceTracker() {
         .eq('monthly_periods.client_id', effectiveClientId)
         .order('id'))
     ])
+    // A failed read must not render an empty price history — a missing trend reads as "prices
+    // never moved" (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setLoading(false); return }
+    const [{ data: v }, { data: i }, { data: p }, { data: pu }] = results
 
     setVendors(v || [])
     setItems(i || [])
@@ -256,6 +265,17 @@ export default function SupplierPriceTracker() {
       <div className="page-header">
         <h1 className="page-title">Price Tracker</h1>
         <p style={{ color: 'var(--theme-text2)', fontSize: 13, marginTop: 12 }}>Loading…</p>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div>
+        <div className="page-header">
+          <h1 className="page-title">Price Tracker</h1>
+        </div>
+        <ReportLoadError error={loadError} />
       </div>
     )
   }

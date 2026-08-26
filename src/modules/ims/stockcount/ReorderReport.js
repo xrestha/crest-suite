@@ -7,6 +7,8 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
@@ -27,6 +29,7 @@ export default function ReorderReport() {
   const [savingPar, setSavingPar] = useState({})
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [filterCat, setFilterCat] = useState('all')
   const [filterStatus, setFilterStatus] = useState('reorder')
   const [search, setSearch] = useState('')
@@ -60,10 +63,15 @@ export default function ReorderReport() {
 
   async function init() {
     setLoading(true)
-    const [{ data: p }, { data: c }] = await Promise.all([
+    setLoadError(null)
+    const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order')
     ])
+    // A failed read must not wear NoPeriodState (S607 silent-zero rule).
+    const initFailed = firstError(initResults)
+    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
+    const [{ data: p }, { data: c }] = initResults
     setPeriods(p || [])
     setCategories(c || [])
     const open = (p || []).find(x => x.status === 'open')
@@ -81,17 +89,8 @@ export default function ReorderReport() {
   }
 
   async function loadReport(periodId) {
-    const [
-      { data: items },
-      { data: opening },
-      { data: closing },
-      { data: purchases },
-      { data: returns },
-      { data: wastages },
-      { data: sales },
-      { data: pars },
-      { data: movements }
-    ] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
@@ -106,6 +105,22 @@ export default function ReorderReport() {
       scopedFrom('par_levels'),
       fetchAllRows(() => scopedFrom('stock_movements', 'item_id, qty').eq('period_id', periodId).order('id'))
     ])
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read must never flow through the `|| []`s below — Book Stock is a figure people
+    // place purchase orders against (S607 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setRows([]); return }
+    const [
+      { data: items },
+      { data: opening },
+      { data: closing },
+      { data: purchases },
+      { data: returns },
+      { data: wastages },
+      { data: sales },
+      { data: pars },
+      { data: movements }
+    ] = results
 
     const parMap = {}
     ;(pars || []).forEach(p => { parMap[p.item_id] = { id: p.id, par_qty: parseFloat(p.par_qty) || 0 } })
@@ -312,7 +327,8 @@ export default function ReorderReport() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="the reorder report" />
+  // !loadError: a failed periods read must not wear NoPeriodState (S607 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the reorder report" />
 
   return (
     <div>
@@ -349,6 +365,9 @@ export default function ReorderReport() {
           </select>
         </div>
       </div>
+
+      {/* A failed read renders as a failure — Book Stock is ordered against (S607). */}
+      {loadError ? <ReportLoadError error={loadError} /> : <>
 
       <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>
         <div className="stat-card">
@@ -620,6 +639,7 @@ export default function ReorderReport() {
           )}
         </div>
       )}
+      </>}
     </div>
   )
 }

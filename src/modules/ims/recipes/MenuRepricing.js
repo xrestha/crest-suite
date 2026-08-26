@@ -3,7 +3,9 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { getSuggestedPrice, computeRecipeCosts } from '../../../utils/recipeCost'
+import { firstError } from '../../../shared/queryError'
 import Tip from '../../../components/Tip'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcBand } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -37,12 +39,15 @@ export default function MenuRepricing() {
   const [onlyUnderpriced, setOnlyUnderpriced] = useState(true)
   const [onlyWithSales, setOnlyWithSales]     = useState(false)
   const [loading, setLoading]         = useState(false)
+  const [loadError, setLoadError]     = useState(null)
 
   useEffect(() => {
     if (!effectiveClientId) return
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // A failed read must not impersonate "no periods yet" (S607 silent-zero rule).
+        if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
       })
@@ -54,7 +59,8 @@ export default function MenuRepricing() {
 
   async function fetchData(periodId) {
     setLoading(true)
-    const [{ data: salesData }, { data: recipes }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       // Repricing suggestions weigh recipes by sales volume/revenue at the current price —
       // comps (source='pos_comp') never generated revenue at that price, so they're excluded.
       supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp'),
@@ -62,6 +68,10 @@ export default function MenuRepricing() {
         .neq('category', 'Sub-Recipe')
         .eq('is_active', true),
     ])
+    // A failed read must not render the celebratory "no underpriced dishes 🎉" empty state (S607).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
+    const [{ data: salesData }, { data: recipes }] = results
 
     // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
     // hand-rolled costMap reading only direct item_id ingredients (as this used to) silently
@@ -225,6 +235,8 @@ export default function MenuRepricing() {
 
       {loading ? (
         <div className="loading-state">Loading...</div>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : display.length === 0 ? (
         <div className="empty-state">
           {onlyUnderpriced ? 'No underpriced dishes — every priced dish is at or below its target food cost. 🎉' : 'No priced recipes found for this period.'}
