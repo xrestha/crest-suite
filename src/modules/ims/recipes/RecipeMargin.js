@@ -40,7 +40,7 @@ export default function RecipeMargin() {
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
-        // A failed read must not impersonate "no periods yet" (S607 silent-zero rule).
+        // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
         if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
@@ -62,7 +62,7 @@ export default function RecipeMargin() {
         .neq('category', 'Sub-Recipe')
         .eq('is_active', true),
     ])
-    // A failed read must not zero every margin and contribution figure (S607 silent-zero rule).
+    // A failed read must not zero every margin and contribution figure (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
     const [{ data: salesData }, { data: recipes }] = results

@@ -79,7 +79,7 @@ export default function SalesReport() {
       supabase.from('settings').select('vat_number, property_address, pos_delivery_partners').eq('client_id', clientId).maybeSingle(),
       scopedFrom('recipes', 'id, is_veg, recipe_code'),
     ]).then(results => {
-      // S607 silent-zero rule: a failed read here isn't cosmetic — it blanks the letterhead and
+      // S612 silent-zero rule: a failed read here isn't cosmetic — it blanks the letterhead and
       // silently drops every Agreed % commission check on the Delivery Partners tab.
       const failed = firstError(results)
       if (failed) { setRangeError(failed); return }
@@ -110,7 +110,7 @@ export default function SalesReport() {
   const [botCategories, setBotCategories] = useState(new Set(['Beverage']))
   const [staffNames, setStaffNames] = useState({})
   const [rangeLoading, setRangeLoading] = useState(true)
-  // S607 silent-zero rule: a failed read must render as a failure, never as an empty range.
+  // S612 silent-zero rule: a failed read must render as a failure, never as an empty range.
   // Two error states because the page runs two independent pipelines (date-range vs 1L+ FY),
   // mirroring the rangeLoading/oneLakhLoading split below.
   const [rangeError, setRangeError] = useState(null)
@@ -137,7 +137,7 @@ export default function SalesReport() {
       // whoever was logged in.
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
-    // S607 silent-zero rule: a failed read here would run every tab's arithmetic over `|| []`
+    // S612 silent-zero rule: a failed read here would run every tab's arithmetic over `|| []`
     // and render a confident report of NPR 0, visually identical to a quiet range.
     const rangeFailed = firstError(results)
     if (rangeFailed) {
@@ -165,7 +165,7 @@ export default function SalesReport() {
       // PostgREST's silent 1000-row cap. Truncated, every figure on this page would be built
       // from roughly the first tenth of the month while looking like a full month (S529).
       const { data: items, error: itemsError } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, comp_reason').in('order_id', orderList.map(o => o.id)).order('id'))
-      // S607 silent-zero rule: with the parent orders loaded but the lines dropped, every figure
+      // S612 silent-zero rule: with the parent orders loaded but the lines dropped, every figure
       // built from itemsByOrder would be a believable zero.
       if (itemsError) {
         setRangeError(itemsError.message || String(itemsError))
@@ -499,7 +499,7 @@ export default function SalesReport() {
     // One narrow column, once per page load, so the extra round trips are cheap.
     fetchAllRows(() => scopedFrom('pos_orders', 'invoice_fy').not('invoice_fy', 'is', null).order('id'))
       .then(({ data, error }) => {
-        // S607 silent-zero rule: a failed read here silently drops past fiscal years from the picker.
+        // S612 silent-zero rule: a failed read here silently drops past fiscal years from the picker.
         if (error) { setOneLakhError(error.message || String(error)); return }
         const fys = [...new Set((data || []).map(r => r.invoice_fy))].sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
         if (fys.length > 0) {
@@ -526,7 +526,7 @@ export default function SalesReport() {
         .order('id')),
       supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
     ])
-    // S607 silent-zero rule — and this one feeds an IRD Annexure 13 disclosure, where a silent
+    // S612 silent-zero rule — and this one feeds an IRD Annexure 13 disclosure, where a silent
     // zero reads as "no party crossed one lakh".
     const oneLakhFailed = firstError(results)
     if (oneLakhFailed) {
@@ -546,7 +546,7 @@ export default function SalesReport() {
       // Paged for the same reason as loadRange above — and this one feeds an IRD Annexure 13
       // threshold, so a truncated read could drop a customer below one lakh incorrectly (S529).
       const { data: items, error: itemsError } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', list.map(o => o.id)).order('id'))
-      // S607 silent-zero rule: lines missing means every party's net reads zero — below threshold.
+      // S612 silent-zero rule: lines missing means every party's net reads zero — below threshold.
       if (itemsError) {
         setOneLakhError(itemsError.message || String(itemsError))
         setParties([])
@@ -835,7 +835,7 @@ export default function SalesReport() {
         <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
       </div>
 
-      {/* S607: a failed read renders as a failure — never as the empty state or a zero table. */}
+      {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
       {loadError ? (
         <ReportLoadError error={loadError} />
       ) : loading ? (

@@ -82,7 +82,7 @@ export default function Items() {
     // filter would be, without needing per-table-specific scoping logic.
     const { data: myItems, error: myItemsErr } = await scopedFrom('items', 'id')
     // A failed read must not blank the usage map — it feeds the delete guard, and an empty map
-    // reads as "nothing references this item" (S607 silent-zero class).
+    // reads as "nothing references this item" (S612 silent-zero class).
     if (myItemsErr) return
     const myItemIds = (myItems || []).map(i => i.id)
     if (myItemIds.length === 0) { setUsageMap({}); return }
@@ -297,7 +297,7 @@ export default function Items() {
     const fe = {}
     if (!form.name.trim()) fe.name = 'Item name is required.'
     // parseFloat, not truthiness: "0" is truthy as a string, and a price of NPR 0 stored here
-    // misprices the item in every valuation at once with nothing to flag it (S607).
+    // misprices the item in every valuation at once with nothing to flag it (S612).
     if (!form.rate || !(parseFloat(form.rate) > 0)) fe.rate = `Price per ${form.uom} is required and must be above zero — type it in, or use "Bought a pack?" to work it out.`
     setFieldErr(fe)
     if (fe.name || fe.rate) { setActiveTab('details'); return false }

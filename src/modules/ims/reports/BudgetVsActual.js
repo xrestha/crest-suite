@@ -36,7 +36,7 @@ export default function BudgetVsActual() {
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order'),
     ])
-    // A failed read must not wear NoPeriodState or an empty budget sheet (S607 silent-zero rule).
+    // A failed read must not wear NoPeriodState or an empty budget sheet (S612 silent-zero rule).
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
     const [{ data: p }, { data: cats }] = initResults
@@ -58,7 +58,7 @@ export default function BudgetVsActual() {
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must not render NPR-0 actuals beside real budgets — or blank budget boxes a
-    // save would then write zeros over (S607).
+    // save would then write zeros over (S612).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setActuals({}); setBudgets({}); return }
     const [{ data: items }, { data: purchases }, { data: returns }, { data: budgetRows }] = results
@@ -124,7 +124,7 @@ export default function BudgetVsActual() {
   const fmtPct = v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%'
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  // !loadError: a failed periods read must not wear NoPeriodState (S607 silent-zero rule).
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="this budget report" />
 
   return (

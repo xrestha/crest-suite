@@ -64,7 +64,7 @@ export default function VendorReport() {
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('vendors').eq('is_active', true).order('name')
     ])
-    // A failed read must never render as an empty period or NoPeriodState (S607 silent-zero rule).
+    // A failed read must never render as an empty period or NoPeriodState (S612 silent-zero rule).
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
     const [{ data: p }, { data: v }] = initResults
@@ -92,7 +92,7 @@ export default function VendorReport() {
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 vendor
-    // ledger (S607 silent-zero rule).
+    // ledger (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setPurchases([]); setReturns([]); setPaymentsMap({}); return }
     const [{ data: p }, { data: r }] = results
@@ -104,7 +104,7 @@ export default function VendorReport() {
       const { data: pmts, error: pmtErr } = await scopedFrom('payable_payments').in('purchase_entry_id', creditIds)
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
       // Cash/Credit splits and the payment-status column derive from this map — refuse rather
-      // than render every credit bill as unpaid (S607).
+      // than render every credit bill as unpaid (S612).
       if (pmtErr) { setLoadError(pmtErr.message); setPurchases([]); setReturns([]); setPaymentsMap({}); return }
       const map = {}
       ;(pmts || []).forEach(pm => {
@@ -351,7 +351,7 @@ export default function VendorReport() {
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
   // !loadError: a failed periods read leaves periods empty, and NoPeriodState would wear the
-  // failure as "no periods yet" (S607 silent-zero rule).
+  // failure as "no periods yet" (S612 silent-zero rule).
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the vendor report" />
 
   return (
@@ -369,7 +369,7 @@ export default function VendorReport() {
         </div>
       </div>
 
-      {/* A failed read renders as a failure — never as a confident NPR-0 vendor ledger (S607). */}
+      {/* A failed read renders as a failure — never as a confident NPR-0 vendor ledger (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(5,1fr)', marginBottom: 24 }}>

@@ -32,7 +32,7 @@ export default function DeadStock() {
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
-        // A failed read must not impersonate "no periods yet" (S607 silent-zero rule).
+        // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
         if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
@@ -58,7 +58,7 @@ export default function DeadStock() {
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
     ])
     // A failed read must never flow through the `|| []`s below — every item would read as "Dead"
-    // or vanish, both believable (S607 silent-zero rule).
+    // or vanish, both believable (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
     const [

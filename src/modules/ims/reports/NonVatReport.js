@@ -64,7 +64,7 @@ export default function NonVatReport() {
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
         // A statutory report must never mistake a failed read for "no periods yet" — the figures
-        // on this page are what gets filed with the IRD (S607, the silent-NPR-0 class).
+        // on this page are what gets filed with the IRD (S612, the silent-NPR-0 class).
         if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data && data.length > 0) setSelected(data[0])

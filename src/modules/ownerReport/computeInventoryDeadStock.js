@@ -19,7 +19,7 @@ export async function computeInventoryDeadStock(clientId, period) {
     scopedFrom('items', clientId, 'id, name, category_id, per_uom_rate, is_active, is_sub_recipe').eq('is_active', true),
   ])
   // Throw on a failed read so the section is named as failed instead of freezing an all-Dead
-  // stock list of zeros into the immutable snapshot (S607).
+  // stock list of zeros into the immutable snapshot (S612).
   throwFirstError(results)
   const [{ data: opening }, { data: purchases }, { data: returns }, { data: wastages }, { data: closing }, { data: items }] = results
 

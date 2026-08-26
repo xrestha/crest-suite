@@ -336,7 +336,7 @@ another month's workbook.
 
 `src/shared/hooks/useLatestRequest.js` is the one guard, now on **21 pages (measured by grep,
 2026-08-26)** — the S601 sweep claimed 19 while never wiring `ConsolidatedPnl.jsx` or
-`StockAgeing.js`, the two pages this rule's own text is about; both were caught by the S607
+`StockAgeing.js`, the two pages this rule's own text is about; both were caught by the S612
 critique re-run and wired then. Call `periodReq.begin(id)`
 synchronously in `handlePeriodChange` before any await, and
 `if (!periodReq.isCurrent(periodId)) return` after the last await and before the first setter.
@@ -393,7 +393,18 @@ Three rules came out of it:
   place a `Promise.all` batch is checked; capture the array instead of destructuring straight
   through. `ConsolidatedPnl`'s group path already had both the check and the sentence for it
   (*"'nothing to show' and 'could not load' are different facts, and only one of them should send
-  someone to billing"*) and it had not travelled 200 lines to its own siblings.
+  someone to billing"*) and it had not travelled 200 lines to its own siblings. **Swept
+  product-wide in S612 (2026-08-26, measured: 37 files now import firstError/ReportLoadError):**
+  every report-class page in IMS/HR/POS — statutory, snapshot computes, variance, stockcount,
+  recipes, vendor/payables, POS reports, HR filing sheets — now refuses to render a figure it has
+  not computed. `ReportLoadError` (`src/components/ReportLoadError.jsx`, extracted from
+  `ReportPage`'s error branch) is the shared error card for pages that predate the `ReportPage`
+  shell; `throwFirstError()` is the throwing form for compute helpers running inside a try/catch
+  harness (the Monthly Owner Report's `runSection`). Two corollaries the sweep enforced: a failed
+  periods read must not wear `NoPeriodState` ("no periods yet" is a claim about the client), and
+  on a data-entry page (Overheads) a failed read must block the form outright — saving over rows
+  the page could not read is a data-loss shape, not a display bug. A new report page copies this
+  from any sibling; there is no unswept example left to copy.
 - **The KPI strip does not render while loading or after a failure.** Both pages painted four stat
   cards *above* their `loading` guard, so a multi-second fiscal-year read showed "Capital in 90+ Day
   Stock: NPR 0" in green until the real number arrived — and on a failed read it stayed there. A

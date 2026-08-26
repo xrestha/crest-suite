@@ -61,7 +61,7 @@ export default function PaymentReport() {
       fetchAllRows(() => scopedFrom('vendor_returns', '*, items(name), vendors(name)').eq('period_id', periodId).order('bs_day').order('id'))
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    // A failed read must not render as a quiet period of NPR 0 (S607 silent-zero rule).
+    // A failed read must not render as a quiet period of NPR 0 (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setPurchases([]); setReturns([]); return }
     const [{ data: p }, { data: r }] = results

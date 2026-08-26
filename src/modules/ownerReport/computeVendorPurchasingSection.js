@@ -31,7 +31,7 @@ export async function computeVendorPurchasingSection(clientId, period, generated
     scopedFrom('vendors', clientId, 'id, name').eq('is_active', true),
   ])
   // Throw on a failed read so runSection() names this section as failed instead of freezing a
-  // vendor ledger of zeros into the immutable snapshot (S607).
+  // vendor ledger of zeros into the immutable snapshot (S612).
   throwFirstError(results)
   const [{ data: purchases }, { data: returns }, { data: vendors }] = results
 

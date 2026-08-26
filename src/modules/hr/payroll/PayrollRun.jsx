@@ -231,7 +231,7 @@ export default function PayrollRun() {
 
   async function regenerate() {
     if (!run || run.status === 'finalized') return
-    // The departed-payslip warning lives in the regenerate ConfirmModal's own body below (S607) —
+    // The departed-payslip warning lives in the regenerate ConfirmModal's own body below (S612) —
     // it used to be a second window.confirm raised on top of that modal's confirm, so the same
     // action asked twice through two different kinds of dialog.
     setConfirmAction(null)
@@ -689,7 +689,7 @@ export default function PayrollRun() {
         // Regenerate rebuilds from LIVE employees, so a payslip belonging to someone since settled
         // or deactivated is deleted and never re-inserted. That payslip is real — they worked part
         // of the month — and losing it is silent, which is why the modal names them (S600 gate;
-        // folded in here from a second window.confirm that used to stack on top of this one, S607).
+        // folded in here from a second window.confirm that used to stack on top of this one, S612).
         const departedNames = (freshness.departed || []).map(nameOf)
         return (
           <ConfirmModal

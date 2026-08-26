@@ -25,7 +25,7 @@ export async function computeInventoryVariance(clientId, period) {
     supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id),
   ])
   // Throw on a failed read so the section is named as failed instead of freezing a variance
-  // table built on zeros into the immutable snapshot (S607).
+  // table built on zeros into the immutable snapshot (S612).
   throwFirstError(results)
   const [{ data: opening }, { data: purchases }, { data: returns }, { data: wastages }, { data: closing }, { data: items }, { data: recipes }, { data: salesData }] = results
 

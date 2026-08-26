@@ -68,7 +68,7 @@ export default function ReorderReport() {
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order')
     ])
-    // A failed read must not wear NoPeriodState (S607 silent-zero rule).
+    // A failed read must not wear NoPeriodState (S612 silent-zero rule).
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
     const [{ data: p }, { data: c }] = initResults
@@ -107,7 +107,7 @@ export default function ReorderReport() {
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below — Book Stock is a figure people
-    // place purchase orders against (S607 silent-zero rule).
+    // place purchase orders against (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); return }
     const [
@@ -327,7 +327,7 @@ export default function ReorderReport() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  // !loadError: a failed periods read must not wear NoPeriodState (S607 silent-zero rule).
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the reorder report" />
 
   return (
@@ -366,7 +366,7 @@ export default function ReorderReport() {
         </div>
       </div>
 
-      {/* A failed read renders as a failure — Book Stock is ordered against (S607). */}
+      {/* A failed read renders as a failure — Book Stock is ordered against (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
       <div className="stat-grid no-print" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 24 }}>

@@ -54,7 +54,7 @@ export default function Variance() {
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order')
     ])
-    // A failed read is not "no periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
     const [{ data: p }, { data: c }] = initResults
@@ -96,7 +96,7 @@ export default function Variance() {
       scopedFrom('recipes', 'id')
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
-    // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S607 silent-zero rule).
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setReport([]); setSummary(null); return }
     const [

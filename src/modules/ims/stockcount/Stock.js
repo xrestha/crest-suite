@@ -59,7 +59,7 @@ export default function Stock() {
   const [saveAllLoading, setSaveAllLoading] = useState(false)
   const [saved, setSaved] = useState(false)
   // Shared ConfirmModal for the page's bulk writes (S575 rule; these three ran on window.confirm
-  // until S607): { title, body, confirmLabel, danger, run }.
+  // until S612): { title, body, confirmLabel, danger, run }.
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
@@ -733,7 +733,7 @@ export default function Stock() {
                               {/* *-text variants (accent-ink for accent): these are TEXT on the
                                   card, and the base tokens fail AA on the light presets — the
                                   tfoot below already used the variants while these body cells
-                                  did not (S607; the tdStyle() argument shape is exactly what a
+                                  did not (S612; the tdStyle() argument shape is exactly what a
                                   property-level color: grep cannot see). */}
                               <td style={tdStyle('var(--theme-text3)')}>{s.opening > 0 ? fmt(s.opening) : '—'}</td>
                               <td style={tdStyle('var(--theme-accent-ink)')}>{s.purchases > 0 ? fmt(s.purchases) : '—'}</td>

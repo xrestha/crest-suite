@@ -132,7 +132,7 @@ export default function OutstandingPayables() {
 
     if (error) {
       // 42703 is the real "migration not applied yet" setup state; anything else is a failed read
-      // and must say so — an empty payables list is a claim that nothing is owed (S607).
+      // and must say so — an empty payables list is a claim that nothing is owed (S612).
       if (error.code === '42703' || error.message?.includes('paid_at')) setSetupNeeded(true)
       else { setLoadError(error.message); setEntries([]); setPaymentsMap({}) }
       setLoading(false)
@@ -160,7 +160,7 @@ export default function OutstandingPayables() {
       const { data: pmts, error: pmtErr } = await scopedFrom('payable_payments')
         .in('purchase_entry_id', ids)
         .order('paid_at', { ascending: true })
-      // A failed payments read would render every credit bill as fully unpaid (S607).
+      // A failed payments read would render every credit bill as fully unpaid (S612).
       if (pmtErr) { setLoadError(pmtErr.message); setEntries([]); setPaymentsMap({}); setLoading(false); return }
       ;(pmts || []).forEach(p => {
         if (!pmtMap[p.purchase_entry_id]) pmtMap[p.purchase_entry_id] = []
@@ -176,7 +176,7 @@ export default function OutstandingPayables() {
     if (ids.length > 0) {
       const { data: rets, error: retErr } = await scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate')
         .in('purchase_entry_id', ids)
-      // A failed returns read would overstate what's owed on every returned bill (S607).
+      // A failed returns read would overstate what's owed on every returned bill (S612).
       if (retErr) { setLoadError(retErr.message); setEntries([]); setPaymentsMap({}); setLoading(false); return }
       ;(rets || []).forEach(r => {
         returnedByEntry[r.purchase_entry_id] =
@@ -556,7 +556,7 @@ export default function OutstandingPayables() {
         <button className={`tab-btn${activeTab === 'paid'        ? ' tab-btn--active' : ''}`} onClick={() => switchTab('paid')}>Paid History</button>
       </div>
 
-      {/* A failed read renders as a failure — an empty payables list claims nothing is owed (S607). */}
+      {/* A failed read renders as a failure — an empty payables list claims nothing is owed (S612). */}
       {loadError && <ReportLoadError error={loadError} />}
 
       {setupNeeded && (

@@ -43,7 +43,7 @@ export default function VendorBalanceConfirmation() {
       scopedFrom('monthly_periods').order('bs_year').order('bs_month'),
       supabase.from('clients').select('name').eq('id', effectiveClientId).single(),
     ])
-    // A failed read must not render as "no vendors / no periods" (S607 silent-zero rule).
+    // A failed read must not render as "no vendors / no periods" (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setLoading(false); return }
     const [{ data: v }, { data: p }, { data: client }] = results

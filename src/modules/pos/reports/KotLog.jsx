@@ -67,7 +67,7 @@ export default function KotLog() {
   const [tab, setTab] = useState('register') // 'register' | 'reconciliation' | 'trail' | 'pulled'
   const [fromIso, setFromIso] = useState(formatAd(new Date()))
   const [toIso,   setToIso]   = useState(formatAd(new Date()))
-  // S607 silent-zero rule: a failed read must render as a failure, never as an empty range —
+  // S612 silent-zero rule: a failed read must render as a failure, never as an empty range —
   // worst here on Reconciliation, whose empty state actively celebrates a quiet report. One
   // shared state is enough: each tab's loader re-runs on activation and clears/sets it.
   const [loadError, setLoadError] = useState(null)
@@ -97,7 +97,7 @@ export default function KotLog() {
       // whoever was logged in.
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
-    // S607 silent-zero rule: a failed read would render an empty Register as if no tickets went out.
+    // S612 silent-zero rule: a failed read would render an empty Register as if no tickets went out.
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setLogRows([]); setRegisterLoading(false); return }
     const [{ data: logs }, { data: profs }] = results
@@ -122,7 +122,7 @@ export default function KotLog() {
     const { data: orders, error: ordersError } = await scopedFrom('pos_orders', 'id, status, close_type, table_name, order_no, closed_at')
       .in('status', ['billed', 'voided'])
       .gte('closed_at', fromTs).lte('closed_at', toTs)
-    // S607 silent-zero rule: a failed read here would render the celebratory "no discrepancies"
+    // S612 silent-zero rule: a failed read here would render the celebratory "no discrepancies"
     // empty state over an anti-fraud check that never ran.
     if (ordersError) { setLoadError(ordersError.message); setDiscrepancies([]); setReconLoading(false); return }
     const orderList = orders || []
@@ -137,7 +137,7 @@ export default function KotLog() {
       fetchAllRows(() => scopedFrom('pos_kot_log', 'order_id, items').in('order_id', orderIds).order('id')),
       fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, recipe_id, name, qty').in('order_id', orderIds).order('id')),
     ])
-    // S607: worse than a zero here — a failed pos_order_items read would flag EVERY sent line as
+    // S612: worse than a zero here — a failed pos_order_items read would flag EVERY sent line as
     // a discrepancy, and a failed pos_kot_log read would clear the report entirely.
     const reconFailed = firstError(reconResults)
     if (reconFailed) { setLoadError(reconFailed); setDiscrepancies([]); setReconLoading(false); return }
@@ -175,7 +175,7 @@ export default function KotLog() {
     const { data: orders, error: ordersError } = await scopedFrom('pos_orders', 'id, order_no, invoice_no, status, close_type, table_name, closed_at, buyer_name')
       .in('status', ['billed', 'voided'])
       .gte('closed_at', fromTs).lte('closed_at', toTs)
-    // S607 silent-zero rule: a failed read is not "no paid or voided bills in this range".
+    // S612 silent-zero rule: a failed read is not "no paid or voided bills in this range".
     if (ordersError) { setLoadError(ordersError.message); setBillTrailRows([]); setBillTrailLoading(false); return }
     const orderList = orders || []
     if (orderList.length === 0) { setBillTrailRows([]); setBillTrailLoading(false); return }
@@ -195,7 +195,7 @@ export default function KotLog() {
       // whoever was logged in.
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
-    // S607: a failed ticket-log read would badge every bill "No KOT" — the alarming direction.
+    // S612: a failed ticket-log read would badge every bill "No KOT" — the alarming direction.
     const trailFailed = firstError(trailResults)
     if (trailFailed) { setLoadError(trailFailed); setBillTrailRows([]); setBillTrailLoading(false); return }
     const [{ data: logs }, { data: currentItems }, { data: profs }] = trailResults
@@ -251,7 +251,7 @@ export default function KotLog() {
         .order('removed_at', { ascending: false }).order('id')),
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
     ])
-    // S607 silent-zero rule: a failed read would render the celebratory "nothing pulled" state.
+    // S612 silent-zero rule: a failed read would render the celebratory "nothing pulled" state.
     const pulledFailed = firstError(pulledResults)
     if (pulledFailed) { setLoadError(pulledFailed); setPulledRows([]); setPulledLoading(false); return }
     const [{ data: rows }, { data: profs }] = pulledResults
@@ -368,7 +368,7 @@ export default function KotLog() {
         <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
       </div>
 
-      {/* S607: a failed read renders as a failure — never as the empty state or a zero table. */}
+      {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
       {loadError ? (
         <ReportLoadError error={loadError} />
       ) : loading ? (

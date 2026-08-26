@@ -49,7 +49,7 @@ export default function ShrinkageReport() {
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order'),
     ])
-    // A failed read is not "no closed periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+    // A failed read is not "no closed periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
     const [{ data: p }, { data: c }] = initResults
@@ -78,7 +78,7 @@ export default function ShrinkageReport() {
       fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, source').in('period_id', periodIds).order('id')),
       scopedFrom('recipes', 'id'),
     ])
-    // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S607 silent-zero rule).
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setReport([]); setSummary(null); setLoading(false); return }
     const [

@@ -19,7 +19,7 @@ function statusFromDays(days) {
   if (days <= 30) return { label: fmt(days),   days, color: 'var(--theme-amber-text)', bg: 'rgba(251,191,36,0.10)',  border: 'rgba(251,191,36,0.25)'  }
   // Green tint at 0.06, not 0.10: green-text sits closest to the AA line of the three variants,
   // and at 0.10 the healthy chip measured 4.42:1 on the Light preset — the one state that renders
-  // for months on end (S607). The fainter wash keeps the hue while the text carries the meaning.
+  // for months on end (S612). The fainter wash keeps the hue while the text carries the meaning.
   return            { label: fmt(days),   days, color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.06)',  border: 'rgba(52,211,153,0.2)'   }
 }
 

@@ -58,7 +58,7 @@ export default function PurchaseOneLakhAboveReport() {
         .select('*, vendors(name, pan_vat_no)').in('period_id', periodIds).order('id')),
       fetchAllRows(() => scopedFrom('vendor_returns', '*, vendors(name, pan_vat_no), purchase_entries(vat_inclusive)').in('period_id', periodIds).order('id')),
     ])
-    // A statutory disclosure must not render a failed read as "no vendors" (S607 silent-zero rule).
+    // A statutory disclosure must not render a failed read as "no vendors" (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setVendors([]); setLoading(false); return }
     const [{ data: entData }, { data: retData }] = results

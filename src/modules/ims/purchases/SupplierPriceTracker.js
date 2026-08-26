@@ -53,7 +53,7 @@ export default function SupplierPriceTracker() {
         .order('id'))
     ])
     // A failed read must not render an empty price history — a missing trend reads as "prices
-    // never moved" (S607 silent-zero rule).
+    // never moved" (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setLoading(false); return }
     const [{ data: v }, { data: i }, { data: p }, { data: pu }] = results

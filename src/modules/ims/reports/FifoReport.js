@@ -40,7 +40,7 @@ export default function FifoReport() {
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories')
     ])
-    // A failed read must never render as NoPeriodState or an empty report (S607 silent-zero rule).
+    // A failed read must never render as NoPeriodState or an empty report (S612 silent-zero rule).
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
     const [{ data: p }, { data: c }] = initResults
@@ -90,7 +90,7 @@ export default function FifoReport() {
       scopedFrom('recipes', 'id'),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    // A failed read must never flow through the `|| []`s below into a confident report (S607).
+    // A failed read must never flow through the `|| []`s below into a confident report (S612).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); return }
     const [{ data: purchases }, { data: returns }, { data: sales }, { data: wastages }, { data: staffMeals }, { data: clientRecipes }] = results
@@ -199,7 +199,7 @@ export default function FifoReport() {
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-  // !loadError: a failed periods read must not wear NoPeriodState (S607 silent-zero rule).
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the FIFO / expiry report" />
 
   return (
@@ -217,7 +217,7 @@ export default function FifoReport() {
         </div>
       </div>
 
-      {/* A failed read renders as a failure — never as a quiet expiry report (S607). */}
+      {/* A failed read renders as a failure — never as a quiet expiry report (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: 20 }}>

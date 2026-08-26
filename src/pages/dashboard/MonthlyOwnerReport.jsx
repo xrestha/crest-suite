@@ -139,7 +139,7 @@ export default function MonthlyOwnerReport() {
   async function loadPeriods() {
     const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    // A failed read must not impersonate "no periods yet" (S607, the silent-zero class).
+    // A failed read must not impersonate "no periods yet" (S612, the silent-zero class).
     if (error) { setGenError(`Could not load periods: ${error.message}`); setLoading(false); return }
     const rows = data || []
     setPeriods(rows)
@@ -154,7 +154,7 @@ export default function MonthlyOwnerReport() {
 
     const { data: existing, error: existingErr } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
     // A failed read here used to fall straight through to the lazy-generate path — treating
-    // "could not read the snapshot" as "no snapshot exists" (S607). Refuse instead.
+    // "could not read the snapshot" as "no snapshot exists" (S612). Refuse instead.
     if (existingErr) { setGenError(`Could not load the report: ${existingErr.message}`); setReport(null); setLoading(false); return }
     if (existing) {
       setReport(existing)

@@ -40,7 +40,7 @@ export default function StockReport() {
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('categories').order('sort_order')
     ])
-    // A failed read is not "no periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
     const [{ data: p }, { data: c }] = initResults
@@ -76,7 +76,7 @@ export default function StockReport() {
       supabase.from('requisition_lines').select('item_id, qty_issued, requisitions!inner(period_id, status)').eq('requisitions.period_id', periodId).eq('requisitions.status', 'issued'),
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
-    // A failed read must never flow through the `|| []`s below into a confident NPR-0 valuation (S607 silent-zero rule).
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 valuation (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); return }
     const [

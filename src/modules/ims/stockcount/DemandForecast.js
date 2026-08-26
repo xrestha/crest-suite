@@ -49,7 +49,7 @@ export default function DemandForecast() {
       scopedFrom('demand_forecast_run_log')
         .order('run_at', { ascending: false }).limit(1),
     ])
-    // A failed read must not wear the "no forecast yet — click Recompute" empty state (S607).
+    // A failed read must not wear the "no forecast yet — click Recompute" empty state (S612).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setForecast([]); setLoading(false); return }
     const [{ data: rows }, { data: runs }] = results

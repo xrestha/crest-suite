@@ -58,7 +58,7 @@ export default function CoversReport() {
   const [staffNames,   setStaffNames]   = useState({})
   const [totalSeats,   setTotalSeats]   = useState(0)
   const [loading,      setLoading]      = useState(true)
-  // S607 silent-zero rule: a failed read must render as a failure, never as an empty range.
+  // S612 silent-zero rule: a failed read must render as a failure, never as an empty range.
   const [loadError,    setLoadError]    = useState(null)
   const [bizInfo,      setBizInfo]      = useState({ name: '' })
 
@@ -73,7 +73,7 @@ export default function CoversReport() {
   useEffect(() => {
     if (!clientId) return
     supabase.from('clients').select('name').eq('id', clientId).single()
-      // S607 silent-zero rule: a dropped error here would just blank the export letterhead.
+      // S612 silent-zero rule: a dropped error here would just blank the export letterhead.
       .then(({ data, error }) => {
         if (error) { setLoadError(error.message); return }
         setBizInfo({ name: data?.name || '' })
@@ -98,7 +98,7 @@ export default function CoversReport() {
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
       scopedFrom('pos_tables', 'id, capacity'),
     ])
-    // S607 silent-zero rule: a failed read here would render a confident report of 0 covers,
+    // S612 silent-zero rule: a failed read here would render a confident report of 0 covers,
     // visually identical to a genuinely quiet range.
     const failed = firstError(results)
     if (failed) {
@@ -124,7 +124,7 @@ export default function CoversReport() {
     if (orderList.length > 0) {
       // Paged — a month of bill lines runs to thousands, past the silent 1000-row cap (S529).
       const { data: items, error: itemsError } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, qty, unit_price, vat_rate, comped').in('order_id', orderList.map(o => o.id)).order('id'))
-      // S607 silent-zero rule: with orders loaded but their lines dropped, every Net/RevPASH
+      // S612 silent-zero rule: with orders loaded but their lines dropped, every Net/RevPASH
       // figure would be a believable zero.
       if (itemsError) {
         setLoadError(itemsError.message || String(itemsError))
@@ -320,7 +320,7 @@ export default function CoversReport() {
         )}
       </div>
 
-      {/* S607: a failed read renders as a failure — never as the empty state or a zero table. */}
+      {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
       {loadError ? (
         <ReportLoadError error={loadError} />
       ) : loading ? (

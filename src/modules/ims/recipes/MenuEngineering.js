@@ -110,7 +110,7 @@ export default function MenuEngineering() {
     const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
-    // A failed read must not impersonate "no periods yet" (S607 silent-zero rule).
+    // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
     if (error) { setLoadError(error.message); setPeriodsLoaded(true); return }
     const withLabel = (data || []).map(p => ({
       ...p,
@@ -130,7 +130,7 @@ export default function MenuEngineering() {
     const { data: recipes, error: recErr } = await scopedFrom('recipes', 'id, name, category, selling_price')
       .neq('is_active', false)
       .neq('category', 'Sub-Recipe')
-    // S607 silent-zero rule: a failed read must not render the "no menu items found" empty state.
+    // S612 silent-zero rule: a failed read must not render the "no menu items found" empty state.
     if (recErr) { setLoadError(recErr.message); setItems([]); setLoading(false); return }
 
     // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
@@ -149,7 +149,7 @@ export default function MenuEngineering() {
       .select('recipe_id, qty_sold, discount')
       .eq('period_id', periodId)
       .neq('source', 'pos_comp')
-    // A failed sales read would classify every dish as a zero-sale Dog (S607).
+    // A failed sales read would classify every dish as a zero-sale Dog (S612).
     if (salesErr) { setLoadError(salesErr.message); setItems([]); setLoading(false); return }
 
     if (!recipes) { setLoading(false); return }
@@ -249,7 +249,7 @@ export default function MenuEngineering() {
   }, [items])
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
-  // !loadError: a failed periods read must not wear NoPeriodState (S607 silent-zero rule).
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
   if (periodsLoaded && !loadError && periods.length === 0) return <NoPeriodState what="menu engineering" />
 
   return (

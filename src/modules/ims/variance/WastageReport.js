@@ -26,7 +26,7 @@ export default function WastageReport() {
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
-        // A failed read is not "no periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+        // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
         if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
@@ -44,7 +44,7 @@ export default function WastageReport() {
       .from('wastages')
       .select('item_id, qty, bs_day, reason, items(name, uom, per_uom_rate, categories(name))')
       .eq('period_id', periodId)
-    // A failed read must never flow through the `|| []` below into a confident NPR-0 report (S607 silent-zero rule).
+    // A failed read must never flow through the `|| []` below into a confident NPR-0 report (S612 silent-zero rule).
     if (error) { setLoadError(error.message); setRows([]); setReasons([]); setLoading(false); return }
 
     // Aggregate by item — an item can now have many rows (monthly catch-all + dated daily entries).

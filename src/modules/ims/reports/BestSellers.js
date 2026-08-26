@@ -66,7 +66,7 @@ export default function BestSellers() {
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
       scopedFrom('recipes', 'id, name, category, selling_price').neq('category', 'Sub-Recipe'),
     ])
-    // A failed read must not rank a confident NPR 0 (S607 silent-zero rule).
+    // A failed read must not rank a confident NPR 0 (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
     const [{ data: entries }, { data: recipes }] = results

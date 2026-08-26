@@ -708,7 +708,7 @@
   opacity: 1;
 }
 /* accent-ink, not accent: the star is a glyph read as text, and the base accent measured 4.07:1
-   at 14px on the light presets' active row (S607). accent-ink falls back to accent on dark. */
+   at 14px on the light presets' active row (S612). accent-ink falls back to accent on dark. */
 .sidebar-pin:hover {
   color: var(--theme-accent-ink);
 }

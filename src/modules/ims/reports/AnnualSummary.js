@@ -93,7 +93,7 @@ export default function AnnualSummary() {
       supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount').in('period_id', periodIds).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, selling_price'),
     ])
-    // A failed read must not render as a quiet year of NPR 0 (S607 silent-zero rule).
+    // A failed read must not render as a quiet year of NPR 0 (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setReport(null); setLoading(false); return }
     const [

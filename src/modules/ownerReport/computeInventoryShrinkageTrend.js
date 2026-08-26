@@ -25,7 +25,7 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
     .eq('status', 'closed')
     .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
   // Throw on a failed read: this section returns null for "fewer than 2 closed periods", and a
-  // failed read must not wear that legitimate absence as a disguise (S607).
+  // failed read must not wear that legitimate absence as a disguise (S612).
   throwFirstError([closedPeriodsRes])
   const { data: closedPeriods } = closedPeriodsRes
 

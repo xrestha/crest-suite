@@ -528,7 +528,7 @@ export default function ConsolidatedPnl() {
                 <tr>
                   <th>Line</th>
                   {/* Keyed by position, not name — two outlets can legitimately share a display
-                      name (Excel dedupes them; React keys must not collide, S607). */}
+                      name (Excel dedupes them; React keys must not collide, S612). */}
                   {cols.map((c, ci) => (
                     <th key={ci} style={{ textAlign: 'right' }}>
                       {c.name}

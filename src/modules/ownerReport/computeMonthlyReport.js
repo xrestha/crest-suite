@@ -55,7 +55,7 @@ async function computeImsSection(clientId, period) {
     scopedFrom('payable_payments', clientId, 'purchase_entry_id, amount'),
   ])
   // A failed read must THROW so runSection() records it as a section error the page names —
-  // otherwise it flows through `|| []` and freezes zeros into the immutable snapshot (S607).
+  // otherwise it flows through `|| []` and freezes zeros into the immutable snapshot (S612).
   throwFirstError(results)
   const [
     { data: purchases }, { data: returns }, { data: salesData }, { data: consumptionSales }, { data: recipes },
@@ -427,7 +427,7 @@ function computeCombinedMetrics({ ims, hr }) {
 async function lookupPriorSnapshot(clientId, bsYear, bsMonth) {
   // Failed reads throw rather than masquerading as reason:'no_period'/'no_report' — a frozen
   // trend claiming "no prior data exists" is an assertion about the client's history, and it
-  // must not be made off a network blip (S607).
+  // must not be made off a network blip (S612).
   const priorPeriodRes = await scopedFrom('monthly_periods', clientId, 'id, status')
     .eq('bs_year', bsYear).eq('bs_month', bsMonth).maybeSingle()
   throwFirstError([priorPeriodRes])

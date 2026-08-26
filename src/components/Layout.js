@@ -86,7 +86,7 @@ const REPORTS = [
   { to: '/payments',             label: 'Payment Summary',      icon: Wallet, featureKey: 'payment_summary',      cat: 'money', minPlan: 'starter', minImsRole: 'manager' },
   { to: '/payables',             label: 'Outstanding Payables', icon: HandCoins, featureKey: 'outstanding_payables', cat: 'money', minImsRole: 'manager' },
   { to: '/purchase-one-lakh-report', label: 'Purchase 1L+ Report', icon: FileDigit, featureKey: 'vat_report',       cat: 'money', minImsRole: 'manager' },
-  // Finance, not Menu & Vendors (S607 IA fix): this is an IRD Annexure 13 balance letter — an
+  // Finance, not Menu & Vendors (S612 IA fix): this is an IRD Annexure 13 balance letter — an
   // accountant filing artifact like the VAT reports beside it, not a menu/vendor analysis.
   { to: '/vendor-balance-confirmation', label: 'Vendor Balance Confirmation', icon: FileSignature, featureKey: 'vendor_balance_confirmation', cat: 'money', minImsRole: 'manager' },
   // Menu & vendors
@@ -603,7 +603,7 @@ export default function Layout() {
     // Tokens, not the Dark preset's own hex — this CTA was painting brass/green literals on all
     // ten presets. Text takes the *-text/-ink variants (the base tokens fail AA on the light
     // presets); the tints derive from the PRESET's own base token via colorTint, because the old
-    // rgba literals were the DARK preset's green/brass frozen under every light theme (S607).
+    // rgba literals were the DARK preset's green/brass frozen under every light theme (S612).
     const tierColor = nextTier === 'growth' ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)'
     const tierTint  = pct => colorTint(nextTier === 'growth' ? 'var(--theme-green)' : 'var(--theme-accent)', pct)
     const locked = [...NAV.slice(1), ...REPORTS].filter(
@@ -1007,7 +1007,7 @@ export default function Layout() {
                 color: plan === 'growth' ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)',
                 // Tint from the preset's own token — the old rgba literals froze the DARK
                 // preset's green/brass under every light theme, and the chip measured 4.42:1
-                // on Light (S607).
+                // on Light (S612).
                 background: colorTint(plan === 'growth' ? 'var(--theme-accent)' : 'var(--theme-green)', 10),
                 border: `1px solid ${colorTint(plan === 'growth' ? 'var(--theme-accent)' : 'var(--theme-green)', 25)}`,
                 borderRadius: 'var(--radius-md)', padding: '7px 8px', cursor: 'pointer', display: 'block'

@@ -24,7 +24,7 @@ export default function Periods() {
   const [periods, setPeriods] = useState([])
   const [backfillBusy, setBackfillBusy] = useState(null) // period id currently posting POS bills
   // One shared ConfirmModal for the page's consequential actions (S575 rule — period close is that
-  // rule's #1 named case, and this page ran it on window.confirm until S607). Shape:
+  // rule's #1 named case, and this page ran it on window.confirm until S612). Shape:
   // { title, body, confirmLabel, danger, run }. Rendered in BOTH returns below — this page has two.
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [loading, setLoading] = useState(true)

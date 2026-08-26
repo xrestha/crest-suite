@@ -48,7 +48,7 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
     scopedFrom('recipes', 'id, name').eq('category', 'Sub-Recipe'),
   ])
   // A failed read must not degrade to EMPTY_USAGE — "nothing consumed" is a real answer this
-  // helper legitimately returns, so it must never also be the error shape (S607 silent-zero rule).
+  // helper legitimately returns, so it must never also be the error shape (S612 silent-zero rule).
   throwFirstError(baseResults)
   const [{ data: salesRows }, { data: allSubs }] = baseResults
 
@@ -105,7 +105,7 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
     computeRecipeCosts(supabase, subIds),
     explodeRecipeTree(supabase, subIds),
   ])
-  // Only the first element is a Supabase result; the other two are util outputs (S607).
+  // Only the first element is a Supabase result; the other two are util outputs (S612).
   throwFirstError([recipeMetaRes])
   const { data: recipeMeta } = recipeMetaRes
 
@@ -173,7 +173,7 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
 async function fetchItemMap(supabase, itemIds) {
   if (itemIds.length === 0) return {}
   const res = await supabase.from('items').select('id, name, per_uom_rate').in('id', itemIds)
-  // A failed read here silently zeroed every valuation built from this map (S607 silent-zero rule).
+  // A failed read here silently zeroed every valuation built from this map (S612 silent-zero rule).
   throwFirstError([res])
   return Object.fromEntries((res.data || []).map(i => [i.id, { name: i.name, rate: parseFloat(i.per_uom_rate) || 0 }]))
 }

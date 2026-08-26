@@ -1,5 +1,5 @@
 /**
- * The "could not load" card for report surfaces — extracted from ReportPage (S607) so the ~20
+ * The "could not load" card for report surfaces — extracted from ReportPage (S612) so the ~20
  * report pages that predate the ReportPage shell can adopt the same error grammar without a
  * structural rewrite. A failed read is not an empty period: an RLS rejection, a network blip or
  * the documented auth-token stall all return `data: null, error: {...}`, and a page that drops

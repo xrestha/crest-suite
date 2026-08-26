@@ -48,7 +48,7 @@ export default function TheoreticalVariance() {
       scopedFrom('categories').order('sort_order'),
       scopedFrom('recipes', 'id, name, yield_qty'),
     ])
-    // A failed read is not "no periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
     const [{ data: p }, { data: i }, { data: c }, { data: r }] = initResults
@@ -63,7 +63,7 @@ export default function TheoreticalVariance() {
       // trim loss is still real. Filtering here is what made yield_pct silently default to 100%.
       scopedFrom('items', 'id, yield_pct'),
     ])
-    // S607: a failed ingredient/yield read silently understates theoretical usage — surface it.
+    // S612: a failed ingredient/yield read silently understates theoretical usage — surface it.
     const ingFailed = firstError(ingResults)
     if (ingFailed) { setLoadError(ingFailed); setLoading(false); return }
     const [{ data: ri }, { data: allItems }] = ingResults
@@ -153,7 +153,7 @@ export default function TheoreticalVariance() {
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
-    // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S607 silent-zero rule).
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); return }
     const [{ data: sales }, { data: opening }, { data: closing }, { data: purch }, { data: rets }, { data: wast }, { data: staffMeals }] = results

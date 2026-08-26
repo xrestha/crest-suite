@@ -1081,7 +1081,7 @@ export default function ClientDashboard() {
   // feature is locked; an admin grant flips hasFeature(...) → real KPI shows instead.
   // Uses var(--theme-purple) (the rationed 4th-color token) instead of a hardcoded indigo —
   // the old #818cf8/rgba(129,140,248,*) literal was unconditional across all 10 theme presets
-  // (a Bright-preset-only exception, retired with that preset in S607) and an unaudited contrast risk on light presets.
+  // (a Bright-preset-only exception, retired with that preset in S612) and an unaudited contrast risk on light presets.
   const UpsellCard = ({ label, tier, blurb }) => (
     <div
       onClick={() => navigate('/pricing')}

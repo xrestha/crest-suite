@@ -37,7 +37,7 @@ export default function HrReports() {
   const [employees, setEmployees] = useState([])
   const [ytdTds,    setYtdTds]    = useState({})   // employee_id -> YTD tds (incl this period)
   const [loading,   setLoading]   = useState(true)
-  // S607 silent-zero rule: a failed read must render as a failure, never as "no payroll run" or
+  // S612 silent-zero rule: a failed read must render as a failure, never as "no payroll run" or
   // a challan of zeros — these are figures an accountant files on.
   const [loadError, setLoadError] = useState(null)
   const [tab,       setTab]       = useState('summary')
@@ -98,7 +98,7 @@ export default function HrReports() {
       .eq('employee_id', certEmpId)
       .eq('hr_payroll_runs.status', 'finalized')
       .then(({ data, error }) => {
-        // S607: a failed read must not render as "no finalized payslips found for this FY" —
+        // S612: a failed read must not render as "no finalized payslips found for this FY" —
         // that sentence is a claim about the employee's tax record.
         if (error) { setCertError(error.message); setCertSlips([]); setCertLoading(false); return }
         const slips = (data || [])
@@ -122,7 +122,7 @@ export default function HrReports() {
     setLoadError(null)
     const { data: runRow, error: runErr } = await scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle()
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    // S607 silent-zero rule: a failed read here would wear the "no payroll run this period"
+    // S612 silent-zero rule: a failed read here would wear the "no payroll run this period"
     // empty state — and the challan/TDS sheets on this page are figures an accountant files on.
     if (runErr) { setLoadError(runErr.message); setRun(null); setPayslips([]); return }
     setRun(runRow || null)
@@ -143,7 +143,7 @@ export default function HrReports() {
     const cur = fiscalYearOf(p.bs_year, p.bs_month)
     const { data, error } = await scopedFrom('hr_payslips', 'employee_id, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
       .eq('hr_payroll_runs.status', 'finalized')
-    // A failed read must not zero every YTD TDS figure on the filing sheets (S607).
+    // A failed read must not zero every YTD TDS figure on the filing sheets (S612).
     if (error) { setLoadError(error.message); setYtdTds({}); return }
     const map = {}
     ;(data || []).forEach(r => {

@@ -34,7 +34,7 @@ export async function computeMenuEngineeringSection(clientId, period) {
     supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp'),
   ])
   // Throw on a failed read so runSection() names this section as failed instead of freezing a
-  // matrix of all-Dogs into the immutable snapshot (S607).
+  // matrix of all-Dogs into the immutable snapshot (S612).
   throwFirstError(results)
   const [{ data: recipes }, { data: salesData }] = results
 

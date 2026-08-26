@@ -46,7 +46,7 @@ export default function MenuRepricing() {
     scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
-        // A failed read must not impersonate "no periods yet" (S607 silent-zero rule).
+        // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
         if (error) { setLoadError(error.message); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
@@ -68,7 +68,7 @@ export default function MenuRepricing() {
         .neq('category', 'Sub-Recipe')
         .eq('is_active', true),
     ])
-    // A failed read must not render the celebratory "no underpriced dishes 🎉" empty state (S607).
+    // A failed read must not render the celebratory "no underpriced dishes 🎉" empty state (S612).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
     const [{ data: salesData }, { data: recipes }] = results

@@ -50,7 +50,7 @@ export default function StockMovements() {
     setLoadError(null)
     const { data: p, error: pErr } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    // A failed read is not "no periods yet" — surface it instead of rendering empty (S607 silent-zero rule).
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
     if (pErr) { setLoadError(pErr.message); setLoading(false); return }
     setPeriods(p || [])
 
@@ -86,7 +86,7 @@ export default function StockMovements() {
         console.error('sub-recipe usage failed:', err)
         if (!periodReq.isCurrent(periodId)) return   // a stale load's failure must not clobber the current view
         // The helper now throws on a failed read — degrading to EMPTY_USAGE rendered a believable
-        // "quiet period" over an error (S607 silent-zero rule).
+        // "quiet period" over an error (S612 silent-zero rule).
         setUsage(EMPTY_USAGE)
         setLoadError(err?.message || String(err))
       })
@@ -108,7 +108,7 @@ export default function StockMovements() {
       supabase.from('sales_entries').select('recipe_id').eq('period_id', periodId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    // A failed read must never flow through the `|| []`s below into a confident NPR-0 ledger (S607 silent-zero rule).
+    // A failed read must never flow through the `|| []`s below into a confident NPR-0 ledger (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); return }
     const [{ data: movements }, { data: profs }, { data: soldEntries }] = results
@@ -125,7 +125,7 @@ export default function StockMovements() {
         scopedFrom('recipes', 'id, name').in('id', soldRecipeIds),
       ])
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-      // S607: a failed read here would silently hide the no-BOM warning banner.
+      // S612: a failed read here would silently hide the no-BOM warning banner.
       const bomFailed = firstError(bomResults)
       if (bomFailed) { setLoadError(bomFailed); setRows([]); setNoBomRecipes([]); return }
       const [{ data: ingRows }, { data: recipeRows }] = bomResults
@@ -266,7 +266,7 @@ export default function StockMovements() {
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
   // !loadError: a failed periods read leaves periods empty, and NoPeriodState would wear the
-  // failure as "no periods yet" (S607 silent-zero rule).
+  // failure as "no periods yet" (S612 silent-zero rule).
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the stock movement log" />
 
   return (
@@ -291,7 +291,7 @@ export default function StockMovements() {
         </div>
       </div>
 
-      {/* A failed read renders as a failure — never as a quiet ledger of zeros (S607). */}
+      {/* A failed read renders as a failure — never as a quiet ledger of zeros (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
       {tab === 'subs' ? (

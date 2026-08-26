@@ -69,7 +69,7 @@ export default function MonthlySummary() {
       scopedFrom('recipes', 'id, selling_price')
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded — a stale load's failure must not clobber the current view either
-    // A failed read must not render as a quiet month of NPR 0 (S607 silent-zero rule).
+    // A failed read must not render as a quiet month of NPR 0 (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setReport(null); return }
     const [

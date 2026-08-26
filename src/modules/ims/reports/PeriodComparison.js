@@ -132,7 +132,7 @@ export default function PeriodComparison() {
       // PostgREST's silent 1000-row cap easily (S528).
       fetchAllRows(() => supabase.from('sales_entries').select('period_id, qty_sold, unit_price, discount, recipes(selling_price, category)').in('period_id', ids).neq('source', 'pos_comp').order('id')),
     ])
-    // A failed read must not render as a quiet run of NPR 0 periods (S607 silent-zero rule).
+    // A failed read must not render as a quiet run of NPR 0 periods (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setStats({}); setLoading(false); return }
     const [

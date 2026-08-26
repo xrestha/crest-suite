@@ -20,7 +20,7 @@ export async function computeLaborAnalyticsSection(clientId, period, { hr, ims }
     scopedFrom('hr_shift_types', clientId, 'id, hours, start_time, end_time'),
   ])
   // Throw on a failed read so runSection() names this section as failed instead of freezing
-  // zero labour hours into the immutable snapshot (S607).
+  // zero labour hours into the immutable snapshot (S612).
   throwFirstError(results)
   const [{ data: attendanceRows }, { data: rosterRows }, { data: shiftTypes }] = results
 

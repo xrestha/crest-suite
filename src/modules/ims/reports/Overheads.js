@@ -90,7 +90,7 @@ export default function Overheads() {
     const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
-    // A failed read must not impersonate "no periods yet" (S607 silent-zero rule).
+    // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
     if (error) { setLoadError(error.message); setLoading(false); return }
     const withLabel = (data || []).map(p => ({ ...p, label: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` }))
     setPeriods(withLabel)
@@ -110,7 +110,7 @@ export default function Overheads() {
       .eq('period_id', periodId)
       .order('created_at')
     // A failed read must NOT fall into the carry-forward branch below: it would seed an editable
-    // draft over a period that may have real saved rows, and Save would replace them (S607 —
+    // draft over a period that may have real saved rows, and Save would replace them (S612 —
     // on a data-entry page the silent-zero class is a data-loss class).
     if (error) { setLoadError(error.message); return }
 
@@ -160,7 +160,7 @@ export default function Overheads() {
     for (const p of candidatePeriods) {
       const { data, error } = await scopedFrom('overheads').eq('period_id', p.id).order('created_at')
       // A failed read mid-walk must not read as "that period had nothing" — the caller would
-      // carry forward from an older period than the truth, as an editable draft (S607).
+      // carry forward from an older period than the truth, as an editable draft (S612).
       if (error) return { rows: null, error: error.message }
       if (data && data.length > 0) return { rows: data, error: null }
     }
@@ -175,7 +175,7 @@ export default function Overheads() {
       supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp'),
       scopedFrom('recipes', 'id, selling_price')
     ])
-    // The reference figures (revenue, food cost) must not print as NPR 0 off a failed read (S607).
+    // The reference figures (revenue, food cost) must not print as NPR 0 off a failed read (S612).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setPeriodData(null); return }
     const [
@@ -335,7 +335,7 @@ export default function Overheads() {
   const bucketTotal = totals[activeBucket]
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
-  // !loadError: a failed periods read must not wear NoPeriodState (S607 silent-zero rule).
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="fixed cost tracking" />
 
   return (
@@ -361,7 +361,7 @@ export default function Overheads() {
       </div>
 
       {/* A failed read blocks the whole form: on a data-entry page, saving over rows the page
-          could not read is a data-loss shape, not just a wrong figure (S607). */}
+          could not read is a data-loss shape, not just a wrong figure (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
       {isLocked && (
