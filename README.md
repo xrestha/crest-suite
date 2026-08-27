@@ -232,9 +232,23 @@ hooks are untouched.
 The impeccable detector hook was measured again: **median 752 ms across 515 Edit fires, 445 ms
 across 104 Writes**, no timeouts, and the six `hook_cancelled` entries are Esc presses. The
 4,723 ms Write peak S605 flagged is dated 2026-08-13 — the *same run*, not a recurrence — but the
-shape did repeat on 2026-08-22 at **4,064 ms against a 5,000 ms timeout**. Twice now within 950 ms
-of being killed silently. Flagged again, still not changed, and worth an actual fix before it
-becomes a third session's footnote.
+shape did repeat on 2026-08-22 at **4,064 ms against a 5,000 ms timeout**. Twice within 950 ms of
+being killed silently, and a cancelled hook is not reported: the detector would simply stop running
+with nothing on screen to say so. **The PostToolUse timeout is now 15 s** (3× the observed max);
+Stop stays at 30 s against a 751 ms maximum. This lives in `.claude/settings.local.json`, which is
+gitignored — so it is a per-machine fix, and a fresh clone still starts at the 5 s default.
+
+Two things were investigated and deliberately *not* changed, because the measurement did not support
+them. Duration does not track file size — a 2,805-byte `index.html` took 2,916 ms while a
+161,396-byte `ClientDashboard.jsx` took 2,551 ms — so scanning is not the cost and narrowing what
+the hook reads would not have helped. And the configured command spawns Node **twice** (an outer
+`node -e` whose only job is an `existsSync` check, then a `spawnSync` of the real script), which
+looked like free savings: measured at ~85 ms per fire on the empty-stdin skip path, it collapsed to
+**~16 ms on the real working path**, inside the noise. The A/B was also confounded by the hook's own
+`.impeccable/hook.cache.json` dedup, which makes consecutive identical runs return different output.
+Changing how a third-party skill is invoked, for a benefit that cannot be measured cleanly, is not a
+trade worth making — **the tail remains unexplained, and the timeout is a guard against it rather
+than a diagnosis of it.**
 
 Nothing was proposed for permissions: auto mode was already the default at user scope with nothing
 shadowing it, and no denial qualified. `DESIGN.md`, `PRODUCT.md` and `POS_TODO.md` were deliberately
@@ -242,8 +256,9 @@ not touched — this pass changed no design token, no product positioning and no
 
 **Files:** `CLAUDE.md` (115,996 → 85,186), `.claude/rules/{component-library, report-pages,
 item-master-rates, accounts-and-logins, ims-figures, recipes-and-subrecipes, bs-calendar}.md` (new),
-`.claude/rules/supabase-sql.md`, `.claude/settings.local.json`, `.claude/skills/{frontend-design,
-ui-ux-pro-max}/**` (deleted, 43 files), `README.md`
+`.claude/rules/supabase-sql.md`, `.claude/settings.local.json` (gitignored — skillOverrides
+cleared, PostToolUse timeout 5 s → 15 s), `.claude/skills/{frontend-design, ui-ux-pro-max}/**`
+(deleted, 43 files), `README.md`
 
 ### S614 — 2026-08-27 — A Day column that only works while you can see the page header
 
