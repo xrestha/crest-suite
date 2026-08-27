@@ -10,6 +10,7 @@ import ConfirmModal from '../components/ConfirmModal'
 import { generateMonthlyReport, saveGeneratedReport } from '../modules/ownerReport/generateMonthlyReport'
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { withTimeout } from '../utils/withTimeout'
+import { closingCountNote } from './periods/closingCountNote'
 
 export default function Periods() {
   const { isAdmin, clientId, profile, switchAdminClient, hasImsAccess, clientModules } = useAuth()
@@ -120,21 +121,21 @@ export default function Periods() {
         // Rows with a real physical count only — carryForwardOpeningStock uses the same test.
         supabase.from('closing_stock').select('item_id', { count: 'exact', head: true })
           .eq('period_id', periodId).not('physical_qty', 'is', null),
+        // NO is_sub_recipe filter, deliberately: Stock.js counts active items WITHOUT that
+        // filter, so sub-recipe mirror items get closing_stock rows like any other. Excluding
+        // them here measured the two sides against different populations — a client with 200
+        // raw items and 30 sub-recipes who counted every sub-recipe and 170 raw items scored
+        // 200 of 200 and was told "All 200 active items have a closing count", with 30 items
+        // heading into the frozen report at zero. Both sides must mean what the count screen
+        // means, or the all-clear is the one branch that can be wrong (S616).
         supabase.from('items').select('id', { count: 'exact', head: true })
-          .eq('client_id', cid).eq('is_active', true).eq('is_sub_recipe', false),
+          .eq('client_id', cid).eq('is_active', true),
       ]), 10000, 'Checking closing counts')
       if (countedRes.error || itemsRes.error) return null
       return { counted: countedRes.count ?? 0, items: itemsRes.count ?? 0 }
     } catch {
       return null // a failed preflight must not block the close — the note says it couldn't check
     }
-  }
-
-  function closingCountNote(pre) {
-    if (!pre) return { danger: false, text: "Couldn't check this month's closing count — make sure Closing Stock is entered before closing." }
-    if (pre.counted === 0) return { danger: true, text: `No closing stock has been counted for this month (0 of ${pre.items} active items). Closed like this, every item's closing stock counts as ZERO in COGS and in the frozen Monthly Report.` }
-    if (pre.counted < pre.items) return { danger: false, text: `${pre.counted} of ${pre.items} active items have a closing count — items without one are treated as zero stock in COGS and the frozen Monthly Report.` }
-    return { danger: false, text: `All ${pre.items} active items have a closing count.` }
   }
 
   // Body = main consequence copy + the preflight line (red when the count is missing entirely).
@@ -292,7 +293,17 @@ export default function Periods() {
           .eq('bs_year', nextYear).eq('bs_month', nextMonth).maybeSingle()
         nextPeriodId = existing?.id
       } else {
+        // A dropped error here closed the month and opened NOTHING — every entry page then reads
+        // "no open period" with no explanation, and "+ Create Period" is admin-only, so a client
+        // owner cannot recover on their own. S613 surfaced this on the ADMIN close path and left
+        // this one — the one an owner actually clicks, from the "has ended" banner — still silent.
         console.error('Could not create next period:', error)
+        window.alert(
+          `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} was closed, but ${BS_MONTHS[nextMonth - 1]} ${nextYear} could not be opened: ${error.message}\n\n` +
+          (isAdmin
+            ? 'Use "+ Create Period" for this client, then "Resync Opening Stock" to carry the closing count forward.'
+            : 'Until the new month is opened you will not be able to record purchases, sales or stock. Please contact your Crest consultant.')
+        )
       }
     }
     if (nextPeriodId) await carryForwardOpeningStock(period.id, nextPeriodId)
