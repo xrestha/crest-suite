@@ -31,3 +31,8 @@ yarn-error.log*
 __pycache__/
 *.pyc
 .playwright-mcp/
+
+# Critique/audit screenshot artifacts dumped in the repo root (viewport-named PNGs from
+# /impeccable browser runs — 1440x900, 390x844). Root-scoped on purpose: every legitimate
+# image asset lives under public/ or src/, so this cannot swallow one.
+/*.png
