@@ -352,3 +352,24 @@ different numbers is a support call.
 Effective rate = settled commission ÷ ex-VAT settled base. The contracted rate it is checked
 against is `settings.pos_delivery_partners[].commission_pct`, which existed for a long time as a
 settle-time pre-fill and was read by nothing else.
+
+### The four POS report pages are reports, not till screens (S613)
+
+`SalesReport`, `CoversReport`, `KotLog` and `PosExceptionReport` now render the product's shell
+grammar — `page-header`/`page-title`/`page-subtitle`, `stat-grid`/`stat-card` KPI tiles,
+`tab-bar` tabs, and keyboard-reachable drill-downs — because they are read at a desk by the same
+owner or accountant who reads every other report in the product. `PosOrders` and `KitchenDisplay`
+keep the full-screen till idiom deliberately; see `.claude/rules/design-system.md` for the boundary
+("a new POS page is a report unless it is operated during service").
+
+Two POS-specific details from that convergence:
+
+- **A `<tr onClick>` is mouse-only.** The RowDisclosure sweep never reached POS, so every
+  drill-down here was unreachable by keyboard. An inline detail expansion takes `RowDisclosure` in
+  the first cell; a drill-down that *opens* something (`viewPosBill`) takes a real `<button>` in a
+  `no-print` action column, with `stopPropagation()` so the row's own handler cannot double-fire.
+  Adding that column means adding a `<th>` **and** a `<td>` to the tfoot, or the totals row shifts
+  one column left of its headers.
+- **KOT vs BOT is a category, not a status.** The KOT chip used `badge-green`; success-green for a
+  categorical distinction is the one thing the badge set is not for. KOT is `badge-purple`, BOT
+  stays `badge-yellow` (the accent-tinted categorical tag).

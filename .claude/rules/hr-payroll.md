@@ -79,3 +79,21 @@ regenerating that month's draft silently destroyed their issued payslip. It deli
 block Finalize (that would strand the run with no legal move); it gates Regenerate with a confirm.
 
 **`hr_tada_claims` has no `bs_year`/`bs_month` and is not plumbed through `monthly_periods` at all** — it's a standalone ledger keyed on plain AD `start_date`/`end_date`, which is why `fetchApprovedTadaMap` converts the BS period to an AD range rather than filtering on period columns, and why TADA Claims' own month filter (S564) buckets client-side via `adToBs(start_date)` instead of a `.eq()`. Don't reach for `period_id` on this table; it isn't there.
+
+### A finalize gate that drops its read error passes vacuously (S613)
+
+Final Settlement's three refusal checks — a finalized payslip already covering the final month, an
+overlapping prior settlement, a concurrent finalize in another tab — each read the database and each
+**dropped the error**. So a failed `hr_payslips` read produced an empty array, which reads as "no
+payroll covers this month", and the gate waved through **exactly the double-payment it exists to
+block**. All three now push a refusal naming the failure instead ("Could not verify whether payroll
+already covers the final month… finalizing without this check could pay that month twice").
+
+`reopen()` had the same shape with worse consequences: it dropped the error on the read of *its own*
+tagged `hr_advance_repayments` rows, so a failed read meant it deleted the repayments and reactivated
+**nothing** — the advances this settlement had closed stayed closed while the settlement that closed
+them was gone. It now aborts before touching anything.
+
+**The rule for any new gate here: a check that could not run has not passed.** Refuse and name the
+failure. The same reasoning applies to Payroll Run's freshness gate, which reads live data to decide
+whether Finalize is safe.

@@ -405,6 +405,19 @@ Three rules came out of it:
   on a data-entry page (Overheads) a failed read must block the form outright — saving over rows
   the page could not read is a data-loss shape, not a display bug. A new report page copies this
   from any sibling; there is no unswept example left to copy.
+- **A dropped WRITE error is silent data loss, and a guard that drops its READ error passes
+  vacuously (S613).** The silent-zero rule above is about rendering; these are its two write-side
+  twins, and both shipped. **Write:** `Roster.jsx` painted the shift optimistically and dropped the
+  upsert's error, so the board showed as saved what the database had refused; `Periods.js` closed a
+  month and dropped the next period's INSERT error, silently blocking the client from recording
+  anything with no explanation on screen; `PosTableManagement`'s four settings saves fell through to
+  INSERT when the existing-row read failed, which splits a client's settings row in two and quietly
+  changes what every later settings read returns. An optimistic UI **must** reconcile against the
+  failure and say so. **Guard:** `FinalSettlement`'s three finalize gates swallowed their reads, so a
+  failed `hr_payslips` read meant "no payroll covers this month" — the gate passing vacuously on
+  exactly the double-payment it exists to prevent. **A check that could not run has not passed**:
+  refuse and say why, never wave through. Ask of any new guard, "what does this do when its own read
+  fails?" — if the answer is "allows the action", it is not a guard.
 - **The KPI strip does not render while loading or after a failure.** Both pages painted four stat
   cards *above* their `loading` guard, so a multi-second fiscal-year read showed "Capital in 90+ Day
   Stock: NPR 0" in green until the real number arrived — and on a failed read it stayed there. A
@@ -619,6 +632,15 @@ registration in `admin-user-ops`, and `RESTORE_ORDER` in the Export/Import resto
 - `pos_orders.order_no` is assigned by a **BEFORE INSERT trigger** (per-client sequential) — never set it from the frontend; read it back via `.select('id, order_no')` after insert. Same pattern for `pos_orders.invoice_no` (BEFORE UPDATE, partitioned by `client_id + invoice_fy + close_type`) and `pos_credit_notes.credit_note_no` (BEFORE INSERT, partitioned by `client_id + invoice_fy`) — never set these from the frontend either. Item-level comps (`pos_order_items.comp_no`) share the **same NC-series** as a whole-order Complimentary Slip — the frontend calls `get_next_pos_comp_slip_no(client_id, fy)` RPC once per Charge action (one number per comp event, not per line) and passes the result in explicitly; `assign_pos_invoice_no()`'s `close_type='writeoff'` branch locks on and considers that same pool, so the two paths can never collide.
 - The offline stock count (and POS order-taking) uses IndexedDB (`src/utils/offlineQueue.js`, DB name `crest-offline`) with 10 object stores. Sync flushes automatically on reconnect. **Any read-modify-write on an offline store must happen inside a single `readwrite` transaction** (get + merge + put together), never a readonly get followed by a separate readwrite put — IndexedDB only serialises *overlapping readwrite* transactions on a store, so the two-transaction shape lets concurrent callers read the same pre-image and clobber each other's write. This was a real bug (S440): `saveOrder` fires `logKotSend('KOT')` + `logKotSend('BOT')` un-awaited, both routing through `enqueuePosOrder`, which silently dropped one station's queued KOT send offline until the merge was made atomic. POS billing is hard-gated offline (`payDisabled` includes `!isOnline`), so the offline surface is order-taking only — no money path is ever reachable without a live server.
 - `settings` was, until S290 (`20260707150000_settings_rls_same_client_write.sql`), the one client-scoped table whose INSERT/UPDATE RLS policies were **admin-only** with no same-client allowance — every settings-writing tab in `PosTableManagement.jsx` (Discounts, Quick Notes, Ticket Routing, Delivery Partners) had been silently no-op'ing for any real (non-admin) client login, since an RLS-blocked write returns zero rows changed with no error rather than throwing. Now follows the standard `is_admin() OR client_id = my_client_id()` pattern like every other table; the `client_id IS NULL` global-defaults row (`app_name`, `app_tagline`, etc.) stays admin-only automatically since a real client's `client_id` can never equal `NULL`. Still stays on raw `supabase.from()` rather than `scopedDb` (see the `scopedDb` note above) — that's about the nullable `client_id`, unrelated to this RLS fix.
+- **Closing a period is preflighted on the closing count (S613).** The close locks the month *and*
+  mints the frozen Monthly Report, and COGS subtracts closing stock — so an uncounted month freezes
+  "closing = 0 for every item" into an artifact nothing recomputes. All three close paths in
+  `Periods.js` now run `closingCountPreflight()` and state what it found inside the ConfirmModal,
+  red when nothing is counted. It **informs and never blocks** (an admin correcting history
+  legitimately closes uncounted months), a failed preflight says it could not check rather than
+  blocking, and it counts the same `physical_qty IS NOT NULL` rows `carryForwardOpeningStock` uses
+  so the sentence and the carry-forward cannot disagree. Full reasoning in
+  `.claude/rules/owner-report.md`.
 - **`monthly_periods` allows at most one `open` period per client** (`monthly_periods_one_open_per_client`, a partial unique index `WHERE status='open'`, added 2026-07-13) — virtually every IMS/HR/Owner Dashboard page assumes this via a plain `.eq('status','open').limit(1).single()` read. Practical consequence: `Periods.js`'s "Reopen" action on a *past* closed period will always fail once a more recent period is open — which is the only realistic time anyone reopens a past period, so always check the update's `error` before treating a reopen as successful (S432, 2026-07-21, found an unhandled case that silently did nothing and gave no indication why). Separately, **admin doesn't need to reopen a period to edit it** — `Stock.js`'s `isLocked = !isAdmin && status==='closed'` (mirrored on every other period-scoped entry page) exempts admin from the read-only lock entirely regardless of status. Reopening only matters for handing edit access back to the *client's own* login; if admin is making the correction personally, editing in place and then re-propagating forward (`Periods.js`'s `carryForwardOpeningStock`, safe to call standalone — it's an idempotent upsert, exposed via the "Resync Opening Stock" action) is the simpler, unblocked path.
 
 ### Two writes in one function can diverge, so one is never evidence of the other
@@ -643,5 +665,17 @@ Use `fetchAllRows(makeQuery)` (`src/shared/fetchAllRows.js`) for any period-scop
 S529 swept the rest: **61 call sites across 42 files**. Row-count thresholds worth knowing, since they decide whether a table needs this at all — `hr_attendance` is one row per employee **per day**, so it crosses 1000 at ~34 staff (that one silently zeroed daily/hourly pay and removed absence deductions for monthly staff, since employees past the cutoff simply appeared to have no attendance); `pos_order_items` is one row per line per bill, so a month of ordinary service is thousands; `purchase_entries` is fine for one period but not for the fiscal-year and all-time reports (Annual Summary, VAT/Non-VAT, One Lakh Above, Vendor Balance Confirmation, Supplier Price Tracker, and Outstanding Payables — that last one unbounded by period, so it gets worse the longer the system is used).
 
 **Deliberately not wrapped:** single-parent reads (`.eq('order_id', X)` for one bill — a bill can't have 1000 lines) and `head: true` count queries (`Vendors.js`'s delete guard returns a count, not rows, so the cap cannot apply). Wrapping either would be noise.
+
+**S613 (2026-08-26) swept the tail S529 left, and its shape is the lesson: a sweep that works
+table-by-table finishes the table it was named after and leaves its neighbours.** S529 wrapped
+`purchase_entries` almost everywhere and `wastages` almost nowhere — 10 of 12 `wastages` reads were
+still bare, including the multi-period windows in `AnnualSummary`, `PeriodComparison` and
+`ShrinkageReport`, while `sales_entries` split 9 wrapped / 9 not. 35 more sites across 25 files are
+now paged. Two worth knowing: `Sales.js`'s `loadAllDaySums` doubles as the **save-time fallback
+baseline** for every item the user did not type into, so a truncated read there could be *written
+back*, not merely displayed; and `Items.js`'s `checkAllUsage` feeds the force-delete guard, so its
+truncation reported a used item as unused. **Deliberately not wrapped**, so the next sweep does not
+churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and
+`persistSalesDay`'s legacy three-call fallback.
 
 **Two traps when doing a sweep like this**, both hit live: (1) if the original chain continued past the line you're editing, the closing paren lands too early and the trailing `.order(...)` gets applied to fetchAllRows' *result* — a plain `{data,error}`, not a builder — which is a runtime `TypeError`, not a build error, so only actually loading the page catches it (`Purchases.js`, found exactly this way). (2) A CRA dev server left running shares `node_modules/.cache` with `npm run build` and will keep rewriting stale ESLint entries underneath it, producing phantom `'fetchAllRows' is defined but never used` errors on files where the import and the usage are both plainly present. Stop the dev server before trusting a CI build.

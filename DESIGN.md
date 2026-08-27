@@ -551,6 +551,20 @@ Every IMS/Suite report renders inside one component that owns the **six states a
 
 **The could-not-load state is deliberately not the empty state.** `.report-error` is a red-bordered card with `role="alert"` that says the figures are not real, where `.empty-state` says there is nothing to show — different facts, and only one of them means the page can be trusted. A failed read rendering as a clean zero is worse than a crash: a crash gets reported, a zero gets believed.
 
+**What "every report renders inside it" actually means, measured (2026-08-26/S613).** Three pages render the full `ReportPage` shell; ~30 report pages render its *grammar* by hand — the shared `ReportLoadError` card (extracted from this component in S612 precisely so a pre-shell page could adopt the failed≠empty rule without a structural rewrite), `firstError`, `NoPeriodState`, and the strip/note/filter gating. **That is the supported state, not a migration debt**: the doctrine is mandatory, the wrapper is optional. A page that renders the grammar by hand must gate its own `stats`/`note`/`filters` on `!loading && !error` — a rule the wrapper enforces for free and a hand-rolled page can forget, which is why a new report page should still start from `ReportPage` unless it has a shape the shell cannot express.
+
+### Report pages are one dialect, till screens are another (settled 2026-08-26/S613)
+
+POS's four **report** pages (`SalesReport`, `CoversReport`, `KotLog`, `PosExceptionReport`) had grown their own grammar — an inline-styled `h2` where every other page opens with `page-title`, hand-rolled KPI tiles instead of `stat-grid`, a third tab family, and mouse-only `<tr onClick>` drill-downs. That was drift, not a decision, and it is now converged: a report is a report whichever module it belongs to, because the person reading it is the same owner or accountant, arriving with the same expectations, often on the same afternoon.
+
+**The till screens are the deliberate exception.** `PosOrders` and `KitchenDisplay` are `position: fixed` full-screen layers with their own idiom — big touch targets, no sidebar, no page header — because they are operated on a busy floor at arm's length, not read at a desk. Their `Modal` usage needs its own `zIndex` for exactly this reason (see Components). Do not "converge" them.
+
+### The phone is a supported reporting surface (settled 2026-08-26/S613)
+
+`.stat-grid` is `repeat(auto-fit, minmax(180px, 1fr))` and reflows on its own. Twenty-five report pages had been overriding it inline with `repeat(N, 1fr)` up to N=6 — **an inline style outranks every media query**, so a phone rendered six crushed KPI columns on precisely the pages an owner checks between services. All removed; the desktop rendering is unchanged because auto-fit lands on the same column count at desktop widths.
+
+The rule that follows: **never pin a fixed column count on a KPI strip.** If a row genuinely needs a different density, add a named variant to `Layout.css` (as `.stat-grid--compact` and `.dash-3col-*` already are) so it carries its own breakpoint, rather than an inline override that has none. Entry surfaces (Stock Count, POS) were already phone/tablet-first; this settles the reporting half.
+
 ### Data Tables (signature component)
 Dense, functional, and the component most of the product's screens are actually built around. Column headers are 11px uppercase labels at wide tracking; rows are 13px body text with a light bottom border between them (no border on the last row); row hover applies a barely-there tint (`table-hover`, 2-8% alpha depending on theme) rather than a solid highlight. Wide tables always live inside a horizontal-scroll wrapper rather than compressing columns to fit - the data stays legible at native width instead of getting cramped to avoid a scrollbar.
 
