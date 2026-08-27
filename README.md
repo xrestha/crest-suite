@@ -159,6 +159,92 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S615 — 2026-08-27 — The root file regrew 7,052 chars in three days, so migration is maintenance
+
+The third `/doctor` pass, and the first one where the interesting result was the *rate of change*
+rather than the size. Everything structural came back clean: one install (VS Code extension
+**2.1.246**, one patch behind 2.1.247 and updated through VS Code rather than `claude update`), all
+five config files parsing, no agent definitions to collide, all five `SKILL.md` frontmatter blocks
+valid, no plugins installed, no `CLAUDE.local.md` anywhere, and auto mode already the default
+permission mode. `playwright` is comfortably the most-used extension — **293 tool calls across the
+14-day window** — and its tools are deferred, so the single heaviest thing in the setup costs
+roughly nothing in resident context.
+
+The denial scan is worth stating as a positive rather than an absence. Sixteen denials over 50
+transcripts, and **every one was a build, an interpreter or a script execution** —
+`npx react-scripts build`, `npm run build`, `python - <<'PY'` heredocs, `node patch.mjs`. Not one
+was read-only. Nothing was pre-approved, because pre-approving any of those is standing arbitrary
+code execution wearing a convenience label. The two genuinely read-only blocks in the whole window
+were a single `grep` and a single `Glob`, one occurrence each. The 226 user-scope plus 192
+project-scope allow rules are already absorbing everything that should be absorbed.
+
+**S605 left `CLAUDE.md` at 108,944 chars on 2026-08-24. It was 115,996 today — +7,052 in three
+days, about 2,350 chars a day.** That is the finding. Two migration passes (2026-08-18 and S605)
+each treated the size as a one-time defect to be fixed, and at the observed rate the file returns
+to its pre-S605 size in roughly two weeks regardless of how well either pass was executed. The
+cause is structural and not a discipline failure: every session's new rule has exactly one obvious
+home, the root file, and no session is in a position to notice that it is the fortieth to make that
+choice. So this pass wrote the routing rule *into* `CLAUDE.md` (**"Where a new rule goes"**, under
+Design conventions) rather than only into the README, where the 2026-08-18 pass had recorded the
+same convention and where no session ever reads it.
+
+Seven sections moved out, 35,293 chars, with 3,873 chars of pointer stubs left behind — net
+**31,420 chars**, taking `CLAUDE.md` to 83,711 — back under the large-memory warning threshold for
+the first time. The "Where a new rule goes" section added 1,475 of that back deliberately, so the
+file finished at **85,186: 115,996 → 85,186, about 7,700 estimated tokens off every request**.
+
+New path-scoped files:
+`component-library.md` (7,363 — the full reusable-component table), `report-pages.md` (6,215 — the
+S594/S613 "never show a number you have not computed" family), `item-master-rates.md` (5,568 —
+S597's `purchase_qty = 1`), `accounts-and-logins.md` (5,206 — the three front doors and the
+Owner-is-the-absence-of-markers trap), `ims-figures.md` (4,782 — `COGS_FORMULA`, `fcBand`, the
+Stock Count two-table reconciliation), `recipes-and-subrecipes.md` (3,911) and `bs-calendar.md`
+(2,248).
+
+**The BS calendar was split rather than moved, which is the first time a section has been.** Its
+provenance — how BS 2000–2087 was cross-verified against four converters, why 2084–2087 are
+deliberately left alone, what `BS_YEAR_MIN`/`adToBsSafe` are for — is only ever needed by someone
+editing `bsCalendar.js`, so it went. The rules stayed: `formatBsDay`, the single `BS_MONTHS`
+definition, and **never `.toISOString()` a Date that came from `bsToAd`**. The test is not "is this
+section about one file" but "is this *rule* only reachable from one file", and a date-rendering
+rule is reachable from everywhere. On the same reasoning the four privilege invariants (S531) and
+the Supabase/DB notes stayed in the always-loaded file — a safety-critical prohibition and the
+`getSession()` stall that can freeze every query in the app are both needed before anyone thinks to
+ask.
+
+Two stale facts, and the way they survived is the lesson. `CLAUDE.md` said `CACHE_NAME` was
+`crest-v25` "as of S460"; the actual value in `public/service-worker.js` is **`crest-v130`** — 105
+bumps of drift, on the line whose entire purpose is to insist that constant gets bumped. S605 read
+that same line and correctly kept it, because S605 was auditing *derivability* and the rule around
+it is not derivable. **A derivability audit does not check accuracy, and a rule that embeds a value
+which moves will rot inside a rule that is otherwise permanently correct.** The version is gone;
+the instruction now points at the file. Same shape in `.claude/rules/supabase-sql.md`: "RLS is
+enabled on all 18+ tables" reads as a count, and there are 78.
+
+`frontend-design` and `ui-ux-pro-max` were deleted — both already disabled since S605, both costing
+zero resident context, so this was repo tidiness only. Sized from their `SKILL.md` files at ~56 kB
+in the proposal, they came out as **43 files and 10,682 lines**: `ui-ux-pro-max` carried a `data/`
+tree of ~40 CSVs that no `SKILL.md` measurement would ever have shown. **A skill is a directory,
+not a file** — size it with `du`, not `wc -c` on its manifest. Their now-dangling `skillOverrides`
+entries came out of `.claude/settings.local.json` at the same time; its 192 allow rules and both
+hooks are untouched.
+
+The impeccable detector hook was measured again: **median 752 ms across 515 Edit fires, 445 ms
+across 104 Writes**, no timeouts, and the six `hook_cancelled` entries are Esc presses. The
+4,723 ms Write peak S605 flagged is dated 2026-08-13 — the *same run*, not a recurrence — but the
+shape did repeat on 2026-08-22 at **4,064 ms against a 5,000 ms timeout**. Twice now within 950 ms
+of being killed silently. Flagged again, still not changed, and worth an actual fix before it
+becomes a third session's footnote.
+
+Nothing was proposed for permissions: auto mode was already the default at user scope with nothing
+shadowing it, and no denial qualified. `DESIGN.md`, `PRODUCT.md` and `POS_TODO.md` were deliberately
+not touched — this pass changed no design token, no product positioning and no POS behaviour.
+
+**Files:** `CLAUDE.md` (115,996 → 85,186), `.claude/rules/{component-library, report-pages,
+item-master-rates, accounts-and-logins, ims-figures, recipes-and-subrecipes, bs-calendar}.md` (new),
+`.claude/rules/supabase-sql.md`, `.claude/settings.local.json`, `.claude/skills/{frontend-design,
+ui-ux-pro-max}/**` (deleted, 43 files), `README.md`
+
 ### S614 — 2026-08-27 — A Day column that only works while you can see the page header
 
 Three reported-from-a-screenshot fixes on the Purchases bill list, and the last one turned into a

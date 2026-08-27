@@ -8,7 +8,7 @@ paths:
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
 
-- RLS is enabled on all 18+ tables. The standard policy pattern uses an inline subquery:
+- RLS is enabled on every table. The standard policy pattern uses an inline subquery:
 
   ```sql
   (SELECT role FROM profiles WHERE id = (select auth.uid())) = 'admin'

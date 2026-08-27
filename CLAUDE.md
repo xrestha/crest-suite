@@ -4,6 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Where a new rule goes
+
+**Default to `.claude/rules/`, not this file.** Everything here loads on *every* request, so a rule
+that only matters while one module is open is paid for by every session that never opens it. Three
+`/doctor` passes have now had to migrate sections out (2026-08-18, S605, S615), and between the last
+two the root file regrew 7,052 chars in three days — not through carelessness, but because a new
+rule has one obvious home and no single session can see that it is the fortieth to pick it.
+
+Ask which file the rule is *reachable from*, not which file it is about:
+
+- **Reachable from one module or a few files** → the matching `.claude/rules/*.md` (add a `paths:`
+  entry, or start a new file), with a short pointer stub left here if a root-file read should still
+  surface that the guidance exists.
+- **Reachable from anywhere** → here. Safety-critical prohibitions ("never do X"), multi-tenant
+  isolation, access control, and anything that must be present *before* someone thinks to ask.
+
+A section can be split when both are true — the BS calendar keeps its rules here and its
+table-provenance in `.claude/rules/bs-calendar.md`.
+
+**Never embed a value that moves** (a cache version, a table count, a file count) in a rule that is
+otherwise permanent: the rule stays correct while the number rots inside it, and a derivability
+audit will not catch it because the rule around it genuinely is not derivable. Point at the file
+instead.
+
+---
+
 ## Stack
 
 - **React 19 (CRA)** — no Vite, no custom webpack config, no TypeScript
@@ -13,7 +39,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Code splitting (S440)** — every page component in `App.js` is route-level `React.lazy(() => import(...))`; only structural pieces stay eager (contexts, `Layout`, `ProtectedRoute`, `ModuleGate`/`PremiumGate`). Keep new page routes lazy too. Two `Suspense` boundaries: one around `Layout.js`'s `<Outlet />` (so the sidebar persists during in-app navigation — only the content area shows `RouteFallback`) and a top-level one in `App.js` for the public routes. Any `import './x.css'` must stay **above** the lazy `const`s or ESLint's `import/first` fails the CI build. This cut initial JS from ~931 kB → ~165 kB gzipped (the rest lazy-loads as ~97 on-demand chunks)
 - **`xlsx` is always `import('xlsx')` inside the click handler, never a top-level `import * as XLSX from 'xlsx'` (S522).** Route-level lazy-loading (S440 above) only defers a *page's own* code — it does nothing about a library that page statically imports, which webpack still must fetch as a parallel chunk the moment the route itself loads. `xlsx` (SheetJS) is genuinely huge (138 kB gzipped, the single largest chunk in the app after `main.js`) and is only ever touched by an explicit "Export Excel"/"Import Excel" click, never by simply viewing a page — so a static import was paying that 138 kB on every visit to any of the 37 pages that have an Excel button, whether or not the button was ever clicked. Fixed across all 37 by making the export/import handler function `async` and adding `const XLSX = await import('xlsx')` as its first line; verified in the built output (`r.e(1238).then(r.bind(r,1238))` now sits inside the button's `onClick`, not at module top level). Two files needed a different shape rather than a flat per-function fix: `SalesReport.jsx`/`CoversReport.jsx` share one `withLetterhead(title, ...)` helper across every tab's export branch, so `XLSX` is now its first parameter instead, passed down from the one `await import('xlsx')` in `exportExcel`; `MonthlyOwnerReport.jsx`'s `monthlyReportExcel.js` uses `XLSX` throughout a whole dedicated helper file, so instead of touching every internal function, the *page* now dynamically imports the whole module at click time (`const { exportMonthlyReportExcel } = await import('../../modules/ownerReport/monthlyReportExcel')`) and that file's own top-level `import * as XLSX from 'xlsx'` was left untouched. `recharts` (102 kB gzipped, the other large chunk) was deliberately left as a static import everywhere it's used — charts are core above-the-fold content on those pages, not a deferred click action, so eagerly loading it is correct per `/impeccable optimize`'s own rule against lazy-loading above-fold content.
 - **Vercel** for deployment — `vercel.json` sets `no-cache` on `index.html` to prevent CDN serving stale bundles
-- **PWA service worker** at `public/service-worker.js` — registered only in production (`src/index.js`). `CACHE_NAME` (`crest-v25` as of S460) must be bumped on **every** JS/CSS change you want existing users to actually receive, not just breaking ones — the fetch handler is cache-first for static assets, so a plain deploy (or even a hard refresh) leaves already-cached chunks serving the old code indefinitely until this constant changes and `activate` purges the old cache (S452 found a real fix silently never reached the browser because of this)
+- **PWA service worker** at `public/service-worker.js` — registered only in production (`src/index.js`). `CACHE_NAME` (read the current value from the file — it moves constantly) must be bumped on **every** JS/CSS change you want existing users to actually receive, not just breaking ones — the fetch handler is cache-first for static assets, so a plain deploy (or even a hard refresh) leaves already-cached chunks serving the old code indefinitely until this constant changes and `activate` purges the old cache (S452 found a real fix silently never reached the browser because of this)
 
 ---
 
@@ -63,22 +89,12 @@ Two rules fall out of it, both of which had already been broken:
 
 ### The IMS figures that must come from one place (S551)
 
-`src/shared/imsFormulas.js` exists because two figures had drifted into several disagreeing copies, and both are figures the product is sold on.
-
-- **COGS / "used".** Nine pages printed the formula nine ways, four of them contradicting the code directly beneath them, and two pages genuinely computed it differently: `AnnualSummary` left Staff Meals out while `MonthlySummary` included them — same month, same column label, two numbers. The decision (2026-08-13) is that **staff meals are in COGS** — the food came out of the same stock. Import `COGS_FORMULA` wherever the formula is *printed* and `computeUsed()` wherever it is *computed*, so the sentence can never drift from the arithmetic again. Any figure that values stock must still carry `.eq('is_active', true)` (S436) — that rule is unaffected.
-- **Food cost % banding.** `fcBand(pct, settings)` reads the client's `fc_warning_pct`/`fc_critical_pct` and returns the `*-text` contrast variants. Five files each carried their own hardcoded `≤30 : ≤38 : else` copy, which disagreed with the very filter pills the user had just clicked. **`MenuEngineering.js`'s `FC_CUTOFF = 35` classification is deliberately NOT routed through this** — `computeMenuEngineeringSection.js` mirrors `classify()` verbatim for the frozen Monthly Owner Report, so changing it would silently desync a snapshot from the live page it must agree with. Its colours use `fcBand`; its maths does not.
-
-**A settings field with no reader is worse than no field.** `variance_flag_pct` shipped with a hint saying the Variance Report used it, and nothing read it (the report hardcoded 10). It is wired now; when adding a threshold to `Settings.js`, grep for a consumer before shipping it.
-
-**Stock Count's Summary tab holds two tables that must reconcile, and four separate things had broken that (S567, found auditing before a real month close).** The category rollup and the item-level table are built from *different loops* — the rollup over `categories`, the table over `items` — so any item the rollup's loop cannot claim silently drops out of the Totals a month gets closed on while still appearing below. That was true of every item with `category_id = NULL` or a stale category id; there is now an `Uncategorised` group, rendered only when non-empty. The same class of divergence produced three more: the item row printed wastage as the catch-all only while `getUsed()`, the rollup and the Excel export all use **catch-all + daily** (so the row visibly did not add up wherever Daily Wastage was used); `hasData` tested opening/closing/purchases only, blanking Used/COGS for an item carrying just waste — exactly the shape that goes negative — and skipping it in `saveAll`'s negative-usage guard; and `staff_meals` was read across both `type` values while `persistValueDirect` deletes and reinserts only `type='staff'`, so a single `'comp'` row would have displayed a figure the tab cannot edit and doubled it on the next save. **Before adding a figure to either table, add it to both and check they still tie out** — nothing on the page cross-checks them, and each of these read as a plausible number.
-
-Two standing notes for this page specifically:
-
-- **Every period-scoped read here is now `fetchAllRows`-paged**, not just `purchase_entries` (which is all the S529 sweep had wrapped). The 1000-row cap matters more here than anywhere else in IMS: a truncated read produces a believable COGS rather than an error, and this is the page a period is closed from. `wastages` is the one that realistically crosses it — daily entries are one row per item per day — while `opening_stock`/`closing_stock` are one row per item and would only bite a client past 1000 items.
-- **Stock Count includes sub-recipes; `MonthlySummary.js` excludes them** (`.eq('is_sub_recipe', false)`). Both are deliberate — Stock Count physically counts prep — but it means the two pages' COGS for the same month differ by exactly the sub-recipe amount, with nothing on either page saying so. Left as-is; if this is ever reconciled, it is a product decision about which figure "COGS" names, not a bug fix.
-
-**Variance-style reports must default to a CLOSED period.** Closing stock is counted at month end, so on an open period `closeQty` is 0 for every item, "actual used" becomes everything on hand plus everything bought, and the page paints a red "potential loss" figure on a month that structurally cannot have one. `Variance.js`/`TheoreticalVariance.js` now default to the most recent closed period and, if an open one is selected anyway, say the count is missing and render the figures neutral and unflagged rather than hiding them. `ShrinkageReport.js` and `ReorderReport.js` already did their own version of this.
-
+See `.claude/rules/ims-figures.md` (auto-loads when editing `imsFormulas.js`, stock count, or the
+IMS report/summary modules). Headline rules: import `COGS_FORMULA` wherever the formula is PRINTED
+and `computeUsed()` wherever it is COMPUTED (staff meals are in COGS); food-cost banding goes through
+`fcBand(pct, settings)`, never a hardcoded copy; a settings field with no reader is worse than no
+field; Stock Count's Summary holds two tables built from different loops that must be kept tying out;
+and a variance-style report must default to a CLOSED period.
 ### Multi-outlet: one login, several clients (S548)
 
 A group of outlets is several `clients` rows joined by `clients.group_id → client_groups`. An Owner switches between them from the sidebar; the Group Console (`/group-dashboard`, Suite Pro) rolls them up.
@@ -198,28 +214,12 @@ Each axis gates two things that must both be kept in sync when adding a page: th
 
 ### Who logs in where, and how an Owner account comes to exist
 
-Asked directly (S554) and answerable only by reading three files, so it belongs here. **There are three front doors, and a client owner uses exactly one of them.**
-
-| Door | Route | Credential | Who |
-| --- | --- | --- | --- |
-| Main | `/login` | email + password | Owner, **IMS staff, HR staff**, Crest admin |
-| POS | `/pos/login` | 4–6 digit PIN on a device-bound picker | POS till staff |
-| Self-Service | `/hr/self-service` | 4–6 digit PIN | Employees checking payslips/leave/roster |
-
-IMS and HR staff share the owner's front door and are separated by role, not by entrance — which is what IMS Staff's own subtitle ("Staff log in with their email and password, same as you do") means. Only POS and Self-Service have their own PIN entrances, and **an owner never uses a PIN.**
-
-An Owner account is created by one of two paths, and they produce a byte-identical profile: `register_trial` (the public trial form on `/login` — creates the `clients` row, the auth user and a `profiles` row of `role:'client'` + `client_id`, then signs them straight in), or Admin → Clients → Manage → Users, which calls the generic `createUser` action and upserts the same `{ id, client_id, full_name, role:'client' }` (`ClientDrawer.js`). Nothing anywhere writes an "owner" flag, because there isn't one.
-
-**That is the trap worth stating plainly: Owner is the ABSENCE of staff markers, so giving the owner's own login a staff role demotes them.** `isOwner` is `role==='client'` with none of `pos_role`/`ims_role`/`hr_role`/`hr_self_service` set, which is what makes an owner resolve to `'manager'` on all three rank axes for free. Assign that same login an IMS role from `/ims-staff` and the negative test flips: they lose Owner-level access — Suite features included — and get only what that rank permits. The owner should never appear in a staff list; those rows are for staff. (Same mechanism as the `isOwner`/`isCallerOwner`/`is_client_owner()` triplet above — a new marker column must be added to all three.)
-
-What an owner sees after signing in is then four independent things: the module flags (sidebar sections + route access), `clients.plan` (which IMS tier features), `clients.suite_plan` (the owner-altitude features behind `SuiteGate`), and `getAccessState` (a lapsed subscription shows `SubscriptionLock` instead of the app). A multi-outlet owner switches outlets from the sidebar. A locked-out owner self-serves via "Forgot password?" on the login card; failing that, admin can reset it — `requireStaffTarget` deliberately exempts admin callers so that stays possible.
-
-**Deactivating an HR employee does not, by itself, revoke their Self-Service login — S561 tried gating on `status` and had to be reverted the same day.** `hr_employees.status` and `profiles.hr_self_service` are two unrelated columns, so an employee marked Inactive keeps full PIN-login access (payslips, leave, roster) indefinitely — that part of S561's diagnosis was correct. But the fix it shipped (`hr-selfservice-login` refusing login when the linked `hr_employees.status === 'inactive'`) collided head-on with `status` already meaning something else load-bearing: `PayrollRun.jsx`/`PayrollCalculation.jsx`/`FinalSettlement.jsx` all query employees via `.in('status', ['active','probation'])`, so the same act that blocks login also drops the employee from every payroll picker — exactly backwards for the real case (an employee who just resigned and still needs their final payslip run). Reverted same-day. **`status` must stay a single-purpose payroll-eligibility field.**
-
-**S563 shipped the real fix: `hr_employees.access_blocked`, a boolean fully independent of `status` (migration `20260815100000`).** Employees now has a checkbox column (header select-all + per row) and a bulk action bar — Deactivate blocks Self-Service login, Activate restores it — that writes `access_blocked` alone via `scopedUpdate`, never `status`. `hr-selfservice-login` embeds `hr_employees(access_blocked)` via `profiles.hr_employee_id` and refuses with the same generic "Invalid credentials" every other rejection path returns. Because `status` is never touched, blocking/unblocking login can never again remove someone from a payroll picker. **The migration must be applied by hand in the Supabase SQL Editor before this works** — this machine has no DB credentials to run it directly; until it's applied, the Edge Function's embedded select on a nonexistent column will fail every Self-Service login, not just blocked ones. Verify the column exists before relying on this.
-
-**Deactivate had no inverse (fixed S562).** `EmployeeForm.jsx`'s footer only ever rendered a Deactivate button (`employee.status === 'active'`) — once flipped to Inactive, the Edit form offered no way back to Active short of Delete-and-re-add, which loses the employee's history. Added a mirrored `handleActivate()` and a green Activate button rendered when `employee.status === 'inactive'`. Note this `status` Deactivate/Activate pair is orthogonal to S563's `access_blocked` Deactivate/Activate pair above — same words, two different columns, two different pages (Edit form vs. Employees list bulk bar).
-
+See `.claude/rules/accounts-and-logins.md` (auto-loads when editing AuthContext, Login, or any
+staff/employee management screen). Headline rules: there are three front doors (`/login` for Owner,
+IMS staff, HR staff and admin; `/pos/login` and `/hr/self-service` for PINs) and an owner never uses
+a PIN; **Owner is the ABSENCE of staff markers, so giving the owner's own login a staff role demotes
+them**; and `hr_employees.status` is payroll eligibility only — `access_blocked` is what revokes a
+Self-Service login.
 ### Splitting a page component once it outgrows one file
 
 As of 2026-07-06, the six pages that had grown past 1,200 lines (`AdminClients.js`, `Roster.jsx`, `Dashboard.js`, `Purchases.js`, `Recipes.js`, `PosOrders.jsx`) were each split, using whichever of these fits what's actually inside — don't force a pattern that doesn't match:
@@ -248,9 +248,10 @@ All periods and dates in the app use the Nepali calendar. Key utilities in `src/
 
 The lookup table covers BS 2000–2087 (extended from 2079–2087, S559). Out-of-range years fall back to a 30-day approximation.
 
-**S559 extended `BS_CALENDAR` back to 2000 BS (~1943 AD) after a real bug in the sister HSS app**: an employee's date of birth, 30 Dec 1979, displayed as "15 Poush 2036" and round-tripped back to 4 Jan 1980 — five days out, and since `adToBs`/`bsToAd` don't throw outside the verified table, the *wrong AD date was being stored*, not just shown. The added 2000–2078 rows were cross-checked against four independent open-source BS↔AD converters (`nepali-date-converter`, `@sbmdkl/nepali-date-converter`, `bikram-sambat`, `nepali-datetime`), which agree unanimously on all 79 added years and reproduce the S352-verified 2079–2083 rows exactly — then verified by round-tripping all 32,000+ consecutive days from 14 Apr 1943 to 1 Jan 2031 through AD→BS→AD with zero mismatches (`bsCalendar.test.js`). **2084–2087 are deliberately left alone** — the four libraries disagree with each other from 2084 onward, since the BS calendar is astronomically determined and officially published year by year, so a far-future row is an extrapolation no library's guess outranks another's; don't "fix" them to match whichever library you happen to consult.
-
-`BS_YEAR_MIN`/`BS_YEAR_MAX` (derived from the table's own keys, so a future extension widens them for free) and `adToBsSafe(adDate)` are the actual fix, not just the wider table — `adToBsSafe` returns `null` instead of a silently-wrong date when the result falls outside the verified range, so a caller can render the raw AD date instead of a confident wrong BS one. **`BsCalendarPicker` adopted it in S569** — the one shared component every DOB/join-date/arbitrary-date field goes through now resolves its value via `adToBsSafe` (an out-of-range value displays as its truthful `YYYY-MM-DD (AD)` form instead of an approximated BS date), its year dropdown is clamped to `BS_YEAR_MIN..BS_YEAR_MAX` (it used to offer 2088–2090, which would have *stored* wrong AD dates via approximated `bsToAd`), and month navigation stops at the table's edges. The remaining direct `adToBs(` call sites all convert operational timestamps (`closed_at`, roster days, period dates) that are inside the verified range by construction — a *new* call site that renders a stored arbitrary date should still reach for `adToBsSafe`.
+The lookup table's provenance — how BS 2000–2087 was cross-verified, why 2084–2087 are deliberately
+left alone, and what `BS_YEAR_MIN`/`BS_YEAR_MAX`/`adToBsSafe` are actually for — lives in
+`.claude/rules/bs-calendar.md`, which auto-loads when editing `bsCalendar.js` or
+`BsCalendarPicker.js`. Read it before extending the table.
 
 **A day inside a chosen period renders as `formatBsDay(day, bsMonth)` — "1st Bhadra" (S614).** Every
 period-scoped Day column in IMS printed a bare number and leaned on the page header to say which month
@@ -303,24 +304,11 @@ inline styles — an inline-styled control escapes the `:disabled` treatment, th
 hook and the `@media (pointer: coarse)` 16px touch floor. There is no `badge-gold`.
 ### Component library (reusable)
 
-| Component | File | Notes |
-| --- | --- | --- |
-| `Tip` | `src/components/Tip.js` | Tooltip using `createPortal` — escapes `overflow:hidden` containers. All non-obvious columns and form labels must have one. Keyboard-accessible since S465 (`tabIndex`, `onFocus`/`onBlur`, `role="tooltip"` + `aria-describedby`) — not hover-only. |
-| `SearchableSelect` | `src/components/SearchableSelect.js` | Drop-in for long `<select>` lists. `position:fixed` dropdown never clips inside modals. Flips above the trigger near the bottom of the viewport. Full combobox ARIA since S521 (`role="combobox"` + `aria-expanded`/`aria-controls`/`aria-autocomplete`/`aria-activedescendant` on the filter input, `role="listbox"`/`role="option"`/`aria-selected` on the panel) — before that it was keyboard-operable but invisible to screen readers, since a custom widget with zero ARIA roles reads as an unlabeled button next to an unrelated list of `div`s. |
-| `Fab` | `src/components/Fab.js` | Fixed bottom-right `+ Add` button |
-| `Modal` | `src/components/Modal.js` | Centered overlay with backdrop-click close. Real dialog semantics since S521 (`role="dialog"`, `aria-modal`, `aria-labelledby`, initial focus + Tab trap on the panel, focus restored to the trigger on close, `aria-label="Close"` on the `×` button) — it backs 19+ create/edit flows app-wide, so this one fix covers every call site. **Nests since S574**: a module-level stack means only the topmost open Modal responds to Escape/Tab (before that, Escape in an inner confirm also closed the drawer behind it and two Tab traps fought). ClientDrawer's typed-name Danger confirms and its password-reset dialog rely on this. **`zIndex` (default 100) and `unstyled` were added S578** to bring POS's nine hand-rolled overlays back onto it: POS's order screen and the KDS board are `position: fixed` full-screen layers at 1000, i.e. their own stacking contexts, so a dialog opened from either needs a higher value or it renders *underneath* the screen that opened it — that one fact is why those nine existed. `unstyled` hands the panel to the caller (no `.card`, no title bar) for a dialog whose shape genuinely is not a card — the two-column billing modal with its live bill preview — keeping only the behaviour: focus capture and restore, the Tab trap, the Escape stack, `role="dialog"`. `title` then becomes the accessible name rather than a rendered heading, so a dialog cannot go unnamed either way. Reach for `unstyled` only when the card shape would have to be undone; `ConfirmModal` forwards `zIndex` too. |
-| `ConfirmModal` | `src/components/ConfirmModal.js` | Confirmation dialog on `Modal` (S575) for actions that change other ledgers, lock a period, or move money — period close, payroll Finalize/Regenerate/Reopen, drawer-short shift close, attendance clears. Takes `title`/`children` (consequence copy, not "are you sure?")/`confirmLabel`/`danger`/`busy`. Cancel and backdrop are inert while `busy`. Routine single-row deletes deliberately stay on `window.confirm`. Inside a hand-rolled overlay with a higher zIndex than 100, render it as a CHILD of that overlay or it stacks underneath (see PosShifts). |
-| `FieldError` | `src/components/FieldError.jsx` | The per-field validation message (`.field-error`, `role="alert"`) plus `fieldAria(id, message)` for the control (S603); `invalidStyle`/`disabledStyle` for a control still styled inline live in `src/shared/inlineFieldState.js`. Extends to the app the pattern that had lived only on Login/Reset since S534 — `aria-invalid` appeared in exactly one file in the product. **Form-level and field-level are different channels**: a rejected write, or a rule spanning several boxes, stays in the page's own `error` string; a message naming one box goes under that box. `id` must be the CONTROL's id — the message derives its own from it. `BsCalendarPicker`/`SearchableSelect` take `invalid={message}` instead (inline styles, so no CSS hook reaches them) and use `aria-describedby` only, since their trigger is a `<button>` and `aria-invalid` is unsupported on that role |
-| `BsCalendarPicker` | `src/components/BsCalendarPicker.js` | BS year/month/day picker, calendar-grid UI |
-| `QtyInput` | `src/components/QtyInput.js` | Numeric field that also accepts arithmetic (`3*24+7` → `79`). Use for any qty/rate box. Takes `onChange` (fires live for plain numbers) + `onCommit` (fires on blur/Enter with the evaluated number), and a `wrapperStyle` for the positioning span the result badge anchors to. **The raw expression never leaves the component** — the parent only ever receives a number or `''`. |
-| `Calculator` | `src/components/Calculator.js` | App-wide Quick Calculator modal (Alt+C), mounted once in `Layout.js`. Import it aliased — `Calculator` is also a lucide icon name. |
-| `ChartCard` | `src/components/ChartCard.js` | Compact-card-that-expands-to-a-modal wrapper for any chart (Recharts or otherwise) — takes `title`/`legend`/`footer`/`smallHeight`/`renderChart(height)`, plus an optional `modalHeight` (default `440`, S556) for the one caller whose modal chrome is dense enough to need a shorter chart area. The expand icon is built in. The modal panel is `maxHeight: calc(100vh - 48px)` + `overflowY: auto` (S556) so a chart with enough legend/stat-pill/footer content can't overflow the viewport top and bottom at once. Used across Dashboard, Menu Engineering, Best Sellers, Covers Report, and Sales Report. |
-| `StatPill` | `src/components/StatPill.js` | Small `label`/`value`/`color` KPI callout, meant for a `ChartCard`'s expanded-only stat strip (gate on `h > 200` inside `renderChart`) — see any chart in `ClientDashboard.jsx` for the pattern. Promoted out of `ClientDashboard.jsx` (S487) once a second file needed it — originally `FoodBeverageSplit.jsx`, since folded into `ClientDashboard.jsx` itself and deleted (S557). |
-| `ReportPage` | `src/components/ReportPage.jsx` | The shell every IMS/Suite report renders inside (S594) — page header + actions, and the six states a report can be in: no period, loading, could-not-load, empty, filtered-to-nothing, content. Slots in render order: `banners` (always shown — they qualify the whole page), `stats`, `note`, `filters`, body, `footnote`. **`stats`/`note`/`filters`/`footnote` are suppressed while loading or after an error** — that gating is the whole point, see the named rule below. Takes `noPeriod`/`noPeriodWhat` and renders `NoPeriodState` itself, so a page no longer hand-rolls that branch either |
-| `RowDisclosure` | `src/components/RowDisclosure.jsx` | The expand control for a table row's detail (S595) — a real `<button>` living **inside a `<td>`**. `role="button"` on a `<tr>` overrides the row's implicit `row` role and takes it out of the table's structure, so its cells stop being associated with their column headers; on a table of currency columns that is the entire content. Takes `expanded`/`onToggle`/`label` + optional `controls`, sets `aria-expanded`, and `stopPropagation()`s so the row's own `onClick` (which still works for mouse users) cannot double-fire. `controls` is optional because `aria-controls` needs one element id and some details are several sibling rows |
-| `ModuleGate` | `src/components/ModuleGate.js` | Module-level route guard |
-| `PremiumGate` | `src/components/PremiumGate.js` | Plan/feature-level route guard |
-
+See `.claude/rules/component-library.md` (auto-loads when editing components, pages or modules) for
+the full table — `Tip`, `SearchableSelect`, `Fab`, `Modal`/`ConfirmModal`, `FieldError`,
+`BsCalendarPicker`, `QtyInput`, `Calculator`, `ChartCard`, `StatPill`, `ReportPage`,
+`RowDisclosure`, `ModuleGate`, `PremiumGate` — with the rationale behind each. Reach for one of
+these before hand-rolling an overlay, a numeric field or a report shell.
 ### A gating wrapper cannot protect an eagerly-evaluated children expression (S601)
 
 `ConsolidatedPnl.jsx` passed its whole table as `ReportPage`'s `children`. `ReportPage` renders
@@ -389,76 +377,12 @@ after every hook, and rely on `ProtectedRoute` having already resolved `profile`
 
 ### A report page must not show a number it has not computed (S594)
 
-`src/components/ReportPage.jsx` exists because the design system governs colour and shape rigorously
-and governs **report grammar** — which is what this product almost entirely consists of — not at all.
-Three report pages shipped in three days and each invented its own answer to the same two questions:
-empty result was `.empty-state` + icon on one and a bare `<p>` on the other two; the totals row was
-an inline `fontWeight: 700` on two and a 2px border on the third; and two of the three had **no error
-branch at all**. The `/impeccable` detector reported **zero findings** across all of it — the token
-layer was perfect — which is the point: a detector that checks colour and shape cannot see this.
-
-Three rules came out of it:
-
-- **A failed read is not an empty period, and it must never render as one.** Every read on the two
-  new IMS report pages destructured `{ data }` and dropped `error`, then ran the result through
-  `|| []`. An RLS rejection, a network blip, a PostgREST schema-cache miss or the documented
-  auth-token stall all produce `data: null, error: {...}` — so the page rendered a complete,
-  confident report of NPR 0, visually identical to a genuinely quiet month. That is strictly worse
-  than a crash: a crash gets reported, a zero gets believed, and this product is sold on an
-  accountant trusting the figure. `firstError(results)` (`src/shared/queryError.js`) is the one
-  place a `Promise.all` batch is checked; capture the array instead of destructuring straight
-  through. `ConsolidatedPnl`'s group path already had both the check and the sentence for it
-  (*"'nothing to show' and 'could not load' are different facts, and only one of them should send
-  someone to billing"*) and it had not travelled 200 lines to its own siblings. **Swept
-  product-wide in S612 (2026-08-26, measured: 37 files now import firstError/ReportLoadError):**
-  every report-class page in IMS/HR/POS — statutory, snapshot computes, variance, stockcount,
-  recipes, vendor/payables, POS reports, HR filing sheets — now refuses to render a figure it has
-  not computed. `ReportLoadError` (`src/components/ReportLoadError.jsx`, extracted from
-  `ReportPage`'s error branch) is the shared error card for pages that predate the `ReportPage`
-  shell; `throwFirstError()` is the throwing form for compute helpers running inside a try/catch
-  harness (the Monthly Owner Report's `runSection`). Two corollaries the sweep enforced: a failed
-  periods read must not wear `NoPeriodState` ("no periods yet" is a claim about the client), and
-  on a data-entry page (Overheads) a failed read must block the form outright — saving over rows
-  the page could not read is a data-loss shape, not a display bug. A new report page copies this
-  from any sibling; there is no unswept example left to copy.
-- **A dropped WRITE error is silent data loss, and a guard that drops its READ error passes
-  vacuously (S613).** The silent-zero rule above is about rendering; these are its two write-side
-  twins, and both shipped. **Write:** `Roster.jsx` painted the shift optimistically and dropped the
-  upsert's error, so the board showed as saved what the database had refused; `Periods.js` closed a
-  month and dropped the next period's INSERT error, silently blocking the client from recording
-  anything with no explanation on screen; `PosTableManagement`'s four settings saves fell through to
-  INSERT when the existing-row read failed, which splits a client's settings row in two and quietly
-  changes what every later settings read returns. An optimistic UI **must** reconcile against the
-  failure and say so. **Guard:** `FinalSettlement`'s three finalize gates swallowed their reads, so a
-  failed `hr_payslips` read meant "no payroll covers this month" — the gate passing vacuously on
-  exactly the double-payment it exists to prevent. **A check that could not run has not passed**:
-  refuse and say why, never wave through. Ask of any new guard, "what does this do when its own read
-  fails?" — if the answer is "allows the action", it is not a guard.
-- **The KPI strip does not render while loading or after a failure.** Both pages painted four stat
-  cards *above* their `loading` guard, so a multi-second fiscal-year read showed "Capital in 90+ Day
-  Stock: NPR 0" in green until the real number arrived — and on a failed read it stayed there. A
-  number the page has not computed yet is not a number. `ReportPage` gates `stats`/`note`/`filters`/
-  `footnote` on `!loading && !error` so a new page cannot reintroduce this.
-- **A report that states a scope must state it everywhere the report goes.** `StockAgeing` aged every
-  fiscal year against `new Date()` while its FY selector accepted any past year, so picking a past FY
-  pushed every surviving batch into the 90+ band, turned the headline amber and reported the whole
-  stock value as stale — failing silently, in the alarming direction. It had no as-of date in the
-  subtitle, the print title *or* the workbook. Related: the filter bar is `no-print`, so a printed
-  sheet showed a filtered table with no record of the filter. Both are now one `scopeLine` used by
-  the page, the print header, a `.print-only` line and the Excel letterhead.
-
-`sheetWithLetterhead()` (`src/shared/excelLetterhead.js`) + `useBizInfo()`
-(`src/shared/hooks/useBizInfo.js`) are the same consolidation for exports: three hand-written copies
-of the letterhead already existed (`SalesReport.jsx`, `CoversReport.jsx`, `monthlyReportExcel.js`)
-and the three new pages had none. Its `scopeLine` parameter is **required**, not optional — a sheet
-that does not state what it covers cannot be reconciled a month later by the person who made it.
-
-`.data-table tfoot` and `font-variant-numeric: tabular-nums` are now rules in `Layout.css` rather
-than per-call-site inline styles. `tfoot` had **no rule at all**, so every totals row in the product
-was hand-styled; `tabular-nums` appeared on exactly one page (`ConsolidatedPnl` found it
-independently) while Poppins' proportional figures left every other currency column ragged.
-`.data-table--sticky-first` is opt-in, for a wide matrix whose first column is the row label.
-
+See `.claude/rules/report-pages.md` (auto-loads when editing `ReportPage.jsx` or any reports
+module). Headline rules: a failed read is not an empty period and must never render as one — use
+`firstError(results)` / `ReportLoadError`, never `{ data } … || []`; a dropped WRITE error is silent
+data loss and a guard that drops its READ error passes vacuously; the KPI strip does not render
+while loading or after a failure; and a report that states a scope must state it everywhere the
+report goes (subtitle, print header, workbook, filename).
 ### Every `type="password"` input needs an explicit `autoComplete`
 
 Without one, Chrome guesses from `type` + surrounding context — and any `type="password"` field anywhere on the page makes it treat the nearest preceding text input as a login username, which has bled a saved login into unrelated fields (a `SearchableSelect` search box, a signup form) more than once (S329). Use `autoComplete="new-password"` on every PIN/account-creation field (POS Staff Add/Reset PIN, Enable Self-Service, trial signup), and `autoComplete="username"` / `"current-password"` on an actual sign-in form's email/password. PIN-pad login screens (POS/HR Self-Service) build their own keypad UI rather than a text input, so they're unaffected.
@@ -491,64 +415,14 @@ See `.claude/rules/auth-and-pins.md` (auto-loads when editing Login/ResetPasswor
 
 All downstream calculations (Stock, Variance, FIFO, Reorder) read these base-unit values directly.
 
-### Every item is stored in its SMALLEST unit — `purchase_qty` is always 1 (S597, supersedes S566)
+### Every item is stored in its SMALLEST unit — `purchase_qty` is always 1 (S597)
 
-`items.per_uom_rate` is a **generated column** — `rate / NULLIF(purchase_qty, 0)` — and `purchase_qty`
-is now always **1**, so **`items.rate` is the price of ONE base unit and equals `per_uom_rate`**. A
-1 KG bag counted as 1000 GM and costing NPR 500 is stored as `purchase_qty 1, rate 0.50`. Stock
-Count, Variance, COGS, Reorder and the Monthly Owner Report all value stock straight off
-`per_uom_rate`, so a wrong pair here misprices the item everywhere at once with nothing to flag it.
-
-The Add/Edit Item form collects **one price — "Price per GM (NPR)"** (the label tracks the UOM) —
-and writes it to `rate` unchanged. A **"Bought a pack?"** line beneath it does the division on
-screen (`500 GM for NPR 388.50 → NPR 0.777 per GM`) and fills the field above; neither of its two
-boxes is state that survives, and both are cleared every time the dialog opens. Migration
-`20260820100000` backfilled the book (value-preserving: `per_uom_rate` is unchanged for every row)
-and a `CHECK (purchase_qty = 1)` holds the line.
-
-**The form's first pass at this kept `Purchase Qty` and `Rate` as fields, and that was the same bug
-one layer up.** `Rate` meant the pack price while you typed and the per-unit price once you reopened
-the item — one box, two meanings, which is precisely what had just been taken out of the database.
-The rule the second pass follows: **a field that is only arithmetic must not look like a field that
-is stored.** So the stored value gets a box with a name that states its unit, and the arithmetic
-gets a sentence-shaped helper that visibly empties itself. `Purchase Qty` left the form entirely —
-it is structurally 1, so a box showing it taught nothing — and `Price per unit` stopped rendering
-its value as a *rounded placeholder* (`0.78` for a stored `0.777`), which had made the one number
-the page is built on the only one on screen that was not real.
-
-**Until S597 the same column meant two things and the product could not tell.** `per_uom_rate` came
-out right either way, so recipe costing and every report looked correct — but **Add Purchase Bill
-prefills `items.rate` into a rate box whose Qty is counted in BASE units**, so a 500 GM bottle
-stored as `(500, 388.50)` prefilled NPR 388.50 against a qty of 500 GM and billed **NPR 194,250 for
-a NPR 388.50 bottle**. 253 of the reference client's 254 items were already `(1, per-unit)`, which
-is exactly why it went unseen: `rate` meant "per GM" for all of them and "per bottle" for the one.
-Four consequences fell out of that, all now fixed and all worth not re-deriving:
-
-- **`purchase_qty` no longer mirrors `conversion_factor`.** Buy-in-CTN / count-in-BTL belongs to the
-  conversion columns alone — that is what the Purchase Bill reads to decide whether its Qty column
-  means cartons or bottles. Mirroring it put a per-CTN price in the column every valuation reads as
-  per-BTL. The Conversion tab's preview now shows cost **per purchase unit** (`rate × cf`), since
-  `rate` is already the per-base-unit figure.
-- **The bill prefills `per_uom_rate × cf`, never `items.rate`** (`PurchaseBillModal.jsx`) — the rate
-  that matches whichever unit the Qty box is counting, in both cases. Purchase Orders had always
-  done this (`PurchaseOrders.js:155`); the bill modal was the only holdout. Each row now also prints
-  the master rate for that same unit beneath the box, ambered past 5×/⅕, so a unit mix-up is visible
-  on the row rather than only in a grand total where a 500× error still reads as a plausible number.
-- **The "Rate changes detected" sync compares and writes in the box's unit** (`Purchases.js`): it
-  matched the entered per-unit rate against `items.rate` and wrote it back raw, so correcting a
-  conversion item's rate by hand would have stored a per-CTN price as per-BTL. It divides by `cf`
-  going in, and its epsilon compare stops the prompt re-firing on rates that never moved.
-- **A restore normalises on the way in** (`restoreClientData.js`) — a backup predating this rule
-  would otherwise come back carrying a pack size and trip the CHECK.
-
-Three things worth keeping in mind before touching this form again:
-
-- **The screen agreed with the user and disagreed with the database.** The "Per UOM rate:" hint special-cased the draft box and printed `form.rate` directly, so it showed the *correct* per-unit figure while saving the wrong one — the one shape of bug a careful user cannot catch by reading the form. That branch is gone; the hint now always derives from `perUom(purchase_qty, rate)`, which is the same arithmetic the DB does.
-- **A sub-paisa `per_uom_rate` is legitimate** (a PCS item bought by the 1000), so the Item Master column's `.toFixed(2)` rendered exactly the mis-entries it existed to reveal as a flat `0.00`. Both the column and the form hint share `fmtPerUom()` now, which falls back to 6 decimals below 0.01.
-- **`Rate (NPR)` had no `Tip`** while every field around it did — and it is the one field whose meaning is genuinely ambiguous. Any new field in this form needs one from the start, per the tooltip rule below.
-
-This is distinct from the `purchase_entries` convention above: that one is about a *conversion factor* between purchase and base units on a transaction row, this one is about the item master. Both end in base units, but they are different columns with different arithmetic — and the S597 lesson is precisely that a column allowed two meanings will be read with the wrong one somewhere, silently, by code that looks correct.
-
+See `.claude/rules/item-master-rates.md` (auto-loads when editing the IMS items or purchases
+modules). Headline rules: `items.rate` is the price of ONE base unit and equals the generated
+`per_uom_rate`, held by a `CHECK (purchase_qty = 1)`; `purchase_qty` no longer mirrors
+`conversion_factor`; a purchase bill prefills `per_uom_rate × cf`, never `items.rate`; and a field
+that is only arithmetic must not look like a field that is stored. Distinct from the
+`purchase_entries` qty/rate convention above — different columns, different arithmetic.
 ### `billKeyOf`/`aging` are centralized in `purchasesHelpers.js` — but not everywhere
 
 See `.claude/rules/vendor-payables.md` (auto-loads when editing IMS report files). Headline rules: `VendorReport.js` and `computeVendorPurchasingSection.js` deliberately keep local single-period copies; a phantom sub-paisa balance can come from three different layers (S502/S505/S510) — check all three. As of S580 it also covers **Supplier Contribution** (`/supplier-contribution`, Pro): `items` has no vendor column, so a supplier is only ever DERIVED — what sold, exploded into ingredients, split across the vendors that supplied them — and its net-spend figure must keep meaning exactly what `VendorReport.js` means by it.
@@ -589,40 +463,12 @@ percentage tolerance AND a rupee one or per-bill rounding raises false alarms.
 
 ### Sub-recipe mirror items
 
-Recipes with `type = 'sub_recipe'` auto-create a mirror row in `items` with `is_sub_recipe = true`. Filter these out of Item Master, Purchases, POs, Requisitions, Reorder Report, and Supplier Price Tracker:
-
-```js
-.eq('is_sub_recipe', false)
-```
-
-**A sub-recipe can never appear in `stock_movements`, and that is structural rather than an omission.** `recipe_ingredients` stores a sub-recipe as `sub_recipe_id` with **`item_id` NULL**, so `explode()` in `recipeCost.js` always recurses past it and only emits a row on reaching a real `item_id` at the bottom of the tree — the prep layer is a scaling step that gets discarded, and the table has no column for the path a depletion took. Stock Movements' **Sub-Recipes tab** (S528) therefore *derives* that layer at read time (`subRecipeUsage.js` → `explodeRecipeTree`), filtered through the shared POS-supersedes-manual rule in `salesDepletion.js` so it agrees with the ledger beside it. Do **not** "fix" this by writing sub-recipe rows into `stock_movements`: the mirror item carries its own `per_uom_rate`, so those rows would double-count the page's own Value Depleted KPI against the raw-item rows already there. The two tabs are the same ingredients at different grains and are never additive.
-
-**Sub-recipes nest — a sub-recipe may contain another sub-recipe, to any practical depth (S602).**
-This was already true and needed no new feature: the ingredient picker excludes only the recipe
-being edited (`Recipes.js`'s `subRecipeOptions`), `calcSubRecipeCostPerUnit()` recurses, and
-`explodeRecipeTree()` walks the whole tree. Indirect cycles (A contains B, then B is edited to
-contain A) are refused at save time by `Recipes.js`'s `wouldCreateCycle`.
-
-Two things were wrong the moment a third level existed, both fixed:
-
-- **A cycle guard must be a PATH set, not a visited set.** `calcSubRecipeCostPerUnit`'s `seen` only
-  ever added, so the second branch of a DIAMOND — `Sauce → Roux → Stock` and `Sauce → Stock` — found
-  `Stock` already "seen" and costed it as **0**. A base used by two branches is not a cycle; it is a
-  base used twice and must be paid for twice. `seen.delete(id)` on the way out is the whole fix, and
-  it is covered by `recipeCostCalc.test.js` ("costs a shared base once per branch") — which returns
-  40 instead of 140 if the delete is removed. Note this made the two engines **disagree**:
-  `explodeRecipeTree()` has no seen set at all (only a depth cap), so it always counted the shared
-  base twice, meaning the printed cost card and the COGS/Variance figures for the same recipe were
-  different numbers with nothing on either page saying so.
-- **Running out of depth was silent.** `explodeRecipeTree`'s frontier loop stops when its round cap
-  is hit and simply returns what it has, so ingredients below the cut vanish from COGS and Variance
-  as a believable smaller number. The cap is now `MAX_DEPTH_ROUNDS = 12` (was 5) and an exhausted
-  frontier `console.error`s with the unresolved ids and the direction of the error.
-
-**Two different sub-recipe counts exist and both are correct** — a recurring "why don't these match" question. `Recipes.js:177` counts the **master list** (`category === 'Sub-Recipe'` over an unfiltered fetch: no period, no usage, not even `is_active`), while Stock Movements' Sub-Recipes tab counts only what a **period's sales actually consumed**. The difference is prep items nothing sold touched, surfaced explicitly on that tab ("9 of your 57 …") rather than left to a cross-check. The one case where they genuinely cannot reconcile: a recipe referenced via `sub_recipe_id` whose own `category` was never set to `'Sub-Recipe'` — counted by the walk but not by the category filter, so used + unused would exceed the master total. That is a data-entry problem on the recipe, and the tab names the offenders instead of silently producing numbers that don't add up.
-
----
-
+See `.claude/rules/recipes-and-subrecipes.md` (auto-loads when editing Recipes.js, `recipeCost.js` or
+the IMS recipe/stock-count modules). Headline rules: a recipe with `type = 'sub_recipe'` auto-creates
+a mirror row in `items` with `is_sub_recipe = true`, so filter `.eq('is_sub_recipe', false)` out of
+Item Master, Purchases, POs, Requisitions, Reorder Report and Supplier Price Tracker; a sub-recipe
+can never appear in `stock_movements` and must not be written there; sub-recipes nest, so a cycle
+guard must be a PATH set (not a visited set) or a shared base costs 0 on its second branch.
 ## When adding a new feature
 
 See `.claude/skills/new-feature-checklist/SKILL.md` — invoke it before shipping any new page,
