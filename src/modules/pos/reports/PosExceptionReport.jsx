@@ -225,11 +225,18 @@ export default function PosExceptionReport() {
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
 
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>Sales Exceptions</h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
-          Every discount, void, and complimentary in one place — revenue that leaked, by reason and by staff member. Click any row below to view the actual bill.
-        </p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="page-title">Sales Exceptions</h1>
+          <p className="page-subtitle">
+            Every discount, void, and complimentary in one place — revenue that leaked, by reason and by staff member. Click any row below to view the actual bill.
+          </p>
+        </div>
+        <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={filtered.length === 0}>
+            ⬇ Excel
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -255,9 +262,6 @@ export default function PosExceptionReport() {
           <button className={`tab-btn${typeFilter === 'void' ? ' tab-btn--active' : ''}`} onClick={() => setTypeFilter('void')}>Voids</button>
           <button className={`tab-btn${typeFilter === 'writeoff' ? ' tab-btn--active' : ''}`} onClick={() => setTypeFilter('writeoff')}>Comps</button>
         </div>
-        <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={filtered.length === 0}>
-          ⬇ Excel
-        </button>
       </div>
 
       {/* S612: a failed read renders as a failure — never as zero stat cards or a quiet report. */}
@@ -267,44 +271,45 @@ export default function PosExceptionReport() {
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : (
         <>
-          {/* Stat cards */}
+          {/* Stat cards — the shared stat-grid/stat-card grammar; signal colours stay on the
+              *-text variants since these values are TEXT, not fills (S613). */}
           <div className="stat-grid" style={{ marginBottom: 24 }}>
-            <div className="card" style={{ padding: '14px 18px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            <div className="stat-card">
+              <div className="stat-label">
                 <Tip text="Total NPR knocked off bills via the Discount field on the Pay tab" width={230}>Discounts</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{fmtNpr(totals.discount.amt)}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{totals.discount.n} bill{totals.discount.n !== 1 ? 's' : ''}</div>
+              <div className="stat-value">{fmtNpr(totals.discount.amt)}</div>
+              <div className="stat-sub">{totals.discount.n} bill{totals.discount.n !== 1 ? 's' : ''}</div>
             </div>
-            <div className="card" style={{ padding: '14px 18px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            <div className="stat-card">
+              <div className="stat-label">
                 <Tip text="Menu value (incl. VAT) of voided orders — orders treated as if they never happened. High void rates usually mean training gaps or entry mistakes" width={260}>Voided Value</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-red-text)' }}>{fmtNpr(totals.void.amt)}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{totals.void.n} order{totals.void.n !== 1 ? 's' : ''}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{fmtNpr(totals.void.amt)}</div>
+              <div className="stat-sub">{totals.void.n} order{totals.void.n !== 1 ? 's' : ''}</div>
             </div>
-            <div className="card" style={{ padding: '14px 18px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            <div className="stat-card">
+              <div className="stat-label">
                 <Tip text="Food cost of complimentary orders and individually-comped items — valued at ingredient cost (not menu price), matching the Complimentary Slip" width={250}>Comp Food Cost</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-amber-text)' }}>{fmtNpr(totals.writeoff.amt)}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{totals.writeoff.n} comp{totals.writeoff.n !== 1 ? 's' : ''}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-amber-text)' }}>{fmtNpr(totals.writeoff.amt)}</div>
+              <div className="stat-sub">{totals.writeoff.n} comp{totals.writeoff.n !== 1 ? 's' : ''}</div>
             </div>
-            <div className="card" style={{ padding: '14px 18px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            <div className="stat-card">
+              <div className="stat-label">
                 <Tip text="What every comped order/item would have sold for at menu price (incl. VAT) had it not been comped — the revenue given away, not just its ingredient cost" width={280}>Comp Potential Sales Value</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-amber-text)' }}>{fmtNpr(totals.writeoff.potential)}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{totals.writeoff.n} comp{totals.writeoff.n !== 1 ? 's' : ''}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-amber-text)' }}>{fmtNpr(totals.writeoff.potential)}</div>
+              <div className="stat-sub">{totals.writeoff.n} comp{totals.writeoff.n !== 1 ? 's' : ''}</div>
             </div>
-            <div className="card" style={{ padding: '14px 18px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            <div className="stat-card">
+              <div className="stat-label">
                 <Tip text="A quiet report is a healthy one — lots of exceptions usually signal training gaps or permission creep" width={240}>Total Exceptions</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{rows.length}</div>
+              <div className="stat-value">{rows.length}</div>
               {/* Revenue-equivalent sum (comps at potential sales value) — never add comp food
                   COST to discount/void revenue figures; that total is not a quantity of anything. */}
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{fmtNpr(totals.discount.amt + totals.void.amt + totals.writeoff.potential)} revenue impact</div>
+              <div className="stat-sub">{fmtNpr(totals.discount.amt + totals.void.amt + totals.writeoff.potential)} revenue impact</div>
             </div>
           </div>
 
@@ -371,6 +376,7 @@ export default function PosExceptionReport() {
                       <Tip text="Comps only — what this would have sold for at menu price (incl. VAT) had it not been comped" width={260}>Potential Value</Tip>
                     </th>
                     <th>Closed By</th>
+                    <th className="no-print"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -398,6 +404,14 @@ export default function PosExceptionReport() {
                         <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(r.amount)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{r.type === 'writeoff' ? fmtNpr(r.potentialValue) : '—'}</td>
                         <td>{staffNames[r.closed_by] || '—'}</td>
+                        {/* Keyboard path to the same drill-down as the row click — a tr onClick
+                            alone is mouse-only, and role="button" on a tr is never the fix (S613). */}
+                        <td className="no-print">
+                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '2px 10px' }}
+                            onClick={e => { e.stopPropagation(); viewPosBill(clientId, r) }}>
+                            View bill
+                          </button>
+                        </td>
                       </tr>
                     )
                   })}

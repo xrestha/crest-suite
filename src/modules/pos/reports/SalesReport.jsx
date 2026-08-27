@@ -788,13 +788,18 @@ export default function SalesReport() {
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1150 }}>
-      <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="page-title">
           Sales Report <Tip text="Ten views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Delivery Partners tracks Foodmandu/Pathao bills from Credit through settlement and checks what each platform withheld against the rate you agreed with it, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
-        </h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
-          One report, eleven ways to slice it.
-        </p>
+          </h1>
+          <p className="page-subtitle">
+            One report, eleven ways to slice it.
+          </p>
+        </div>
+        <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
+        </div>
       </div>
 
       <div className="tab-bar" style={{ marginBottom: 16 }}>
@@ -832,7 +837,6 @@ export default function SalesReport() {
             )}
           </>
         )}
-        <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
       </div>
 
       {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
@@ -969,6 +973,9 @@ export default function SalesReport() {
                 <th style={{ textAlign: 'right' }}>Non-Taxable</th><th style={{ textAlign: 'right' }}>Taxable</th>
                 <th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>Net</th>
                 <th>Remarks</th><th>Entered By</th>
+                {/* Keyboard-reachable drill-down (S613): the row onClick stays for mouse users,
+                    but a click target must also be tabbable — a <tr> is not. */}
+                <th className="no-print"></th>
               </tr>
             </thead>
             <tbody>
@@ -1000,6 +1007,10 @@ export default function SalesReport() {
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(v.net)}</td>
                     <td>{v.remarks || '—'}</td>
                     <td>{v.enteredBy}</td>
+                    <td className="no-print">
+                      <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 9px' }}
+                        onClick={e => { e.stopPropagation(); viewPosBill(clientId, { id: v.id }) }}>View bill</button>
+                    </td>
                   </tr>
                 )
               })}
@@ -1013,7 +1024,7 @@ export default function SalesReport() {
                 <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.taxable)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.vat)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(voucherTotals.net)}</td>
-                <td></td><td></td>
+                <td></td><td></td><td className="no-print"></td>
               </tr>
             </tfoot>
           </table>
@@ -1036,6 +1047,7 @@ export default function SalesReport() {
                   <Tip text="What the comped item(s) would have sold for at menu price incl. VAT" width={240}>Potential Value</Tip>
                 </th>
                 <th>Reason</th>
+                <th className="no-print"></th>
               </tr>
             </thead>
             <tbody>
@@ -1051,6 +1063,10 @@ export default function SalesReport() {
                     <td style={{ textAlign: 'right' }}>{fmtNpr(c.foodCost)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(c.potentialValue)}</td>
                     <td>{c.reason}</td>
+                    <td className="no-print">
+                      <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 9px' }}
+                        onClick={e => { e.stopPropagation(); viewPosBill(clientId, { isItemComp: true, parentOrderId: c.orderId, compNo: c.compNo }) }}>View bill</button>
+                    </td>
                   </tr>
                 )
               })}
@@ -1060,7 +1076,7 @@ export default function SalesReport() {
                 <td colSpan={5}>TOTAL</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(compedBillTotals.foodCost)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(compedBillTotals.potentialValue)}</td>
-                <td></td>
+                <td></td><td className="no-print"></td>
               </tr>
             </tfoot>
           </table>
@@ -1124,24 +1140,25 @@ export default function SalesReport() {
             <button className="btn btn-ghost" style={{ fontSize: 12, padding: '2px 10px' }} onClick={() => setPartnerFilter('all')}>Show all partners</button>
           </p>
         )}
+        {/* Shared stat-grid/stat-card grammar (S613) — was four hand-rolled `card` tiles. */}
         <div className="stat-grid" style={{ marginBottom: 16 }}>
-          <div className="card" style={{ padding: '14px 18px' }}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Bills</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{deliveryPartnerTotals.bills}</div>
+          <div className="stat-card">
+            <div className="stat-label">Bills</div>
+            <div className="stat-value">{deliveryPartnerTotals.bills}</div>
           </div>
-          <div className="card" style={{ padding: '14px 18px' }}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          <div className="stat-card">
+            <div className="stat-label">
               <Tip text="Bills not yet settled from Customers → Outstanding Credit" width={220}>Outstanding</Tip>
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: deliveryPartnerTotals.outstanding > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{fmtNpr(deliveryPartnerTotals.outstanding)}</div>
+            <div className="stat-value" style={{ color: deliveryPartnerTotals.outstanding > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{fmtNpr(deliveryPartnerTotals.outstanding)}</div>
           </div>
-          <div className="card" style={{ padding: '14px 18px' }}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Commission (settled)</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{fmtNpr(deliveryPartnerTotals.commission)}</div>
+          <div className="stat-card">
+            <div className="stat-label">Commission (settled)</div>
+            <div className="stat-value">{fmtNpr(deliveryPartnerTotals.commission)}</div>
           </div>
-          <div className="card" style={{ padding: '14px 18px' }}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Net Received (settled)</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-green-text)' }}>{fmtNpr(deliveryPartnerTotals.netReceived)}</div>
+          <div className="stat-card">
+            <div className="stat-label">Net Received (settled)</div>
+            <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{fmtNpr(deliveryPartnerTotals.netReceived)}</div>
           </div>
         </div>
 
@@ -1230,6 +1247,7 @@ export default function SalesReport() {
                 </th>
                 <th style={{ textAlign: 'right' }}>Net Received</th>
                 <th>Settled Via</th>
+                <th className="no-print"></th>
               </tr>
             </thead>
             <tbody>
@@ -1256,6 +1274,10 @@ export default function SalesReport() {
                     </td>
                     <td style={{ textAlign: 'right' }}>{r.settled ? fmtNpr(r.amount - r.commission) : '—'}</td>
                     <td>{r.settled ? r.settledMethod : '—'}</td>
+                    <td className="no-print">
+                      <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 9px' }}
+                        onClick={e => { e.stopPropagation(); viewPosBill(clientId, { id: r.id }) }}>View bill</button>
+                    </td>
                   </tr>
                 )
               })}
@@ -1268,7 +1290,7 @@ export default function SalesReport() {
                 <td style={{ textAlign: 'right' }}>{fmtNpr(deliveryPartnerTotals.commission)}</td>
                 <td></td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(deliveryPartnerTotals.netReceived)}</td>
-                <td></td>
+                <td></td><td className="no-print"></td>
               </tr>
             </tfoot>
           </table>

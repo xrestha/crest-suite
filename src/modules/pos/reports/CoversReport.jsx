@@ -291,13 +291,21 @@ export default function CoversReport() {
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1150 }}>
-      <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
-          Covers Report <Tip text="How guest traffic (not just revenue) moves through the floor — average party size, revenue per guest, how long tables turn, and when covers actually peak." width={320}>ⓘ</Tip>
-        </h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
-          Covers = the "How many guests?" number entered when a table is opened.
-        </p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="page-title">
+            Covers Report <Tip text="How guest traffic (not just revenue) moves through the floor — average party size, revenue per guest, how long tables turn, and when covers actually peak." width={320}>ⓘ</Tip>
+          </h1>
+          <p className="page-subtitle">
+            Covers = the "How many guests?" number entered when a table is opened.
+          </p>
+        </div>
+        <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* Overview is KPI cards + a settings form — nothing tabular to export (S613). */}
+          {tab !== 'overview' && (
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
+          )}
+        </div>
       </div>
 
       <div className="tab-bar" style={{ marginBottom: 16 }}>
@@ -315,9 +323,6 @@ export default function CoversReport() {
           <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="covers-report-to-bs">To (BS)</label>
           <BsCalendarPicker id="covers-report-to-bs" value={toIso} onChange={setToIso} />
         </div>
-        {tab !== 'overview' && (
-          <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
-        )}
       </div>
 
       {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
@@ -331,34 +336,36 @@ export default function CoversReport() {
         </div>
       ) : tab === 'overview' ? (
         <>
+          {/* KPI strip — the shared stat-grid/stat-card grammar (S613); `gold` is the shell's
+              accent-as-text class, same accent-ink the hand-rolled tile used. */}
           <div className="stat-grid" style={{ marginBottom: 24 }}>
-            <div className="card" style={{ padding: '14px 18px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            <div className="stat-card">
+              <div className="stat-label">
                 <Tip text="Sum of the covers entered when each table was opened, across every paid bill in this range" width={250}>Covers Served</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{totals.covers}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{totals.bills} bill{totals.bills !== 1 ? 's' : ''}</div>
+              <div className="stat-value">{totals.covers}</div>
+              <div className="stat-sub">{totals.bills} bill{totals.bills !== 1 ? 's' : ''}</div>
             </div>
-            <div className="card" style={{ padding: '14px 18px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            <div className="stat-card">
+              <div className="stat-label">
                 <Tip text="Covers served ÷ bills — are you mostly seating couples, families, or large groups?" width={250}>Avg Party Size</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{totals.avgParty.toFixed(1)}</div>
+              <div className="stat-value">{totals.avgParty.toFixed(1)}</div>
             </div>
-            <div className="card" style={{ padding: '14px 18px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            <div className="stat-card">
+              <div className="stat-label">
                 <Tip text="Net sales ÷ covers served — the standard restaurant 'average check per guest' metric" width={260}>Revenue / Cover</Tip>
               </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{fmtNpr(totals.revPerCover)}</div>
+              <div className="stat-value gold">{fmtNpr(totals.revPerCover)}</div>
             </div>
-            <div className="card" style={{ padding: '14px 18px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            <div className="stat-card">
+              <div className="stat-label">
                 <Tip text="Revenue Per Available Seat-Hour — net sales ÷ (total seats × operating hours in this range). Set your operating hours below to see this." width={300}>RevPASH</Tip>
               </div>
               {revPash !== null ? (
-                <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>{fmtNpr(revPash)}</div>
+                <div className="stat-value">{fmtNpr(revPash)}</div>
               ) : (
-                <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Set operating hours below</div>
+                <div className="stat-sub" style={{ marginTop: 0 }}>Set operating hours below</div>
               )}
             </div>
           </div>
@@ -381,7 +388,7 @@ export default function CoversReport() {
               </button>
             </div>
             {hoursMsg && (
-              <p style={{ margin: '10px 0 0', fontSize: 12, color: hoursMsg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
+              <p role="alert" style={{ margin: '10px 0 0', fontSize: 12, color: hoursMsg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                 {hoursMsg.slice(hoursMsg.indexOf(':') + 1)}
               </p>
             )}

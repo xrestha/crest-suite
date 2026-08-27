@@ -8,6 +8,7 @@ import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import RowDisclosure from '../../../components/RowDisclosure'
 import { formatAd, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 
 // Total ever sent, per (order_id, recipe_id) — summing every log row's printed qty gives the true
@@ -340,13 +341,18 @@ export default function KotLog() {
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1150 }}>
-      <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
-          KOT Log <Tip text="Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was sent to the kitchen against what's currently on each order, flagging food that was cooked but then reduced, removed, or the order was voided entirely — the anti-fraud check. Bill Trail shows every paid/voided bill with its complete KOT/BOT history, including bills that never sent anything to the kitchen at all. Pulled Items is the named record: who took an already-cooked line off a bill, when, and why — Reconciliation can only infer that it happened." width={360}>ⓘ</Tip>
-        </h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
-          Every ticket sent to the kitchen, whether it matches what was actually billed, and who pulled anything that no longer does.
-        </p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="page-title">
+            KOT Log <Tip text="Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was sent to the kitchen against what's currently on each order, flagging food that was cooked but then reduced, removed, or the order was voided entirely — the anti-fraud check. Bill Trail shows every paid/voided bill with its complete KOT/BOT history, including bills that never sent anything to the kitchen at all. Pulled Items is the named record: who took an already-cooked line off a bill, when, and why — Reconciliation can only infer that it happened." width={360}>ⓘ</Tip>
+          </h1>
+          <p className="page-subtitle">
+            Every ticket sent to the kitchen, whether it matches what was actually billed, and who pulled anything that no longer does.
+          </p>
+        </div>
+        <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
+        </div>
       </div>
 
       <div className="tab-bar" style={{ marginBottom: 16 }}>
@@ -365,7 +371,6 @@ export default function KotLog() {
           <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="kot-log-to-bs">To (BS)</label>
           <BsCalendarPicker id="kot-log-to-bs" value={toIso} onChange={setToIso} />
         </div>
-        <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={isEmpty}>⬇ Excel</button>
       </div>
 
       {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
@@ -402,7 +407,9 @@ export default function KotLog() {
                     </td>
                     <td>{r.table_name || 'Takeaway'}</td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{r.order_no}</td>
-                    <td><span className={r.station === 'BOT' ? 'badge-yellow' : 'badge-green'} style={{ fontSize: 11 }}>{r.station}</span></td>
+                    {/* KOT/BOT is a CATEGORY split, not a success state — green is reserved for
+                        outcomes (statusBadge's 'Billed'), so KOT takes purple, BOT yellow (S613). */}
+                    <td><span className={r.station === 'BOT' ? 'badge-yellow' : 'badge-purple'} style={{ fontSize: 11 }}>{r.station}</span></td>
                     <td>{(r.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}</td>
                     <td>{staffNames[r.sent_by] || '—'}</td>
                     <td style={{ textAlign: 'right', color: overEst ? 'var(--theme-red-text)' : undefined }}>
@@ -471,7 +478,15 @@ export default function KotLog() {
                 return (
                   <Fragment key={o.id}>
                     <tr onClick={() => setExpandedOrderId(expanded ? null : o.id)} style={{ cursor: 'pointer' }}>
-                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{o.order_no}</td>
+                      {/* RowDisclosure is the keyboard/SR path to the expansion — the row onClick
+                          stays as the mouse convenience, never role="button" on the tr (S613). */}
+                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                        <RowDisclosure
+                          expanded={expanded}
+                          onToggle={() => setExpandedOrderId(expanded ? null : o.id)}
+                          label={`KOT trail for order #${o.order_no}`}
+                        /> #{o.order_no}
+                      </td>
                       <td>{o.table_name || 'Takeaway'}</td>
                       <td><span className={statusBadge(o).className} style={{ fontSize: 11 }}>{statusBadge(o).label}</span></td>
                       <td>
@@ -480,7 +495,9 @@ export default function KotLog() {
                           : <span className="badge-gray" style={{ fontSize: 11 }}>{row.logs.length} ticket{row.logs.length > 1 ? 's' : ''}</span>}
                       </td>
                       <td>{flagged && <span className="badge-red" style={{ fontSize: 11 }}>Discrepancy</span>}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>{expanded ? '▲ hide' : '▼ trail'}</td>
+                      {/* Mouse affordance only — the RowDisclosure carries aria-expanded, so this
+                          duplicate hint stays out of the accessibility tree (S613). */}
+                      <td aria-hidden="true" style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>{expanded ? '▲ hide' : '▼ trail'}</td>
                     </tr>
                     {expanded && (
                       <tr>
@@ -494,7 +511,8 @@ export default function KotLog() {
                                 {row.logs.map(log => (
                                   <tr key={log.id}>
                                     <td>{new Date(log.sent_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</td>
-                                    <td><span className={log.station === 'BOT' ? 'badge-yellow' : 'badge-green'} style={{ fontSize: 11 }}>{log.station}</span></td>
+                                    {/* Same KOT-purple / BOT-yellow category colours as the Register tab (S613). */}
+                                    <td><span className={log.station === 'BOT' ? 'badge-yellow' : 'badge-purple'} style={{ fontSize: 11 }}>{log.station}</span></td>
                                     <td>{(log.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}</td>
                                     <td>{staffNames[log.sent_by] || '—'}</td>
                                   </tr>
