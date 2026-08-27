@@ -159,6 +159,89 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S618 — 2026-08-27 — Loyalty, and why a redemption is a tender rather than a discount
+
+POS_TODO's last engineering item from the 2026-07-04 Nepal-market scan. Half of it already existed
+and was doing nothing: `closeOrder` has been auto-building `pos_customers` from any bill with a
+buyer name and phone since S291, so identity, the dedup key and the capture point were all built.
+What was missing was the ledger, the schemes, and the moment at the till where a diner spends what
+they earned.
+
+**The shape came from the client, not from the code.** Several schemes; a customer is tagged to
+exactly one or to none, and **untagged earns nothing** — so switching the feature on never starts
+accruing points across an existing customer book. A scheme controls the earn rate and a minimum
+spend and nothing else, which makes what a point is *worth* a single client-level number: schemes
+differ in how fast you earn, everyone redeems at the same rate, and staff only ever explain one
+figure at the till.
+
+**Redemption is a TENDER — a `pos_order_payments` row with method `'Loyalty'`, like a gift card.**
+The discount route looks cheaper and collides with two things that already exist. `computeOrderAmounts`
+applies `discount_amount` to the **pre-VAT** base and recalculates VAT on the discounted amount, so
+booking a redemption there would quietly reduce the VAT remitted on every redeemed bill. And
+`guard_pos_order_close()` (S577) measures `discount_amount` server-side against the line total and
+rejects a close over `pos_discount_limit` — so a 10%-capped waiter applying a 20% redemption would
+have had a legitimate bill refused mid-service. A tender touches none of
+`close_type`/`status`/`discount_amount`, so that trigger never fires.
+
+Three consequences worth stating because they are the reason to prefer it: **revenue needs no
+change at all** (`writeSalesEntries` posts `unit_price`; a tender does not touch it, so every IMS
+report is untouched), **Expected Cash needs no change** (`cashSales` is `byMethod.Cash`, so a
+Loyalty tender cannot leak into the drawer), and the redemption prints on the bill through the
+existing split-payment machinery rather than a new billing path.
+
+**The known simplification, written into the Help text rather than left to be discovered from a
+P&L:** revenue is recognised in full and the redemption is a non-cash tender, so no liability is
+accrued at earn time and the cost of a reward lands as *less cash taken* rather than an expense
+line. Correct double-entry would accrue at earn; that is deliberately out of scope for v1.
+
+**Two defects found by building it, both in code that already shipped:**
+
+- **`PAY_METHODS` in `PosShifts.jsx` and `PAY_METHOD_ORDER` in `SalesReport.jsx` accumulate only
+  methods they already know** — `if (byMethod[p.payment_method] !== undefined)` silently drops
+  anything else. A redeemed bill would have left the Z-report's method breakdown short of the bill
+  total with nothing on screen saying so. Both lists gained `'Loyalty'`; `PAYMENT_METHODS` itself
+  deliberately did **not**, because that is the list a cashier *picks* from and a redemption is not
+  picked — the same distinction S290→S291 learned with Foodmandu/Pathao.
+- **The ledger's no-write-policy design would have made restore silently lose every balance.**
+  `restoreClientData.js` inserts through the **browser** client as `authenticated`, not through the
+  service role, so a SELECT-only table cannot be restored at all — a restored client would come
+  back with every customer's points at zero. Resolved with an admin-only INSERT policy, which
+  leaves the actual threat (a till JWT minting itself points) untouched. **A security posture that
+  breaks the backup is not a security posture**, and the only reason this surfaced is that
+  `RESTORE_ORDER` is on the new-feature checklist.
+
+`pos_loyalty_ledger` has **no INSERT/UPDATE/DELETE policy for a client session** beyond that admin
+restore path, so the two `SECURITY DEFINER` RPCs are the only write path — the same shape as
+`set_outlet_access` (S617) and `apply_pos_item_comps` (S579). Balance is `SUM(points)` and is never
+stored: a stored balance and its ledger are two sources for one number, and the day they disagree
+there is no way to tell which is right (`payable_payments` behind Outstanding Payables, same rule).
+`award_loyalty_points` computes from the **order's own stored lines**, never a caller-supplied
+amount, and a partial unique index on `(order_id) WHERE kind = 'earn'` makes a retried close a
+no-op rather than a double award.
+
+`redeem_loyalty_points` is called at Charge time **before the order is marked billed** — the exact
+ordering `apply_pos_item_comps` uses (S286), so a failure aborts the Charge cleanly instead of
+billing a customer whose points were never debited. It writes the ledger row and the tender in one
+transaction, which is why the local `pos_order_payments` insert filters the Loyalty leg out;
+writing it twice would double the collected total.
+
+One placement note, because the file has form here: the redeem panel sits inside the **order-screen**
+return. `PosOrders.jsx` has two returns and a control placed in the floor tree sets state that
+nothing renders (S578).
+
+**Files:** `supabase/migrations/20260827160000_pos_loyalty.sql` (new),
+`src/modules/pos/customers/{loyaltyPoints.js, loyaltyPoints.test.js, LoyaltyTab.jsx}` (new),
+`src/modules/pos/customers/PosCustomers.jsx`, `src/modules/pos/orders/PosOrders.jsx`,
+`src/modules/pos/shifts/PosShifts.jsx`, `src/modules/pos/reports/SalesReport.jsx`,
+`src/context/{AuthContext, SettingsContext}.js`, `src/pages/adminClients/FeatureAccessModal.js`,
+`src/shared/scopedDb.js`, `src/modules/admin/dataExport/restoreClientData.js`,
+`supabase/functions/admin-user-ops/index.ts`, `src/pages/Help.js`,
+`src/pages/settings/posGuideData.js`, `public/service-worker.js` (`crest-v132` → `crest-v133`),
+`README.md`. Build clean, 398/398 tests (12 new).
+
+**Not yet applied.** The migration has not been run, and neither RPC has ever executed — dry-run
+the earn path on a throwaway customer before enrolling a real one.
+
 ### S617 — 2026-08-27 — Building on multi-outlet found three ways it was already broken
 
 Starting P2's multi-outlet item (per-branch privileges, then the HQ→branch master-data push

@@ -569,7 +569,7 @@ const POS_FEATURES = [
                 },
                 {
                   icon: '👤', name: 'Customers', path: '/pos/customers',
-                  desc: 'Customer book built automatically from billed orders — every bill closed with buyer Name + Phone (required for any discount or Credit sale) adds or updates a customer, keyed by phone number. The Outstanding Credit tab lists Credit bills awaiting collection with a one-tap Settle action. Requires Supervisor role or above.',
+                  desc: 'Customer book built automatically from billed orders — every bill closed with buyer Name + Phone (required for any discount or Credit sale) adds or updates a customer, keyed by phone number. The Outstanding Credit tab lists Credit bills awaiting collection with a one-tap Settle action. If Loyalty is switched on for your outlet, a third tab sets up points schemes and shows who is enrolled. Requires Supervisor role or above.',
                   tips: [
                     'No manual data entry — the book fills itself as bills are closed with buyer details. Repeat customers are matched by phone number, so their name/address/PAN stay up to date automatically',
                     'Click any customer row to see their full order history — every billed order under that phone number, including payment method and any outstanding Credit',
@@ -578,6 +578,11 @@ const POS_FEATURES = [
                     'The Who owes what table totals the ledger by counterparty — each delivery platform separately, plus one Direct customers row — so a balance can be chased per platform instead of read off a bill-by-bill list. It covers every Credit bill ever, settled and unsettled; for one month, and to check what a platform withheld against the rate you agreed, use Sales Report → Delivery Partners',
                     'The Age column shows how long each credit bill has been outstanding — chase the old ones first',
                     'Settling is Supervisor+ (routine cashier work); issuing credit at Charge stays Manager+ only',
+                    'Loyalty tab: create one or more schemes (how many points per NPR 100, and a minimum spend below which a bill earns nothing), then enrol customers one at a time. Anyone left on “Not enrolled” earns nothing at all — switching Loyalty on never starts accruing points for your whole existing customer book',
+                    'A customer belongs to one scheme at a time. What a point is WORTH is a single number for the outlet, set at the top of the same tab — schemes differ only in how fast points are earned, so staff only ever have to explain one redemption rate at the till',
+                    'Points are earned automatically on any bill closed with a name and phone; the Orders floor shows what the last bill earned. They are spent at Charge, where the Pay tab shows the balance and lets the cashier apply some of it',
+                    'Redeeming behaves like a gift card, not a discount: the bill’s VAT is unchanged and the points settle part of what is owed. That also means it does not count against a cashier’s discount limit',
+                    'Worth knowing for your accounts: revenue is recorded in full and the redemption shows as a non-cash payment, so the cost of a reward appears as less cash taken rather than as an expense line',
                   ],
                 },
                 {
