@@ -92,6 +92,16 @@ function nextOutletsOrSame(prev, client, siblings) {
   return prev.every((o, i) => o.id === next[i].id) ? prev : next
 }
 
+// Same stable-identity contract as nextOutletsOrSame, for the same reason — this array also
+// reaches the context value, so handing back a fresh [] on every fetchProfile() is a state
+// CHANGE and re-renders every consumer. Ids arrive PK-ordered, so a plain positional compare is
+// enough; nothing here needs to sort.
+function nextIdsOrSame(prev, ids) {
+  const next = ids || []
+  if (prev.length !== next.length) return next
+  return prev.every((id, i) => id === next[i]) ? prev : next
+}
+
 export function AuthProvider({ children }) {
   const [session, setSession]                   = useState(null)
   const [profile, setProfile]                   = useState(null)
@@ -105,6 +115,11 @@ export function AuthProvider({ children }) {
   // profiles.active_client_id, because it decides which tenant's rows every RLS policy resolves
   // to. A browser-held value could not be trusted for that.
   const [outlets, setOutlets] = useState([])
+  // The sibling outlets THIS account has been explicitly allowlisted into (S617). Empty for an
+  // Owner, who reaches the whole group by virtue of being the Owner, and empty for everyone in a
+  // single-outlet client. Read from profile_outlet_access, whose SELECT policy allows your own
+  // rows — so this is what the account itself is permitted to know, not a copy of the matrix.
+  const [allowedOutletIds, setAllowedOutletIds] = useState([])
 
   useEffect(() => {
     let mounted = true
@@ -187,7 +202,14 @@ export function AuthProvider({ children }) {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, role, client_id, pos_role, pos_team, pos_discount_limit, pos_allow_void, hr_employee_id, hr_self_service, ims_role, ims_job_title, hr_role, hr_job_title')
+        // active_client_id is load-bearing and was MISSING from this list until S617, while two
+        // places below read it (effectiveClientId, and clientId in the context value). Undefined
+        // in both, so switchOutlet wrote the column server-side and the frontend never learned:
+        // my_client_id() resolved to the selected outlet while every scopedDb query still filtered
+        // .eq('client_id', <home>), so every client-scoped table returned zero rows with
+        // error: null — the whole app empty, and by the S594 rule indistinguishable from an empty
+        // tenant. Never noticed because no client has a group_id yet.
+        .select('id, full_name, role, client_id, active_client_id, pos_role, pos_team, pos_discount_limit, pos_allow_void, hr_employee_id, hr_self_service, ims_role, ims_job_title, hr_role, hr_job_title')
         .eq('id', userId)
         .single()
 
@@ -225,6 +247,27 @@ export function AuthProvider({ children }) {
           data.clients = client
           setFeatureFlags(flags || {})
           setOutlets(prev => nextOutletsOrSame(prev, client, siblings))
+        }
+
+        // The outlet allowlist is fetched SECOND and only for a grouped client — deliberately not
+        // folded into the batch above, for two reasons. It is dead weight for the ungrouped
+        // majority, who can never switch anywhere. And this is the app's hottest path: every page
+        // load runs it, so per the standing rule about migration hot paths, it must not reference
+        // a table that may not exist yet on a given deployment. Gating on group_id means an
+        // ungrouped deployment never issues the query at all, and a grouped one only reaches it
+        // after the multi-outlet migrations have been applied. supabase-js resolves rather than
+        // throws on a missing table, so even then the failure mode is an empty allowlist — no
+        // switcher — which is the safe direction.
+        if (mounted && client?.group_id) {
+          const { data: access } = await supabase
+            .from('profile_outlet_access')
+            .select('client_id')
+            .eq('profile_id', userId)
+          if (mounted) {
+            setAllowedOutletIds(prev => nextIdsOrSame(prev, (access || []).map(a => a.client_id)))
+          }
+        } else if (mounted) {
+          setAllowedOutletIds(prev => nextIdsOrSame(prev, []))
         }
       }
 
@@ -289,10 +332,23 @@ export function AuthProvider({ children }) {
   const posTeam = isAdmin || isOwner ? 'foh' : (profile?.pos_team || 'foh')
 
   // ── Multi-outlet ──
-  // Only an Owner switches outlets. A POS till, an IMS storekeeper or an HR clerk belongs to one
-  // physical outlet; handing them a switcher would let a waiter re-point their whole session at
-  // a sibling branch. Staff-account markers are exactly what isOwner already excludes.
-  const canSwitchOutlet = isOwner && outlets.length > 1
+  // An Owner reaches every outlet in the group. Anyone else reaches their home outlet plus
+  // whatever they have been explicitly allowlisted into (S617, profile_outlet_access). The case
+  // that motivated the allowlist is a manager who genuinely covers two branches: before it, the
+  // only way to grant the second was to make them an Owner, which hands over the entire group
+  // AND — because the Owner test is the ABSENCE of staff markers — strips every rank they hold.
+  //
+  // The default is still nothing. An account with no allowlist row gets no switcher at all, so a
+  // POS till, an IMS storekeeper or an HR clerk stays pinned to one physical outlet exactly as
+  // before. This is a UI convenience over set_active_outlet()'s server-side check, never a
+  // substitute for it — that RPC enforces the same rule and is the thing that actually holds.
+  const homeClientId = profile?.client_id || null
+  const switchableOutlets = useMemo(() => {
+    if (isOwner) return outlets
+    if (!allowedOutletIds.length) return []
+    return outlets.filter(o => o.id === homeClientId || allowedOutletIds.includes(o.id))
+  }, [isOwner, outlets, allowedOutletIds, homeClientId])
+  const canSwitchOutlet = switchableOutlets.length > 1
 
   // Writes through set_active_outlet(), never a direct PATCH: active_client_id decides which
   // tenant every RLS policy resolves to, so it is a privileged column and is deliberately NOT on
@@ -484,7 +540,7 @@ export function AuthProvider({ children }) {
       featureFlags, hasFeature,
       // Multi-outlet. `outlets` is [] for everyone not in a group, so every consumer of these
       // degrades to today's single-outlet behavior without a special case.
-      outlets, canSwitchOutlet, switchOutlet,
+      outlets, switchableOutlets, allowedOutletIds, canSwitchOutlet, switchOutlet,
       groupId: profile?.clients?.group_id || null,
       imsEnabled,
       hrEnabled,

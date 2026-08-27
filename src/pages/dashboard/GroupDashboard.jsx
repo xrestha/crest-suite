@@ -1,8 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
 import SuiteGate from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
+import OutletAccessPanel from './OutletAccessPanel'
+import MasterPushPanel from './MasterPushPanel'
 import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
 
 // Multi-Outlet Group Console — every branch in the group on one screen.
@@ -35,7 +38,7 @@ function pctColor(v, good, warn) {
 }
 
 export default function GroupDashboard() {
-  const { groupId, clientId, canSwitchOutlet, switchOutlet } = useAuth()
+  const { groupId, clientId, canSwitchOutlet, switchOutlet, isAdmin, isOwner } = useAuth()
   const [switching, setSwitching] = useState(null)
   const today = getBsToday()
   const [bsYear, setBsYear] = useState(today.year)
@@ -71,6 +74,14 @@ export default function GroupDashboard() {
   }, [bsYear, bsMonth])
 
   useEffect(() => { if (groupId) load() }, [groupId, load])
+
+  // Placed after every hook, and relying on ProtectedRoute having already resolved `profile`.
+  // This page had NO role guard at all until S617 — not at the route in App.js, not here — while
+  // the sidebar showed it to isAdmin || isOwner only. MonthlyOwnerReport has carried this exact
+  // line since it shipped; /pnl and /owner-dashboard were given it in S601; this is the fourth
+  // page behind an owner-only nav entry and the last one missing it. Group figures cross tenant
+  // boundaries, so the altitude test is the whole point (S601's rule).
+  if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />
 
   async function handleGoToOutlet(targetId) {
     setSwitching(targetId)
@@ -248,6 +259,13 @@ export default function GroupDashboard() {
                 )}
               </table>
             </div>
+
+            {/* Rendered from `rows`, not from AuthContext's `outlets`: this matrix must list every
+                outlet in the group, including ones excluded from the figures above for want of
+                Suite Pro. Access is about where someone may work, not about what the group is
+                billed for — omitting an unpaid outlet would silently make it un-staffable. */}
+            <OutletAccessPanel outlets={rows.map(r => ({ id: r.client_id, name: r.client_name }))} />
+            <MasterPushPanel outlets={rows.map(r => ({ id: r.client_id, name: r.client_name }))} groupId={groupId} />
           </>
         )}
       </SuiteGate>

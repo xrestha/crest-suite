@@ -181,7 +181,7 @@ export default function Layout() {
   const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient,
           isTrial, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
           accessReason, graceDaysLeft, clientId,
-          outlets, canSwitchOutlet, switchOutlet,
+          outlets, switchableOutlets, canSwitchOutlet, switchOutlet,
           hasPosAccess, posRole, posTeam, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom } = useScopedDb()
@@ -529,7 +529,12 @@ export default function Layout() {
       ...tag('Suite', [
         { to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown },
         { to: '/owner-report', label: 'Monthly Owner/Manager Report', icon: ScrollText },
-        ...(outlets.length > 1 ? [{ to: '/group-dashboard', label: 'Group Console', icon: Network }] : []),
+        // Must match the sidebar's own condition above, which is `(isAdmin || isOwner) &&
+        // outlets.length > 1`. It didn't: the palette offered Group Console on group membership
+        // alone, so a POS or IMS staff account of a grouped client could search its way onto a
+        // page the sidebar deliberately withheld — the S601 rule, and worse than a bare URL
+        // because the product was advertising the page (S617).
+        ...((isAdmin || isOwner) && outlets.length > 1 ? [{ to: '/group-dashboard', label: 'Group Console', icon: Network }] : []),
       ]),
       ...tag('IMS', NAV.slice(1)),
       ...tag('IMS', REPORTS),
@@ -886,7 +891,10 @@ export default function Layout() {
               })()}
               {outletDropdownOpen && canSwitchOutlet && (
                 <div className="sidebar-dropdown-panel" ref={outletDropdownRef} role="listbox">
-                  {outlets.map(o => {
+                  {/* switchableOutlets, not outlets: an allowlisted manager may reach two of the
+                      group's five branches, and offering the other three would fail server-side
+                      inside set_active_outlet() with an error rather than a closed door (S617). */}
+                  {switchableOutlets.map(o => {
                     const s = getSubStatus(o)
                     const active = o.id === clientId
                     return (
