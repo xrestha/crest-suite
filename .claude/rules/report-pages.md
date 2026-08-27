@@ -7,6 +7,11 @@ paths:
   - "src/shared/excelLetterhead.js"
   - "src/shared/hooks/useBizInfo.js"
   - "src/modules/ims/reports/**"
+  # Reports also live in these two, which is half of why S616 found three drifted pages here:
+  # DeadStock/StockReport/ReorderReport/StockMovements/DemandForecast are reports in stockcount/,
+  # MenuRepricing/RecipeMargin/MenuEngineering are reports in recipes/. This file never loaded for them.
+  - "src/modules/ims/stockcount/**"
+  - "src/modules/ims/recipes/**"
   - "src/modules/pos/reports/**"
   - "src/modules/hr/reports/**"
   - "src/pages/dashboard/**"
@@ -88,3 +93,29 @@ than per-call-site inline styles. `tfoot` had **no rule at all**, so every total
 was hand-styled; `tabular-nums` appeared on exactly one page (`ConsolidatedPnl` found it
 independently) while Poppins' proportional figures left every other currency column ragged.
 `.data-table--sticky-first` is opt-in, for a wide matrix whose first column is the row label.
+
+### The gate must be INSIDE the branch, not merely present on the page (S616)
+
+`ReportPage` suppresses `stats` while loading or after an error, and the ~20 pages that predate it
+have to do it by hand. Three were doing it wrong in a way no audit had caught, because every
+earlier sweep asked *does this page have an error branch* — `MenuRepricing.js`, `RecipeMargin.js`
+and `DeadStock.js` all answered yes. Their KPI strips simply sat forty lines **above** the
+`{loading ? … : loadError ? <ReportLoadError/> : …}` ternary, outside it.
+
+Measured on a forced 500: three `stat-card`s each, rendered directly above the "Could not load this
+report" card — `UNDERPRICED DISHES 0`, `MONTHLY OPPORTUNITY NPR 0`, `TOTAL CONTRIBUTION NPR 0`,
+`DEAD STOCK ITEMS 0`. And they were **green**: not just a number the page has not computed, but one
+that reads as good news. "Nothing is underpriced" and "we have no dead stock" are the two most
+reassuring sentences those pages can say, and a failed read said both. They were equally visible on
+every ordinary load, before the data arrived.
+
+So the check is positional, not textual. **Grep for the `stat-grid` line and confirm a
+`!loading && !loadError` guard opens before it**, rather than confirming `ReportLoadError` appears
+somewhere in the file:
+
+```bash
+grep -n "stat-grid" <file>          # then read the five lines above it
+```
+
+The same applies to any slot `ReportPage` would have gated — `note`, `filters`, `footnote`. A page
+that hand-rolls the shell inherits the whole rule, not the error card alone.

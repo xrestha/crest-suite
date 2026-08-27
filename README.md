@@ -159,6 +159,92 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S616 — 2026-08-27 — The smoke test S613 deferred, and the three defects it found before a browser was opened
+
+S613 shipped the period-close preflight and a batch of new error branches and ended with **"not
+smoke-tested live"**; S612 had ended the same way. This session cleared that debt. The useful result
+is that the static pass found three real defects *before* Playwright was started, and the browser's
+job turned out to be proving them rather than discovering them.
+
+**Three report pages render their KPI strip above their own error branch.** `MenuRepricing.js`,
+`RecipeMargin.js` and `DeadStock.js` each have a correct `loadError` branch — the stat cards simply
+sit forty lines *above* it, outside the ternary. Every earlier sweep asked "does this page have an
+error branch" (yes) and not "is the strip inside it" (no). Proven by A/B: the three files stashed,
+a 500 forced on `items`/`recipes` via `page.route`, and the pages rendered **three stat cards each
+alongside the "Could not load this report" card** — `UNDERPRICED DISHES 0`, `MONTHLY OPPORTUNITY
+NPR 0`, `TOTAL CONTRIBUTION NPR 0`, `DEAD STOCK ITEMS 0 ZERO CONSUMPTION`. Restored, the same probe
+returns 0 stat cards on all three, matching `StockReport` as the already-correct control. Worth
+noting these are *green* zeros: not merely a confident number the page has not computed, but an
+actively reassuring one — "nothing is underpriced", "no dead stock" — which is the S594 defect in
+its worst form. They were also visible on every ordinary page load, not only on failure.
+
+**The preflight was measuring two different populations.** Its `closing_stock` side counted every
+row for the period; its `items` side excluded sub-recipes. But `Stock.js:132` loads active items
+**without** that filter, so sub-recipe mirror items get closing rows like anything else. A client
+with 200 raw items and 30 sub-recipes who counted every sub-recipe and 170 raw items scored 200 of
+200 and was told *"All 200 active items have a closing count"* — with 30 items heading into the
+frozen report at zero. The all-clear is the one branch that can be wrong in the direction that
+matters, and it was. Both sides now mean what the count screen means.
+
+**S613 fixed the close-failure alert on the admin path and left the client-facing one silent.**
+`performAdminCloseAndAdvance` got the `window.alert`; `performCloseAndAdvance` kept a bare
+`console.error` — and that is the function behind the "◷ *month* has ended" banner an owner
+actually clicks. It is worse there than on the admin path, because "+ Create Period" is
+`isAdmin`-gated: the month closes, nothing opens, and the owner is locked out of purchases, sales
+and stock with no message and no way to recover. Now surfaced, with different second sentences for
+admin and client.
+
+`closingCountNote` moved to `src/pages/periods/closingCountNote.js` with **6 tests** — the four
+branches plus `counted > items` (reachable: an item deactivated after being counted keeps its
+closing row) and an empty item master, which had been showing a fresh client a red *"0 of 0 active
+items"* alarm and now gets its own non-danger sentence.
+
+**PosOrders: 5 of 20 swallowed errors closed, chosen by consequence rather than by count.** S573's
+smallest-safe-cut rule is still right for this file, so the ones fixed are those where a dropped
+error produces a wrong artifact or a duplicate charge. `openTable` is the worst in the file: a
+failed read returns `existing` as null, the table reads as **empty**, and staff start a second order
+on a table whose items are already with the kitchen — re-fired KOTs and two bills on one guest. It
+now refuses to guess, via `window.alert` because the floor view has no message banner at all
+(`setMsg` renders only inside the `view === 'order'` tree — CLAUDE.md's two-returns trap). `printBill`
+was printing a Split bill with **no tender lines** under a real invoice number, and its payments read
+moved above the `print_count` increment so aborting cannot mislabel the next reprint's
+ORIGINAL/SECOND-COPY line. `reprintBill`'s `if (!order) return` let a failed *items* read straight
+through and reprinted a Tax Invoice with a real invoice number and zero line items. `loadRecentBills`
+rendered "No bills closed yet today" on failure — an invitation to re-bill a table already billed.
+`clearAllOccupiedTables` freed every occupied table while all of their orders survived underneath.
+Deliberately left: the four polls, the upsell RPC and `hscMap` (cosmetic or a print field, not a
+figure), and `writeSalesEntries`' `monthly_periods` read, which **already fails safe** — it returns
+false, `ims_posted_at` stays null, and the floor surfaces the bill as unposted.
+
+Live results, all against BHATTI CHOILA on the dev server: the close confirm rendered
+*"No closing stock has been counted for this month (0 of 1 active items)"* at `rgb(143,36,64)` weight
+700, matching ground truth read straight from PostgREST; the forced-failure probe returned 0 stat
+cards and 1 error card on all four pages; the close-failure alert named both months correctly
+(*"Bhadra 2083 was closed, but Ashwin 2083 could not be opened"*); and the POS guard fired with the
+table name resolved, leaving the floor view up with no covers modal.
+
+**The method lesson, which cost a real period close: a Playwright `route` handler that throws does
+not fail the test — the request goes to the real network.** The first fault-injection run used
+`new URL()` inside the handler, which does not exist in the Playwright server context. The handler
+threw on the first non-GET request, the PATCH that closes the period went through for real, and
+Bhadra 2083 closed on the dummy client. Recovery was clean (Reopen worked; `monthly_owner_reports`
+still held only months 3 and 4, so no frozen snapshot had been minted) and the period is open again
+— but the rule to carry forward is **wrap every route handler in try/catch and `route.abort()` on
+error, never let it fall through to `continue()`**. The second run also neutralised *every* non-GET
+request to `/rest/v1/` — fulfilling the PATCH as a fake 200 and failing only the POST under test —
+so the whole scenario ran with zero real writes, verified afterwards against the live table.
+
+Second, smaller: **CRA's `process.env` is not readable from the page, and `require`/dynamic `import`
+are both unavailable inside `browser_run_code_unsafe`.** The anon key was recovered by fetching the
+dev bundle from inside the page and picking the JWT whose payload decodes to `role: "anon"` — which
+keeps it out of the transcript as well.
+
+**Files:** `src/modules/ims/recipes/{MenuRepricing,RecipeMargin}.js`,
+`src/modules/ims/stockcount/DeadStock.js`, `src/pages/Periods.js`,
+`src/pages/periods/closingCountNote.js` + `.test.js` (new),
+`src/modules/pos/orders/PosOrders.jsx`, `public/service-worker.js` (`crest-v130` → `crest-v131`),
+`.claude/rules/report-pages.md`, `README.md`. Build clean, 386/386 tests pass.
+
 ### S615 — 2026-08-27 — The root file regrew 7,052 chars in three days, so migration is maintenance
 
 The third `/doctor` pass, and the first one where the interesting result was the *rate of change*
