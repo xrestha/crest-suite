@@ -181,7 +181,9 @@ export default function MenuRepricing() {
         </div>
       </div>
 
-      {/* Stat cards */}
+      {/* KPI strip waits for the load and never survives a failure: unloaded or failed,
+          Underpriced Dishes / Monthly Opportunity read as confident green zeros (S594). */}
+      {!loading && !loadError && (
       <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">
@@ -203,6 +205,7 @@ export default function MenuRepricing() {
           {biggestLeak && <div className="stat-label" style={{ marginTop: 4 }}>{fmtNPR(biggestLeak.monthlyOpportunity || biggestLeak.priceGap)}{biggestLeak.monthlyOpportunity ? '/mo' : '/portion'}</div>}
         </div>
       </div>
+      )}
 
       {/* Sort + filter bar */}
       <div className="no-print" style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>

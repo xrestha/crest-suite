@@ -169,7 +169,9 @@ export default function RecipeMargin() {
         </div>
       </div>
 
-      {/* Stat cards */}
+      {/* KPI strip waits for the load and never survives a failure: unloaded or failed,
+          Total Contribution reads as a confident green NPR 0 (S594). */}
+      {!loading && !loadError && (
       <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">
@@ -191,6 +193,7 @@ export default function RecipeMargin() {
           {topRecipe && <div className="stat-label" style={{ marginTop: 4 }}>{fmtNPR(topRecipe.totalContribution)}</div>}
         </div>
       </div>
+      )}
 
       {/* Sort + filter bar */}
       <div className="no-print" style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
