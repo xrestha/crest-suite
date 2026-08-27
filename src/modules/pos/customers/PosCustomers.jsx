@@ -6,6 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
+import LoyaltyTab from './LoyaltyTab'
 
 // Cheque + Bank Transfer are settlement-only (how a receivable is remitted) — not counter-payment
 // methods, so they're not in PAYMENT_METHODS. Foodmandu/Pathao typically remit by Bank Transfer.
@@ -24,10 +25,13 @@ function daysAgo(iso) {
 }
 
 export default function PosCustomers() {
-  const { clientId, profile, hasPosAccess } = useAuth()
+  const { clientId, profile, hasPosAccess, hasFeature } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
 
-  const [mainTab, setMainTab] = useState('customers') // 'customers' | 'credit'
+  const [mainTab, setMainTab] = useState('customers') // 'customers' | 'credit' | 'loyalty'
+  // What one point is worth, held here rather than inside LoyaltyTab because the tab is
+  // unmounted whenever another tab is open and would re-read it on every visit.
+  const [pointValue, setPointValue] = useState(1)
 
   // Customers
   const [customers, setCustomers] = useState([])
@@ -60,13 +64,18 @@ export default function PosCustomers() {
     if (!clientId) return
     loadCustomers()
     supabase.from('settings')
-      .select('is_vat_registered, invoice_prefix, pos_delivery_partners')
+      .select('is_vat_registered, invoice_prefix, pos_delivery_partners, pos_loyalty_point_value')
       .eq('client_id', clientId).maybeSingle()
-      .then(({ data }) => setBillingSettings({
-        is_vat_registered: data?.is_vat_registered ?? true,
-        invoice_prefix: data?.invoice_prefix || '',
-        delivery_partners: data?.pos_delivery_partners || [],
-      }))
+      .then(({ data }) => {
+        setBillingSettings({
+          is_vat_registered: data?.is_vat_registered ?? true,
+          invoice_prefix: data?.invoice_prefix || '',
+          delivery_partners: data?.pos_delivery_partners || [],
+        })
+        // Defaults to 1 rather than 0 — a zero point value would silently make every balance
+        // worth nothing at the till while the numbers still read fine on this page.
+        setPointValue(Number(data?.pos_loyalty_point_value) || 1)
+      })
   }, [clientId]) // eslint-disable-line
 
   if (!hasPosAccess('supervisor')) return <Navigate to="/pos" replace />
@@ -252,7 +261,30 @@ export default function PosCustomers() {
             )}
           </button>
         </Tip>
+        {hasFeature('loyalty') && (
+          <Tip text="Points schemes, who is enrolled, and each member's balance. Points are earned automatically on any bill closed with a name and phone, and are spent at the till like a gift card">
+            <button
+              className={`tab-btn${mainTab === 'loyalty' ? ' tab-btn--active' : ''}`}
+              onClick={() => setMainTab('loyalty')}
+            >Loyalty</button>
+          </Tip>
+        )}
       </div>
+
+      {/* ══ LOYALTY TAB ══ */}
+      {mainTab === 'loyalty' && hasFeature('loyalty') && (
+        <LoyaltyTab
+          pointValue={pointValue}
+          onPointValueSaved={async v => {
+            // settings is nullable-client_id, so it stays on raw supabase rather than scopedDb.
+            const { error } = await supabase.from('settings')
+              .update({ pos_loyalty_point_value: v }).eq('client_id', clientId)
+            if (error) return false
+            setPointValue(v)
+            return true
+          }}
+        />
+      )}
 
       {/* ══ CUSTOMERS TAB ══ */}
       {mainTab === 'customers' && (

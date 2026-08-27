@@ -4,6 +4,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { pointsValue, maxRedeemablePoints } from '../customers/loyaltyPoints'
 import Tip from '../../../components/Tip'
 import { contrastRatio } from '../../../utils/avatarColor'
 import QRCode from 'qrcode'
@@ -39,7 +41,7 @@ function isMissingPosSaveFn(error) {
 }
 
 export default function PosOrders() {
-  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, hasFeature } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { colors } = useTheme()
   // Solid-amber badges (offline-pending dot, pending-items count, writeoff button) were hardcoded
@@ -216,6 +218,17 @@ export default function PosOrders() {
   // Bumped so the floor banner appears immediately after the close that caused it, rather than
   // only after the next full refresh of unpostedCount below.
   const [imsPostWarning,  setImsPostWarning]  = useState(0)
+  // What the last closed bill earned, or why it didn't. Shown on the FLOOR view, not in the
+  // billing modal — the modal closes the instant the bill does, so a message left there is
+  // one nobody ever reads.
+  const [loyaltyNote, setLoyaltyNote] = useState(null)
+  // Redemption state, live only while the billing modal is open. balance is null until a
+  // buyer phone has been entered and looked up — null and 0 are different facts here (not
+  // checked yet vs checked and empty), and the panel renders nothing for the first.
+  const [loyaltyBalance, setLoyaltyBalance] = useState(null)
+  const [loyaltyPointValue, setLoyaltyPointValue] = useState(1)
+  const [redeemStr, setRedeemStr] = useState('')
+  const [loyaltyLookupMsg, setLoyaltyLookupMsg] = useState('')
   const [unpostedCount,   setUnpostedCount]   = useState(0)
   const flushRef = useRef(null)
   // Re-entry guard for closeOrder — a manual Charge tap and the QR auto-confirm poll both call
@@ -466,6 +479,38 @@ export default function PosOrders() {
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [billingOpen, closing, coversModal, recentBillsOpen])
+
+  // Look up the customer's points as soon as a phone is on the bill. Debounced because this
+  // fires per keystroke on a field a cashier types ten digits into.
+  //
+  // fetchAllRows, not a bare select: a regular's ledger is one row per visit plus one per
+  // redemption, and a truncated SUM would understate a balance the customer is about to spend —
+  // the silent-wrong-number shape, on the one figure a diner will argue about.
+  useEffect(() => {
+    if (!billingOpen || !hasFeature('loyalty')) { setLoyaltyBalance(null); setLoyaltyLookupMsg(''); return }
+    const phone = buyerPhone.trim()
+    if (!phone) { setLoyaltyBalance(null); setLoyaltyLookupMsg(''); return }
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      const [custRes, setRes] = await Promise.all([
+        scopedFrom('pos_customers', 'id, name').eq('phone', phone).maybeSingle(),
+        supabase.from('settings').select('pos_loyalty_point_value').eq('client_id', clientId).maybeSingle(),
+      ])
+      if (cancelled) return
+      setLoyaltyPointValue(Number(setRes?.data?.pos_loyalty_point_value) || 1)
+      // A failed read is not 'no points' — that difference is the whole S594 rule, and here it
+      // would have a cashier tell a regular to their face that they have nothing.
+      if (custRes.error) { setLoyaltyBalance(null); setLoyaltyLookupMsg(`Couldn't check points — ${custRes.error.message}`); return }
+      if (!custRes.data) { setLoyaltyBalance(null); setLoyaltyLookupMsg(''); return }
+      const { data: rows, error: ledErr } = await fetchAllRows(() =>
+        scopedFrom('pos_loyalty_ledger', 'points').eq('customer_id', custRes.data.id).order('id'))
+      if (cancelled) return
+      if (ledErr) { setLoyaltyBalance(null); setLoyaltyLookupMsg(`Couldn't check points — ${ledErr.message}`); return }
+      setLoyaltyLookupMsg('')
+      setLoyaltyBalance((rows || []).reduce((t, r) => t + (r.points || 0), 0))
+    }, 400)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [billingOpen, buyerPhone, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
 
@@ -1348,6 +1393,18 @@ export default function PosOrders() {
     return true
   }
 
+  // Adds the redemption as an ordinary TENDER in local state. It is not written anywhere yet —
+  // closeOrder calls redeem_loyalty_points at Charge time, so an abandoned bill debits nothing.
+  function applyRedemption() {
+    const pts = Math.floor(Number(redeemStr) || 0)
+    const cap = maxRedeemablePoints(loyaltyBalance, payTotal, loyaltyPointValue)
+    if (pts <= 0 || pts > cap) return
+    setSplitMode(true)
+    setTenders(prev => [...prev.filter(t => t.method !== 'Loyalty'),
+      { method: 'Loyalty', amount: pointsValue(pts, loyaltyPointValue), points: pts }])
+    setRedeemStr('')
+  }
+
   /* ── Billing / Charge ── */
 
   async function openBilling() {
@@ -1363,6 +1420,7 @@ export default function PosOrders() {
     setCompQtyByRecipe({}); setItemCompReason(''); setItemsExpanded(false)
     setHscMap({})
     setSplitMode(false); setTenders([]); setTenderMethod('Cash'); setTenderAmtStr('')
+    setLoyaltyBalance(null); setRedeemStr(''); setLoyaltyLookupMsg('')
     setBillingOpen(true)
     const recipeIds = orderItems.map(i => i.recipe_id).filter(Boolean)
     if (recipeIds.length > 0) {
@@ -1579,6 +1637,23 @@ export default function PosOrders() {
         compedItemRows = data || []
       }
 
+      // Loyalty redemption, applied BEFORE the order is marked billed — the same ordering the
+      // item-comp RPC uses (S286) and for the same reason: a failure here must abort the Charge
+      // cleanly rather than bill a customer whose points were never debited. The RPC writes the
+      // ledger row AND the 'Loyalty' tender in one transaction, which is exactly why that tender
+      // is filtered out of the local pos_order_payments insert further down — writing it twice
+      // would double the collected total on the Z-report.
+      const loyaltyTender = tenders.find(t => t.method === 'Loyalty')
+      if (loyaltyTender) {
+        const { error: redErr } = await supabase.rpc('redeem_loyalty_points', {
+          p_order_id: orderId, p_points: loyaltyTender.points,
+        })
+        if (redErr) {
+          setCloseMsg('error:Could not redeem the points — ' + redErr.message)
+          return false
+        }
+      }
+
       const payload = {
         status:           closeType === 'void' ? 'voided' : 'billed',
         close_type:       closeType,
@@ -1632,11 +1707,17 @@ export default function PosOrders() {
       }
 
       if (isSplit) {
-        await scopedInsert('pos_order_payments', tenders.map(t => ({
-          order_id: orderId,
-          payment_method: t.method, amount: t.amount, tendered_amount: t.tenderedAmount,
-          recorded_by: profile?.id || null,
-        })))
+        // The Loyalty leg is deliberately absent: redeem_loyalty_points already wrote it, in the
+        // same transaction as the ledger debit, so inserting it again here would show the bill as
+        // collecting the redemption twice.
+        const cashTenders = tenders.filter(t => t.method !== 'Loyalty')
+        if (cashTenders.length > 0) {
+          await scopedInsert('pos_order_payments', cashTenders.map(t => ({
+            order_id: orderId,
+            payment_method: t.method, amount: t.amount, tendered_amount: t.tenderedAmount,
+            recorded_by: profile?.id || null,
+          })))
+        }
       }
 
       // Stamp only on a confirmed post. A void has nothing to post, so it is marked done rather
@@ -1656,6 +1737,26 @@ export default function PosOrders() {
         if (buyerAddress.trim()) custRow.address = buyerAddress.trim()
         if (buyerPan.trim())     custRow.pan     = buyerPan.trim()
         await scopedUpsert('pos_customers', custRow, { onConflict: 'client_id,phone' })
+      }
+
+      // Loyalty earn, immediately after the customer row exists — award_loyalty_points()
+      // resolves the customer from the order's buyer_phone, so the upsert above has to have
+      // landed first.
+      //
+      // Best-effort in the same shape writeSalesEntries established: a points problem must
+      // never stop a bill closing. But deliberately NOT silent — an earn that fails without a
+      // word is how a regular discovers at the till next month that none of it counted. The
+      // RPC computes from the order's own stored lines, so nothing here can influence the
+      // number; this call only asks.
+      setLoyaltyNote(null)
+      if (hasFeature('loyalty') && closeType === 'paid' && buyerPhone.trim()) {
+        try {
+          const { data: earned, error: loyErr } = await supabase.rpc('award_loyalty_points', { p_order_id: orderId })
+          if (loyErr) setLoyaltyNote({ ok: false, text: `Points not awarded — ${loyErr.message}` })
+          else if (earned > 0) setLoyaltyNote({ ok: true, text: `+${earned} point${earned === 1 ? '' : 's'} for ${buyerName.trim() || buyerPhone.trim()}` })
+        } catch (e) {
+          setLoyaltyNote({ ok: false, text: `Points not awarded — ${e.message || e}` })
+        }
       }
 
       if (activeTable?.id) {
@@ -2436,6 +2537,63 @@ export default function PosOrders() {
               </div>
             )}
 
+            {/* Loyalty redemption. Rendered inside the ORDER-screen return, beside the item-comp
+                panel — PosOrders has two returns and a control placed in the floor tree sets state
+                that nothing renders (S578).
+
+                Deliberately NOT gated on Supervisor rank, unlike comp above it: comping is
+                discretionary and giving away stock, whereas redeeming is a customer spending
+                something they already own. The real control is server-side — redeem_loyalty_points
+                re-checks the balance and will refuse. */}
+            {billingTab === 'pay' && hasFeature('loyalty') && (loyaltyBalance !== null || loyaltyLookupMsg) && (() => {
+              const applied = tenders.find(t => t.method === 'Loyalty')
+              const cap = maxRedeemablePoints(loyaltyBalance, payTotal, loyaltyPointValue)
+              return (
+                <div style={{
+                  marginBottom: 16, padding: '10px 12px', borderRadius: 'var(--radius-sm)',
+                  background: 'color-mix(in srgb, var(--theme-purple) 7%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--theme-purple) 25%, transparent)',
+                }}>
+                  {loyaltyLookupMsg ? (
+                    <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>{loyaltyLookupMsg}</p>
+                  ) : (<>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                        <Tip text="Points this customer has earned on past bills. Redeeming settles part of this bill like a gift card — it is not a discount, so the VAT on the bill does not change." width={300}>Loyalty points</Tip>
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-purple-text)' }}>
+                        {loyaltyBalance} pt{loyaltyBalance === 1 ? '' : 's'} · {fmtNpr(pointsValue(loyaltyBalance, loyaltyPointValue))}
+                      </span>
+                    </div>
+                    {applied ? (
+                      <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-purple-text)' }}>
+                        {applied.points} pt{applied.points === 1 ? '' : 's'} applied ({fmtNpr(applied.amount)}) — undo it in the tender list below to change it.
+                      </p>
+                    ) : cap > 0 ? (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                        <input
+                          type="number" min="1" max={cap} value={redeemStr}
+                          onChange={e => setRedeemStr(e.target.value)}
+                          className="form-input form-input--auto" style={{ width: 110 }}
+                          placeholder={`max ${cap}`}
+                          aria-label="Points to redeem"
+                        />
+                        <button className="btn btn-ghost btn-sm" onClick={applyRedemption}
+                          disabled={!(Math.floor(Number(redeemStr) || 0) > 0 && Math.floor(Number(redeemStr) || 0) <= cap)}>
+                          Apply
+                        </button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setRedeemStr(String(cap))}>Use max</button>
+                      </div>
+                    ) : (
+                      <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>
+                        {loyaltyBalance > 0 ? 'Not enough to cover any of this bill yet.' : 'No points yet — this bill will earn some.'}
+                      </p>
+                    )}
+                  </>)}
+                </div>
+              )
+            })()}
+
             {billingTab === 'pay' && hasPosAccess('supervisor') && orderItems.length > 0 && (
               <div style={{ marginBottom: 16 }}>
                 {/* Collapsed by default — a comp checkbox on every item, visible on every single
@@ -2969,6 +3127,28 @@ export default function PosOrders() {
           for their date. The sale itself is fine and the bill is valid — but IMS has no record of
           it, so MonthlySummary, Variance and stock levels are all short until it is backfilled.
           Silently correct-looking was the worst available option here. */}
+      {/* What the bill just closed earned. Dismissible and transient: it is feedback on one
+          action, not a standing condition like the unposted-bills warning below it. A failure
+          uses the same amber treatment rather than red — nothing is wrong with the BILL, which
+          closed and printed correctly; only the points did not land. */}
+      {loyaltyNote && (
+        <div
+          role="status"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            background: loyaltyNote.ok
+              ? 'color-mix(in srgb, var(--theme-green) 8%, transparent)'
+              : 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+            border: `1px solid color-mix(in srgb, var(--theme-${loyaltyNote.ok ? 'green' : 'amber'}) 28%, transparent)`,
+            borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 16, fontSize: 13,
+            color: loyaltyNote.ok ? 'var(--theme-green-text)' : 'var(--theme-amber-text)',
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>{loyaltyNote.ok ? '★ ' : '⚠ '}{loyaltyNote.text}</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setLoyaltyNote(null)} aria-label="Dismiss">×</button>
+        </div>
+      )}
+
       {(unpostedCount > 0 || imsPostWarning > 0) && (
         <div role="alert" style={{
           background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
