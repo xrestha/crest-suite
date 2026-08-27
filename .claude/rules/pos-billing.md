@@ -373,3 +373,62 @@ Two POS-specific details from that convergence:
 - **KOT vs BOT is a category, not a status.** The KOT chip used `badge-green`; success-green for a
   categorical distinction is the one thing the badge set is not for. KOT is `badge-purple`, BOT
   stays `badge-yellow` (the accent-tinted categorical tag).
+
+## Anything that takes money off a bill is a TENDER or a DISCOUNT, and the choice is not cosmetic (S618)
+
+Loyalty redemption was the first thing to face this and it will not be the last — a gift card, a
+voucher, a staff allowance and a deposit are all the same question. Two things already in the
+codebase decide it, and both push the same way:
+
+- **`computeOrderAmounts` applies `discount_amount` to the PRE-VAT base** and recalculates VAT on
+  the discounted amount. So anything booked as a discount reduces the taxable value and the VAT
+  remitted. That is correct for a genuine price reduction and wrong for an instrument that settles
+  a bill at full price.
+- **`guard_pos_order_close()` (S577) enforces `pos_discount_limit` server-side** against
+  `SUM(qty * unit_price)`. A redemption booked as a discount is therefore capped by the cashier's
+  discount permission — a 10%-capped waiter applying a 20% redemption gets a legitimate bill
+  REJECTED mid-service. This is the failure that decides it: the trigger cannot tell a reward from
+  a giveaway, and teaching it to would mean a second exemption rule inside a money guard.
+
+A tender touches none of `close_type`/`status`/`discount_amount`, so that trigger never fires, VAT
+is charged on the full bill, and **IMS revenue needs no change at all** — `writeSalesEntries` posts
+`unit_price`, which a tender does not touch. `expectedCashOf` is likewise safe for free, because
+`cashSales` is `byMethod.Cash`.
+
+**Adding a tender means three lists, not one, and two of them are easy to miss:**
+
+1. The `payment_method` CHECKs on **both** `pos_order_payments` and `pos_orders` (drop + recreate;
+   the current lists are in `20260707160000`, not the baseline, which still shows the reverted
+   Foodmandu/Pathao experiment).
+2. `PAY_METHODS` (`PosShifts.jsx`) and `PAY_METHOD_ORDER` (`SalesReport.jsx`) — the **display**
+   lists. Both accumulate with `if (byMethod[m] !== undefined)`, so a method they do not already
+   know is **silently dropped**: the Z-report breakdown comes up short of the day's takings with
+   nothing on screen saying why, and a manager counts the drawer chasing a shortfall that is only
+   a display bug.
+3. **NOT `PAYMENT_METHODS`** in `posOrdersConstants.js`. That is the list a cashier PICKS from, and
+   a redemption is not picked — it is applied when the customer has a balance. S290→S291 already
+   learned this by adding Foodmandu/Pathao there and reverting it.
+
+### A no-write-policy table still has to survive a restore
+
+`pos_loyalty_ledger` deliberately has no client INSERT/UPDATE/DELETE policy — the two
+`SECURITY DEFINER` RPCs are the only write path, the same shape as `apply_pos_item_comps` (S579)
+and `set_outlet_access` (S617). But **Export/Import restore inserts through the BROWSER as
+`authenticated`**, not through the service role (`restoreClientData.js`), so that lock would have
+silently restored every customer's balance as zero and reported success. An admin-only INSERT
+policy fixes it without touching the actual threat, which is a till JWT minting itself points.
+
+**A lock that breaks the backup is not a security posture.** Ask of any new locked-down table:
+what writes it during a restore, and as which role? It only surfaced because `RESTORE_ORDER` is a
+step on the new-feature checklist.
+
+**Verifying such a table needs a PAIR of measurements, never one.** `authenticated` holds INSERT
+so the restore path works, which means `has_table_privilege` proves nothing about who is refused.
+The evidence is the same row sent to the same table by two identities: Owner → `403 / 42501`,
+admin → `201`. A guard that refuses everyone is indistinguishable from a correct one until the
+day a restore comes back empty.
+
+**Reading your own role needs the token's `sub`.** `profiles?select=role&limit=1` returns an
+arbitrary row for an admin, because an admin can read every profile — it reported the admin
+account as `role: client`. Key the query to the JWT's `sub`, and cross-check with a row count
+(admin sees all profiles, a client sees exactly one).

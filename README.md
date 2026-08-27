@@ -239,8 +239,40 @@ nothing renders (S578).
 `src/pages/settings/posGuideData.js`, `public/service-worker.js` (`crest-v132` → `crest-v133`),
 `README.md`. Build clean, 398/398 tests (12 new).
 
-**Not yet applied.** The migration has not been run, and neither RPC has ever executed — dry-run
-the earn path on a throwaway customer before enrolling a real one.
+**Applied and smoke-tested end to end** (same day, against BHATTI CHOILA on the live database).
+No browser was involved — Playwright's MCP server had dropped, so the whole run went through the
+auth API and PostgREST with `curl`, which turned out to be a better instrument for it anyway.
+
+Earn is arithmetically exact rather than merely non-zero: the order's only line was COKE 1 ×
+NPR 200 at 0% VAT with no discount, so the base is 200 and a 1-point-per-100 scheme must award
+**2** — which is what came back. Re-calling the same order returned **0** with the ledger still
+holding one row, so the partial unique index is doing the idempotency rather than the caller.
+Redemption refused an over-balance request (`Only 2 point(s) available.`), a zero request, and a
+request against a spent balance; the successful one returned `2.00` and wrote a
+`payment_method: "Loyalty"` row — **which is also how the CHECK constraint got verified**, since
+an unrelaxed constraint would have failed that insert with `23514` rather than needing a separate
+query. Balance reconciles: `+2`, `−2`, `0`.
+
+**The check the grant layer could not settle, settled.** `authenticated` legitimately holds
+INSERT on `pos_loyalty_ledger` so Export/Import restore can write it, which means privilege
+introspection proves nothing about who is actually refused. The measurement is a PAIR, both
+sending the identical row to the identical table: the **Owner** (`role=client`) got
+`403 / 42501 new row violates row-level security policy`, and an **admin** got `201`. Only the
+pair is evidence — a guard that refuses everyone looks exactly like a correct one until a restore
+silently returns zeros, which is the project's own "always include a control that must still
+succeed" rule. The test row was deliberately `points = 0`, so proving the policy could not move a
+real balance.
+
+Two identity traps worth carrying. Reading "am I admin?" with
+`profiles?select=role&limit=1` is **wrong for exactly the role you are testing** — an admin can
+read every profile, so `limit=1` returns an arbitrary stranger's row; it reported the admin
+account as `role: client` until the query was keyed to the token's own `sub`. And the honest
+cross-check is a row count: the admin session sees **16** profiles, the Owner **1**, which
+confirms both identities and `profiles_select`'s self-or-admin rule in one request.
+
+**Still unproven:** a POS PIN staff token. Staff sit further from admin than an Owner does, so
+the Owner refusal makes it near-certain — but that is inference, and it needs a device secret to
+measure.
 
 ### S617 — 2026-08-27 — Building on multi-outlet found three ways it was already broken
 
