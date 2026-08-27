@@ -455,6 +455,11 @@ Shadow was already in real use before this change beyond the two cases previousl
 
 ## Components
 
+> This section is the **visual spec** — shape, colour, state, focus. For the *inventory* — which
+> reusable component to reach for and why each exists — see `.claude/rules/component-library.md`
+> (moved out of `CLAUDE.md` in the 2026-08-27 /doctor pass; it auto-loads when editing
+> `src/components/**`, `src/pages/**` or `src/modules/**`).
+
 ### Buttons
 - **Shape:** 12px radius (`--radius-md`; bumped from 6px 2026-07-12), no exceptions across variants.
 - **Primary:** Aged Brass background, `accent-text` foreground (never hardcoded), 700 weight, 8px 16px padding, 13px label.

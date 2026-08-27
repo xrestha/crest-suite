@@ -251,12 +251,33 @@ trade worth making — **the tail remains unexplained, and the timeout is a guar
 than a diagnosis of it.**
 
 Nothing was proposed for permissions: auto mode was already the default at user scope with nothing
-shadowing it, and no denial qualified. `DESIGN.md`, `PRODUCT.md` and `POS_TODO.md` were deliberately
-not touched — this pass changed no design token, no product positioning and no POS behaviour.
+shadowing it, and no denial qualified.
+
+**Moving prose breaks the words that point at where it used to be**, which is a failure mode the
+migration itself creates and no link check would have caught before it. Text written inside one file
+says "the convention *above*"; carried into another file, that phrase now points at nothing and reads
+as though the reference simply went missing. A sweep of every positional word in the seven moved
+sections found two genuine cases — `item-master-rates.md`'s "the `purchase_entries` convention above"
+and `accounts-and-logins.md`'s "the `isOwner`/`isCallerOwner`/`is_client_owner()` triplet above",
+both of which point at sections that stayed in `CLAUDE.md` — now rewritten to name the file. Nine
+other hits were false positives ("flips *above* the trigger", "*below* the cut"); one was
+self-referential inside its own new file. Link integrity was then verified both ways: all 17 rules
+files referenced by `CLAUDE.md` exist, all 17 on disk are referenced, and all 17 carry valid `paths:`
+frontmatter. **The check to run after a migration is not "do the files exist" but "does the prose
+still mean what it says".**
+
+`DESIGN.md` gained one pointer under `## Components`, separating the two halves that had never been
+distinguished: that section is the visual spec (shape, colour, state, focus), while the inventory of
+which reusable component to reach for now lives in `.claude/rules/component-library.md`.
+`PRODUCT.md` and `POS_TODO.md` needed nothing — this pass changed no product positioning and no POS
+behaviour, and POS_TODO's one `CLAUDE.md` reference points at Staff role systems, which stayed. The
+`.impeccable/critique/*.md` snapshots and the older session-log entries that name the deleted skills
+were deliberately left alone: both are frozen records of what was true when written, and editing
+them to match the present would destroy the only evidence of what changed.
 
 **Files:** `CLAUDE.md` (115,996 → 85,186), `.claude/rules/{component-library, report-pages,
 item-master-rates, accounts-and-logins, ims-figures, recipes-and-subrecipes, bs-calendar}.md` (new),
-`.claude/rules/supabase-sql.md`, `.claude/settings.local.json` (gitignored — skillOverrides
+`.claude/rules/supabase-sql.md`, `DESIGN.md`, `.claude/settings.local.json` (gitignored — skillOverrides
 cleared, PostToolUse timeout 5 s → 15 s), `.claude/skills/{frontend-design, ui-ux-pro-max}/**`
 (deleted, 43 files), `README.md`
 
