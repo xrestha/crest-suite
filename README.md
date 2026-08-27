@@ -159,6 +159,51 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S619 — 2026-08-27 — "TypeError: Failed to fetch" is not a message, and two audiences need two wordings
+
+Reported live from the Add Item modal: a red line reading `TypeError: Failed to fetch` under a
+perfectly valid item (CINAMON STICK, 3 GM for NPR 199.11 → NPR 66.37 per GM). Nothing was wrong with
+the entry. That string is what supabase-js hands back when the browser's `fetch` never completes —
+PostgrestBuilder catches the thrown `TypeError` and stringifies it into `error.message` rather than
+rethrowing, so it flows through the ordinary `if (error) setError(error.message)` path and lands in
+front of the owner untouched. Ruled out as causes: the service worker (it returns on
+`method !== 'GET'` before anything else), the CSP (`connect-src` already carries
+`https://*.supabase.co`, and every read on the page had just succeeded), and
+`makeAuthTimeoutFetch` (an abort surfaces as an AbortError, not this). It was the connection.
+
+**The defect is the message, and it was already solved one module away.**
+`src/modules/hr/selfservice/employeeError.js` (S594's rule, applied in S6xx) had a rule table doing
+exactly this job for HR Self-Service — including the offline case — and no IMS or POS screen could
+reach it. Rather than copy it, the table moved to **`src/shared/errorText.js`** and
+`employeeError.js` became a four-line delegate, so its call sites and its tests are untouched.
+
+**It grew an `audience` argument, because the same failure has two different next steps.** A waiter
+on Self-Service can only escalate; an Owner adding an item *is* the person who fixes it. Telling the
+Owner to "tell your manager" is as useless as `PGRST202` is to the waiter. `errorText(err,
+'operator')` says "a migration hasn't been applied yet. Retrying won't help" where the staff wording
+says "tell your manager". Default stays `'staff'`, so the shipped wording did not move.
+
+**No message asserts the write did not land.** A dead fetch does not prove that — the response can
+be lost after the server has committed — and `items` has no `UNIQUE(client_id, name)`, so a retry
+after a genuinely-committed insert creates a second item with a second item code. "Check your
+internet and try again" is the honest sentence; "nothing was saved" would be a claim we cannot
+make, and there is a test asserting the string never appears.
+
+The technical detail is not destroyed either: `errorInfo` returns `{ text, detail }` and the Item
+modal now renders `code · message` as an 11px monospace line under the headline, because whoever
+diagnoses it still needs it.
+
+**Files:** `src/shared/errorText.js` (new) + `errorText.test.js`, `employeeError.js` (now a
+delegate), `src/modules/ims/items/Items.js` (one `showError`/`showSaveError` pair replacing five
+scattered `setError` calls, so a stale technical detail can never outlive its message), SW cache
+`crest-v134`. **Docs:** the rule in `CLAUDE.md` (reachable from anywhere — every page surfaces
+`error.message`), a cross-reference in `.claude/rules/report-pages.md` (refusing to render the
+figure is half the job; the sentence you show instead is the other half) with `errorText.js` added
+to its `paths:`, and `.claude/rules/staff-app.md` updated to say why `employeeError.js` survives as
+a named delegate rather than being deleted.
+
+---
+
 ### S618 — 2026-08-27 — Loyalty, and why a redemption is a tender rather than a discount
 
 POS_TODO's last engineering item from the 2026-07-04 Nepal-market scan. Half of it already existed

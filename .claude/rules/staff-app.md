@@ -57,7 +57,11 @@ unauthenticated redirect goes to **that** PIN pad rather than `/login`, because 
 - **A failed read is not an empty period.** `employeeError.js` turns a Supabase/PostgREST code into
   one honest sentence, and each area holds its own message (`errs` map) so a failed payslip read
   cannot blank a roster that loaded fine. The old portal had one shared string and rendered a failed
-  `get_my_hr_payslips` as "No finalized payslips yet."
+  `get_my_hr_payslips` as "No finalized payslips yet." As of S619 the rule table itself lives in
+  `src/shared/errorText.js` — the same failures reach IMS and POS screens — and `employeeError.js`
+  is a four-line delegate pinning the **`'staff'`** audience. Keep it: the name is what tells every
+  call site in this module which reader it is speaking to, and the staff wording ("tell your
+  manager") is wrong for the Owner-facing wording on the other side of the same table.
 - **Next shift skips days off** — "next shift: Day Off" answers a question nobody asked — and Home
   loads **this week and next**, so the answer on a Saturday is Monday rather than silence.
 - **Only offer a notification button in the two states where pressing it can do something.**

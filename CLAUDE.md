@@ -389,6 +389,29 @@ module). Headline rules: a failed read is not an empty period and must never ren
 data loss and a guard that drops its READ error passes vacuously; the KPI strip does not render
 while loading or after a failure; and a report that states a scope must state it everywhere the
 report goes (subtitle, print header, workbook, filename).
+### An error surfaced as `error.message` is not a message (S619)
+
+`src/shared/errorText.js` is the ONE table turning a Supabase/Postgres error into a sentence its
+reader can act on. `errorText(err, audience)` / `errorInfo(err, audience)` → `{ text, detail }`.
+Reported live from Add Item: a red `TypeError: Failed to fetch` under a valid entry — that is what
+supabase-js hands back for any dead connection (PostgrestBuilder stringifies the thrown `TypeError`
+into `error.message` rather than rethrowing, so it flows through every ordinary
+`if (error) setError(error.message)` path untouched).
+
+- **Two audiences, because the same failure has two different next steps.** `'staff'` (default —
+  the HR Self-Service wording, which is why `employeeError.js` is now a four-line delegate) speaks
+  to someone who can only escalate; `'operator'` speaks to the Owner/manager who *is* the person
+  who fixes it. "Tell your manager" is as useless to an Owner as `PGRST202` is to a waiter.
+- **No message claims a failed write did not land.** A dead fetch does not prove that — the
+  response can be lost after the server committed — and `items` has no `UNIQUE(client_id, name)`,
+  so a retry over a committed insert silently creates a second item. Say "check your internet and
+  try again", never "nothing was saved"; a test asserts that string never appears.
+- **Never destroy the technical detail.** `detail` (`code · message`) is returned alongside for a
+  fine-print line, never the headline — whoever diagnoses it still needs it.
+- Distinct from the report rule above: that one is about a figure a page *did not compute*; this
+  one is about the sentence shown once something has already failed. Rules only get added here for
+  shapes genuinely recognisable from the error — everything else takes an honest fallback.
+
 ### Every `type="password"` input needs an explicit `autoComplete`
 
 Without one, Chrome guesses from `type` + surrounding context — and any `type="password"` field anywhere on the page makes it treat the nearest preceding text input as a login username, which has bled a saved login into unrelated fields (a `SearchableSelect` search box, a signup form) more than once (S329). Use `autoComplete="new-password"` on every PIN/account-creation field (POS Staff Add/Reset PIN, Enable Self-Service, trial signup), and `autoComplete="username"` / `"current-password"` on an actual sign-in form's email/password. PIN-pad login screens (POS/HR Self-Service) build their own keypad UI rather than a text input, so they're unaffected.

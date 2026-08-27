@@ -4,6 +4,7 @@ paths:
   - "src/components/ReportLoadError.jsx"
   - "src/components/RowDisclosure.jsx"
   - "src/shared/queryError.js"
+  - "src/shared/errorText.js"
   - "src/shared/excelLetterhead.js"
   - "src/shared/hooks/useBizInfo.js"
   - "src/modules/ims/reports/**"
@@ -56,6 +57,13 @@ Three rules came out of it:
   on a data-entry page (Overheads) a failed read must block the form outright — saving over rows
   the page could not read is a data-loss shape, not a display bug. A new report page copies this
   from any sibling; there is no unswept example left to copy.
+- **Refusing to render the figure is half the job; the sentence you show instead is the other half
+  (S619).** `firstError`/`ReportLoadError` decide *that* something failed. `errorText(err,
+  'operator')` (`src/shared/errorText.js`) decides what the reader is told — one table, two
+  audiences, and no message that claims a failed write did not land. Before S619 the only such
+  table lived inside HR Self-Service and no IMS or POS screen could reach it, so a dead connection
+  reached an Owner as a bare `TypeError: Failed to fetch`. Pass the error object through it rather
+  than `error.message`, and keep `detail` as fine print.
 - **A dropped WRITE error is silent data loss, and a guard that drops its READ error passes
   vacuously (S613).** The silent-zero rule above is about rendering; these are its two write-side
   twins, and both shipped. **Write:** `Roster.jsx` painted the shift optimistically and dropped the

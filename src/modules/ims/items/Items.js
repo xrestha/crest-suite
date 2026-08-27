@@ -10,6 +10,7 @@ import Modal from '../../../components/Modal'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { Navigate } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
+import { errorInfo } from '../../../shared/errorText'
 
 const DEFAULT_CATEGORIES = [
   'Dairy & Bakery',
@@ -45,6 +46,10 @@ export default function Items() {
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // The raw `code · message` behind `error`, kept as fine print rather than the headline. A save
+  // that dies at the network layer surfaces as "TypeError: Failed to fetch", which says nothing an
+  // owner can act on and — worse — nothing about whether the row landed (S618).
+  const [errorDetail, setErrorDetail] = useState('')
   // Per-field validation, separate from `error` above. `error` stays the FORM-level channel — a
   // save that the server rejected, or a rule spanning several fields (the conversion trio) that no
   // single box owns. A message about one box belongs under that box (S603).
@@ -242,7 +247,7 @@ export default function Items() {
     setForm({ ...EMPTY_FORM, category_id: categories[0]?.id || '' })
     setActiveTab('details')
     setPack({ qty: '', total: '' })
-    setError('')
+    showError('')
     setFieldErr({})
     setShowForm(true)
   }
@@ -263,7 +268,7 @@ export default function Items() {
       conversion_factor: item.conversion_factor && item.conversion_factor !== 1 ? item.conversion_factor : ''
     })
     setActiveTab('details')
-    setError('')
+    showError('')
     setFieldErr({})
     setShowForm(true)
   }
@@ -290,10 +295,23 @@ export default function Items() {
     return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`
   }
 
+  // One entry point for the modal's error line, so a stale technical detail can never outlive the
+  // message it belonged to.
+  function showError(text, detail = '') { setError(text); setErrorDetail(detail) }
+
+  // A write that failed. `errorInfo(..., 'operator')` says what happened in words the owner can
+  // act on; the raw `code · message` is kept underneath, because whoever diagnoses it still needs
+  // it. Deliberately never asserts the row was not written — a fetch can die after the server has
+  // already committed, and `items` has no UNIQUE(client_id, name) to catch a retried duplicate.
+  function showSaveError(err) {
+    const { text, detail } = errorInfo(err, 'operator')
+    showError(text, detail)
+  }
+
   // Core save — validates + writes, returns true on success. Does NOT close the modal or reload,
   // so callers can chain a "save & next" navigation.
   async function doSave() {
-    if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return false }
+    if (!clientId) { showError('No client selected. Pick a client in the top-left switcher before saving.'); return false }
     const fe = {}
     if (!form.name.trim()) fe.name = 'Item name is required.'
     // parseFloat, not truthiness: "0" is truthy as a string, and a price of NPR 0 stored here
@@ -308,13 +326,13 @@ export default function Items() {
     const hasFactor = form.conversion_factor !== '' && parseFloat(form.conversion_factor) > 0
     const hasAny = hasPurchaseUnit || hasBaseUnit || hasFactor
     if (hasAny && !(hasPurchaseUnit && hasBaseUnit && hasFactor)) {
-      setError('Conversion requires all three fields: Purchase Unit, Base Unit, and Conversion Factor.')
+      showError('Conversion requires all three fields: Purchase Unit, Base Unit, and Conversion Factor.')
       setActiveTab('conversion')
       return false
     }
 
     setSaving(true)
-    setError('')
+    showError('')
 
     const cf = hasFactor ? parseFloat(form.conversion_factor) : 1
 
@@ -336,10 +354,10 @@ export default function Items() {
 
     if (editing) {
       const { error } = await supabase.from('items').update(payload).eq('id', editing)
-      if (error) { setError(error.message); setSaving(false); return false }
+      if (error) { showSaveError(error); setSaving(false); return false }
     } else {
       const { error } = await scopedInsert('items', { ...payload, item_code: getNextItemCode() })
-      if (error) { setError(error.message); setSaving(false); return false }
+      if (error) { showSaveError(error); setSaving(false); return false }
     }
     setSaving(false)
     return true
@@ -645,7 +663,14 @@ export default function Items() {
             </>
           )}
 
-          {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '10px 0 0' }}>{error}</p>}
+          {error && (
+            <div style={{ margin: '10px 0 0' }}>
+              <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: 0 }}>{error}</p>
+              {errorDetail && (
+                <p style={{ color: 'var(--theme-text-muted)', fontSize: 11, margin: '3px 0 0', fontFamily: 'monospace' }}>{errorDetail}</p>
+              )}
+            </div>
+          )}
           <div className="form-actions" style={{ justifyContent: 'space-between' }}>
             {editing ? (() => {
               const idx = filtered.findIndex(i => i.id === editing)
