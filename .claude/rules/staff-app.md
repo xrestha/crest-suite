@@ -100,3 +100,12 @@ Every figure comes from an RPC the portal already called: `get_my_hr_payslips`,
 `get_my_swap_requests`, `get_my_tada_claims`, `submit_my_tada_claim`, `get_my_client_vendors`.
 **Keep it that way where possible** — the whole rebuild carried no migration and no Edge Function
 deploy, which is why it could not break the admin side.
+
+## A day is named, not numbered (S614)
+
+The swap flow used to say "Day 3" — in the target-day picker and in both pending-swap lines. An
+employee reads the roster by date, not by ordinal position in a month, and the shift-swap screen is
+the one place two people have to agree on *which* day before either of them commits. Those now use
+`formatBsDay(cd.bs_day, swapDay.bsMonth)` ("3rd Bhadra") where the month is not already on screen
+and `bsDayOrdinal(...)` where it is — both from `src/utils/bsCalendar.js`. Same helpers the roster
+and HR Dashboard use, so the two sides of a swap request can never describe the day differently.

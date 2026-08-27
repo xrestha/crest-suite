@@ -108,3 +108,17 @@ Also settled by the same audit, so it does not get re-asked: `buildStatement()` 
 double-count wastage and staff meals. `computeUsed()` subtracts them from COGS and the statement
 re-deducts them as their own lines; `netProfit = Rev − (O + P − R − C) − L − OH − T`, so the two
 cancel exactly and total food cost recognised (`cogs + W + S`) equals full depletion.
+
+## Day columns name the month (S614)
+
+Every period-scoped **Day** column on these pages — Vendor Report (four tables plus its drilldown
+title), VAT/Non-VAT, Payment Report — renders `formatBsDay(day, selectedPeriod?.bs_month)` from
+`src/utils/bsCalendar.js`: **"1st Bhadra"**, not a bare `1`. A bare number is legible only while the
+page header that names the month is on screen, which stops being true the moment the sheet is
+printed or read back later — and these are the pages an accountant reconciles months afterwards.
+
+Two behaviours are load-bearing rather than cosmetic: an absent or out-of-range month **degrades to
+the bare ordinal rather than naming the wrong month** (so a page whose period has not loaded yet
+prints "1st", never "1st Baisakh"), and day 0 returns `''` so the caller keeps its own dash. The
+**Excel exports deliberately keep the numeric Day column** — text breaks a spreadsheet's sorting and
+filtering, and `sheetWithLetterhead`'s `scopeLine` already states the period.

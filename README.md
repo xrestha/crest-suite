@@ -200,6 +200,14 @@ the full suite at 380/380. **Not smoke-tested live** beyond the build — the Da
 render-only change, but the Purchases row-height fix was reported from a screenshot and deserves
 one.
 
+Written down rather than left in the commit: the day-label grammar and the table-collapse rule
+are in `DESIGN.md` and `.claude/rules/design-system.md`, the BS half in `CLAUDE.md`'s calendar
+section, and a one-paragraph note in each module rule whose files this touched
+(`vendor-payables.md`, `hr-payroll.md`, `staff-app.md`). `PRODUCT.md` gained the principle
+underneath it — BS is the native calendar, not a translation layer. Deliberately NOT added to the
+memory store: `project_patterns.md` records its own convention that the README Session Log is
+authoritative after S132, and the convention itself now loads with `CLAUDE.md` every session.
+
 ### S613 — 2026-08-26 — The re-run scored 34, and both P1s were rules the product had already written
 
 A second `/impeccable critique` product-wide run, same slug, four hours after S612's fix pass:

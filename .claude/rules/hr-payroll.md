@@ -97,3 +97,15 @@ them was gone. It now aborts before touching anything.
 **The rule for any new gate here: a check that could not run has not passed.** Refuse and name the
 failure. The same reasoning applies to Payroll Run's freshness gate, which reads live data to decide
 whether Finalize is safe.
+
+## BS day labels, and the month list (S614)
+
+Anywhere HR prints a day inside a known month — the OT list and swap column on HR Dashboard,
+Overtime's date column, Attendance's clear-a-day confirm, Self-Service's swap-day picker — it uses
+`formatBsDay(day, bsMonth)` ("1st Bhadra") or `bsDayOrdinal(day)` where the month is already stated
+beside it. Both live in `src/utils/bsCalendar.js`. The confirm dialog is the one that matters most:
+a destructive action must name the day it will wipe in the same words the roster shows.
+
+`FinalSettlement.jsx` carried the twelve month names as its own `BS_MONTH_NAMES` — the same list as
+`BS_MONTHS`, under a different name, so no name-based search would ever have paired it with the
+other 30 copies. It now imports `BS_MONTHS`. **Never retype the month list**; there is exactly one.

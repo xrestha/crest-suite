@@ -34,6 +34,8 @@ Precision over polish: numbers (TDS, SSF, variance, payroll) must read as exact 
 
 Serve two literacy levels on one screen: the same page has to satisfy an operationally-minded owner scanning for a decision and a compliance-minded accountant verifying a figure.
 
+Bikram Sambat is the native calendar, not a translation layer: periods, payroll months, roster days and every date a user types are BS first, and a day is *named* the way a Nepali operator says it ("1st Bhadra") rather than reduced to an index into a month the screen has stopped showing. AD appears alongside it where a bank, a vendor or the IRD will ask for it — never instead of it.
+
 Modernize the category on Crest's own terms: differentiate from both the dated local-ERP look and the generic AI-template look, rather than drifting toward either by default.
 
 ## Data Ownership

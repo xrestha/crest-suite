@@ -244,3 +244,28 @@ keyboard-reachable drill-downs like every other report in the product. `PosOrder
 thumb mid-service, which is a real difference in kind (it is also why those nine overlays needed
 `Modal`'s `zIndex` prop in S578). **A new POS page is a report unless it is operated during
 service** — and if it is a report, it gets the shell, not a hand-rolled header.
+
+### A table column collapses where you didn't choose it to (S614)
+
+`table-layout` is `auto` everywhere, so a column's width is **bid for against its neighbours** and a
+neighbour carrying `white-space: nowrap` always wins. Three consequences, all reported from
+screenshots of the same Purchases bill list rather than found by any detector:
+
+**A cell holding two things is the one that collapses.** The Item cell holds the item name *and* its
+category badge, the Vendor cell beside it is `nowrap` — so a two-word name broke over two lines with
+the badge dropping onto a third, and the row stood three lines tall to show one line of figures.
+
+**The fix is `nowrap` on the cell, never a fixed width.** `.table-wrap`'s horizontal scroll exists
+to carry exactly this; a width pins the column and moves the wrap somewhere else on the next screen
+size. Same failure with no second element at all: a Day cell holding `2026-08-17` collapsed to its
+widest *unbreakable fragment*, `2026-`, and broke the date at every hyphen — a date, a code, an
+invoice ref and a phone number all need `nowrap` for this reason, not just crowded cells.
+
+**Row density is a table-level decision.** The global `td` padding is 11px; a table read as a dense
+ledger opts down through its own scoped class (`table.purchases-table`, 7px), never per cell — a
+per-cell inline padding leaves one row taller than its neighbours the first time someone adds a
+column, and inline beats the class silently.
+
+**Day columns say the month.** `formatBsDay(day, bsMonth)` → "1st Bhadra", not a bare `1` that only
+reads correctly while the page header is on screen. Full rule in `DESIGN.md` and `CLAUDE.md`'s BS
+calendar section; Excel exports keep the numeric column.
