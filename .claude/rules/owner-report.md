@@ -26,3 +26,29 @@ Two figures are deliberately redefined from Owner Dashboard's live formulas, bot
 The orchestrator (`computeMonthlyReport.js`) used to `Promise.all` every section flat, so one section throwing meant no report got written at all for the period. Every section — including the original IMS/HR/POS — now runs through a `runSection(key, fn, errors)` wrapper that degrades a failed section to `null` plus a `snapshot.sectionErrors[key]` entry instead, so the rest of the report and the row write still succeed; the page shows a dismissible "couldn't be generated" note per missing section. `schema_version` is now `CURRENT_SCHEMA_VERSION` (bumped to `2`, exported instead of a duplicated hardcoded `1`) — no migration tooling needed, since every existing read already uses optional chaining and treats new fields as absent on old snapshots. Print CSS is real multi-page pagination (`page-break-inside:avoid` on sections/tables) rather than the original 1-page aggressive shrink.
 
 No PDF library exists in this codebase (nor is one added for this) — "Print / Save as PDF" reuses the existing `printWithTitle()` browser-print mechanism already used by every bill/credit-note/KOT.
+
+### Closing a period is gated on the count the report is built from (S613)
+
+The close is the product's highest-stakes action: it locks the month **and** mints this frozen
+snapshot. COGS subtracts closing stock, so a period closed with no count freezes "closing = 0 for
+every item" into an artifact that is never recomputed — a structurally wrong report that reads as a
+finished one. Payroll Finalize earned a data-derived gate in S570; the close had one advisory
+sentence.
+
+All three close paths in `Periods.js` (`closeAndAdvance`, `adminCloseAndAdvance`, `adminEndPeriod`)
+now run `closingCountPreflight()` before opening their ConfirmModal, and the modal states what it
+found: **"No closing stock has been counted for this month (0 of N active items)"** in red when the
+month is uncounted, a partial count when some items are missing, a plain confirmation when all are
+there.
+
+Three properties worth not re-deriving:
+
+- **It informs, it never blocks.** An admin correcting history legitimately closes uncounted months,
+  and a hard block would strand them with no legal move — the same reasoning that keeps Payroll
+  Finalize unblocked on a departed-employee payslip.
+- **A failed preflight says so rather than blocking the close.** It is wrapped in `withTimeout` and
+  a try/catch that returns `null`, and `null` renders "Couldn't check this month's closing count".
+  The check is a courtesy to the operator, not a gate the close depends on.
+- **It counts rows with a real `physical_qty`**, the same test `carryForwardOpeningStock` uses to
+  decide what carries into next month — so the sentence and the carry-forward can never disagree
+  about what "counted" means.

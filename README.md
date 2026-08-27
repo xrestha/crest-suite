@@ -159,6 +159,59 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S613 — 2026-08-26 — The re-run scored 34, and both P1s were rules the product had already written
+
+A second `/impeccable critique` product-wide run, same slug, four hours after S612's fix pass:
+**34/40, 0 P0 / 2 P1 / 3 P2** — snapshot at
+`.impeccable/critique/2026-08-26T13-36-09Z__crest-suite-all-modules.md`, trend **34 → 32 → 34**.
+The dip and the recovery are both measurement, not mood: S612 scored lower because it measured the
+Light preset and grepped pattern adoption for the first time, and this run scored higher because
+assessment B could **verify the fixes had landed** — 0 window.confirm left in the five named files,
+`useLatestRequest` at 21 importers matching CLAUDE.md exactly, the argument-shape token grep at
+zero violations, detector 20 → 17 with 15 in known false-positive classes. For the first time in
+the campaign the docs and the grep agreed.
+
+Then "fix all" again, six commits:
+
+- **Period close now has a closing-count preflight.** The product's highest-stakes action locks the
+  month *and* mints the frozen Monthly Report, and COGS subtracts closing stock — so closing an
+  uncounted month freezes "closing = 0 for every item" into an artifact that is never recomputed.
+  Payroll Finalize earned a data-derived gate in S570; the close had one advisory sentence. All
+  three close paths now state what the preflight found, red when nothing is counted. It **informs
+  and never blocks** (an admin correcting history legitimately closes uncounted months) and a
+  failed preflight says so rather than blocking the close.
+- **The phone became a supported reporting surface, by deleting code.** 25 report pages overrode
+  `.stat-grid`'s auto-fit with an inline `repeat(N,1fr)`, N up to 6 — and an inline style beats
+  every media query, so a phone got six crushed columns on exactly the pages an owner checks
+  between services. All 20 overrides deleted plus four hand-rolled grids moved to `auto-fit`;
+  desktop renders identically. Both this and the POS-dialect question are now written into
+  `.claude/rules/design-system.md` as settled decisions rather than recurring findings.
+- **The truncation tail: 35 more reads paged.** `wastages` was the systematic gap (10 of 12 reads
+  unwrapped — one row per item per day), including the multi-period AnnualSummary/ShrinkageReport/
+  PeriodComparison windows; `sales_entries` split 9/9. `Sales.js`'s `allDaySums` mattered most —
+  it doubles as a save-time fallback baseline, so its truncation could have been *written back*.
+- **Write and guard errors stopped being dropped.** Roster's optimistic paint reported a shift as
+  saved when the upsert had failed; Periods' close-and-advance silently blocked a client when the
+  next period couldn't be created; **FinalSettlement's three finalize gates passed vacuously on a
+  failed read** — a dropped payslips error read as "no payroll covers this month", on exactly the
+  double-payment the gate exists to block. PosTableManagement's four settings saves no longer fall
+  into INSERT on a failed existing-row read (which splits the client's settings row).
+- **POS reports adopted the product shell**: headers, `stat-card` tiles, and keyboard-reachable
+  drill-downs — the RowDisclosure sweep had never reached POS, so every drill-down was mouse-only.
+  KOT's chip moved off success-green (it is a category, not a status).
+- **The `*-text` tail and the 10px triage**, including the ternary sites an exact-match pass cannot
+  see — the trap `design-system.md` names, which is why Help.js's 3 and Settings.js's 5 were still
+  there after the earlier sweeps reported success.
+
+Method notes: **the killed-agent event repeated for the third time** (both fix agents died on a
+session limit) and the checkpoint discipline again made it cheap — CoversReport was identifiable
+in seconds as "modified but uncheckpointed", SalesReport as never started. Also: two of assessment
+A's findings were **overruled by DESIGN.md rather than fixed** (Overheads' paired color/textColor
+maps, micro-caps at 10px), and saying which is which in the commit is the point — an unexplained
+non-fix reads as an oversight to the next reader. **Not smoke-tested live**: the preflight and the
+new error branches need a dummy-client session with a forced failed read. PosOrders' 19 error
+swallows stay deferred by the S573 smallest-safe-cut rule for the live till screen.
+
 ### S612 — 2026-08-26 — The product-wide re-run scored 32/40, and every finding was the same finding
 
 A `/impeccable critique` product-wide re-run against the 2026-08-18 baseline (34/40): **32/40, 0 P0

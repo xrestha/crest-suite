@@ -220,3 +220,27 @@ the reader cannot tell whether the difference is meaningful.
 Before adding a nav entry, check its icon is not already on another route, and verify the export
 exists (`grep "declare const <Name>:" node_modules/lucide-react/dist/lucide-react.d.ts`) — a
 misspelled icon name is a build failure, and a *wrong-but-real* one is silent.
+
+### Two decisions settled in S613, so they stop being re-litigated
+
+**The phone IS a supported reporting surface.** `.stat-grid` is
+`repeat(auto-fit, minmax(180px, 1fr))` and reflows on its own; **25 report pages had overridden it
+with an inline `gridTemplateColumns: 'repeat(N, 1fr)'`** (N up to 6), and an inline style beats
+every media query — so an owner checking food cost on a phone between services got six crushed
+columns on exactly the pages that matter most. All 20 stat-grid overrides were deleted and the four
+hand-rolled KPI grids (Overheads ×2, TheoreticalVariance, MenuEngineering) moved to `auto-fit`
+`minmax`. Desktop renders identically; the phone stops shredding.
+
+**Never pin a KPI strip's column count.** If a row genuinely needs a different density, change the
+`minmax` floor (the wider the tile's content, the higher the floor) — never the track count. The
+same reasoning already produced `.dash-3col-*` and `.dash-spend-purchases-row`: a fixed-count grid
+belongs in a CSS class with a breakpoint, never in an inline style.
+
+**POS REPORT pages use the product shell; POS TILL screens do not.** `SalesReport`, `CoversReport`,
+`KotLog` and `PosExceptionReport` are reports that happen to read POS data — they now carry
+`page-header`/`page-title`/`page-subtitle`, `stat-grid`/`stat-card` tiles, `tab-bar` tabs and
+keyboard-reachable drill-downs like every other report in the product. `PosOrders` and
+`KitchenDisplay` keep their full-screen till idiom: they are `position: fixed` layers built for a
+thumb mid-service, which is a real difference in kind (it is also why those nine overlays needed
+`Modal`'s `zIndex` prop in S578). **A new POS page is a report unless it is operated during
+service** — and if it is a report, it gets the shell, not a hand-rolled header.
