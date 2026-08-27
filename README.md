@@ -243,9 +243,23 @@ initially folded into `fetchProfile`'s concurrent batch, which is the app's hott
 table that does not exist until the migration is applied — moved behind a `client?.group_id` gate,
 and verified live that an ungrouped client issues **zero** requests for it.
 
-**Nothing here is applied or executed.** Four migrations wait on the Dashboard SQL Editor, and
-`push_master_data` is ~200 lines of PL/pgSQL that has never run. Dry-run it against a throwaway
-branch before any real one.
+**All four migrations are applied and verified** (2026-08-27, same session). Verification was
+run through the REST path rather than by asking Postgres about itself: the three `master_id`
+columns and `profile_outlet_access` all read back, `get_group_outlet_access()` returns `200 []`
+for an admin whose group is NULL, `push_master_data` dry-run returns `400 P0001 "you are not
+part of an outlet group"` — proving the owner check passed and the group check then fired, in
+that order — and `set_active_outlet(null)` returns 204, so the always-allowed reset branch
+still works. **Called as `anon`, all five RPCs return `401 / 42501 permission denied`**, along
+with a direct read of the new table; that is the empirical form of `has_function_privilege`,
+and stronger, since it tests the path an attacker would actually use.
+
+**What that does NOT prove, and it matters.** Those anon results verify the GRANT layer. They
+do not exercise the new in-function owner check against an authenticated STAFF account, which
+is the case all three fixes exist for — that needs a POS or IMS account inside a grouped
+client, and no group exists. `push_master_data`'s guards ran; its actual work never has. So:
+when the first group is created, dry-run the push against a throwaway branch before a real
+one, and fire the staff-token test in the comment block at the bottom of
+`20260827140000_group_summary_owner_only.sql`.
 
 **Files:** `supabase/migrations/{20260827120000_set_active_outlet_owner_only,
 20260827130000_profile_outlet_access, 20260827140000_group_summary_owner_only,

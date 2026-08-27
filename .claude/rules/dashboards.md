@@ -52,7 +52,7 @@ Three things it enforces that the overheads trap above makes possible:
 
 A related but distinct artifact, not a fourth dashboard: **`/owner-report`** (`MonthlyOwnerReport.jsx`, `SuiteGate` with `requireModules={['ims']}`) — see "Monthly Owner/Manager Report" below. Where all three above are always live (re-query on every load, reflect the currently-open period), this one is a **frozen snapshot** captured once when a period *closes* and never recomputed afterward, even if the underlying data is later corrected in place.
 
-### Owner-altitude pages need a role guard, not just a Suite gate (S601)
+### Owner-altitude pages need a role guard, not just a Suite gate (S601, extended S617)
 
 /owner-dashboard, /owner-report and /pnl are rendered in Layout.js only for `isAdmin || isOwner`,
 but SuiteGate checks `suite_plan` and ProtectedRoute checks a session — neither checks a role. Two
@@ -61,3 +61,35 @@ filters (empty result, no error), a POS PIN account got a full P&L reading Net P
 100% margin rather than an access error. All three now carry
 `if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />` after their hooks.
 See CLAUDE.md, "A page reachable by URL needs the guard its nav item implies".
+
+**`/group-dashboard` was the fourth and it was worse (S617), because the product advertised it.**
+It had no guard at the route or in the component, and while the sidebar offered it on
+`(isAdmin || isOwner) && outlets.length > 1`, the **command palette** offered it on
+`outlets.length > 1` alone — so a staff account of a grouped client could search its way in. The
+two conditions must match: the palette flattens every module into one searchable list, so any
+gate applied to a sidebar entry has to be applied there too. Its RPC had the mirror-image hole —
+`get_group_summary()` checked only `my_group_id() IS NULL`, which is a MEMBERSHIP test, and every
+staff account shares its client's `client_id`, so a waiter could have pulled every outlet's
+revenue, purchases and payroll. Both fixed; neither was reachable, because no client has ever had
+a `group_id`.
+
+### The Group Console's two admin sections (S617)
+
+Below the branch table sit **Outlet Access** and **Push master data**, both Owner/admin only by
+virtue of the page guard above.
+
+- **Outlet Access** (`OutletAccessPanel.jsx`) is a matrix of who may switch into which branch. It
+  lives here rather than beside each staff account for a structural reason: `profiles_select` RLS
+  is self-or-admin only, so an Owner cannot read a sibling outlet's staff rows at all — hence
+  `get_group_outlet_access()`, the group-wide sibling of `get_client_profile_names()`. It grants
+  **reach, never rank**. The home outlet renders as a fixed marker, not a checkbox, so nobody can
+  lock a person out of their own branch.
+- **Push master data** (`MasterPushPanel.jsx`) previews before it writes, always. The dry run
+  returns exactly the rows the write pass applies, so the preview cannot drift from the outcome.
+  Three refusals are load-bearing and documented in CLAUDE.md: branch purchase rates are never
+  overwritten, selling price is a separate opt-in, and an unmappable ingredient is reported
+  rather than dropped.
+
+Both panels take their outlet list from the RPC's `rows`, **not** from AuthContext's `outlets` —
+the matrix must include outlets excluded from the figures for want of Suite Pro, since access and
+staffing are not what the group is billed for.
