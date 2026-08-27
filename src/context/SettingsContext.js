@@ -51,6 +51,7 @@ const DEFAULT_FLAGS = {
   stock_ageing: false,
   demand_forecast: false,
   guest_ordering: false,
+  loyalty: false,
   combo_builder: false,
   owner_dashboard: false,
   monthly_owner_report: false,

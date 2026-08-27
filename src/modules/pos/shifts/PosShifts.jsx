@@ -18,7 +18,13 @@ const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 // derived from the same source of truth, plus 'Credit' (a shift-reporting-only bucket, not an
 // actual Charge-tab tender button). Foodmandu/Pathao are buyers on Credit bills, not their own
 // payment_method (see posOrdersConstants.js) — they're already covered under 'Credit' here.
-const PAY_METHODS = [...PAYMENT_METHODS, 'Credit']
+// 'Loyalty' is appended here but is deliberately absent from PAYMENT_METHODS: that constant is
+// the list a cashier can PICK, and a points redemption is not picked — it is applied when the
+// customer has a balance (S290->S291 learned the same distinction with Foodmandu/Pathao). It has
+// to be in THIS list though, because the breakdown below only accumulates methods it already
+// knows: `if (byMethod[p.payment_method] !== undefined)` silently drops anything else, so a
+// redeemed bill would leave the method breakdown short of the bill total with nothing saying so.
+const PAY_METHODS = [...PAYMENT_METHODS, 'Loyalty', 'Credit']
 const DENOMINATIONS = [1000, 500, 100, 50, 20, 10, 5, 2, 1]
 const EMPTY_COUNTS = Object.fromEntries(DENOMINATIONS.map(d => [d, '']))
 

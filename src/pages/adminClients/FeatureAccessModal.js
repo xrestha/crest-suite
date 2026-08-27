@@ -30,6 +30,7 @@ const DEFAULT_FLAGS = {
   demand_forecast: null,
   combo_builder: null,
   guest_ordering: null,
+  loyalty: null,
   owner_dashboard: null,
   monthly_owner_report: null,
   stock_movement_log: null,
@@ -112,6 +113,7 @@ const FEATURE_GROUPS = [
   // IMS Starter could not buy it at any price, even though it already declared planSource: 'pos'.
   { tier: 'pos',     label: 'Crest POS Module', color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)', features: [
     { key: 'guest_ordering',       label: 'Guest QR Self-Ordering', planSource: 'pos' },
+    { key: 'loyalty',              label: 'Loyalty & Rewards', planSource: 'pos' },
   ]},
 ]
 
@@ -328,6 +330,7 @@ export default function FeatureAccessModal({ client, onClose }) {
           : [
               { key: 'menu_pricing',   label: 'Menu Pricing' },
               { key: 'guest_ordering', label: 'Guest QR Self-Ordering', moduleIncluded: true },
+              { key: 'loyalty',        label: 'Loyalty & Rewards', moduleIncluded: true },
             ].map(feat => {
               // POS has no tiers, so its features come with the module. guest_ordering used to
               // check pos_plan against a Pro tier POS never sold; menu_pricing keeps its

@@ -41,7 +41,13 @@ const TABS = [
 // Was its own hardcoded copy of the tender-type list (drifted from posOrdersConstants.js) — a
 // new payment method added there would have silently sorted last here instead of vanishing
 // outright (grouping itself is dynamic), but still worth deriving from the same source of truth.
-const PAY_METHOD_ORDER = [...PAYMENT_METHODS, 'Credit']
+// 'Loyalty' is appended here but is deliberately absent from PAYMENT_METHODS: that constant is
+// the list a cashier can PICK, and a points redemption is not picked — it is applied when the
+// customer has a balance (S290->S291 learned the same distinction with Foodmandu/Pathao). It has
+// to be in THIS list though, because the breakdown below only accumulates methods it already
+// knows: `if (byMethod[p.payment_method] !== undefined)` silently drops anything else, so a
+// redeemed bill would leave the method breakdown short of the bill total with nothing saying so.
+const PAY_METHOD_ORDER = [...PAYMENT_METHODS, 'Loyalty', 'Credit']
 
 export default function SalesReport() {
   const { clientId, hasPosAccess } = useAuth()

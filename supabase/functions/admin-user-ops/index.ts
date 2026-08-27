@@ -1225,10 +1225,12 @@ Deno.serve(async (req) => {
         // pos_kot_removals cascades from pos_orders, so this delete is not load-bearing — it is
         // here so the sequence still names every table it clears, which is what makes a missed
         // one visible on review (S382's pos_credit_notes was missed exactly by being implicit).
+        await del(admin.from('pos_loyalty_ledger').delete().eq('client_id', clientId), 'pos_loyalty_ledger')
         await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
         await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
         await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
         await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')
+        await del(admin.from('pos_loyalty_schemes').delete().eq('client_id', clientId), 'pos_loyalty_schemes')
         await del(admin.from('pos_parking_slips').delete().eq('client_id', clientId), 'pos_parking_slips')
         // Tables are kept (setup) but any left "occupied" by a deleted order are freed
         await admin.from('pos_tables').update({ status: 'available' }).eq('client_id', clientId)
@@ -1305,10 +1307,12 @@ Deno.serve(async (req) => {
       await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
       // Before orders/shifts — its FKs to both are ON DELETE SET NULL.
       await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
+      await del(admin.from('pos_loyalty_ledger').delete().eq('client_id', clientId), 'pos_loyalty_ledger')
       await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
       await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
       await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
       await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')
+      await del(admin.from('pos_loyalty_schemes').delete().eq('client_id', clientId), 'pos_loyalty_schemes')
       await del(admin.from('pos_parking_slips').delete().eq('client_id', clientId), 'pos_parking_slips')
       await del(admin.from('pos_tables').delete().eq('client_id', clientId), 'pos_tables')
 

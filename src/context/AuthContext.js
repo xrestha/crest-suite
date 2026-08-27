@@ -72,7 +72,7 @@ export const SUITE_KEYS = new Set([
 // itself rather than with any plan rank. guest_ordering used to live in PRO_KEYS, which gated a
 // POS feature on the IMS plan — a POS client on IMS Starter could not buy it at any price, even
 // though FeatureAccessModal already declared it planSource: 'pos'.
-const POS_MODULE_KEYS = new Set(['guest_ordering'])
+const POS_MODULE_KEYS = new Set(['guest_ordering', 'loyalty'])
 
 // Returns the SAME array reference when the outlet list hasn't actually changed.
 //
