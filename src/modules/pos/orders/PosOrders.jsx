@@ -200,6 +200,9 @@ export default function PosOrders() {
   const [recentBillsOpen, setRecentBillsOpen] = useState(false)
   const [recentBills,     setRecentBills]     = useState([])
   const [recentBillsLoad, setRecentBillsLoad] = useState(false)
+  // 'No bills closed yet today' and 'the list failed to load' are the same picture and opposite
+  // facts: the first invites a staff member to re-bill a table they have already billed (S616).
+  const [recentBillsError, setRecentBillsError] = useState(null)
   const [ordersWithItemComp, setOrdersWithItemComp] = useState(() => new Set()) // pos_orders.id with any item-level comp — see loadRecentBills
   const [creditNoteOrder, setCreditNoteOrder] = useState(null) // order row currently in the Issue Credit Note modal
 
@@ -856,10 +859,21 @@ export default function PosOrders() {
       return
     }
 
-    const { data: existing } = await scopedFrom('pos_orders', 'id, order_no, covers, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, notes)')
+    const { data: existing, error: existingErr } = await scopedFrom('pos_orders', 'id, order_no, covers, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, notes)')
       .eq('status', 'open')
       .eq('table_id', table.id)
       .maybeSingle()
+
+    // A dropped error here is the worst swallow in this file: `existing` comes back null, the
+    // table reads as EMPTY, and staff start a SECOND order on a table whose items are already
+    // with the kitchen — re-firing every KOT and opening a second bill on one guest. Refuse to
+    // guess. window.alert because the floor view has no message banner (setMsg renders only
+    // inside the `view === 'order'` tree — CLAUDE.md's two-returns trap) and this cannot be
+    // missable mid-service (S616).
+    if (existingErr) {
+      window.alert(`Couldn't check whether ${table.name} already has an open order: ${existingErr.message}\n\nDon't start a new order on this table until it loads — you may be re-ringing one that is already with the kitchen. Try again in a moment.`)
+      return
+    }
 
     if (existing) {
       setActiveTable(table)
@@ -1676,15 +1690,23 @@ export default function PosOrders() {
   }
 
   async function printBill(order, items) {
+    // Split tenders are read BEFORE print_count is incremented. A dropped error here fell
+    // through to `payments = []` and printed a Split bill with no payment breakdown at all —
+    // a wrong document under a real invoice number — and aborting after the increment would
+    // have mislabelled the next reprint's ORIGINAL/SECOND-COPY line too (S616).
+    let payments
+    if (order.payment_method === 'Split') {
+      const { data, error } = await scopedFrom('pos_order_payments', 'payment_method, amount').eq('order_id', order.id).order('recorded_at')
+      if (error) {
+        window.alert(`Couldn't load this bill's split payment lines: ${error.message}\n\nNothing was printed — try again, so the bill doesn't go out without its payment breakdown.`)
+        return
+      }
+      payments = (data || []).map(p => ({ method: p.payment_method, amount: p.amount }))
+    }
     const newCount = (order.print_count || 0) + 1
     await scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id)
     const qrUrl = QR_PAY_METHODS.includes(order.payment_method)
       ? await makeBillQr(order.paid_amount, order.order_no ? `CR${order.order_no}` : null) : ''
-    let payments
-    if (order.payment_method === 'Split') {
-      const { data } = await scopedFrom('pos_order_payments', 'payment_method, amount').eq('order_id', order.id).order('recorded_at')
-      payments = (data || []).map(p => ({ method: p.payment_method, amount: p.amount }))
-    }
     printHtml(buildBillHtml({
       order, items, copyLabel: COPY_LABEL(newCount), qrUrl, payments,
       outletName, billingSettings, hscMap,
@@ -1742,11 +1764,18 @@ export default function PosOrders() {
 
   async function loadRecentBills() {
     setRecentBillsLoad(true)
+    setRecentBillsError(null)
     const today = getBsToday()
-    const { data } = await scopedFrom('pos_orders', 'id, table_name, invoice_no, invoice_fy, close_type, paid_amount, closed_at, order_no, credit_note_id, buyer_name, buyer_address, buyer_pan, buyer_phone, discount_amount')
+    const { data, error } = await scopedFrom('pos_orders', 'id, table_name, invoice_no, invoice_fy, close_type, paid_amount, closed_at, order_no, credit_note_id, buyer_name, buyer_address, buyer_pan, buyer_phone, discount_amount')
       .in('status', ['billed', 'voided'])
       .order('closed_at', { ascending: false })
       .limit(30)
+    if (error) {
+      setRecentBillsError(error.message)
+      setRecentBills([])
+      setRecentBillsLoad(false)
+      return
+    }
     const todays = (data || []).filter(o => {
       if (!o.closed_at) return false
       const bs = adToBs(new Date(o.closed_at))
@@ -1766,9 +1795,15 @@ export default function PosOrders() {
   }
 
   async function reprintBill(orderRow) {
-    const { data: order } = await scopedFrom('pos_orders').eq('id', orderRow.id).single()
-    const { data: items } = await scopedFrom('pos_order_items').eq('order_id', orderRow.id)
-    if (!order) return
+    const { data: order, error: orderErr } = await scopedFrom('pos_orders').eq('id', orderRow.id).single()
+    const { data: items, error: itemsErr } = await scopedFrom('pos_order_items').eq('order_id', orderRow.id)
+    // `if (!order) return` alone let a failed ITEMS read straight through: items came back null,
+    // `|| []` turned it into an empty array, and the reprint went out as a Tax Invoice carrying
+    // a real invoice number and not one line item (S616).
+    if (orderErr || itemsErr || !order || !items) {
+      window.alert(`Couldn't load bill ${orderRow.invoice_no || orderRow.order_no || ''} to reprint: ${(orderErr || itemsErr)?.message || 'the bill could not be found'}\n\nNothing was printed — try again.`)
+      return
+    }
     if (order.close_type === 'writeoff') {
       await printCompSlip(order, items || [])
     } else {
@@ -1783,7 +1818,14 @@ export default function PosOrders() {
     if (!isAdmin || !clientId) return
     if (!window.confirm('Clear ALL occupied tables? This permanently deletes every open order and its items for this client. Use only for testing.')) return
     setFloorLoad(true)
-    const { data: openOrders } = await scopedFrom('pos_orders', 'id').eq('status', 'open')
+    const { data: openOrders, error: openErr } = await scopedFrom('pos_orders', 'id').eq('status', 'open')
+    // A dropped error gave ids = [], skipped both deletes, and then still flipped every occupied
+    // table to 'available' — freeing the floor while every open order survived underneath it.
+    if (openErr) {
+      window.alert(`Couldn't read the open orders: ${openErr.message}\n\nNothing was cleared — the tables were left as they are rather than freed with their orders still open.`)
+      setFloorLoad(false)
+      return
+    }
     const ids = (openOrders || []).map(o => o.id)
     if (ids.length > 0) {
       await scopedDelete('pos_order_items').in('order_id', ids)
@@ -3075,6 +3117,10 @@ export default function PosOrders() {
           <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
             {recentBillsLoad ? (
               <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+            ) : recentBillsError ? (
+              <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13 }}>
+                Couldn't load today's bills — {recentBillsError}. This is a failed read, not an empty day: do not re-bill a table from this list.
+              </p>
             ) : recentBills.length === 0 ? (
               <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No bills closed yet today.</p>
             ) : recentBills.map(o => (
