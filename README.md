@@ -159,6 +159,101 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S617 — 2026-08-27 — Building on multi-outlet found three ways it was already broken
+
+Starting P2's multi-outlet item (per-branch privileges, then the HQ→branch master-data push
+CLAUDE.md has flagged as unbuilt since S548). Reading the feature before extending it turned up
+three defects, none of which anyone could have hit: **there are zero `client_groups`, zero grouped
+clients and zero profiles with `active_client_id` set on the live database.** The whole feature
+shipped in S548 and has never had a user. So all three are preventative — and all three would have
+landed on the first group customer.
+
+**`set_active_outlet()` checked group membership, not who was asking.** The Owner-only rule lived
+entirely in `AuthContext.js`'s `canSwitchOutlet = isOwner && outlets.length > 1`, i.e. in React,
+over an RPC any account in a grouped client could call directly. The comment two lines above it
+names the exact attack — *"handing them a switcher would let a waiter re-point their whole session
+at a sibling branch"* — which is what the function permitted. S531 invariant #3 in a fourth guise,
+after the PIN lockout, the POS close and item comp.
+
+**`get_group_summary()` was the same shape and worse.** Its only check was
+`my_group_id() IS NULL`, which is a membership test: every staff account shares its client's
+`client_id`, and `my_group_id()` resolves from the HOME client, so it is non-NULL for POS PIN
+staff, IMS staff, HR staff and self-service employees alike. Any of them could call it and receive
+**every outlet's revenue, net purchases, payroll and covers**. `SECURITY DEFINER` is why the
+RESTRICTIVE staff-isolation families don't help — bypassing RLS is the function's job, so supplying
+the check RLS would have made is also its job. The frontend half: `/group-dashboard` had **no role
+guard at either the route or the component**, and while the sidebar offered it to `isAdmin ||
+isOwner`, the **command palette** offered it on `outlets.length > 1` alone — so the page was not
+merely reachable by URL, it was advertised. S601's rule on a fourth page.
+
+**And the switcher never worked at all.** `active_client_id` is read in two places in
+`AuthContext` — `effectiveClientId` and the `clientId` the whole app scopes by — and was **missing
+from the `profiles` select**, so it was `undefined` in both. `switchOutlet` wrote the column
+server-side and the frontend never learned: `my_client_id()` would resolve to outlet B while every
+`scopedDb` query still filtered `.eq('client_id', <home>)`, so every client-scoped table returns
+**zero rows with `error: null`** — the entire app empty, and by the S594 rule indistinguishable
+from an empty tenant. One column added to one select. Nobody noticed because nobody has a group.
+
+**Per-account outlet allowlist** (`profile_outlet_access`, `20260827130000`). The case it exists
+for is a manager who genuinely covers two branches: before it, the only way to grant the second was
+to make them an Owner, which hands over the whole group *and*, because the Owner test is the
+absence of staff markers, strips every rank they hold. It grants **reach, never rank** — a
+storekeeper allowed into a second branch is still a storekeeper there — deliberately not a
+per-outlet role matrix, which would push a second rank rule into `AuthContext`, all three
+`hasXAccess` helpers and `is_client_owner()`. The table has **no write policy at all**, so
+`set_outlet_access()` is the only path; a revoke also clears `active_client_id` so it evicts rather
+than merely denying the next switch. Managed from a matrix on the Group Console, because
+`profiles_select` is self-or-admin only and an Owner cannot read a sibling outlet's staff rows —
+`get_group_outlet_access()` is `get_client_profile_names()`'s group-wide sibling, and returns names,
+never emails.
+
+**HQ→branch master-data push** (`push_master_data`, `20260827150000`). `master_id` on
+`categories`/`items`/`recipes` is the link CLAUDE.md specified — *"it must match on an added
+`master_id`, never by name"* — with one deliberate exception: the **first** push into a branch that
+already has data has no `master_id` to match on, so name matching is the only alternative to
+duplicating an entire item master. That is an `adopt`, it happens once per record, and the preview
+names every one before anything is written. Three things it refuses to do, each of which would
+have been a silent corruption:
+
+- **`items.rate` is never pushed on update.** It is what the *branch* pays its own supplier and the
+  input to every costing figure that branch produces; overwriting it with HQ's would put another
+  city's prices into its food cost. Seeded on create only, because the column is NOT NULL.
+- **Selling price is a separate opt-in**, not swept along with the recipe — a mall branch
+  legitimately charges more than a high-street one.
+- **An ingredient with no counterpart at the branch is reported, not dropped.** A recipe costed
+  from a silently-shortened ingredient list is exactly the wrong-number-nobody-questions shape.
+
+Sub-recipes needed their own handling: a sub-recipe is `recipes.category = 'Sub-Recipe'` and
+`Recipes.js` mirrors it into `items` so it can be stock-counted, so the push reproduces that mirror
+and links it, or the branch would hold a recipe it cannot count. `per_uom_rate` stays out of every
+payload (generated), `purchase_qty` is copied rather than derived (S597's `CHECK (= 1)`), and the
+apply pass runs categories → items → recipes → mirrors → ingredients because each references the
+last.
+
+**The preview IS the plan.** A dry run computes into a temp table with pure SELECTs and returns it;
+the write pass applies from that same table. Two implementations of "what will happen" is how a
+preview comes to lie.
+
+Method notes. **I reconstructed `get_group_summary`'s body from memory for the `CREATE OR REPLACE`
+and got four things wrong** — `ps.gross`/`ssf_employer`/`run_id` were invented column names, and a
+`discount_amount` subtraction was dropped — caught only by going back and reading the original, then
+diffing the 41-line query body to prove it was byte-identical. A `CREATE OR REPLACE` of a function
+you have not read in full is a rewrite wearing a patch's clothing. Second: the allowlist read was
+initially folded into `fetchProfile`'s concurrent batch, which is the app's hottest path, against a
+table that does not exist until the migration is applied — moved behind a `client?.group_id` gate,
+and verified live that an ungrouped client issues **zero** requests for it.
+
+**Nothing here is applied or executed.** Four migrations wait on the Dashboard SQL Editor, and
+`push_master_data` is ~200 lines of PL/pgSQL that has never run. Dry-run it against a throwaway
+branch before any real one.
+
+**Files:** `supabase/migrations/{20260827120000_set_active_outlet_owner_only,
+20260827130000_profile_outlet_access, 20260827140000_group_summary_owner_only,
+20260827150000_master_data_push}.sql` (new), `src/context/AuthContext.js`,
+`src/components/Layout.js`, `src/pages/dashboard/GroupDashboard.jsx`,
+`src/pages/dashboard/{OutletAccessPanel,MasterPushPanel}.jsx` (new), `src/pages/Help.js`,
+`public/service-worker.js` (`crest-v131` → `crest-v132`), `README.md`. Build clean, 386/386 tests.
+
 ### S616 — 2026-08-27 — The smoke test S613 deferred, and the three defects it found before a browser was opened
 
 S613 shipped the period-close preflight and a batch of new error branches and ended with **"not
