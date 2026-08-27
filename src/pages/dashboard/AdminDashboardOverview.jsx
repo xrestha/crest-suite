@@ -224,11 +224,11 @@ export default function AdminDashboardOverview() {
               <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>{active.length}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>{inactive.length} inactive · {adminClients.length} total</div>
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS {imsCount}</span>
-                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.18)' }}>HR {hrCount}</span>
-                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)', border: '1px solid rgba(167,139,250,0.2)' }}>POS {posCount}</span>
+                <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS {imsCount}</span>
+                <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.18)' }}>HR {hrCount}</span>
+                <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)', border: '1px solid rgba(167,139,250,0.2)' }}>POS {posCount}</span>
                 {suiteCount > 0 && (
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.20)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.45)' }}>★ SUITE {suiteCount}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.20)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.45)' }}>★ SUITE {suiteCount}</span>
                 )}
               </div>
             </div>
@@ -443,13 +443,13 @@ export default function AdminDashboardOverview() {
                         <td>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                             {c.ims_enabled !== false && (
-                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS</span>
+                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS</span>
                             )}
                             {c.hr_enabled && (
-                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.18)' }}>HR</span>
+                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.18)' }}>HR</span>
                             )}
                             {c.pos_enabled && (
-                              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)', border: '1px solid rgba(167,139,250,0.2)' }}>POS</span>
+                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)', border: '1px solid rgba(167,139,250,0.2)' }}>POS</span>
                             )}
                             {/* Suite is an add-on ABOVE the modules, not a fourth one, so it takes
                                 the accent rather than a fourth hue — the star and the heavier fill
@@ -460,7 +460,7 @@ export default function AdminDashboardOverview() {
                                 ? `Crest Suite Pro — Owner Dashboard, Monthly Owner Report, Group Console, Demand Forecast and Fixed Assets. Sold per outlet.${suiteDays !== null ? ` Renews in ${suiteDays}d.` : ''}`
                                 : 'Crest Suite Pro has lapsed — the Suite features are locked and this outlet is no longer counted in the Suite MRR.'} width={280}>
                                 <span style={{
-                                  fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--radius-sm)',
+                                  fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--radius-sm)',
                                   background: suiteLive ? 'rgba(201,168,76,0.20)' : 'transparent',
                                   color: suiteLive ? 'var(--theme-accent-ink)' : 'var(--theme-text3)',
                                   border: `1px solid ${suiteLive ? 'rgba(201,168,76,0.45)' : 'var(--theme-border)'}`,
@@ -487,7 +487,7 @@ export default function AdminDashboardOverview() {
                           {mrr > 0 ? (
                             <>
                               NPR {mrr.toLocaleString('en-NP')}
-                              <span style={{ display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--theme-text3)', marginTop: 2 }}>
+                              <span style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--theme-text3)', marginTop: 2 }}>
                                 {c.is_active ? (c.billing_cycle === 'annual' ? 'Annual' : 'Monthly') : 'inactive — not billed'}
                               </span>
                             </>
@@ -499,15 +499,15 @@ export default function AdminDashboardOverview() {
                           <div>
                             <span style={{ fontSize: 12, color: typeColor }}>{typeLabel}</span>
                             {hrExpiring && c.hr_enabled && (
-                              <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2 }}>HR exp. {hrDays}d</div>
+                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>HR exp. {hrDays}d</div>
                             )}
                             {/* Suite could lapse silently: this column tracks IMS, and the only
                                 other module hint was HR's. Losing Suite is NPR 2,000/outlet. */}
                             {suiteExpiring && (
-                              <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2 }}>Suite exp. {suiteDays}d</div>
+                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>Suite exp. {suiteDays}d</div>
                             )}
                             {c.suite_plan && !suiteLive && (
-                              <div style={{ fontSize: 10, color: 'var(--theme-red-text)', marginTop: 2 }}>Suite lapsed</div>
+                              <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 2 }}>Suite lapsed</div>
                             )}
                           </div>
                         </td>
@@ -529,12 +529,12 @@ export default function AdminDashboardOverview() {
                           {isOpen ? (
                             <span style={{ fontSize: 12, color: 'var(--theme-text1)' }}>
                               {BS_MONTHS[period.bs_month - 1]} {period.bs_year}
-                              {' '}<span style={{ fontSize: 10, color: 'var(--theme-green-text)' }}>● Open</span>
+                              {' '}<span style={{ fontSize: 11, color: 'var(--theme-green-text)' }}>● Open</span>
                             </span>
                           ) : period ? (
                             <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                               {BS_MONTHS[period.bs_month - 1]} {period.bs_year}
-                              {' '}<span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>● Closed</span>
+                              {' '}<span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>● Closed</span>
                             </span>
                           ) : (
                             <span style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 600 }}>⚠ No period</span>

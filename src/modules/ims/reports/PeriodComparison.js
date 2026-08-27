@@ -50,7 +50,7 @@ function DeltaRow({ pct, suffix, judge = 'neutral' }) {
   if (judge === 'good-up')   color = up ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
   if (judge === 'good-down') color = up ? 'var(--theme-red-text)'   : 'var(--theme-green-text)'
   return (
-    <div style={{ fontSize: 10, color, marginTop: 1, fontStyle: suffix === 'vs LY' ? 'italic' : 'normal' }}>
+    <div style={{ fontSize: 11, color, marginTop: 1, fontStyle: suffix === 'vs LY' ? 'italic' : 'normal' }}>
       {up ? '↑' : '↓'} {Math.abs(pct).toFixed(1)}% {suffix}
     </div>
   )
@@ -63,7 +63,7 @@ function PpDeltaRow({ curr, prev, suffix }) {
   const diff = curr - prev
   const color = diff < 0 ? 'var(--theme-green-text)' : diff > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)'
   return (
-    <div style={{ fontSize: 10, color, marginTop: 1, fontStyle: suffix === 'vs LY' ? 'italic' : 'normal' }}>
+    <div style={{ fontSize: 11, color, marginTop: 1, fontStyle: suffix === 'vs LY' ? 'italic' : 'normal' }}>
       {diff < 0 ? '↓' : diff > 0 ? '↑' : '→'} {Math.abs(diff).toFixed(1)}pp {suffix}
     </div>
   )
@@ -317,13 +317,16 @@ export default function PeriodComparison() {
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--theme-text2)', cursor: 'pointer' }} htmlFor="period-f1">
+            {/* The label WRAPS the checkbox (implicit association) — it used to also carry
+                htmlFor="period-f1", which pointed at the SELECT below, so the checkbox read as
+                unnamed and the select was announced as "Compare vs last year" (S613). */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--theme-text2)', cursor: 'pointer' }}>
               <input type="checkbox" checked={showYoy} onChange={e => setShowYoy(e.target.checked)} />
               <Tip text="Adds an italic 'vs LY' line under each figure, comparing this period to the same BS month one year earlier — useful for spotting festival/seasonal swings a plain month-to-month view can't tell apart from real drift." width={280}>
                 Compare vs last year
               </Tip>
             </label>
-            <select id="period-f1" className="form-select" value={limit} onChange={e => setLimit(Number(e.target.value))}>
+            <select id="period-f1" className="form-select" aria-label="How many periods to compare" value={limit} onChange={e => setLimit(Number(e.target.value))}>
               <option value={6}>Last 6 periods</option>
               <option value={12}>Last 12 periods</option>
               <option value={24}>Last 24 periods</option>
@@ -471,7 +474,7 @@ export default function PeriodComparison() {
           <ChartCard
             title="Food Cost % — Period Trend"
             footer={
-              <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 11, flexWrap: 'wrap' }}>
                 <span style={{ color: 'var(--theme-green-text)' }}>● ≤{fcT.warn}% Good</span>
                 <span style={{ color: 'var(--theme-amber-text)' }}>● {fcT.warn}–{fcT.critical}% Watch</span>
                 <span style={{ color: 'var(--theme-red-text)' }}>● &gt;{fcT.critical}% High</span>
@@ -586,12 +589,12 @@ export default function PeriodComparison() {
                     <td>
                       <strong>{periodLabel(p)}</strong>
                       {p.status === 'open' && (
-                        <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: 'var(--theme-green-text)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 'var(--radius-xs)', padding: '1px 5px' }}>
+                        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 'var(--radius-xs)', padding: '1px 5px' }}>
                           OPEN
                         </span>
                       )}
                       {showYoy && (
-                        <div style={{ fontSize: 10, color: 'var(--theme-text3)', fontStyle: 'italic', marginTop: 2 }}>
+                        <div style={{ fontSize: 11, color: 'var(--theme-text3)', fontStyle: 'italic', marginTop: 2 }}>
                           {ly ? `LY: ${periodLabel(ly)}` : 'LY: no matching period'}
                         </div>
                       )}

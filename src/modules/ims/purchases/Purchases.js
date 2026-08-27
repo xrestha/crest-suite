@@ -378,7 +378,7 @@ export default function Purchases() {
                     <span style={{ color: 'var(--theme-red-text)', fontWeight: 600 }}>NPR {fmtRate(item.oldRate)}</span>
                     <span style={{ color: 'var(--theme-text2)' }}> → </span>
                     <span style={{ color: 'var(--theme-green-text)', fontWeight: 600 }}>NPR {fmtRate(item.newRate)}</span>
-                    <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginTop: 1 }}>per {item.unit}</div>
+                    <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 1 }}>per {item.unit}</div>
                   </div>
                 </label>
               ))}
@@ -415,6 +415,7 @@ export default function Purchases() {
             <input
               autoFocus
               className="form-input"
+              aria-label={`Type ${periodLabel} to confirm deleting all entries`}
               style={{ width: '100%', marginBottom: 16 }}
               value={deleteAllTyped}
               onChange={e => setDeleteAllTyped(e.target.value)}
@@ -638,7 +639,7 @@ export default function Purchases() {
                               <>
                                 {day}
                                 {selectedPeriod && (
-                                  <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--theme-text3)', marginTop: 2 }}>
+                                  <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginTop: 2 }}>
                                     {formatAd(bsToAd(selectedPeriod.bs_year, selectedPeriod.bs_month, parseInt(day)))}
                                   </div>
                                 )}
@@ -688,17 +689,17 @@ export default function Purchases() {
                               </td>
                               <td style={{ textAlign: 'right' }}>
                                 {Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
-                                {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString()} {entry.items?.uom}</div>}
+                                {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString()} {entry.items?.uom}</div>}
                               </td>
                               <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
                               <td style={{ textAlign: 'right' }}>
                                 {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                                {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
+                                {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
                               </td>
                               <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
                                 {groupGrand.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                {vatAmount > 0 && <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
-                                {discountAmt > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                                {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                                {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                               </td>
                               <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                                 {entry.expiry_date ? <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
@@ -721,8 +722,8 @@ export default function Purchases() {
                             <td colSpan={3}></td>
                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
                               {groupGrand.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              {vatAmount > 0 && <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
-                              {discountAmt > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                             </td>
                             <td></td>
                             {actionsCell}
@@ -747,12 +748,12 @@ export default function Purchases() {
                                   <>
                                     <td style={{ textAlign: 'right' }}>
                                       {Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
-                                      {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString()} {entry.items?.uom}</div>}
+                                      {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString()} {entry.items?.uom}</div>}
                                     </td>
                                     <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
                                     <td style={{ textAlign: 'right' }}>
                                       {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                                      {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
+                                      {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
                                     </td>
                                   </>
                                 )

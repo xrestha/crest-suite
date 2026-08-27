@@ -281,7 +281,7 @@ export default function Settings() {
         <div className="card" style={{ marginBottom: 20, display: 'flex', gap: 18, alignItems: 'center' }}>
           {settings.logo_url
             ? <img src={settings.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 8, flexShrink: 0 }} />
-            : <span style={{ fontSize: 36, color: 'var(--theme-accent)', flexShrink: 0 }}>⬢</span>
+            : <span style={{ fontSize: 36, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>⬢</span>
           }
           <div>
             <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{settings.app_name || '—'}</div>
@@ -304,7 +304,7 @@ export default function Settings() {
         ))}
       </div>
 
-      {error && <p style={{ color: 'var(--theme-red)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
+      {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
 
       {/* BRANDING */}
       {activeTab === 'Branding' && (
@@ -340,7 +340,7 @@ export default function Settings() {
               <div style={{ width: 64, height: 64, borderRadius: 8, border: '1px solid var(--theme-border)', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {form.logo_url
                   ? <img src={form.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 6 }} />
-                  : <span style={{ fontSize: 26, color: 'var(--theme-accent)' }}>⬢</span>
+                  : <span style={{ fontSize: 26, color: 'var(--theme-accent-ink)' }}>⬢</span>
                 }
               </div>
               <div>
@@ -356,12 +356,12 @@ export default function Settings() {
                     </span>
                   </label>
                   {form.logo_url && (
-                    <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleLogoRemove}>
+                    <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleLogoRemove}>
                       Remove
                     </button>
                   )}
                 </div>
-                {logoMsg && <p style={{ fontSize: 11, margin: '6px 0 0', color: logoMsg.startsWith('error') ? 'var(--theme-red)' : 'var(--theme-green)' }}>{logoMsg.replace(/^(ok|error):/, '')}</p>}
+                {logoMsg && <p style={{ fontSize: 11, margin: '6px 0 0', color: logoMsg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{logoMsg.replace(/^(ok|error):/, '')}</p>}
               </div>
             </div>
           </div>
@@ -371,7 +371,7 @@ export default function Settings() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               {form.logo_url
                 ? <img src={form.logo_url} alt="logo" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4 }} />
-                : <span style={{ fontSize: 20, color: 'var(--theme-accent)' }}>⬢</span>
+                : <span style={{ fontSize: 20, color: 'var(--theme-accent-ink)' }}>⬢</span>
               }
               <div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{form.app_name || 'App Name'}</div>
@@ -489,7 +489,7 @@ export default function Settings() {
               {regenerating ? 'Renumbering…' : '↻ Regenerate All Item Codes'}
             </button>
             {regenerateMsg && (
-              <p style={{ fontSize: 12, color: regenerateMsg.startsWith('Error') ? 'var(--theme-red)' : 'var(--theme-green)', margin: '12px 0 0' }}>
+              <p style={{ fontSize: 12, color: regenerateMsg.startsWith('Error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)', margin: '12px 0 0' }}>
                 {regenerateMsg}
               </p>
             )}
@@ -530,7 +530,7 @@ export default function Settings() {
               {regeneratingVnd ? 'Renumbering…' : '↻ Regenerate All Vendor Codes'}
             </button>
             {regenerateMsgVnd && (
-              <p style={{ fontSize: 12, color: regenerateMsgVnd.startsWith('Error') ? 'var(--theme-red)' : 'var(--theme-green)', margin: '12px 0 0' }}>
+              <p style={{ fontSize: 12, color: regenerateMsgVnd.startsWith('Error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)', margin: '12px 0 0' }}>
                 {regenerateMsgVnd}
               </p>
             )}
@@ -570,7 +570,7 @@ export default function Settings() {
               {regeneratingSrc ? 'Renumbering…' : '↻ Regenerate All Sub-Recipe Codes'}
             </button>
             {regenerateMsgSrc && (
-              <p style={{ fontSize: 12, color: regenerateMsgSrc.startsWith('Error') ? 'var(--theme-red)' : 'var(--theme-green)', margin: '12px 0 0' }}>
+              <p style={{ fontSize: 12, color: regenerateMsgSrc.startsWith('Error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)', margin: '12px 0 0' }}>
                 {regenerateMsgSrc}
               </p>
             )}
@@ -623,7 +623,7 @@ export default function Settings() {
                 <span style={{ flex: 1, fontSize: 13, color: 'var(--theme-text1)' }}>{cat}</span>
                 <button
                   onClick={() => setCats(prev => prev.filter((_, idx) => idx !== i))}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--theme-red)', fontSize: 18, lineHeight: 1, padding: '0 4px', opacity: 0.7 }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--theme-red-text)', fontSize: 18, lineHeight: 1, padding: '0 4px', opacity: 0.7 }}
                   title="Remove category"
                 >×</button>
               </div>
@@ -652,7 +652,7 @@ export default function Settings() {
             {catSaving ? 'Saving…' : 'Save Categories'}
           </button>
           {catMsg && (
-            <p style={{ fontSize: 12, marginTop: 10, color: catMsg.startsWith('error') ? 'var(--theme-red)' : 'var(--theme-green)' }}>
+            <p style={{ fontSize: 12, marginTop: 10, color: catMsg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
               {catMsg.replace(/^(ok|error):/, '')}
             </p>
           )}
@@ -851,7 +851,7 @@ export default function Settings() {
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-accent)' }}>Custom ✓</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-accent-ink)' }}>Custom ✓</div>
                     <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Your custom palette</div>
                   </div>
                 </div>
@@ -975,7 +975,7 @@ export default function Settings() {
 
           {isAdmin && (
             <div className="card" style={{ borderColor: 'rgba(248,113,113,0.2)' }}>
-              <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-red)' }}>Danger Zone</h3>
+              <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-red-text)' }}>Danger Zone</h3>
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 16px' }}>
                 Destructive actions. These cannot be undone.
               </p>

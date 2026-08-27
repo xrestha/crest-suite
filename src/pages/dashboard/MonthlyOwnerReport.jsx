@@ -415,7 +415,7 @@ export default function MonthlyOwnerReport() {
                     <Row label="Opening Stock" value={fmt(snapshot.ims.openingStockValueTotal)}
                       tip="Value of stock on hand at the start of the period (qty × per-unit rate), carried forward from last period's closing count." />
                     <Row label="Purchases" value={fmt(snapshot.ims.purchaseTotal)} />
-                    <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red)' : undefined} />
+                    <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red-text)' : undefined} />
                     <Row label="Closing Stock" value={fmt(snapshot.ims.closingStockValueTotal)}
                       tip="Value of stock physically counted at period close (qty × per-unit rate) — becomes next period's Opening Stock." />
                     <Row label="Cash Purchases" value={fmt(snapshot.ims.cashNet)} />
@@ -478,7 +478,7 @@ export default function MonthlyOwnerReport() {
                     <Row label="Comped Bills" value={`${num(snapshot.pos.compedBillsTotal?.count)} — ${fmt(snapshot.pos.compedBillsTotal?.potentialValue)} potential value`}
                       tip="Bills given away free (staff meals, goodwill, promo) — 'potential value' is what they would have cost the guest at full price." />
                     <Row label="Voids / Write-offs" value={`${num(snapshot.pos.voidsWriteoffsTotal?.count)} — ${fmt(snapshot.pos.voidsWriteoffsTotal?.amount)}`}
-                      color={snapshot.pos.voidsWriteoffsTotal?.count > 0 ? 'var(--theme-red)' : undefined}
+                      color={snapshot.pos.voidsWriteoffsTotal?.count > 0 ? 'var(--theme-red-text)' : undefined}
                       tip="Void = cancelled before payment (e.g. a wrong order). Write-off = billed but never collected. Both are lost potential revenue." />
                     <Row label="Avg Check / Cover" value={fmt(snapshot.pos.covers?.avgCheckPerCover)}
                       tip="Average spend per guest ('cover' = one seated diner), not per bill — a table of 4 sharing one bill counts as 4 covers." />
@@ -516,7 +516,7 @@ export default function MonthlyOwnerReport() {
 
             {snapshot.menuEngineering && (() => {
               const me = snapshot.menuEngineering
-              const quadrantColor = { Star: 'var(--theme-green)', Plowhorse: 'var(--theme-accent)', Puzzle: 'var(--theme-amber)', Dog: 'var(--theme-red)' }
+              const quadrantColor = { Star: 'var(--theme-green-text)', Plowhorse: 'var(--theme-accent)', Puzzle: 'var(--theme-amber-text)', Dog: 'var(--theme-red-text)' }
               return (
                 <div className="owner-report-section owner-report-page-break">
                   <h3 style={sectionTitleStyle}>Menu Engineering Matrix</h3>
@@ -598,11 +598,11 @@ export default function MonthlyOwnerReport() {
                     <>
                       <div className="table-wrap" style={{ marginBottom: 8 }}>
                         <table className="data-table owner-report-table"><tbody>
-                          <Row label="Dead Stock Items" value={num(inv.deadSlowStock.deadCount)} color={inv.deadSlowStock.deadCount > 0 ? 'var(--theme-red)' : undefined}
+                          <Row label="Dead Stock Items" value={num(inv.deadSlowStock.deadCount)} color={inv.deadSlowStock.deadCount > 0 ? 'var(--theme-red-text)' : undefined}
                             tip="Zero usage this period despite stock on hand." />
-                          <Row label="Slow Stock Items" value={num(inv.deadSlowStock.slowCount)} color={inv.deadSlowStock.slowCount > 0 ? 'var(--theme-amber)' : undefined}
+                          <Row label="Slow Stock Items" value={num(inv.deadSlowStock.slowCount)} color={inv.deadSlowStock.slowCount > 0 ? 'var(--theme-amber-text)' : undefined}
                             tip="Used less than 20% of available stock this period." />
-                          <Row label="Total Value at Risk" value={fmt(inv.deadSlowStock.totalValueAtRisk)} color={inv.deadSlowStock.totalValueAtRisk > 0 ? 'var(--theme-red)' : undefined} />
+                          <Row label="Total Value at Risk" value={fmt(inv.deadSlowStock.totalValueAtRisk)} color={inv.deadSlowStock.totalValueAtRisk > 0 ? 'var(--theme-red-text)' : undefined} />
                         </tbody></table>
                       </div>
                       {inv.deadSlowStock.items?.length > 0 && (
@@ -626,7 +626,7 @@ export default function MonthlyOwnerReport() {
                         <table className="data-table owner-report-table"><tbody>
                           <Row label="Items Flagged (Theoretical vs Actual, ±10%)" value={num(inv.variance.flaggedCount)}
                             tip="Items where actual usage differed from recipe-theoretical usage by more than 10%." />
-                          <Row label="Total Variance Value" value={fmt(inv.variance.totalVarianceValue)} color={Math.abs(inv.variance.totalVarianceValue) > 0 ? 'var(--theme-amber)' : undefined} />
+                          <Row label="Total Variance Value" value={fmt(inv.variance.totalVarianceValue)} color={Math.abs(inv.variance.totalVarianceValue) > 0 ? 'var(--theme-amber-text)' : undefined} />
                         </tbody></table>
                       </div>
                       {inv.variance.items?.filter(i => i.flag !== 'ok').length > 0 && (
@@ -653,7 +653,7 @@ export default function MonthlyOwnerReport() {
                       <table className="data-table owner-report-table"><tbody>
                         <Row label={`Shrinkage Trend (${inv.shrinkageTrend.periodsAnalyzed}-period window)`} value={`${num(inv.shrinkageTrend.consistentCount)} consistent, ${num(inv.shrinkageTrend.anyFlaggedCount)} flagged`}
                           tip="Items with unexplained over-consumption across multiple closed periods ending at this one — distinct from a single period's Variance above." />
-                        <Row label="Total Shrinkage Loss Value" value={fmt(inv.shrinkageTrend.totalLossValue)} color={inv.shrinkageTrend.totalLossValue > 0 ? 'var(--theme-red)' : undefined} />
+                        <Row label="Total Shrinkage Loss Value" value={fmt(inv.shrinkageTrend.totalLossValue)} color={inv.shrinkageTrend.totalLossValue > 0 ? 'var(--theme-red-text)' : undefined} />
                       </tbody></table>
                     </div>
                   ) : (
@@ -682,9 +682,9 @@ export default function MonthlyOwnerReport() {
                   <div className="table-wrap">
                     <table className="data-table owner-report-table"><tbody>
                       <Row label="Unpaid Credit — Current (≤30d)" value={fmt(vp.billAging.current)} />
-                      <Row label="Unpaid Credit — 31–60 days" value={fmt(vp.billAging.d31_60)} color={vp.billAging.d31_60 > 0 ? 'var(--theme-amber)' : undefined} />
-                      <Row label="Unpaid Credit — 61–90 days" value={fmt(vp.billAging.d61_90)} color={vp.billAging.d61_90 > 0 ? 'var(--theme-amber)' : undefined} />
-                      <Row label="Unpaid Credit — 90+ days" value={fmt(vp.billAging.d90plus)} color={vp.billAging.d90plus > 0 ? 'var(--theme-red)' : undefined}
+                      <Row label="Unpaid Credit — 31–60 days" value={fmt(vp.billAging.d31_60)} color={vp.billAging.d31_60 > 0 ? 'var(--theme-amber-text)' : undefined} />
+                      <Row label="Unpaid Credit — 61–90 days" value={fmt(vp.billAging.d61_90)} color={vp.billAging.d61_90 > 0 ? 'var(--theme-amber-text)' : undefined} />
+                      <Row label="Unpaid Credit — 90+ days" value={fmt(vp.billAging.d90plus)} color={vp.billAging.d90plus > 0 ? 'var(--theme-red-text)' : undefined}
                         tip="Bill-age since purchase date, pinned to when this report was generated — not a live count. No vendor payment-terms field exists in this system, so this is not a true SLA measure." />
                     </tbody></table>
                   </div>

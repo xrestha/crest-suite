@@ -925,7 +925,7 @@ export default function Help() {
                 <p style={{ fontSize: 10, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>Tips</p>
                 {feat.tips.map((tip, i) => (
                   <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-                    <span style={{ color: 'var(--theme-accent)', fontSize: 11, marginTop: 2, flexShrink: 0 }}>→</span>
+                    <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11, marginTop: 2, flexShrink: 0 }}>→</span>
                     <span style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{tip}</span>
                   </div>
                 ))}
@@ -1056,7 +1056,7 @@ export default function Help() {
               <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Module Guide</p>
               {matchedFeatures.map(({ feat, moduleKey, module }) => (
                 <div key={`${moduleKey}:${feat.name}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 6 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent)', width: 34, flexShrink: 0, marginTop: 14, textTransform: 'uppercase' }}>{module}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', width: 34, flexShrink: 0, marginTop: 14, textTransform: 'uppercase' }}>{module}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <FeatureCard feat={feat} moduleKey={`search-${moduleKey}`} />
                   </div>
@@ -1120,7 +1120,7 @@ export default function Help() {
                       Crest tracks your ingredient purchases, stock levels, and food cost in real time. The core idea is simple:
                     </p>
                     <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '10px 16px', display: 'inline-block', marginBottom: 8 }}>
-                      <span style={{ fontSize: 13, color: 'var(--theme-accent)', fontWeight: 600 }}>Opening Stock + Purchases − Wastage − Closing Stock = COGS (what you actually used)</span>
+                      <span style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>Opening Stock + Purchases − Wastage − Closing Stock = COGS (what you actually used)</span>
                     </div>
                     <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
                       Follow the steps below to get set up. First-time setup takes about 30–60 minutes. After that, the monthly routine takes 15–20 minutes of admin at month end.
@@ -1144,15 +1144,15 @@ export default function Help() {
               { step: 5, title: 'Build your Recipes', desc: 'Go to Recipe Costing → New Recipe → add each menu item with its ingredients and selling price.', why: 'Required for the Variance Report and food cost % per dish. Skip this step if you are on the Starter plan.', plan: 'Growth+' },
             ].map((s, i, arr) => (
               <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 16, paddingBottom: 16, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border)' : 'none' }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent)', flexShrink: 0 }}>{s.step}</div>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>{s.title}</span>
-                    {s.plan && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-green)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '1px 7px', borderRadius: 8 }}>{s.plan}</span>}
+                    {s.plan && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '1px 7px', borderRadius: 8 }}>{s.plan}</span>}
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 6 }}>{s.desc}</div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-                    <span style={{ color: 'var(--theme-accent)', fontSize: 11, marginTop: 1, flexShrink: 0 }}>Why:</span>
+                    <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11, marginTop: 1, flexShrink: 0 }}>Why:</span>
                     <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.why}</span>
                   </div>
                 </div>
@@ -1175,11 +1175,11 @@ export default function Help() {
               { step: 9, title: 'Close the Period',                 desc: 'Periods → Close → confirm. Locks all data. Closing stock automatically becomes opening stock for next month.' },
             ].map((s, i, arr) => (
               <div key={s.step} style={{ display: 'flex', gap: 14, marginBottom: 12, paddingBottom: 12, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border-lt)' : 'none' }}>
-                <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent)', flexShrink: 0 }}>{s.step}</div>
+                <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{s.title}</span>
-                    {s.plan && <span style={{ fontSize: 10, fontWeight: 700, color: s.plan === 'Growth+' ? 'var(--theme-green)' : 'var(--theme-text3)', background: s.plan === 'Growth+' ? 'rgba(52,211,153,0.1)' : 'rgba(156,163,175,0.1)', border: `1px solid ${s.plan === 'Growth+' ? 'rgba(52,211,153,0.2)' : 'rgba(156,163,175,0.2)'}`, padding: '1px 7px', borderRadius: 8 }}>{s.plan}</span>}
+                    {s.plan && <span style={{ fontSize: 11, fontWeight: 700, color: s.plan === 'Growth+' ? 'var(--theme-green-text)' : 'var(--theme-text3)', background: s.plan === 'Growth+' ? 'rgba(52,211,153,0.1)' : 'rgba(156,163,175,0.1)', border: `1px solid ${s.plan === 'Growth+' ? 'rgba(52,211,153,0.2)' : 'rgba(156,163,175,0.2)'}`, padding: '1px 7px', borderRadius: 8 }}>{s.plan}</span>}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.desc}</div>
                 </div>
@@ -1197,7 +1197,7 @@ export default function Help() {
               'Using estimated closing stock — always do a physical count. Estimated numbers make every report inaccurate.',
             ].map((text, i, arr) => (
               <div key={i} style={{ display: 'flex', gap: 10, marginBottom: i < arr.length - 1 ? 10 : 0 }}>
-                <span style={{ color: 'var(--theme-red)', fontSize: 12, flexShrink: 0, marginTop: 1 }}>✕</span>
+                <span style={{ color: 'var(--theme-red-text)', fontSize: 12, flexShrink: 0, marginTop: 1 }}>✕</span>
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{text}</span>
               </div>
             ))}
@@ -1241,12 +1241,12 @@ export default function Help() {
               <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Do this once when you first turn on Crest HR.</p>
               {HR_SETUP_STEPS.map((s, i, arr) => (
                 <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 16, paddingBottom: 16, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border)' : 'none' }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent)', flexShrink: 0 }}>{s.step}</div>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 4 }}>{s.title}</div>
                     <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 6 }}>{s.desc}</div>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-                      <span style={{ color: 'var(--theme-accent)', fontSize: 11, marginTop: 1, flexShrink: 0 }}>Why:</span>
+                      <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11, marginTop: 1, flexShrink: 0 }}>Why:</span>
                       <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.why}</span>
                     </div>
                   </div>
@@ -1259,7 +1259,7 @@ export default function Help() {
               <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Repeat this every BS month.</p>
               {HR_WORKFLOW_STEPS.map((s, i, arr) => (
                 <div key={s.step} style={{ display: 'flex', gap: 14, marginBottom: 12, paddingBottom: 12, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border-lt)' : 'none' }}>
-                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent)', flexShrink: 0 }}>{s.step}</div>
+                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 3 }}>{s.title}</div>
                     <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.desc}</div>
@@ -1272,7 +1272,7 @@ export default function Help() {
               <h3 style={{ margin: '0 0 16px', fontSize: 15, color: 'var(--theme-text1)' }}>Common Mistakes to Avoid</h3>
               {HR_MISTAKES.map((text, i, arr) => (
                 <div key={i} style={{ display: 'flex', gap: 10, marginBottom: i < arr.length - 1 ? 10 : 0 }}>
-                  <span style={{ color: 'var(--theme-red)', fontSize: 12, flexShrink: 0, marginTop: 1 }}>✕</span>
+                  <span style={{ color: 'var(--theme-red-text)', fontSize: 12, flexShrink: 0, marginTop: 1 }}>✕</span>
                   <span style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{text}</span>
                 </div>
               ))}
@@ -1316,12 +1316,12 @@ export default function Help() {
               <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Do this once when you first turn on Crest POS.</p>
               {POS_SETUP_STEPS.map((s, i, arr) => (
                 <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 16, paddingBottom: 16, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border)' : 'none' }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent)', flexShrink: 0 }}>{s.step}</div>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 4 }}>{s.title}</div>
                     <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 6 }}>{s.desc}</div>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-                      <span style={{ color: 'var(--theme-accent)', fontSize: 11, marginTop: 1, flexShrink: 0 }}>Why:</span>
+                      <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11, marginTop: 1, flexShrink: 0 }}>Why:</span>
                       <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.why}</span>
                     </div>
                   </div>
@@ -1334,7 +1334,7 @@ export default function Help() {
               <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Repeat this every shift/day the floor is open.</p>
               {POS_WORKFLOW_STEPS.map((s, i, arr) => (
                 <div key={s.step} style={{ display: 'flex', gap: 14, marginBottom: 12, paddingBottom: 12, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border-lt)' : 'none' }}>
-                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent)', flexShrink: 0 }}>{s.step}</div>
+                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 3 }}>{s.title}</div>
                     <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.desc}</div>
@@ -1347,7 +1347,7 @@ export default function Help() {
               <h3 style={{ margin: '0 0 16px', fontSize: 15, color: 'var(--theme-text1)' }}>Common Mistakes to Avoid</h3>
               {POS_MISTAKES.map((text, i, arr) => (
                 <div key={i} style={{ display: 'flex', gap: 10, marginBottom: i < arr.length - 1 ? 10 : 0 }}>
-                  <span style={{ color: 'var(--theme-red)', fontSize: 12, flexShrink: 0, marginTop: 1 }}>✕</span>
+                  <span style={{ color: 'var(--theme-red-text)', fontSize: 12, flexShrink: 0, marginTop: 1 }}>✕</span>
                   <span style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{text}</span>
                 </div>
               ))}
@@ -1370,9 +1370,9 @@ export default function Help() {
                 onClick={() => toggleModule('ims')}
                 style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid rgba(201,168,76,0.2)', cursor: 'pointer' }}
               >
-                <span style={{ fontSize: 18, color: 'var(--theme-accent)' }}>▦</span>
+                <span style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>▦</span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest IMS</span>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-green)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '2px 8px', borderRadius: 10 }}>Active</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '2px 8px', borderRadius: 10 }}>Active</span>
                 {!isAdmin && (
                   <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginLeft: 4 }}>
                     {plan === 'pro' ? 'Pro Plan' : plan === 'growth' ? 'Growth Plan' : 'Starter Plan'}
@@ -1435,15 +1435,15 @@ export default function Help() {
                 onClick={() => toggleModule('hr')}
                 style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid rgba(201,168,76,0.2)', cursor: 'pointer' }}
               >
-                <span style={{ fontSize: 18, color: 'var(--theme-accent)' }}>👤</span>
+                <span style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>👤</span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest HR</span>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-green)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '2px 8px', borderRadius: 10 }}>Active</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '2px 8px', borderRadius: 10 }}>Active</span>
                 <span style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('hr') ? '▲' : '▼'}</span>
               </div>
               {moduleOpen('hr') && (
                 <>
                   <div style={{ marginBottom: 8 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Human Resources</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Human Resources</span>
                   </div>
                   {HR_FEATURES.map(feat => (
                     <FeatureCard key={feat.name} feat={feat} moduleKey="hr" />
@@ -1460,15 +1460,15 @@ export default function Help() {
                 onClick={() => toggleModule('pos')}
                 style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid rgba(201,168,76,0.2)', cursor: 'pointer' }}
               >
-                <span style={{ fontSize: 18, color: 'var(--theme-accent)' }}>⊕</span>
+                <span style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>⊕</span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest POS</span>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-green)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '2px 8px', borderRadius: 10 }}>Active</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '2px 8px', borderRadius: 10 }}>Active</span>
                 <span style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('pos') ? '▲' : '▼'}</span>
               </div>
               {moduleOpen('pos') && (
                 <>
                   <div style={{ marginBottom: 8 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Point of Sale</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Point of Sale</span>
                   </div>
                   {POS_FEATURES.map(feat => (
                 <FeatureCard key={feat.name} feat={feat} moduleKey="pos" />
@@ -1482,9 +1482,9 @@ export default function Help() {
           {isAdmin && (
             <div style={{ marginBottom: 32 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid rgba(248,113,113,0.2)' }}>
-                <span style={{ fontSize: 18, color: 'var(--theme-red)' }}>⚙</span>
+                <span style={{ fontSize: 18, color: 'var(--theme-red-text)' }}>⚙</span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Admin Tools</span>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-red)', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', padding: '2px 8px', borderRadius: 10 }}>Crest Admin Only</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-red-text)', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', padding: '2px 8px', borderRadius: 10 }}>Crest Admin Only</span>
               </div>
               {ADMIN_FEATURES.map(feat => (
                 <FeatureCard key={feat.name} feat={feat} moduleKey="admin" />
@@ -1517,7 +1517,7 @@ export default function Help() {
               <tbody>
                 {GLOSSARY.map(g => (
                   <tr key={g.term}>
-                    <td style={{ fontWeight: 700, color: 'var(--theme-accent)' }}>{g.term}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{g.term}</td>
                     <td style={{ color: 'var(--theme-text2)', lineHeight: 1.6 }}>{g.def}</td>
                   </tr>
                 ))}
@@ -1539,9 +1539,9 @@ export default function Help() {
             <h2 style={{ fontSize: 28, fontWeight: 800, margin: '0 0 8px', fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>Plans & Pricing</h2>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>One system for IMS, HR, and POS — pick a module or bundle them all</p>
             <div style={{ display: 'inline-flex', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: 3, gap: 2 }}>
-              <button onClick={() => setPricingAnnual(false)} style={{ background: !pricingAnnual ? 'rgba(201,168,76,0.15)' : 'none', border: !pricingAnnual ? '1px solid rgba(201,168,76,0.3)' : '1px solid transparent', color: !pricingAnnual ? 'var(--theme-accent)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Monthly</button>
-              <button onClick={() => setPricingAnnual(true)}  style={{ background:  pricingAnnual ? 'rgba(201,168,76,0.15)' : 'none', border:  pricingAnnual ? '1px solid rgba(201,168,76,0.3)' : '1px solid transparent', color:  pricingAnnual ? 'var(--theme-accent)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                Annual <span style={{ background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.25)', color: 'var(--theme-green)', fontSize: 9, padding: '2px 7px', borderRadius: 8, fontWeight: 700 }}>Save 25%</span>
+              <button onClick={() => setPricingAnnual(false)} style={{ background: !pricingAnnual ? 'rgba(201,168,76,0.15)' : 'none', border: !pricingAnnual ? '1px solid rgba(201,168,76,0.3)' : '1px solid transparent', color: !pricingAnnual ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Monthly</button>
+              <button onClick={() => setPricingAnnual(true)}  style={{ background:  pricingAnnual ? 'rgba(201,168,76,0.15)' : 'none', border:  pricingAnnual ? '1px solid rgba(201,168,76,0.3)' : '1px solid transparent', color:  pricingAnnual ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                Annual <span style={{ background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.25)', color: 'var(--theme-green-text)', fontSize: 9, padding: '2px 7px', borderRadius: 8, fontWeight: 700 }}>Save 25%</span>
               </button>
             </div>
           </div>
@@ -1656,11 +1656,11 @@ export default function Help() {
                 <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>Contact your Crest consultant to change your plan.</p>
               </div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                {phone   && <a href={`tel:${phone}`}    style={{ color: 'var(--theme-accent)', fontSize: 13, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>📞 {phone}</a>}
-                {email   && <a href={`mailto:${email}`} style={{ color: 'var(--theme-accent)', fontSize: 13, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>✉ {email}</a>}
-                {website && <a href={website.startsWith('http') ? website : `https://${website}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--theme-accent)', fontSize: 13, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>🌐 {website}</a>}
+                {phone   && <a href={`tel:${phone}`}    style={{ color: 'var(--theme-accent-ink)', fontSize: 13, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>📞 {phone}</a>}
+                {email   && <a href={`mailto:${email}`} style={{ color: 'var(--theme-accent-ink)', fontSize: 13, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>✉ {email}</a>}
+                {website && <a href={website.startsWith('http') ? website : `https://${website}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--theme-accent-ink)', fontSize: 13, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>🌐 {website}</a>}
                 {!phone && !email && !website && <span style={{ fontSize: 13, color: 'var(--theme-text3)' }}>Contact your Crest consultant to upgrade.</span>}
-                <button onClick={() => navigate('/pricing')} style={{ background: 'rgba(201,168,76,0.1)', border: '1px solid rgba(201,168,76,0.3)', color: 'var(--theme-accent)', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                <button onClick={() => navigate('/pricing')} style={{ background: 'rgba(201,168,76,0.1)', border: '1px solid rgba(201,168,76,0.3)', color: 'var(--theme-accent-ink)', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
                   View full pricing page →
                 </button>
               </div>
