@@ -4,7 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import ConfirmModal from '../../../components/ConfirmModal'
-import { bsToAd, daysInBsMonth, getBsToday, formatAd, adToBs } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, daysInBsMonth, getBsToday, formatAd, adToBs } from '../../../utils/bsCalendar'
 import { computeBonusTds, fiscalYearOf } from '../payroll/tds'
 import { printWithTitle } from '../../../utils/printTitle'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -30,11 +30,6 @@ function fmtService(months) {
   return `${y} yr ${m} mo`
 }
 
-const BS_MONTH_NAMES = [
-  'Baisakh', 'Jestha', 'Ashadh', 'Shrawan', 'Bhadra', 'Ashwin',
-  'Kartik', 'Mangsir', 'Poush', 'Magh', 'Falgun', 'Chaitra'
-]
-
 function BsDateSelect({ id, label, year, month, day, onChange, tip }) {
   const daysInMonth = daysInBsMonth(year, month)
   const yearRange = []
@@ -54,7 +49,7 @@ function BsDateSelect({ id, label, year, month, day, onChange, tip }) {
           {yearRange.map(y => <option key={y} value={y}>{y}</option>)}
         </select>
         <select id={`${id}-month`} aria-label={`${label} — month`} className="form-select" value={month} onChange={e => set({ month: +e.target.value })}>
-          {BS_MONTH_NAMES.map((n, i) => <option key={i+1} value={i+1}>{n}</option>)}
+          {BS_MONTHS.map((n, i) => <option key={i+1} value={i+1}>{n}</option>)}
         </select>
         <select id={`${id}-day`} aria-label={`${label} — day`} className="form-select" value={Math.min(day, daysInMonth)} onChange={e => set({ day: +e.target.value })}>
           {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
@@ -427,7 +422,7 @@ export default function FinalSettlement() {
         out.push('Could not verify whether payroll already covers the final month (' + slipsErr.message + '). Try again — finalizing without this check could pay that month twice.')
       }
       if ((slips || []).length > 0) {
-        out.push('A finalized payroll run already covers ' + BS_MONTH_NAMES[lastDate.month - 1] + ' ' + lastDate.year
+        out.push('A finalized payroll run already covers ' + BS_MONTHS[lastDate.month - 1] + ' ' + lastDate.year
           + ' for ' + emp.full_name + ', so their pay for that month has been issued once already.'
           + ' Reopen that payroll run (it now prorates for the end date), or set the last working date to a month payroll has not run.')
       }
@@ -764,7 +759,7 @@ export default function FinalSettlement() {
               used is the difference between a figure someone can check and one they must trust. */}
           {!result.attendanceKnown && (
             <div className="card no-print" style={{ marginBottom: 12, padding: '10px 16px', fontSize: 12, lineHeight: 1.7, color: 'var(--theme-text2)', borderColor: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)' }}>
-              No attendance is marked for {BS_MONTH_NAMES[lastDate.month - 1]} {lastDate.year}, so the partial month is prorated on
+              No attendance is marked for {BS_MONTHS[lastDate.month - 1]} {lastDate.year}, so the partial month is prorated on
               calendar days alone — any absence or unpaid leave in that month is not deducted. Mark it in HR → Attendance first if it
               matters, because after this settlement is finalized {emp.full_name} leaves the attendance sheet and it can no longer be entered.
             </div>
@@ -782,7 +777,7 @@ export default function FinalSettlement() {
               {emp.full_name}{emp.employee_code ? ` · ${emp.employee_code}` : ''} · {emp.department || ''}
             </div>
             <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>
-              Last working date: {lastDate.day} {BS_MONTH_NAMES[lastDate.month - 1]} {lastDate.year} BS ·
+              Last working date: {lastDate.day} {BS_MONTHS[lastDate.month - 1]} {lastDate.year} BS ·
               Service: {fmtService(result.serviceMonths)} ·
               Reason: {reason.charAt(0).toUpperCase() + reason.slice(1)}
             </div>
@@ -963,7 +958,7 @@ export default function FinalSettlement() {
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.7 }} className="no-print">
             <strong style={{ color: 'var(--theme-text2)' }}>Notes:</strong>
             {' '}Partial salary is gross pay (basic plus allowances, as payroll computes it) over the BS month day count
-            {' '}({result.totalDaysInLastMonth} days for {BS_MONTH_NAMES[lastDate.month-1]} {lastDate.year})
+            {' '}({result.totalDaysInLastMonth} days for {BS_MONTHS[lastDate.month-1]} {lastDate.year})
             {result.attendanceKnown ? ', less unpaid days marked on the attendance sheet' : ', prorated on calendar days as no attendance is marked'}.
             {' '}Leave encashment at basic ÷ {DAY_DIVISOR} per day (Nepal Labour Act).
             {' '}TDS on the lump sum is the marginal rate above this employee's actual year-to-date earnings

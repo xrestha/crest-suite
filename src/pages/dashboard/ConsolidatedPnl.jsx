@@ -38,8 +38,8 @@ import Tip from '../../components/Tip'
 import ReportPage from '../../components/ReportPage'
 import { printWithTitle } from '../../utils/printTitle'
 import { computeUsed, COGS_FORMULA } from '../../shared/imsFormulas'
+import { BS_MONTHS } from '../../utils/bsCalendar'
 
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const npr = n => `NPR ${Math.round(n || 0).toLocaleString('en-NP')}`
 const pctOf = (part, whole) => (whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : '—')
 

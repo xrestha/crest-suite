@@ -6,7 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { getBsToday } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
@@ -14,7 +14,6 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const DEPARTMENTS = [
   'Kitchen',
   'Bar',
@@ -776,7 +775,7 @@ export default function Requisitions() {
                       const lineCount = (req.requisition_lines || []).length
                       return (
                         <tr key={req.id} style={{ cursor: 'pointer' }} onClick={() => viewReq(req)}>
-                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>Day {req.bs_day}</td>
+                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(req.bs_day, selectedPeriod?.bs_month) || '—'}</td>
                           <td style={{ fontWeight: 600 }}>{req.department}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{lineCount}</td>
                           <td>

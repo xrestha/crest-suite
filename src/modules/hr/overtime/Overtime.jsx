@@ -5,7 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
-import { BS_MONTHS, getBsToday, daysInBsMonth } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STATUS_TINT } from '../payrollConstants'
 
 // STATUS_TINT's `color` is the base signal token — right for the 10%/20% fill and border it also
@@ -321,7 +321,7 @@ export default function Overtime() {
                         {emp.employee_code && <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{emp.employee_code}</div>}
                       </td>
                       <td style={{ textAlign: 'center', color: 'var(--theme-text2)', fontSize: 12 }}>
-                        {BS_MONTHS[e.bs_month - 1]} {e.bs_day}, {e.bs_year}
+                        {formatBsDay(e.bs_day, e.bs_month)} {e.bs_year}
                       </td>
                       <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-green-text)' }}>
                         {otLabel(e.ot_type, e.ot_hours)}

@@ -56,6 +56,43 @@ export const BS_MONTHS_SHORT = [
   'Kart', 'Mang', 'Pous', 'Magh', 'Falg', 'Chai'
 ]
 
+/**
+ * "1st", "22nd", "32nd" — the ordinal form of a BS day number. BS months run to 32 days, so the
+ * 11-13 exception has to be handled properly rather than by a last-digit lookup.
+ */
+export function bsDayOrdinal(day) {
+  const d = Number(day)
+  if (!Number.isFinite(d) || d <= 0) return ''
+  const r100 = d % 100
+  const suffix = (r100 >= 11 && r100 <= 13) ? 'th'
+    : d % 10 === 1 ? 'st'
+    : d % 10 === 2 ? 'nd'
+    : d % 10 === 3 ? 'rd' : 'th'
+  return `${d}${suffix}`
+}
+
+/**
+ * "1st Bhadra" — a day WITHIN a known month, which is what every period-scoped Day column in IMS
+ * actually holds. Those columns printed the bare number and leaned on the page header to say which
+ * month it belonged to; that works while the header is on screen and stops working the moment the
+ * sheet is printed, scrolled past, or read back a month later.
+ *
+ * Deliberately not the same string as a full BS date ("1 Bhadra 2083", what DemandForecast and the
+ * pickers render) — this one names a day inside the period you already chose, so it carries no
+ * year, and the ordinal is what marks it as a day rather than a count.
+ *
+ * `bsMonth` is 1-12; an absent or out-of-range month degrades to the bare ordinal rather than
+ * naming the wrong month. Day 0 (Sales' Bulk-entry sentinel) and non-numbers return '' so the
+ * caller renders its own dash.
+ */
+export function formatBsDay(day, bsMonth) {
+  const ord = bsDayOrdinal(day)
+  if (!ord) return ''
+  const m = Number(bsMonth)
+  const name = Number.isInteger(m) && m >= 1 && m <= 12 ? BS_MONTHS[m - 1] : ''
+  return name ? `${ord} ${name}` : ord
+}
+
 const BS_CALENDAR = {
   2000: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
   2001: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],

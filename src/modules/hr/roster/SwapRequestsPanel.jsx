@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
 
 // Admin-side queue of shift-swap requests a coworker has already accepted (status='pending_admin')
 // and is now waiting on final sign-off for. Approving trades the employee_id on the two underlying
@@ -157,10 +157,10 @@ export default function SwapRequestsPanel({ employees, shiftMap }) {
                 <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 12 }}>
                   <div style={{ color: 'var(--theme-text2)' }}>
                     <b style={{ color: 'var(--theme-text1)' }}>{nameById[r.requester_employee_id] || '—'}</b>
-                    {' '}(day {r.requester_bs_day}, {shiftMap[r.requester_shift_type_id]?.name || '—'})
+                    {' '}({bsDayOrdinal(r.requester_bs_day)}, {shiftMap[r.requester_shift_type_id]?.name || '—'})
                     {' ⇄ '}
                     <b style={{ color: 'var(--theme-text1)' }}>{nameById[r.target_employee_id] || '—'}</b>
-                    {' '}(day {r.target_bs_day}, {shiftMap[r.target_shift_type_id]?.name || '—'})
+                    {' '}({bsDayOrdinal(r.target_bs_day)}, {shiftMap[r.target_shift_type_id]?.name || '—'})
                     {' — '}{BS_MONTHS[r.bs_month - 1]} {r.bs_year}
                     {r.note && <span style={{ color: 'var(--theme-text3)' }}> · "{r.note}"</span>}
                   </div>
@@ -197,10 +197,10 @@ export default function SwapRequestsPanel({ employees, shiftMap }) {
                 <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, fontSize: 12 }}>
                   <div style={{ color: 'var(--theme-text2)' }}>
                     <b style={{ color: 'var(--theme-text1)' }}>{nameById[r.requester_employee_id] || '—'}</b>
-                    {' '}(day {r.requester_bs_day}, {shiftMap[r.requester_shift_type_id]?.name || '—'})
+                    {' '}({bsDayOrdinal(r.requester_bs_day)}, {shiftMap[r.requester_shift_type_id]?.name || '—'})
                     {' ⇄ '}
                     <b style={{ color: 'var(--theme-text1)' }}>{nameById[r.target_employee_id] || '—'}</b>
-                    {' '}(day {r.target_bs_day}, {shiftMap[r.target_shift_type_id]?.name || '—'})
+                    {' '}({bsDayOrdinal(r.target_bs_day)}, {shiftMap[r.target_shift_type_id]?.name || '—'})
                     {' — '}{BS_MONTHS[r.bs_month - 1]} {r.bs_year}
                     {r.note && <span style={{ color: 'var(--theme-text3)' }}> · "{r.note}"</span>}
                     <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 2 }}>{decidedLine(r)}</div>

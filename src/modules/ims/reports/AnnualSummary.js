@@ -10,8 +10,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared/imsFormulas'
 import { useSettings } from '../../../context/SettingsContext'
 import { Navigate } from 'react-router-dom'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 // Nepal fiscal year starts Shrawan (month 4)
 // bs_month >= 4 → fiscal year = bs_year; else fiscal year = bs_year - 1

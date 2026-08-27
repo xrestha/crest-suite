@@ -7,9 +7,8 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
+import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -259,7 +258,7 @@ export default function NonVatReport() {
                     const rowTotal = e.qty * e.rate
                     return (
                       <tr key={e.id}>
-                        <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{e.bs_day}</td>
+                        <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(e.bs_day, selectedPeriod?.bs_month)}</td>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{e.items?.name}</td>
                         <td>
                           {e.items?.categories?.name

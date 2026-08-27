@@ -5,7 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import ConfirmModal from '../../../components/ConfirmModal'
-import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday } from '../../../utils/bsCalendar'
+import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
 import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 import { buildAttendanceFromRoster } from './attendanceFromRoster'
 import { calcHours, shiftHours } from '../roster/laborForecast'
@@ -1068,7 +1068,7 @@ export default function AttendanceSheet() {
         >
           <p style={{ margin: '0 0 10px' }}>
             {confirmClear.kind === 'day'
-              ? <>All <strong>{confirmClear.count}</strong> attendance record{confirmClear.count === 1 ? '' : 's'} for Day {selectedDay} will be deleted — the day reverts to blank for every employee.</>
+              ? <>All <strong>{confirmClear.count}</strong> attendance record{confirmClear.count === 1 ? '' : 's'} for {formatBsDay(selectedDay, period?.bs_month)} will be deleted — the day reverts to blank for every employee.</>
               : <>All <strong>{confirmClear.count}</strong> of {confirmClear.name}&apos;s attendance record{confirmClear.count === 1 ? '' : 's'} this month will be deleted.</>}
           </p>
           <p style={{ margin: 0 }}>

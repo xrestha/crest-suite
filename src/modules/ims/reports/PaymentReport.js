@@ -9,8 +9,8 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const METHODS = ['Cash', 'Credit', 'FonePay']
 // Two roles, two values: the base token is the FILL (split bar, legend swatch), the -text variant
 // is the TEXT (the KPI figure). One value cannot do both — the base tokens fail AA as text on all
@@ -292,7 +292,7 @@ export default function PaymentReport() {
               <tbody>
                 {dailyByMethod.map(d => (
                   <tr key={d.day}>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-accent-ink)' }}>{d.day}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(d.day, selectedPeriod?.bs_month)}</td>
                     {METHODS.map(m => (
                       <td key={m} style={{ textAlign: 'right', color: d.byMethod[m] !== 0 ? METHOD_COLORS[m] : 'var(--theme-text3)' }}>
                         {d.byMethod[m] !== 0 ? `NPR ${d.byMethod[m].toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { BS_MONTHS, adToBs, adToBsSafe, formatAd, getBsToday } from '../../../utils/bsCalendar'
+import { BS_MONTHS, adToBs, adToBsSafe, formatAd, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { workingDaysInRange, DAY_TYPES } from '../leave/leaveConstants'
 import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount } from '../tada/tadaShared'
 import SearchableSelect from '../../../components/SearchableSelect'
@@ -504,9 +504,9 @@ export default function SelfServiceHome() {
                       <div key={r.id} className={`card${iAmTarget && r.status === 'pending_target' ? ' ss-attention' : ''}`} style={{ padding: 14 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                           <div style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
-                            <b style={{ color: 'var(--theme-text1)' }}>{r.requester_name}</b> (day {r.requester_bs_day}, {r.requester_shift_name || '—'})
+                            <b style={{ color: 'var(--theme-text1)' }}>{r.requester_name}</b> ({bsDayOrdinal(r.requester_bs_day)}, {r.requester_shift_name || '—'})
                             {' ⇄ '}
-                            <b style={{ color: 'var(--theme-text1)' }}>{r.target_name}</b> (day {r.target_bs_day}, {r.target_shift_name || '—'})
+                            <b style={{ color: 'var(--theme-text1)' }}>{r.target_name}</b> ({bsDayOrdinal(r.target_bs_day)}, {r.target_shift_name || '—'})
                           </div>
                           <span className={SWAP_STATUS_BADGE[r.status] || 'badge-gray'} style={{ textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
                             {r.status.replace(/_/g, ' ')}
@@ -844,7 +844,7 @@ export default function SelfServiceHome() {
                 <label htmlFor="ss-swap-day">Their day</label>
                 <select id="ss-swap-day" className="form-select" style={{ width: '100%' }} value={swapTargetDay} onChange={e => setSwapTargetDay(e.target.value)}>
                   <option value="">Choose a day…</option>
-                  {coworkerDays.map(cd => <option key={cd.bs_day} value={cd.bs_day}>Day {cd.bs_day} — {cd.shift_type_name || '—'}</option>)}
+                  {coworkerDays.map(cd => <option key={cd.bs_day} value={cd.bs_day}>{formatBsDay(cd.bs_day, swapDay.bsMonth)} — {cd.shift_type_name || '—'}</option>)}
                 </select>
               </div>
             )}

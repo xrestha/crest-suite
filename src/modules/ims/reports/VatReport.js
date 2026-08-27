@@ -7,9 +7,9 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
+import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
 
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const VAT_RATE = 0.13
 
 function fmtNPR(n) {
@@ -328,7 +328,7 @@ export default function VatReport() {
                       const total = base + vat
                       return (
                         <tr key={e.id}>
-                          <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{e.bs_day}</td>
+                          <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(e.bs_day, selectedPeriod?.bs_month)}</td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{e.items?.name}</td>
                           <td>
                             {e.items?.categories?.name
@@ -404,7 +404,7 @@ export default function VatReport() {
                       const total = base + vat
                       return (
                         <tr key={r.id}>
-                          <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{r.bs_day}</td>
+                          <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(r.bs_day, selectedPeriod?.bs_month)}</td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.items?.name}</td>
                           <td>
                             {r.items?.categories?.name

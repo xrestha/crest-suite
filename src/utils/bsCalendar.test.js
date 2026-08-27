@@ -1,6 +1,6 @@
 import {
   daysInBsMonth, bsToAd, adToBs, adToBsSafe, getBsFiscalYear, formatAd, bsAddDays, bsDiffDays,
-  BS_YEAR_MIN, BS_YEAR_MAX, BS_MONTHS, BS_MONTHS_SHORT,
+  BS_YEAR_MIN, BS_YEAR_MAX, BS_MONTHS, BS_MONTHS_SHORT, bsDayOrdinal, formatBsDay,
 } from './bsCalendar'
 
 const d = s => new Date(s + 'T00:00:00')
@@ -212,5 +212,42 @@ describe('BS_MONTHS_SHORT', () => {
   // as "Ash", so an 11-month chart axis showed two different months under one label.
   it('is unique, so no two months can share an axis label', () => {
     expect(new Set(BS_MONTHS_SHORT).size).toBe(BS_MONTHS_SHORT.length)
+  })
+})
+
+describe('bsDayOrdinal / formatBsDay', () => {
+  test('BS months run to 32 days, so the 11-13 exception has to be real', () => {
+    expect(bsDayOrdinal(1)).toBe('1st')
+    expect(bsDayOrdinal(2)).toBe('2nd')
+    expect(bsDayOrdinal(3)).toBe('3rd')
+    expect(bsDayOrdinal(4)).toBe('4th')
+    expect(bsDayOrdinal(11)).toBe('11th')
+    expect(bsDayOrdinal(12)).toBe('12th')
+    expect(bsDayOrdinal(13)).toBe('13th')
+    expect(bsDayOrdinal(21)).toBe('21st')
+    expect(bsDayOrdinal(22)).toBe('22nd')
+    expect(bsDayOrdinal(31)).toBe('31st')
+    expect(bsDayOrdinal(32)).toBe('32nd')
+  })
+
+  test('names the month a period-scoped Day column was leaning on its header to supply', () => {
+    expect(formatBsDay(1, 5)).toBe('1st Bhadra')
+    expect(formatBsDay(22, 9)).toBe('22nd Poush')
+  })
+
+  // Degrade to the bare ordinal rather than naming the WRONG month: a caller with no period
+  // loaded yet passes undefined, and BS_MONTHS[-1] / BS_MONTHS[12] are both undefined.
+  test('an absent or out-of-range month drops the name instead of inventing one', () => {
+    expect(formatBsDay(1)).toBe('1st')
+    expect(formatBsDay(1, 0)).toBe('1st')
+    expect(formatBsDay(1, 13)).toBe('1st')
+  })
+
+  // Day 0 is Sales' Bulk-entry sentinel, and every caller renders its own dash for it.
+  test('returns empty for day 0 and for junk', () => {
+    expect(formatBsDay(0, 5)).toBe('')
+    expect(formatBsDay(null, 5)).toBe('')
+    expect(formatBsDay(undefined, 5)).toBe('')
+    expect(bsDayOrdinal('')).toBe('')
   })
 })

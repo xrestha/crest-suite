@@ -9,9 +9,8 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
 import { getCf } from './purchasesHelpers'
+import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 export default function SupplierPriceTracker() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -507,8 +506,7 @@ export default function SupplierPriceTracker() {
                           <td></td>
                           {selectedVendorId === 'all' && <td></td>}
                           <td colSpan={3} style={{ paddingLeft: 32, fontSize: 12, color: 'var(--theme-text3)' }}>
-                            {entry.period_label}
-                            {entry.bs_day != null && <span style={{ marginLeft: 6, color: 'var(--theme-text3)' }}>Day {entry.bs_day}</span>}
+                            {entry.bs_day != null ? `${bsDayOrdinal(entry.bs_day)} ${entry.period_label}` : entry.period_label}
                           </td>
                           <td colSpan={2}></td>
                           <td className="no-print"></td>

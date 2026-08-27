@@ -3,7 +3,7 @@ import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
-import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { useHrApprovalCounts } from './useHrApprovalCounts'
 
 const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
@@ -475,7 +475,7 @@ export default function HrDashboard() {
                     <tr key={e.id}>
                       <td style={{ fontWeight: 600, fontSize: 12, color: 'var(--theme-text1)' }}>{empMap[e.employee_id] || '—'}</td>
                       <td style={{ textAlign: 'center', fontSize: 12, color: 'var(--theme-text3)' }}>
-                        {BS_MONTHS[e.bs_month - 1]} {e.bs_day}
+                        {formatBsDay(e.bs_day, e.bs_month)}
                       </td>
                       <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-green-text)', fontSize: 12 }}>{e.ot_hours}h</td>
                       <td>
@@ -561,7 +561,7 @@ export default function HrDashboard() {
                         <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{empMap[s.target_employee_id] || '—'}</span>
                       </td>
                       <td style={{ textAlign: 'center', fontSize: 12, color: 'var(--theme-text3)' }}>
-                        {BS_MONTHS[s.bs_month - 1]} {s.requester_bs_day} ⇄ {s.target_bs_day}
+                        {bsDayOrdinal(s.requester_bs_day)} ⇄ {formatBsDay(s.target_bs_day, s.bs_month)}
                       </td>
                     </tr>
                   ))}

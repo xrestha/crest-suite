@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import { getBsToday } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -11,7 +11,6 @@ import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
 
 const STATUS_META = {

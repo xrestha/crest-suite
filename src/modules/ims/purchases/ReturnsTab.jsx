@@ -4,6 +4,7 @@ import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import { getCf } from './purchasesHelpers'
+import { formatBsDay } from '../../../utils/bsCalendar'
 
 const EMPTY_RETURN = { purchase_entry_id: '', qty: '', notes: '' }
 
@@ -130,7 +131,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                   const dRate = cf > 1 ? p.rate * cf : p.rate
                   return (
                     <option key={p.id} value={p.id}>
-                      Day {p.bs_day} · {p.items?.name} · {Number(dQty).toLocaleString(undefined, { maximumFractionDigits: 3 })} {dUnit} @ NPR {Number(dRate).toLocaleString(undefined, { maximumFractionDigits: 2 })} ({p.payment_method || 'Cash'}) {p.vendors?.name ? `— ${p.vendors.name}` : ''}
+                      {formatBsDay(p.bs_day, period?.bs_month) || 'No day'} · {p.items?.name} · {Number(dQty).toLocaleString(undefined, { maximumFractionDigits: 3 })} {dUnit} @ NPR {Number(dRate).toLocaleString(undefined, { maximumFractionDigits: 2 })} ({p.payment_method || 'Cash'}) {p.vendors?.name ? `— ${p.vendors.name}` : ''}
                     </option>
                   )
                 })}
@@ -237,7 +238,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
               <tbody>
                 {returns.map(ret => (
                   <tr key={ret.id}>
-                    <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{ret.bs_day || '—'}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(ret.bs_day, period?.bs_month) || '—'}</td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{ret.items?.name}</td>
                     <td style={{ color: 'var(--theme-text2)' }}>{ret.vendors?.name || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                     {(() => {

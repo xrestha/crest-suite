@@ -13,12 +13,11 @@ import ConfirmModal from '../../../components/ConfirmModal'
 import QtyInput from '../../../components/QtyInput'
 import './Stock.css'
 import { cacheItems, getCachedItems, cacheCategories, getCachedCategories, cachePeriods, getCachedPeriods, cacheStockData, getCachedStockData, enqueue, getQueue, dequeue } from '../../../utils/offlineQueue'
-import { getBsToday } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const WASTAGE_REASONS = ['Spoilage', 'Expiry', 'Over-prep', 'Breakage', 'Spillage', 'Customer return', 'Other']
 
 function dispPurch(baseQty, item) {
@@ -1033,7 +1032,7 @@ export default function Stock() {
                   </thead>
                   <tbody>
                     {dayEntries.length === 0 ? (
-                      <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>No wastage logged for Day {wDay}.</td></tr>
+                      <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>No wastage logged for {formatBsDay(wDay, selectedPeriod?.bs_month)}.</td></tr>
                     ) : dayEntries.map(r => (
                       <tr key={r.id}>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.items?.name || '—'}</td>
@@ -1049,7 +1048,7 @@ export default function Stock() {
                   {dayEntries.length > 0 && (
                     <tfoot>
                       <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                        <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Day {wDay} total</td>
+                        <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{formatBsDay(wDay, selectedPeriod?.bs_month)} total</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>{Number(dayQty).toLocaleString()}</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', fontSize: 14, paddingTop: 12 }}>{fmtNpr(dayValue)}</td>
                         <td></td>

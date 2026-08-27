@@ -11,9 +11,7 @@ import { useSettings } from '../../../context/SettingsContext'
 import { fcBand } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
-
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 // vat_rate may be 0 (No VAT); null/undefined falls back to 13%.
 function vatOf(r) {

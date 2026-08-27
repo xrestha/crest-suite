@@ -11,9 +11,7 @@ import { fcBand } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
-
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 export default function RecipeMargin() {
   const { clientId, profile, hasImsAccess } = useAuth()

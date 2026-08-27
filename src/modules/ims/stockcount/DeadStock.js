@@ -9,8 +9,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 // Item is "Slow" if used < 20% of net available
 const SLOW_THRESHOLD = 0.2

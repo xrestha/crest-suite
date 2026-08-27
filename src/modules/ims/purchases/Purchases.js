@@ -5,7 +5,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
-import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, formatAd, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
@@ -17,8 +17,6 @@ import ReturnsTab from './ReturnsTab'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 export default function Purchases() {
   const { clientId, profile, loading: authLoading, isAdmin, hasImsAccess } = useAuth()
@@ -157,7 +155,7 @@ export default function Purchases() {
     const vendor = vendors.find(v => v.id === header.vendor_id)
     setPrintBill({ header, lines: validLines, vendorName: vendor?.name || '' })
     setTimeout(() => {
-      printWithTitle(`Purchase Voucher - ${vendor?.name || 'No Vendor'} - ${periodLabel} Day ${header.bs_day}`)
+      printWithTitle(`Purchase Voucher - ${vendor?.name || 'No Vendor'} - ${formatBsDay(header.bs_day, selectedPeriod?.bs_month) || periodLabel} ${selectedPeriod?.bs_year || ''}`.trim())
       setPrintBill(null)
     }, 60)
   }
@@ -607,7 +605,7 @@ export default function Purchases() {
               <div className="empty-state"><p className="empty-state-text">No entries match your filters.</p></div>
             ) : (
               <div className="table-wrap table-wrap--fab-clear">
-                <table className="data-table purchases-print-plain">
+                <table className="data-table purchases-table purchases-print-plain">
                   <thead>
                     <tr>
                       <th><Tip text="Day of the Nepali month the goods were received." width={220}>Day</Tip></th>
@@ -634,10 +632,10 @@ export default function Purchases() {
                         const groupGrand    = (groupTotal - discountAmt) + vatAmount
 
                         const dayCell = (
-                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, borderRight: '1px solid var(--theme-border)', verticalAlign: 'middle', paddingTop: 10, paddingBottom: 10 }}>
+                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, borderRight: '1px solid var(--theme-border)', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                             {gIdx === 0 ? (
                               <>
-                                {day}
+                                {formatBsDay(day, selectedPeriod?.bs_month)}
                                 {selectedPeriod && (
                                   <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginTop: 2 }}>
                                     {formatAd(bsToAd(selectedPeriod.bs_year, selectedPeriod.bs_month, parseInt(day)))}
@@ -677,7 +675,7 @@ export default function Purchases() {
                           return [
                             <tr key={`gh-${gid}`} style={{ background: 'rgba(201,168,76,0.04)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
                               {dayCell}
-                              <td style={{ fontWeight: 500, color: 'var(--theme-text1)', fontSize: 13 }}>
+                              <td className="purchases-item-cell" style={{ fontWeight: 500, color: 'var(--theme-text1)', fontSize: 13 }}>
                                 {entry.items?.name}
                                 {entry.items?.categories?.name && (
                                   <span className="badge badge-yellow" style={{ marginLeft: 8 }}>{entry.items.categories.name}</span>
@@ -732,7 +730,7 @@ export default function Purchases() {
                           ...groupEntries.map(entry => (
                             <tr key={entry.id} style={{ background: 'rgba(0,0,0,0.12)', borderBottom: '1px solid var(--theme-card)' }}>
                               <td></td>
-                              <td style={{ fontWeight: 500, color: 'var(--theme-text2)', paddingLeft: 20, fontSize: 13 }}>
+                              <td className="purchases-item-cell" style={{ fontWeight: 500, color: 'var(--theme-text2)', paddingLeft: 20, fontSize: 13 }}>
                                 {entry.items?.name}
                                 {entry.items?.categories?.name && (
                                   <span className="badge badge-yellow" style={{ marginLeft: 8 }}>{entry.items.categories.name}</span>

@@ -159,6 +159,47 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S614 — 2026-08-27 — A Day column that only works while you can see the page header
+
+Three reported-from-a-screenshot fixes on the Purchases bill list, and the last one turned into a
+convention.
+
+- **The Item cell wrapped a two-word name over three lines.** It holds the item name *and* its
+  category badge, while the Vendor cell beside it is `white-space: nowrap` — so under the auto table
+  layout the Item column was the one that collapsed, and "COCONUT WATER" broke into two lines with
+  the badge dropping onto a third. The row stood three lines tall to show one line of figures.
+  Fixed with a scoped `table.purchases-table` rule (nowrap on the item cell, 7px row padding down
+  from the global 11px), letting `.table-wrap`'s existing horizontal scroll carry the width.
+- **The Day cell had no `white-space` rule at all**, so the column collapsed to the widest
+  unbreakable fragment of the AD date — `2026-` — and broke `2026-08-17` across three lines at
+  every hyphen.
+- **A bare day number is only legible next to the page header that names the month.** Print the
+  sheet, scroll past the header, or read it back a month later and "1" says nothing.
+  `formatBsDay(day, bsMonth)` and `bsDayOrdinal(day)` (`src/utils/bsCalendar.js`, 12 tests) render
+  it as **"1st Bhadra"**, applied to every period-scoped Day column in IMS plus the HR labels that
+  were already printing "Bhadra 1". Two properties worth not re-deriving: an absent or out-of-range
+  month **degrades to the bare ordinal rather than naming the wrong month**, and day 0 (Sales'
+  Bulk-entry sentinel) returns `''` so each caller keeps its own dash. Deliberately NOT the same
+  string as a full BS date ("1 Bhadra 2083", what DemandForecast and the pickers render) — this one
+  names a day inside the period you already chose, so it carries no year. Excel exports keep the
+  numeric Day column (text breaks sorting); the "Days with wastage" chip strip stays bare under a
+  heading that already says the month; ClientDashboard's "Day 12 of 32" is progress, not a date.
+
+Then, found while doing it: **`BS_MONTHS` was copy-pasted into 31 files.** All 31 were byte-identical
+to the shared export, so nothing rendered wrong — it was a list that only had to be edited once to
+disagree with itself. Now imported from `bsCalendar.js` everywhere; `grep -rn "'Baisakh'" src`
+outside that file returns nothing. **Three of the 31 hid from the obvious grep**, which is the
+lesson: `FinalSettlement.jsx` held the same twelve strings under a *different name*
+(`BS_MONTH_NAMES`, so no name-based search would ever have paired it with the others), `Periods.js`
+wrapped the array across two lines, and `MenuEngineering.js` declared it **inside the component
+body** where it was rebuilt on every render. A `^const NAME =` anchor finds the tidy copies and
+misses exactly the ones that have drifted furthest from the pattern.
+
+Verified by ESLint on all 39 changed files, a clean `react-scripts build` (`main.js` +1 byte), and
+the full suite at 380/380. **Not smoke-tested live** beyond the build — the Day columns are a
+render-only change, but the Purchases row-height fix was reported from a screenshot and deserves
+one.
+
 ### S613 — 2026-08-26 — The re-run scored 34, and both P1s were rules the product had already written
 
 A second `/impeccable critique` product-wide run, same slug, four hours after S612's fix pass:

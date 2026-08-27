@@ -6,15 +6,13 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { viewPosBill } from '../../../utils/viewPosBill'
-import { daysInBsMonth } from '../../../utils/bsCalendar'
+import { BS_MONTHS, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import { loadSubRecipeUsage, usageForSource, subRecipeHasIngredient, EMPTY_USAGE } from './subRecipeUsage'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 export default function StockMovements() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -564,7 +562,7 @@ export default function StockMovements() {
               <tbody>
                 {filtered.map(r => (
                   <tr key={r.id}>
-                    <td style={{ color: 'var(--theme-text2)' }}>{r.bsDay}</td>
+                    <td style={{ color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>{formatBsDay(r.bsDay, selectedPeriod?.bs_month) || '—'}</td>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.item.name}</div>
                       {r.item.item_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{r.item.item_code}</div>}

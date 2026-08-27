@@ -252,6 +252,22 @@ The lookup table covers BS 2000–2087 (extended from 2079–2087, S559). Out-of
 
 `BS_YEAR_MIN`/`BS_YEAR_MAX` (derived from the table's own keys, so a future extension widens them for free) and `adToBsSafe(adDate)` are the actual fix, not just the wider table — `adToBsSafe` returns `null` instead of a silently-wrong date when the result falls outside the verified range, so a caller can render the raw AD date instead of a confident wrong BS one. **`BsCalendarPicker` adopted it in S569** — the one shared component every DOB/join-date/arbitrary-date field goes through now resolves its value via `adToBsSafe` (an out-of-range value displays as its truthful `YYYY-MM-DD (AD)` form instead of an approximated BS date), its year dropdown is clamped to `BS_YEAR_MIN..BS_YEAR_MAX` (it used to offer 2088–2090, which would have *stored* wrong AD dates via approximated `bsToAd`), and month navigation stops at the table's edges. The remaining direct `adToBs(` call sites all convert operational timestamps (`closed_at`, roster days, period dates) that are inside the verified range by construction — a *new* call site that renders a stored arbitrary date should still reach for `adToBsSafe`.
 
+**A day inside a chosen period renders as `formatBsDay(day, bsMonth)` — "1st Bhadra" (S614).** Every
+period-scoped Day column in IMS printed a bare number and leaned on the page header to say which month
+it was; that stops working the moment the sheet is printed, scrolled past, or read back later. Two
+properties are load-bearing: an absent or out-of-range month **degrades to the bare ordinal rather
+than naming the wrong month**, and day 0 (Sales' Bulk-entry sentinel) returns `''` so each caller
+keeps its own dash. It is deliberately NOT the full-date form (`1 Bhadra 2083`, what DemandForecast
+and the pickers render) — this one names a day inside the period you already chose, so it carries no
+year. Use `bsDayOrdinal(day)` alone where the month is already stated beside it. **Excel exports keep
+the numeric Day column** — text breaks a spreadsheet's sorting and filtering.
+
+**`BS_MONTHS` has exactly one definition and it lives here.** It was copy-pasted into 31 files until
+S614 (all byte-identical, so nothing rendered wrong — it was simply a list that only had to be edited
+once to disagree with itself). Three of those 31 hid from a `^const BS_MONTHS =` grep: one held the
+same twelve strings under a different name (`BS_MONTH_NAMES`), one wrapped the array across two lines,
+and one declared it inside a component body. Import it; never retype it.
+
 **Never `.toISOString()` a Date that came from `bsToAd`.** It returns local midnight, so at Nepal's UTC+05:45 `.toISOString()` lands at 18:15Z on the *previous* day and `.slice(0,10)` yields the wrong date for every user in the country. This shipped twice: `ClientDashboard` documented and worked around it, then `GroupDashboard` reintroduced it and silently shifted both bounds of the multi-outlet comparison by a day (fixed S550 by lifting the helper into `bsCalendar.js`). Use `formatAd` where a bare date string is wanted — including any RPC declaring its parameter as `date`, which is what `get_group_summary` does — and `bsDayBoundaryIso` where the value is compared against a real `timestamptz` such as `pos_orders.closed_at`.
 
 ### HR payroll engine

@@ -3,18 +3,13 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import { scopedInsert as scopedInsertRaw, scopedUpdate as scopedUpdateRaw } from '../shared/scopedDb'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
-import { getBsToday } from '../utils/bsCalendar'
+import { BS_MONTHS, getBsToday } from '../utils/bsCalendar'
 import { useNavigate, Navigate } from 'react-router-dom'
 import Tip from '../components/Tip'
 import ConfirmModal from '../components/ConfirmModal'
 import { generateMonthlyReport, saveGeneratedReport } from '../modules/ownerReport/generateMonthlyReport'
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { withTimeout } from '../utils/withTimeout'
-
-const BS_MONTHS = [
-  'Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin',
-  'Kartik','Mangsir','Poush','Magh','Falgun','Chaitra'
-]
 
 export default function Periods() {
   const { isAdmin, clientId, profile, switchAdminClient, hasImsAccess, clientModules } = useAuth()

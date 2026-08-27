@@ -11,8 +11,8 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const npr = n => Number(n || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })
 
 export default function StockReport() {

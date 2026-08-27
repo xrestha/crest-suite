@@ -11,8 +11,7 @@ import ChartCard from '../../../components/ChartCard'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 // Recharts SVG props (fill, tick) don't resolve CSS vars — these fixed hexes back only
 // the two chart call sites below; everything else uses the theme-token constants beneath.

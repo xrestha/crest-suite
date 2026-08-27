@@ -6,12 +6,10 @@ import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { daysInBsMonth } from '../../../utils/bsCalendar'
+import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { disabledStyle } from '../../../shared/inlineFieldState'
-
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
 // labor's blue has no dedicated theme token — accent/green/red/amber/purple are already spoken
 // for by food/overhead/profit-loss/target-warning/tax elsewhere on this page, so it stays a fixed

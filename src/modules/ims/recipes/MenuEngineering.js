@@ -17,6 +17,7 @@ import {
 import { chartMotion } from '../../../shared/chartMotion'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 const QUADRANTS = {
   Star:      { color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.30)', icon: '★', desc: 'High profit · High popularity' },
@@ -103,8 +104,6 @@ export default function MenuEngineering() {
 
   useEffect(() => { if (!authLoading && clientId) loadPeriods() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (periodId && clientId) loadData() }, [periodId, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 
   async function loadPeriods() {
     const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')

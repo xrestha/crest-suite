@@ -8,12 +8,11 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Modal from '../../../components/Modal'
-import { bsToAd } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, formatBsDay } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const EPS = 0.001
 
 function billAging(days) {
@@ -615,7 +614,7 @@ export default function VendorReport() {
                           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                           title="View bill(s) for this day"
                         >
-                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{day}</td>
+                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(day, selectedPeriod?.bs_month)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                             NPR {val.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
                           </td>
@@ -649,7 +648,7 @@ export default function VendorReport() {
                     const dn = dayNet(day)
                     return (
                       <tr key={day}>
-                        <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{day}</td>
+                        <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(day, selectedPeriod?.bs_month)}</td>
                         {filteredActiveVendors.map(v => {
                           const val = vendorDayNet(v.id, day)
                           return (
@@ -753,7 +752,7 @@ export default function VendorReport() {
                   <tbody>
                     {discountedBills.map((b, i) => (
                       <tr key={i}>
-                        <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{b.day}</td>
+                        <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(b.day, selectedPeriod?.bs_month)}</td>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{b.vendor}</td>
                         <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{b.invoice || '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>NPR {b.billTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
@@ -774,7 +773,7 @@ export default function VendorReport() {
 
       {drilldownVendor && (
         <Modal
-          title={`${drilldownVendor.name} — Purchase Bills${drilldownDay != null ? ` (Day ${drilldownDay})` : ''}`}
+          title={`${drilldownVendor.name} — Purchase Bills${drilldownDay != null ? ` (${formatBsDay(drilldownDay, selectedPeriod?.bs_month)})` : ''}`}
           onClose={() => { setDrilldownVendor(null); setDrilldownDay(null); setExpandedBillKey(null) }}
           maxWidth={900}
         >
@@ -829,7 +828,7 @@ export default function VendorReport() {
                               The control lives in a cell instead — see components/RowDisclosure.jsx (S595). */}
                           <tr style={{ cursor: 'pointer' }}
                             onClick={() => setExpandedBillKey(prev => prev === b.key ? null : b.key)}>
-                            <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{b.day}</td>
+                            <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(b.day, selectedPeriod?.bs_month)}</td>
                             <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{b.invoice || '—'}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.itemCount}</td>
                             <td><span className={`badge ${b.paymentMethod === 'Cash' ? 'badge-green' : b.paymentMethod === 'Credit' ? 'badge-red' : 'badge-gray'}`}>{b.paymentMethod}</span></td>

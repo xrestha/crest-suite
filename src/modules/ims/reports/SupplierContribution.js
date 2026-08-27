@@ -33,8 +33,8 @@ import {
   vendorNetByItem, vendorNetTotals, attributeConsumption, NO_VENDOR, UNATTRIBUTED,
 } from './supplierAttribution'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 
-const BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
 const npr = n => `NPR ${(n || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`
 const pct = (part, whole) => (whole > 0 ? (part / whole) * 100 : 0)
 
