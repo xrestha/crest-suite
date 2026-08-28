@@ -237,13 +237,17 @@ export default function Items() {
   // parse of a not-quite-numeric string ("5oo" → 5, "1,200" → 1) must never price an item.
   function perUnitOf(qty, total) {
     const q = Number(qty), t = Number(total)
-    return q > 0 && t > 0 ? parseFloat((t / q).toFixed(6)) : null
+    return q > 0 && t > 0 ? Number((t / q).toFixed(6)) : null
   }
   const packPerUnit = perUnitOf(pack.qty, pack.total)
   // Both boxes filled but the division can't run (zero, negative, unparseable): the rate box
   // above deliberately KEEPS its last value in that state, so it must be flagged here or the
-  // pack line and the saved price silently disagree on screen.
+  // pack line and the saved price silently disagree on screen. One message spans both boxes, so
+  // both carry fieldAria with the SAME id — the one the FieldError below derives its own id from.
   const packInvalid = pack.qty !== '' && pack.total !== '' && packPerUnit == null
+  const packErr = packInvalid
+    ? `Both boxes need a number above zero — Price per ${form.uom} above still shows its last value.`
+    : ''
 
   function setPackField(field, val) {
     const next = { ...pack, [field]: val }
@@ -571,7 +575,7 @@ export default function Items() {
                   onChange={v => setPackField('qty', v)}
                   placeholder="500"
                   style={{ width: 92 }}
-                  aria-invalid={packInvalid || undefined}
+                  {...fieldAria('items-pack-qty', packErr)}
                 />
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{form.uom} for NPR</span>
                 <QtyInput id="items-pack-total"
@@ -581,18 +585,14 @@ export default function Items() {
                   onChange={v => setPackField('total', v)}
                   placeholder="388.50"
                   style={{ width: 112 }}
-                  aria-invalid={packInvalid || undefined}
+                  {...fieldAria('items-pack-qty', packErr)}
                 />
                 {packPerUnit != null && (
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                     → NPR {fmtPerUom(packPerUnit)} per {form.uom}
                   </span>
                 )}
-                {packInvalid && (
-                  <span role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>
-                    Both boxes need a number above zero — Price per {form.uom} above still shows its last value.
-                  </span>
-                )}
+                <FieldError id="items-pack-qty" message={packErr} />
               </div>
             </>
           )}

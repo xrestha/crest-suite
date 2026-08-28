@@ -159,6 +159,50 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S624 — 2026-08-28 — A /simplify pass over the S623 batch: same job, one definition
+
+Four parallel cleanup reviewers (reuse / simplification / efficiency / altitude) over the last four
+commits; six findings applied, efficiency reported the diff clean (the `TOOLTIP_CHROME` hoist and
+module-scope tooltip were already net wins on the hottest path). No behavior changes — the 10
+S623 tests pass unchanged and the production build is clean.
+
+**The pack-helper's error line now goes through `FieldError`/`fieldAria`** instead of a hand-rolled
+inline `role="alert"` span — the same helpers the same form already used two fields up. The inline
+copy had drifted from the global `.field-error` class (12px vs 13px) and, worse, carried a bare
+`aria-invalid` with no `aria-describedby`, so a screen reader heard both boxes announced invalid
+with no path to the sentence explaining why. One message spans two boxes, so both `fieldAria` calls
+point at the SAME id — the one the single `FieldError` derives its own id from; that two-box shape
+is now noted on the component-library rule. Also `perUnitOf` used `parseFloat` on the line directly
+under its own "Number(), not parseFloat" comment — safe (a `toFixed` string is fully numeric) but a
+planted contradiction for the next person grepping a rates file for `parseFloat`; now `Number()`.
+
+**`QtyInput.commit()`'s two branches had become byte-identical** — S623's fix made the
+non-expression branch evaluate-or-revert, which is exactly what the expression branch did, leaving
+a fork that no longer selected between behaviors. Collapsed to one evaluate-or-revert path (empty
+string still commits `''`); the tests assert outcomes, not branches, and all pass.
+
+**`TOOLTIP_CHROME` moved to `src/shared/tooltipChrome.js`** — its "ONE definition of the chart-
+tooltip card chrome" comment was only true inside `ClientDashboard.jsx`: byte-identical copies
+still sit in `OwnerDashboard.jsx`, `SalesReport.jsx`, `PeriodComparison.js`, `BestSellers.js`, and
+an already-drifted one (no borderRadius) in `ValuationReportTab.js`. Same precedent as
+`chartMotion.js`; the shared file's comment names the stragglers for migration as they're touched.
+Two more trend-tooltip cleanups: it no longer restates the compact `fontSize: 11` the chrome
+constant owns (only the `big` bump is stated locally, so a chrome font change now reaches it), and
+the `textColor` prop is gone — the tooltip is a plain `<div>`, so `color: 'var(--theme-text1)'`
+resolves natively and the S550 exemption (JS-resolved hex for Recharts SVG props) never applied.
+
+**The salesProj→sales / purchProj→purchases pairing lives in one `PROJ_ACTUAL_KEY` map.** The
+tooltip's anchor-row suppression and `projActiveDot`'s anchor-dot suppression each hardcoded the
+pairing independently — the two consumers of the same invariant, drift-free only by luck.
+`projActiveDot` now takes the projection's own dataKey (`projActiveDot('salesProj')`, matching the
+adjacent `dataKey`) and resolves the actual through the map. Deliberately skipped: stamping the
+anchor in the trend build (deeper, but touches code outside the reviewed diff — the map
+single-sources the pairing without it) and migrating the five other `TOOLTIP_CHROME` copies
+(outside the diff; ValuationReportTab's is drifted, so its migration is a small deliberate
+behavior change). `CACHE_NAME` v144→v145.
+
+---
+
 ### S623 — 2026-08-28 — A /code-review of the last two sessions, and the escape that committed
 
 An 8-angle `/code-review` over the S621+S622 diff, with adversarial verification (including

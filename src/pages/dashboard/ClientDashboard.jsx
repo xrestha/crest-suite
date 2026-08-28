@@ -13,6 +13,7 @@ import {
   BarChart, Bar, Dot
 } from 'recharts'
 import { chartMotion } from '../../shared/chartMotion'
+import { TOOLTIP_CHROME } from '../../shared/tooltipChrome'
 import { ArrowDown, Lock, TriangleAlert, Clock, LayoutGrid, ChevronDown } from 'lucide-react'
 import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
@@ -82,20 +83,16 @@ const DAILY_TREND_COLORS = {
   salesTarget: '#60a5fa', // blue — frozen Sales Target, deliberately not green
 }
 
-// ONE definition of the chart-tooltip card chrome — the five <Tooltip contentStyle> sites in this
-// file and the hand-rolled trend tooltip below all read it, so a border/radius/padding change
-// lands on every chart instead of the five a grep happens to find.
-const TOOLTIP_CHROME = {
-  background: 'var(--theme-card)',
-  border: '1px solid var(--theme-border)',
-  borderRadius: 'var(--radius-sm)',
-  fontSize: 11,
-}
+// Which actual series each dashed projection extends. The tooltip suppresses a projection row on
+// any day its actual is present (the anchor day), and projActiveDot suppresses the projection's
+// anchor-day dot for the same reason — the pairing lives here once so the two consumers can't
+// drift, and a third metric pair is one entry here plus its columns in the trend build.
+const PROJ_ACTUAL_KEY = { salesProj: 'sales', purchProj: 'purchases' }
 
 // Custom tooltip for Daily Purchases vs Sales, at module scope so React sees one stable component
 // type (an inline arrow is a brand-new type every parent render, remounting the tooltip subtree —
 // same hoisted shape as MenuEngineering's ScatterTooltipContent). Recharts clones this element
-// with { active, payload, label }; `big`/`textColor` come from the render site.
+// with { active, payload, label }; `big` comes from the render site.
 //
 // Why custom content rather than contentStyle/formatter: the dashed projection series anchor at
 // the last actual day so the line connects (see the trend build in loadStats), and Recharts'
@@ -104,22 +101,23 @@ const TOOLTIP_CHROME = {
 // under a label that claims it was computed. A projection row is only shown on days that have no
 // actual for the same metric. Rows are sorted by value, highest first, so the tooltip reads in
 // the same top-to-bottom order as the lines it describes at that day. Each row keeps its series
-// hue as a ● swatch while the text takes textColor — a chart hex as 11px body text measures
-// ~1.9:1 on a light card (the S550 rule); whiteSpace keeps a long NPR row from wrapping the way
-// Recharts' own container never does.
-function TrendTooltipContent({ active, payload, label, big, textColor }) {
+// hue as a ● swatch while the text takes --theme-text1 — a chart hex as 11px body text measures
+// ~1.9:1 on a light card (the S550 rule), and this is a plain <div>, so the CSS variable resolves
+// natively (no useTheme-resolved hex needed, unlike Recharts SVG props); whiteSpace keeps a long
+// NPR row from wrapping the way Recharts' own container never does.
+function TrendTooltipContent({ active, payload, label, big }) {
   if (!active || !payload?.length) return null
   const row = payload[0]?.payload || {}
   const shown = payload.filter(en => {
     if (en.value == null) return false
-    if (en.dataKey === 'salesProj' && row.sales != null) return false
-    if (en.dataKey === 'purchProj' && row.purchases != null) return false
+    const actualKey = PROJ_ACTUAL_KEY[en.dataKey]
+    if (actualKey && row[actualKey] != null) return false
     return true
   }).sort((a, b) => Number(b.value) - Number(a.value))
   if (!shown.length) return null
   return (
-    <div style={{ ...TOOLTIP_CHROME, fontSize: big ? 12 : 11, padding: '8px 12px', whiteSpace: 'nowrap' }}>
-      <p style={{ color: textColor, margin: 0, fontWeight: 600 }}>{label}</p>
+    <div style={{ ...TOOLTIP_CHROME, ...(big && { fontSize: 12 }), color: 'var(--theme-text1)', padding: '8px 12px', whiteSpace: 'nowrap' }}>
+      <p style={{ margin: 0, fontWeight: 600 }}>{label}</p>
       {shown.map(en => {
         // Actual-vs-target direction arrow on the two actual rows: ▲ green when the day's
         // actual sits above its frozen Target line, ▼ red below. Direction colouring,
@@ -133,7 +131,7 @@ function TrendTooltipContent({ active, payload, label, big, textColor }) {
             ? <span style={{ color: 'var(--theme-green-text)' }}> ▲</span>
             : <span style={{ color: 'var(--theme-red-text)' }}> ▼</span>
         return (
-          <p key={en.dataKey} style={{ color: textColor, margin: '4px 0 0' }}>
+          <p key={en.dataKey} style={{ margin: '4px 0 0' }}>
             <span style={{ color: en.color }}>●</span> {en.name} : NPR {Math.round(Number(en.value)).toLocaleString()}{arrow}
           </p>
         )
@@ -1790,9 +1788,14 @@ export default function ClientDashboard() {
             // activeDot at that exact coordinate, so without this the seam day rendered two
             // concentric white-ringed dots as a small bullseye. Suppress the projection's dot on
             // any day its actual is present; elsewhere reproduce the old config on Recharts' Dot.
-            const projActiveDot = actualKey => props => props.payload?.[actualKey] != null
-              ? null
-              : <Dot {...props} r={big ? 4 : 3} fill={DAILY_TREND_COLORS[actualKey]} />
+            // Takes the projection's own dataKey and resolves the actual via PROJ_ACTUAL_KEY, the
+            // same map the tooltip's suppression reads.
+            const projActiveDot = projKey => props => {
+              const actualKey = PROJ_ACTUAL_KEY[projKey]
+              return props.payload?.[actualKey] != null
+                ? null
+                : <Dot {...props} r={big ? 4 : 3} fill={DAILY_TREND_COLORS[actualKey]} />
+            }
             const chart = (
               <ResponsiveContainer width="100%" height={h}>
                 <ComposedChart data={chartData} margin={{ top: big ? 8 : 4, right: big ? 16 : 8, bottom: big ? 4 : 0, left: big ? 8 : 0 }}>
@@ -1813,7 +1816,7 @@ export default function ClientDashboard() {
                   <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
                   {/* See TrendTooltipContent at module scope for why this chart needs custom
                       content (anchor-day suppression, value-sorted rows, the target arrows). */}
-                  <Tooltip content={<TrendTooltipContent big={big} textColor={colors.text1} />} />
+                  <Tooltip content={<TrendTooltipContent big={big} />} />
                   {/* Frozen full-month reference lines, drawn first (so they sit BEHIND the more
                       prominent actual/adaptive-projection lines below) — thin, dotted, and each in
                       its own hue (DAILY_TREND_COLORS.salesTarget/purchTarget) rather than reusing
@@ -1832,8 +1835,8 @@ export default function ClientDashboard() {
                   ) : (
                     <Line type="monotone" dataKey="sales" name="Sales" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} connectNulls dot={{ r: 2, fill: DAILY_TREND_COLORS.sales, strokeWidth: 0 }} activeDot={{ r: 4, fill: DAILY_TREND_COLORS.sales }} {...chartMotion()} />
                   ))}
-                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={projActiveDot('sales')} {...chartMotion()} />}
-                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={projActiveDot('purchases')} {...chartMotion()} />}
+                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={projActiveDot('salesProj')} {...chartMotion()} />}
+                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={projActiveDot('purchProj')} {...chartMotion()} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )

@@ -71,15 +71,11 @@ export default function QtyInput({
 
     if (raw === '') {
       next = ''
-    } else if (looksLikeExpression(raw)) {
-      const result = evaluate(raw)
-      // An incomplete or malformed expression ("3*", "2+(4") reverts rather than committing a
-      // partial reading of it.
-      next = result === null ? (value ?? '') : result
     } else {
-      // Not an expression — but still not necessarily a clean number. evaluate() accepts
-      // anything tokenize() can normalise ("1,200" → 1200), so run it anyway; genuine garbage
-      // ("5oo") reverts. Never hand the raw string up: a parent's parseFloat would read a
+      // Everything non-empty goes through evaluate(), expression or not: it computes "3*24+7",
+      // normalises anything tokenize() accepts ("1,200" → 1200, "12x4" → 48), and returns null
+      // for an incomplete expression ("3*", "2+(4") or genuine garbage ("5oo"), which reverts to
+      // the last good value. Never hand the raw string up: a parent's parseFloat would read a
       // prefix of it ("1,200" → 1) and store a confidently wrong figure (S623).
       const result = evaluate(raw)
       next = result === null ? (value ?? '') : result
