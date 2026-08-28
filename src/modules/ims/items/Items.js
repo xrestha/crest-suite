@@ -231,16 +231,25 @@ export default function Items() {
   // `rate = amount / qty`, which the generated column then divided by `qty` a SECOND time — S566,
   // found via a CUP HOLDER valuing 880 PCS at NPR 12. The form now collects the per-unit price
   // directly, so neither multiplication nor division survives at save time.
-  const packPerUnit = (() => {
-    const q = parseFloat(pack.qty), t = parseFloat(pack.total)
-    return q > 0 && t > 0 ? t / q : null
-  })()
+  // ONE derivation feeds both the "→ NPR x per uom" preview and the rate written into the form —
+  // they briefly had independent copies of this division with different rounding, which is how a
+  // preview comes to state a price the form did not save. Number(), not parseFloat: a prefix
+  // parse of a not-quite-numeric string ("5oo" → 5, "1,200" → 1) must never price an item.
+  function perUnitOf(qty, total) {
+    const q = Number(qty), t = Number(total)
+    return q > 0 && t > 0 ? parseFloat((t / q).toFixed(6)) : null
+  }
+  const packPerUnit = perUnitOf(pack.qty, pack.total)
+  // Both boxes filled but the division can't run (zero, negative, unparseable): the rate box
+  // above deliberately KEEPS its last value in that state, so it must be flagged here or the
+  // pack line and the saved price silently disagree on screen.
+  const packInvalid = pack.qty !== '' && pack.total !== '' && packPerUnit == null
 
   function setPackField(field, val) {
     const next = { ...pack, [field]: val }
     setPack(next)
-    const q = parseFloat(next.qty), t = parseFloat(next.total)
-    if (q > 0 && t > 0) setForm(prev => ({ ...prev, rate: String(parseFloat((t / q).toFixed(6))) }))
+    const v = perUnitOf(next.qty, next.total)
+    if (v != null) setForm(prev => ({ ...prev, rate: String(v) }))
   }
 
   function openNew() {
@@ -562,6 +571,7 @@ export default function Items() {
                   onChange={v => setPackField('qty', v)}
                   placeholder="500"
                   style={{ width: 92 }}
+                  aria-invalid={packInvalid || undefined}
                 />
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{form.uom} for NPR</span>
                 <QtyInput id="items-pack-total"
@@ -571,10 +581,16 @@ export default function Items() {
                   onChange={v => setPackField('total', v)}
                   placeholder="388.50"
                   style={{ width: 112 }}
+                  aria-invalid={packInvalid || undefined}
                 />
                 {packPerUnit != null && (
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                     → NPR {fmtPerUom(packPerUnit)} per {form.uom}
+                  </span>
+                )}
+                {packInvalid && (
+                  <span role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>
+                    Both boxes need a number above zero — Price per {form.uom} above still shows its last value.
                   </span>
                 )}
               </div>

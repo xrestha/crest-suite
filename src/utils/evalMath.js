@@ -56,11 +56,16 @@ function tokenize(input) {
 // True only when the string contains an actual operation. A plain "146" or a leading-minus
 // "-5" is NOT an expression: fields that hold a plain number must keep behaving exactly as
 // they did before, with no evaluation step and no result preview.
+//
+// The character class must cover EVERYTHING tokenize() above normalises — x/X (its ASCII
+// multiply) and the comma it strips included. When the two disagreed, "12x4" and "1,200"
+// were waved past evaluation onto the raw-string path, where a caller's parseFloat read
+// them as 12 and 1 — a silently 4×/1000×-wrong figure in a rate box (S623).
 export function looksLikeExpression(str) {
   if (typeof str !== 'string') return false
   const s = str.trim()
   if (!s) return false
-  if (/[+*/×✕÷()]/.test(s)) return true
+  if (/[+*/×✕xX÷(),]/.test(s)) return true
   return s.slice(1).includes('-') // a '-' anywhere but the sign position
 }
 

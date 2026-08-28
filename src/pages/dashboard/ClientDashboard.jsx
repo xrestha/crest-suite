@@ -10,7 +10,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
   LineChart, Line, ComposedChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine,
-  BarChart, Bar
+  BarChart, Bar, Dot
 } from 'recharts'
 import { chartMotion } from '../../shared/chartMotion'
 import { ArrowDown, Lock, TriangleAlert, Clock, LayoutGrid, ChevronDown } from 'lucide-react'
@@ -80,6 +80,66 @@ const DAILY_TREND_COLORS = {
   sales:     '#34d399', // green
   purchTarget: '#fb923c', // orange — frozen Purch. Target, deliberately not gold
   salesTarget: '#60a5fa', // blue — frozen Sales Target, deliberately not green
+}
+
+// ONE definition of the chart-tooltip card chrome — the five <Tooltip contentStyle> sites in this
+// file and the hand-rolled trend tooltip below all read it, so a border/radius/padding change
+// lands on every chart instead of the five a grep happens to find.
+const TOOLTIP_CHROME = {
+  background: 'var(--theme-card)',
+  border: '1px solid var(--theme-border)',
+  borderRadius: 'var(--radius-sm)',
+  fontSize: 11,
+}
+
+// Custom tooltip for Daily Purchases vs Sales, at module scope so React sees one stable component
+// type (an inline arrow is a brand-new type every parent render, remounting the tooltip subtree —
+// same hoisted shape as MenuEngineering's ScatterTooltipContent). Recharts clones this element
+// with { active, payload, label }; `big`/`textColor` come from the render site.
+//
+// Why custom content rather than contentStyle/formatter: the dashed projection series anchor at
+// the last actual day so the line connects (see the trend build in loadStats), and Recharts'
+// default tooltip can't tell an anchor from a forecast — on that one day it listed "Sales
+// Projection: NPR 13,721" right under an identical "Sales: NPR 13,721", restating the actual
+// under a label that claims it was computed. A projection row is only shown on days that have no
+// actual for the same metric. Rows are sorted by value, highest first, so the tooltip reads in
+// the same top-to-bottom order as the lines it describes at that day. Each row keeps its series
+// hue as a ● swatch while the text takes textColor — a chart hex as 11px body text measures
+// ~1.9:1 on a light card (the S550 rule); whiteSpace keeps a long NPR row from wrapping the way
+// Recharts' own container never does.
+function TrendTooltipContent({ active, payload, label, big, textColor }) {
+  if (!active || !payload?.length) return null
+  const row = payload[0]?.payload || {}
+  const shown = payload.filter(en => {
+    if (en.value == null) return false
+    if (en.dataKey === 'salesProj' && row.sales != null) return false
+    if (en.dataKey === 'purchProj' && row.purchases != null) return false
+    return true
+  }).sort((a, b) => Number(b.value) - Number(a.value))
+  if (!shown.length) return null
+  return (
+    <div style={{ ...TOOLTIP_CHROME, fontSize: big ? 12 : 11, padding: '8px 12px', whiteSpace: 'nowrap' }}>
+      <p style={{ color: textColor, margin: 0, fontWeight: 600 }}>{label}</p>
+      {shown.map(en => {
+        // Actual-vs-target direction arrow on the two actual rows: ▲ green when the day's
+        // actual sits above its frozen Target line, ▼ red below. Direction colouring,
+        // deliberately literal — for purchases "down" is usually the good direction, but a
+        // tooltip glyph states where the line sits, not a verdict; the target rows themselves
+        // carry no arrow. No arrow when no target is captured yet.
+        const target = en.dataKey === 'sales' ? row.salesTarget
+          : en.dataKey === 'purchases' ? row.purchTarget : null
+        const arrow = target == null || Number(en.value) === target ? null
+          : Number(en.value) > target
+            ? <span style={{ color: 'var(--theme-green-text)' }}> ▲</span>
+            : <span style={{ color: 'var(--theme-red-text)' }}> ▼</span>
+        return (
+          <p key={en.dataKey} style={{ color: textColor, margin: '4px 0 0' }}>
+            <span style={{ color: en.color }}>●</span> {en.name} : NPR {Math.round(Number(en.value)).toLocaleString()}{arrow}
+          </p>
+        )
+      })}
+    </div>
+  )
 }
 
 // Sunday-first, one letter each, exactly as asked for — S/M/T/W/T/F/S. Tue and Thu (and Sun/Sat)
@@ -1560,7 +1620,7 @@ export default function ClientDashboard() {
                         {categorySpend.map((entry, i) => <Cell key={entry.name} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                       </Pie>
                       <Tooltip
-                        contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
+                        contentStyle={TOOLTIP_CHROME}
                         formatter={(v, name) => [`NPR ${Number(v).toLocaleString()} (${((v / categorySpendTotal) * 100).toFixed(1)}%)`, name]}
                         labelFormatter={name => name}
                       />
@@ -1613,7 +1673,7 @@ export default function ClientDashboard() {
                     <XAxis type="number" hide />
                     <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
                     <Tooltip
-                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
+                      contentStyle={TOOLTIP_CHROME}
                       formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}${purchaseTotal > 0 ? ` (${((v / purchaseTotal) * 100).toFixed(1)}% of purchases)` : ''}`, p.payload.fullName || n]}
                       labelFormatter={() => ''}
                     />
@@ -1725,6 +1785,14 @@ export default function ClientDashboard() {
                 </g>
               )
             }
+            // The projection series carry a synthetic anchor point on the last actual day so the
+            // dashed line connects (see the trend build) — but the actual series draws its own
+            // activeDot at that exact coordinate, so without this the seam day rendered two
+            // concentric white-ringed dots as a small bullseye. Suppress the projection's dot on
+            // any day its actual is present; elsewhere reproduce the old config on Recharts' Dot.
+            const projActiveDot = actualKey => props => props.payload?.[actualKey] != null
+              ? null
+              : <Dot {...props} r={big ? 4 : 3} fill={DAILY_TREND_COLORS[actualKey]} />
             const chart = (
               <ResponsiveContainer width="100%" height={h}>
                 <ComposedChart data={chartData} margin={{ top: big ? 8 : 4, right: big ? 16 : 8, bottom: big ? 4 : 0, left: big ? 8 : 0 }}>
@@ -1743,53 +1811,9 @@ export default function ClientDashboard() {
                   <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="day" tick={dayAxisTick} height={big ? 32 : 26} tickLine={false} axisLine={false} interval={0} />
                   <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
-                  {/* Custom content rather than contentStyle/formatter: the dashed projection
-                      series anchor at the last actual day so the line connects (see the trend
-                      build above), and Recharts' default tooltip can't tell an anchor from a
-                      forecast — on that one day it listed "Sales Projection: NPR 13,721" right
-                      under an identical "Sales: NPR 13,721", restating the actual under a label
-                      that claims it was computed. A projection row is only shown on days that
-                      have no actual for the same metric. Rows are sorted by value, highest
-                      first, so the tooltip reads in the same top-to-bottom order as the lines
-                      it describes at that day — the default (series render order) put the two
-                      Target rows first because those series are drawn first to sit behind. */}
-                  <Tooltip
-                    content={({ active, payload, label }) => {
-                      if (!active || !payload?.length) return null
-                      const row = payload[0]?.payload || {}
-                      const shown = payload.filter(en => {
-                        if (en.value == null) return false
-                        if (en.dataKey === 'salesProj' && row.sales != null) return false
-                        if (en.dataKey === 'purchProj' && row.purchases != null) return false
-                        return true
-                      }).sort((a, b) => Number(b.value) - Number(a.value))
-                      if (!shown.length) return null
-                      return (
-                        <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: big ? 12 : 11, padding: '8px 12px' }}>
-                          <p style={{ color: colors.text1, margin: 0, fontWeight: 600 }}>{label}</p>
-                          {shown.map(en => {
-                            // Actual-vs-target direction arrow on the two actual rows: ▲ green
-                            // when the day's actual sits above its frozen Target line, ▼ red
-                            // below. Direction colouring, deliberately literal — for purchases
-                            // "down" is usually the good direction, but a tooltip glyph states
-                            // where the line sits, not a verdict; the target rows themselves
-                            // carry no arrow. No arrow when no target is captured yet.
-                            const target = en.dataKey === 'sales' ? row.salesTarget
-                              : en.dataKey === 'purchases' ? row.purchTarget : null
-                            const arrow = target == null || Number(en.value) === target ? null
-                              : Number(en.value) > target
-                                ? <span style={{ color: 'var(--theme-green-text)' }}> ▲</span>
-                                : <span style={{ color: 'var(--theme-red-text)' }}> ▼</span>
-                            return (
-                              <p key={en.dataKey} style={{ color: en.color, margin: '4px 0 0' }}>
-                                {en.name} : NPR {Math.round(Number(en.value)).toLocaleString()}{arrow}
-                              </p>
-                            )
-                          })}
-                        </div>
-                      )
-                    }}
-                  />
+                  {/* See TrendTooltipContent at module scope for why this chart needs custom
+                      content (anchor-day suppression, value-sorted rows, the target arrows). */}
+                  <Tooltip content={<TrendTooltipContent big={big} textColor={colors.text1} />} />
                   {/* Frozen full-month reference lines, drawn first (so they sit BEHIND the more
                       prominent actual/adaptive-projection lines below) — thin, dotted, and each in
                       its own hue (DAILY_TREND_COLORS.salesTarget/purchTarget) rather than reusing
@@ -1808,8 +1832,8 @@ export default function ClientDashboard() {
                   ) : (
                     <Line type="monotone" dataKey="sales" name="Sales" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} connectNulls dot={{ r: 2, fill: DAILY_TREND_COLORS.sales, strokeWidth: 0 }} activeDot={{ r: 4, fill: DAILY_TREND_COLORS.sales }} {...chartMotion()} />
                   ))}
-                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: DAILY_TREND_COLORS.sales }} {...chartMotion()} />}
-                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={{ r: big ? 4 : 3, fill: DAILY_TREND_COLORS.purchases }} {...chartMotion()} />}
+                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={projActiveDot('sales')} {...chartMotion()} />}
+                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={projActiveDot('purchases')} {...chartMotion()} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )
@@ -1884,7 +1908,7 @@ export default function ClientDashboard() {
                         <ReferenceLine y={fcBands.critical} stroke={colors.redText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.critical}%`, fill: colors.redText, fontSize: 9, position: 'right' }} />
                         {big && fcTrendAvg != null && <ReferenceLine y={fcTrendAvg} stroke={colors.text2} strokeDasharray="2 3" strokeOpacity={0.85} label={{ value: `avg ${fcTrendAvg.toFixed(1)}%`, fill: colors.text2, fontSize: 9, position: 'insideBottomRight' }} />}
                         <Tooltip
-                          contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--theme-text1)' }}
+                          contentStyle={{ ...TOOLTIP_CHROME, color: 'var(--theme-text1)' }}
                           labelStyle={{ color: 'var(--theme-text1)' }}
                           itemStyle={{ color: 'var(--theme-text1)' }}
                           formatter={(v, _n, props) => {
@@ -2009,7 +2033,7 @@ export default function ClientDashboard() {
                             {costBreakdown.map(entry => <Cell key={entry.name} fill={COST_BREAKDOWN_COLORS[entry.name] || colors.text3} />)}
                           </Pie>
                           <Tooltip
-                            contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
+                            contentStyle={TOOLTIP_CHROME}
                             formatter={(v, name) => [`NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })} (${(v / costBreakdownTotal * 100).toFixed(1)}%)`, name]}
                           />
                         </PieChart>
@@ -2077,7 +2101,7 @@ export default function ClientDashboard() {
                           {mixPieData.map(entry => <Cell key={entry.name} fill={salesMixColorOf(entry.name)} />)}
                         </Pie>
                         <Tooltip
-                          contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
+                          contentStyle={TOOLTIP_CHROME}
                           formatter={(v, name) => [`NPR ${Math.round(v).toLocaleString('en-NP')} (${((v / salesMixTotal) * 100).toFixed(1)}%)`, name]}
                         />
                       </PieChart>

@@ -159,6 +159,62 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S623 — 2026-08-28 — A /code-review of the last two sessions, and the escape that committed
+
+An 8-angle `/code-review` over the S621+S622 diff, with adversarial verification (including
+empirical tests in the repo's own React 19 harness), confirmed ten findings; all fixed here. The
+serious ones were all in the pack-helper change, not the tooltip.
+
+**`looksLikeExpression()` recognised fewer spellings than `tokenize()` accepts, and the gap was a
+pricing bug.** `tokenize` normalises `x`/`X` to `*` and strips commas, but the detection regex knew
+neither — so `12x4` and `1,200` skipped evaluation and travelled the raw-string path, where
+`setPackField`'s `parseFloat` read a prefix: pack size 12 instead of 48 (rate 4× high), pack price
+1 instead of 1200 (rate 1000× high), each saved silently into `items.rate`, the figure every
+costing report reads. Three layers now close it: the detection class covers everything `tokenize`
+normalises; `commit()` runs even non-expression text through `evaluate()` and reverts genuine
+garbage (`5oo`) to the last good value rather than ever handing a raw string up; and the live
+keystroke mirror suppresses anything that doesn't `Number()` as itself, matching what the old
+`type="number"` reported. Corollary: plain numbers now commit as numbers, not strings.
+
+**Escape committed the expression instead of cancelling it — verified by running it, not reading
+it.** `setDraft(null)` is batched, but `e.currentTarget.blur()` dispatches focusout synchronously,
+so `commit()` ran from the still-current render where `draft` held the expression: Esc after `12*4`
+fired `onCommit(48)`, byte-identical to Enter, at every QtyInput call site since the component
+shipped. A `cancelRef` (a ref, precisely because state can't win that race) now makes Esc revert.
+The same test run caught Enter double-firing `onCommit` (keydown commit + the blur it triggers);
+Enter now just blurs and lets the one blur commit. And Esc no longer destroys the dialog around
+the box: `QtyInput` consumes the key (preventDefault + stopPropagation) only when there is an edit
+to cancel, and `Modal`'s document listener now respects `defaultPrevented` — before this, one Esc
+in an Add Item pack box committed the value AND closed the modal, discarding the whole form, while
+the Help text added in S621 promised "Esc cancels". Both halves of that sentence are now true.
+`QtyInput.test.js` + `evalMath.test.js` (10 tests) lock all of these contracts down.
+
+**Items.js keeps one division.** `packPerUnit` (the preview) and `setPackField` (the stored rate)
+each computed `total/qty` with different rounding; one `perUnitOf()` now feeds both, using
+`Number()` so a prefix-parseable string can never price an item even if one slips through. And the
+silent-stale-rate state (both boxes filled, division can't run — a zero, a negative) now flags
+both boxes `aria-invalid` with a red line saying the price above still shows its last value,
+instead of the preview just vanishing.
+
+**The trend tooltip got the quality pass the review asked for.** The content function is hoisted to
+module scope as `TrendTooltipContent` (an inline arrow is a new component type every render — same
+shape as MenuEngineering's tooltips); the card chrome is one `TOOLTIP_CHROME` object shared by the
+file's five `contentStyle` sites and the custom tooltip, so they can no longer drift; row text
+takes `colors.text1` with the series hue kept as a ● swatch (a chart hex as 11px body text
+measures ~1.9:1 on light presets — the S550 rule; carried over from Recharts' default, fixed now
+that the rows are app code); `whiteSpace: nowrap` is restored so a long NPR row can't wrap; and
+the seam-day double activeDot (the actual's dot plus the projection anchor's white-ringed dot,
+concentric — the residue of the S622 report) is suppressed via a function `activeDot` that skips
+the projection's dot on any day its actual is present.
+
+Verification also *cleared* four finder claims, recorded so they aren't re-found: the arrow's
+rounding is sound (trend values are pre-rounded integers), NaN can't reach the rows, the missing
+`'en-NP'` locale predates the diff file-wide, and the glyph arrows are not a WCAG 1.4.1 failure
+(direction is carried by shape; colour is redundant). The green-▲-on-purchases-over-target stays
+as the deliberate S622 call. 416 tests green, production build clean, `CACHE_NAME` v143→v144.
+
+---
+
 ### S622 — 2026-08-28 — A projection row that restates the actual is not a projection
 
 Reported from the dashboard trend tooltip as "something feels off": Day 12 showed six rows, with

@@ -72,6 +72,10 @@ export default function Modal({
 
     const onKeyDown = e => {
       if (modalStack[modalStack.length - 1] !== stackToken) return
+      // A child that already consumed this key (QtyInput's Escape-cancels-the-expression)
+      // preventDefaults it; closing the whole dialog on top of that turns "cancel this box"
+      // into "discard the entire form" (S623). Belt to QtyInput's own stopPropagation.
+      if (e.defaultPrevented) return
       if (e.key === 'Escape') { onCloseRef.current(); return }
       // Trap Tab within the panel — without this, keyboard focus can walk out into the
       // page behind the overlay, which is only visually obscured, not actually inert.

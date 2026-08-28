@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { evaluate, looksLikeExpression } from '../utils/evalMath'
 
 // A numeric field that also accepts arithmetic: type "3*24+7" in a stock-count box and it
@@ -26,6 +26,11 @@ export default function QtyInput({
   ...rest
 }) {
   const [draft, setDraft] = useState(null) // non-null only while focused
+  // Escape's cancel flag must be a ref, not state: Escape blurs the field, and the blur's
+  // commit() runs synchronously in the same task — before React has re-rendered — so it closes
+  // over the PRE-Escape `draft` and would happily commit the expression Escape was meant to
+  // discard (measured: Esc after "12*4" committed 48, byte-identical to Enter — S623).
+  const cancelRef = useRef(false)
 
   const asText = value === '' || value == null ? '' : String(value)
   const shown = draft !== null ? draft : asText
@@ -45,11 +50,21 @@ export default function QtyInput({
     const raw = e.target.value
     setDraft(raw)
     // Only mirror plain numbers upward while typing. An in-progress expression deliberately
-    // leaves the parent on its last good value so row totals don't flicker through nonsense.
-    if (!looksLikeExpression(raw)) onChange?.(raw)
+    // leaves the parent on its last good value so row totals don't flicker through nonsense —
+    // and so does anything that doesn't parse as itself ("5oo"): the old <input type="number">
+    // reported '' for that, so a stray character must never reach a parent whose parseFloat
+    // would read a prefix of it. Blur then evaluates or reverts it (see commit()).
+    if (!looksLikeExpression(raw) && !Number.isNaN(Number(raw))) onChange?.(raw)
   }
 
   function commit() {
+    if (cancelRef.current) {
+      // Escape asked for a revert; this blur-commit runs before the setDraft(null) has
+      // re-rendered, so without the ref it would still see the discarded draft.
+      cancelRef.current = false
+      setDraft(null)
+      return
+    }
     if (draft === null) return
     const raw = draft.trim()
     let next
@@ -62,7 +77,12 @@ export default function QtyInput({
       // partial reading of it.
       next = result === null ? (value ?? '') : result
     } else {
-      next = raw
+      // Not an expression — but still not necessarily a clean number. evaluate() accepts
+      // anything tokenize() can normalise ("1,200" → 1200), so run it anyway; genuine garbage
+      // ("5oo") reverts. Never hand the raw string up: a parent's parseFloat would read a
+      // prefix of it ("1,200" → 1) and store a confidently wrong figure (S623).
+      const result = evaluate(raw)
+      next = result === null ? (value ?? '') : result
     }
 
     setDraft(null)
@@ -72,14 +92,24 @@ export default function QtyInput({
 
   function handleKeyDown(e) {
     if (e.key === 'Enter') {
+      // Blur and let onBlur run commit() exactly once — calling commit() here too made every
+      // Enter fire onCommit twice (the keydown's commit, then the blur's, both from the same
+      // still-rendered closure), double-running any call site whose onCommit writes.
       e.preventDefault()
-      commit()
       e.currentTarget.blur()
     }
     if (e.key === 'Escape') {
-      e.preventDefault()
-      setDraft(null)
-      e.currentTarget.blur()
+      // Only consume Escape when there is an edit to cancel — then it reverts this box and
+      // must NOT also close a host Modal (stopPropagation keeps it from the document-level
+      // listener). An untouched box lets Escape through, so the dialog's normal Esc-to-close
+      // still works.
+      if (draft !== null && draft !== asText) {
+        e.preventDefault()
+        e.stopPropagation()
+        cancelRef.current = true
+        setDraft(null)
+        e.currentTarget.blur()
+      }
     }
   }
 
