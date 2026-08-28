@@ -210,7 +210,7 @@ for; no new colour enters the palette. **That fix would have shipped to new inst
 who had ever picked a theme carried a frozen copy. Preset keys now resolve fresh; `'custom'` still
 wins, since there the saved values really are the user's edits.
 
-**The BS date audit is written but not run.** Fixing the calendar table never fixed the dates already
+**The BS date audit was run, found nothing, and nearly broke two correct dates on the way.** Fixing the calendar table never fixed the dates already
 written through it — `BsCalendarPicker` stores `formatAd(bsToAd(...))`, so a correction fixes every
 display and no committed value. Four eras, two faults; the one that matters is E3, where the table
 started at 2079 and every older year fell through to a 30-day approximation, which is the
@@ -219,7 +219,26 @@ date-of-birth case. `scripts/bs-date-audit.mjs` derives the repair exactly
 retyping them, because a transcription slip in the old table would produce a confident wrong repair —
 the same class of bug being cleaned up. Verified without DB access: it reproduces the documented
 2-day epoch error, and reproduces S559's own example (born 30 Dec 1979 shown as 15 Poush 2036) to the
-day. Needs a service-role key and a backup to run.
+day.
+
+Then it was run for real, and the first version was wrong. It reported "6 repairable, 0 need review"
+— and two of those six were a leaver's `end_date` and `retirement_date` that had been written a week
+*after* the calendar fix and were already correct. It would have corrupted them. Two faults, both
+worth carrying: **a field's write time is not the row's** (a leaver's end date is set months after
+hire, so the row's `created_at` says nothing about it), and **`updated_at` is dead in this schema** —
+no trigger maintains it, `EmployeeForm` never writes it, so it equals `created_at` forever and the
+"was this edited after the fix?" guard could not fire once. It printed `0 need review` and meant
+nothing by it, which is the vacuous-guard shape the root file already records for dropped read
+errors. The owner caught it by knowing the man's actual last working day; nothing in the output
+would have revealed it.
+
+The real per-field write time was in `audit_logs` all along (`log_audit()` snapshots the whole row),
+so the era is now taken from the last entry where that COLUMN changed, and auto-repair is limited to
+fields where that history proves it. Rerun: 12 dates flagged across 64 rows in six tables, 0
+auto-repairable, and the two that were already correct dropped out on their own. Every one of the 12
+was then confirmed correct by the owner against the real records. **Nothing needed repair** — the
+stored dates are good. Coverage was also extended to `clients` (subscription windows, report-only:
+they are `timestamptz`, and a day either way is absorbed by `GRACE_DAYS`).
 
 **Files:** `src/modules/hr/payroll/payrollData.js` (paging, `{ data, error }`, `payslipDrift`),
 `PayrollRun.jsx`, `PayrollCalculation.jsx`, `src/modules/hr/settlement/FinalSettlement.jsx`,

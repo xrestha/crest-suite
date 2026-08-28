@@ -52,7 +52,26 @@ worth remembering, because it is silent and large (5 days on the measured exampl
 `onChange` hands back a day NUMBER within an already-chosen period and no AD date is derived. When
 adding a picker, that distinction decides whether the value can rot.
 
-**NOT YET RUN against production** as of S620 — it needs a service-role key and a backup.
+**RUN against production 2026-08-28 (S620). Nothing needed repair.** 64 rows across six tables;
+12 dates flagged, every one confirmed correct by the owner against the real records. Two of them —
+a leaver's `end_date` and `retirement_date` — the script itself cleared once it read the audit log.
+Do not re-run expecting a clean sheet to mean the script is idle; it means the data is good.
+
+**The near-miss is the reusable lesson.** The first version keyed the era off the ROW's
+`created_at` and guarded with `updated_at`. Both were wrong. A field's write time is not the row's —
+a leaver's `end_date` is set months after hire, and one written *after* the fix was already correct
+while the row's creation date said otherwise. And `updated_at` is **dead in this schema**: no
+trigger maintains it and `EmployeeForm` never writes it, so it equals `created_at` forever and the
+guard could not fire even once. It printed "0 need review" and meant nothing by it — the same
+vacuous-guard shape the root `CLAUDE.md` records for dropped read errors. **Before relying on
+`updated_at` anywhere, check that something actually writes it.**
+
+`log_audit()` snapshots the whole row per change, so the true per-field write time is in
+`audit_logs` — walk an id's history newest-first and take the first entry where that COLUMN
+changed. Only `hr_employees` and `hr_leave_requests` carry audit triggers, so everything else can
+never be proven and is report-only. Audit logging began 2026-08-04, which is *after* the July
+converter fix, so fields written before that date cannot be dated from it either — they are
+reported for a human rather than guessed at.
 
 **Name that key `SUPABASE_SERVICE_ROLE_KEY`, with NO `REACT_APP_` prefix.** CRA inlines every
 `REACT_APP_*` variable into the production bundle, so a service-role key under that prefix is

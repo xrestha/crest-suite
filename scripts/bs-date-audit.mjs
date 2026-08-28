@@ -105,6 +105,13 @@ const TARGETS = [
   { table: 'hr_advances',       cols: ['issued_date'],            audited: false, empCol: 'employee_id' },
   { table: 'hr_tada_claims',    cols: ['start_date', 'end_date'], audited: false, empCol: 'employee_id' },
   { table: 'purchase_orders',   cols: ['expected_date'],          audited: false },
+  // Subscription windows, set by admin through the same unlocked picker. These are timestamptz
+  // rather than date, so only the date part is compared and they are never auto-repaired — a
+  // written-back value could shift the time component. `audited: false` already forces that, and
+  // it is the right posture regardless: a day either way on an access window is absorbed by
+  // GRACE_DAYS, and correcting one by hand in Admin → Clients is a single click.
+  { table: 'clients', cols: ['ims_ends_at', 'hr_ends_at', 'pos_ends_at', 'suite_ends_at', 'subscription_ends_at'],
+    audited: false, labelCols: ['name'], labelOf: r => r.name, clientIdCol: 'id' },
 ]
 
 function loadEnvLocal() {
@@ -155,7 +162,9 @@ const fmtAd = d =>
 // The whole derivation, in one place: read D back through the converter that wrote it, then
 // re-encode that BS date with the converter we trust now.
 function repair(era, stored) {
-  const asDate = new Date(stored + 'T00:00:00')
+  // A timestamptz column arrives as a full ISO string; compare only its calendar date.
+  const dayOnly = String(stored).slice(0, 10)
+  const asDate = new Date(dayOnly + 'T00:00:00')
   if (Number.isNaN(asDate.getTime())) return null
   const bs = era.mod.adToBs(asDate)
   if (!bs || !bs.year) return null
@@ -165,8 +174,9 @@ function repair(era, stored) {
 }
 
 // Paged read — this runs across every tenant at once, so the 1000-row cap is well within reach.
-async function readAll(table, cols, extra = []) {
-  const select = ['id', 'client_id', 'created_at', ...cols, ...extra]
+async function readAll(table, cols, extra = [], clientIdCol = 'client_id') {
+  // `clients` has no client_id — it IS the client, so its own id is the tenant key.
+  const select = [...new Set(['id', clientIdCol, 'created_at', ...cols, ...extra])]
   const out = []
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase.from(table).select(select.join(', ')).order('id').range(from, from + 999)
@@ -233,7 +243,7 @@ async function main() {
   for (const target of TARGETS) {
     let rows
     const extra = [...(target.labelCols || []), ...(target.empCol ? [target.empCol] : [])]
-    try { rows = await readAll(target.table, target.cols, extra) }
+    try { rows = await readAll(target.table, target.cols, extra, target.clientIdCol) }
     catch (e) { console.log(target.table + ': SKIPPED — ' + e.message + '\n'); continue }
 
     // Only rows created before the last fix can be affected at all; fetch history for those.
@@ -255,12 +265,12 @@ async function main() {
         if (!era) continue                                 // written by the correct converter
 
         const r = repair(era, stored)
-        if (!r || r.fixed === stored) continue
+        if (!r || r.fixed === String(stored).slice(0, 10)) continue
         // E3 only broke years the table did not cover; a 2079+ date written then is fine.
         if (era.id === 'E3' && r.bs.year >= 2079) continue
 
         const rec = { id: row.id, col, stored, fixed: r.fixed, bs: r.bs, era: era.id,
-                      clientId: row.client_id, writtenAt: writtenAt || row.created_at, proven,
+                      clientId: row[target.clientIdCol || 'client_id'], writtenAt: writtenAt || row.created_at, proven,
                       label: target.labelOf ? target.labelOf(row) : null,
                       empId: target.empCol ? row[target.empCol] : null }
         // Auto-repair ONLY where the audit log proves when this field was written. Everything else
