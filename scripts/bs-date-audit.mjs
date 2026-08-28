@@ -50,9 +50,11 @@
 //   node scripts/bs-date-audit.mjs --apply            # repair the rows it can prove are safe
 //   node scripts/bs-date-audit.mjs --apply --include-unverifiable
 //
-// Reads REACT_APP_SUPABASE_URL / REACT_APP_SUPABASE_SERVICE_ROLE_KEY from .env.local, same as
-// scripts/backfill-credit-note-reversals.mjs. The service key is needed because this crosses
-// every tenant; it is never in the browser bundle.
+// Reads REACT_APP_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from .env.local. The service key is
+// needed because this crosses every tenant. Its name is deliberately WITHOUT the REACT_APP_ prefix:
+// CRA inlines every REACT_APP_* variable into the production bundle, so a prefixed service-role key
+// gets published to every visitor on the next `npm run build`. Delete the line when you are done.
+// (scripts/backfill-credit-note-reversals.mjs still reads the prefixed name — same hazard.)
 
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -112,10 +114,23 @@ const INCLUDE_UNVERIFIABLE = process.argv.includes('--include-unverifiable')
 
 const env = loadEnvLocal()
 const url = env.REACT_APP_SUPABASE_URL
-const serviceKey = env.REACT_APP_SUPABASE_SERVICE_ROLE_KEY
+// Deliberately NOT REACT_APP_-prefixed. CRA inlines every REACT_APP_* variable into the production
+// bundle, so a service-role key under that prefix would be published in plain text to every visitor
+// the next time anyone runs `npm run build` — full read/write on every tenant, readable from View
+// Source. An unprefixed name is invisible to the build. The prefixed form is still accepted so an
+// existing .env.local keeps working, but it warns, because leaving it there is the actual danger.
+const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || env.REACT_APP_SUPABASE_SERVICE_ROLE_KEY
 if (!url || !serviceKey) {
-  console.error('Missing REACT_APP_SUPABASE_URL / REACT_APP_SUPABASE_SERVICE_ROLE_KEY in .env.local')
+  console.error('Missing REACT_APP_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in .env.local')
+  console.error('Note: name it SUPABASE_SERVICE_ROLE_KEY with NO react_app prefix — a prefixed one')
+  console.error('would be compiled into the public browser bundle by the next production build.')
   process.exit(1)
+}
+if (!env.SUPABASE_SERVICE_ROLE_KEY && env.REACT_APP_SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn('WARNING: the service key is named REACT_APP_SUPABASE_SERVICE_ROLE_KEY.')
+  console.warn('Rename it to SUPABASE_SERVICE_ROLE_KEY before the next `npm run build`, or that')
+  console.warn('build will publish full database access inside the browser bundle.')
+  console.warn('')
 }
 const supabase = createClient(url, serviceKey, { auth: { persistSession: false } })
 

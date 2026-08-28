@@ -53,3 +53,10 @@ worth remembering, because it is silent and large (5 days on the measured exampl
 adding a picker, that distinction decides whether the value can rot.
 
 **NOT YET RUN against production** as of S620 — it needs a service-role key and a backup.
+
+**Name that key `SUPABASE_SERVICE_ROLE_KEY`, with NO `REACT_APP_` prefix.** CRA inlines every
+`REACT_APP_*` variable into the production bundle, so a service-role key under that prefix is
+published in plain text to every visitor on the next `npm run build` — full read/write across every
+tenant, readable from View Source. The script accepts the prefixed name so an existing `.env.local`
+keeps working, but warns. `scripts/backfill-credit-note-reversals.mjs` still reads only the prefixed
+name and carries the same hazard.
