@@ -59,3 +59,35 @@ The Supabase CLI is installed and linked to the live project (`supabase link`, r
 **Docker note:** `supabase db pull` / `supabase db dump` require Docker Desktop (they shell out to a version-matched `pg_dump` via a Docker image) — not installed on this machine. The baseline was produced instead with a standalone `pg_dump 17.10` client (`C:\Program Files\PostgreSQL\17\bin`) against the pooler connection string, which is sufficient for the write-a-file-by-hand workflow above. Installing Docker Desktop would additionally unlock `supabase db diff` (auto-generates a migration from a local schema change) — not required unless that workflow is wanted later. Docker's absence does **not** block Edge Function deploys — `supabase functions deploy <name>` doesn't need it, and the CLI on this machine is already authenticated + linked (`supabase projects list` works without any login step), so a function can be shipped directly from here with no manual dashboard upload.
 
 **`CREATE OR REPLACE FUNCTION` cannot change an existing function's return columns** (Postgres error `42P13`, "cannot change return type of existing function," with a hint pointing at `DROP FUNCTION` first) — this includes adding, removing, or reordering `RETURNS TABLE(...)` columns, even if the function body and parameter list are otherwise unchanged. Caught live (S464, `20260728100000_hr_self_service_staff_drop_email.sql`) shrinking a function from 3 output columns to 2. The fix is always `DROP FUNCTION IF EXISTS public.foo(arg_types);` immediately before the `CREATE FUNCTION` — the `IF EXISTS` keeps the migration idempotent (safe to paste and run again if a prior attempt partially failed, since a failed statement in the Dashboard SQL Editor does not commit anything before it in the same paste unless explicitly wrapped in its own transaction control). Changing only the function *body* (same signature, same return shape) is unaffected — plain `CREATE OR REPLACE` still works for that, which is why this hadn't come up in any of this project's many prior `CREATE OR REPLACE FUNCTION` migrations.
+
+## `updated_at` is not maintained by the database — check before you trust it (S620)
+
+**There is no trigger anywhere in this schema that sets `updated_at`.** Not on any table, in any
+migration. The column exists with `DEFAULT now()`, which fires on INSERT only, so unless application
+code writes it explicitly on every UPDATE it stays frozen at the row's creation time forever.
+
+That makes it reliable on some tables and meaningless on others, which is worse than uniformly
+absent — it reads as trustworthy because you last saw it work somewhere else:
+
+| Table | `updated_at` |
+| --- | --- |
+| `feature_flags`, `par_levels`, `settings`, `client_secrets` | written by app code — usable |
+| **`hr_employees`, `pos_customers`** | **column exists, nothing writes it — always equals `created_at`** |
+
+This shipped a real near-miss. `scripts/bs-date-audit.mjs` proposes corrections to stored dates and
+guarded against touching an already-corrected value with "was this row updated after the fix?". On
+`hr_employees` that guard could not fire once. It reported `0 need review`, meant nothing by it, and
+would have overwritten two correct dates on a live employee record — caught only because the owner
+knew the man's actual last working day. The fix reads per-field write times from `audit_logs`
+instead (`log_audit()` snapshots the whole row, so the last entry where a COLUMN changed is when it
+took its current value).
+
+Two rules follow:
+
+- **Before writing any logic that depends on `updated_at`, grep for something that writes it.**
+  A guard on a column nobody updates is the same vacuous shape as a guard that drops its read error.
+- **Adding `updated_at` to a new table does nothing on its own.** Either write it from the app on
+  every update path, or add a `BEFORE UPDATE` trigger — a bare column is a promise the schema does
+  not keep. `audit_logs` is the reliable alternative for tables carrying a `log_audit()` trigger
+  (currently `hr_employees` and `hr_leave_requests` among the HR/date tables), though note audit
+  logging in this project only begins **2026-08-04**, so it cannot date anything written earlier.

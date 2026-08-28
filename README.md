@@ -246,7 +246,9 @@ they are `timestamptz`, and a day either way is absorbed by `GRACE_DAYS`).
 `scripts/bs-date-audit.mjs` (new), SW cache `crest-v138`. **Docs:** `.claude/rules/hr-payroll.md`
 (the three payroll failures + the Reopen rule), `.claude/rules/bs-calendar.md` (the era table and why
 the audit refuses what it cannot prove), `.claude/rules/design-system.md` (a saved theme pins the
-user to a stale preset), `DESIGN.md`, `hrGuideData.js`, `Help.js`.
+user to a stale preset), `.claude/rules/supabase-sql.md` (**no trigger anywhere in this schema sets
+`updated_at`** — it is written by app code on four tables and dead on `hr_employees`/`pos_customers`,
+which is what made the audit's guard vacuous), `DESIGN.md`, `hrGuideData.js`, `Help.js`.
 
 ---
 
