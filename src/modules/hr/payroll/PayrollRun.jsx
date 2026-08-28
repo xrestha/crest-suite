@@ -14,6 +14,8 @@ import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift } from
 import PayslipBody from './PayslipBody'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { firstError } from '../../../shared/queryError'
+import { errorText } from '../../../shared/errorText'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
 
@@ -82,10 +84,7 @@ export default function PayrollRun() {
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadAll(periodId, bsYear, bsMonth) {
-    const [
-      { data: runRow }, { data: emps }, { data: comps }, { data: att }, { data: ot },
-      { data: advs },   { data: reps },
-    ] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle(),
       scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date, end_date')
         .in('status', ['active', 'probation']).order('full_name'),
@@ -113,6 +112,20 @@ export default function PayrollRun() {
       fetchAllRows(() => scopedFrom('hr_advance_repayments').order('id')),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read is not an empty month. Every one of these feeds pay: no attendance rows pays
+    // daily/hourly staff zero and monthly staff a full month with no absence deduction, and no
+    // advances/repayments drops or inflates a deduction — all of it looking like a complete,
+    // ordinary payroll. Surfaced and abandoned rather than rendered (S594's rule).
+    const failed = firstError(results)
+    if (failed) {
+      setMsg('error:' + errorText(failed, 'operator'))
+      setEmployees([]); setPayslips([]); setRun(null)
+      return
+    }
+    const [
+      { data: runRow }, { data: emps }, { data: comps }, { data: att }, { data: ot },
+      { data: advs },   { data: reps },
+    ] = results
     setEmployees(emps || [])
     setComponents(comps || [])
     setAttendance(att || [])
@@ -126,12 +139,18 @@ export default function PayrollRun() {
       // Only a saved run needs the freshness comparison; with no run there is nothing to be
       // stale against, and these two are the page's only extra round trips.
       const periodObj = { id: periodId, bs_year: bsYear, bs_month: bsMonth }
-      const [ytd, tada] = await Promise.all([
+      const maps = await Promise.all([
         fetchYtdMap(scopedFrom, periodObj),
         fetchApprovedTadaMap(scopedFrom, periodObj),
       ])
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-      setYtdMap(ytd); setTadaMap(tada)
+      // These two drive the freshness comparison. Falling back to empty maps would recompute every
+      // employee's TDS as if this were month 1 of the fiscal year, so the live figures would differ
+      // from the stored ones and the whole run would report itself stale — a false Regenerate
+      // prompt whose fix would then write those wrong figures in.
+      const mapsFailed = firstError(maps)
+      if (mapsFailed) { setMsg('error:' + errorText(mapsFailed, 'operator')); return }
+      setYtdMap(maps[0].data); setTadaMap(maps[1].data)
     } else {
       setPayslips([])
       setYtdMap({}); setTadaMap({})
@@ -232,8 +251,13 @@ export default function PayrollRun() {
   async function generate() {
     if (!period || employees.length === 0) return
     setBusy(true); setMsg('')
-    const ytdMap = await fetchYtdMap(scopedFrom, period)
-    const tadaMap = await fetchApprovedTadaMap(scopedFrom, period)
+    // Checked BEFORE anything is written. These maps decide the TDS on every payslip this inserts,
+    // and an empty YTD map is a legitimate-looking value (a fiscal year's first month), so a failed
+    // read here does not fail — it persists under-withheld tax that nothing later recomputes.
+    const maps = await Promise.all([fetchYtdMap(scopedFrom, period), fetchApprovedTadaMap(scopedFrom, period)])
+    const mapsFailed = firstError(maps)
+    if (mapsFailed) { setMsg('error:' + errorText(mapsFailed, 'operator')); setBusy(false); return }
+    const [{ data: ytdMap }, { data: tadaMap }] = maps
     const { data: runRow, error: rErr } = await scopedInsert('hr_payroll_runs', { period_id: period.id, status: 'draft' }, { single: true })
     if (rErr) { setMsg('error:' + rErr.message); setBusy(false); return }
     const { error: pErr } = await scopedInsert('hr_payslips', buildRows(runRow.id, ytdMap, tadaMap))
@@ -249,8 +273,13 @@ export default function PayrollRun() {
     // action asked twice through two different kinds of dialog.
     setConfirmAction(null)
     setBusy(true); setMsg('')
-    const ytdMap = await fetchYtdMap(scopedFrom, period)
-    const tadaMap = await fetchApprovedTadaMap(scopedFrom, period)
+    // Checked before the DELETE below, not after. Regenerate hard-deletes every payslip in the run
+    // and re-inserts from these maps, so a failed read reached after the delete would leave the run
+    // rebuilt on empty YTD — or, if the insert then also failed, emptied outright.
+    const maps = await Promise.all([fetchYtdMap(scopedFrom, period), fetchApprovedTadaMap(scopedFrom, period)])
+    const mapsFailed = firstError(maps)
+    if (mapsFailed) { setMsg('error:' + errorText(mapsFailed, 'operator')); setBusy(false); return }
+    const [{ data: ytdMap }, { data: tadaMap }] = maps
     await scopedDelete('hr_payslips').eq('run_id', run.id)
     const { error } = await scopedInsert('hr_payslips', buildRows(run.id, ytdMap, tadaMap))
     if (error) { setMsg('error:' + error.message); setBusy(false); return }

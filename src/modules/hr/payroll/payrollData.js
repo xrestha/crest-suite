@@ -8,6 +8,7 @@ import { fiscalYearOf } from './tds'
 
 // Year-to-date taxable per employee: sum of (gross − SSF) and tds from PRIOR finalized payslips
 // in the same fiscal year (months before the current one).
+// Returns `{ data, error }`, not a bare map — see the `if (error)` note below.
 export async function fetchYtdMap(scopedFrom, period) {
   const cur = fiscalYearOf(period.bs_year, period.bs_month)
   // Paged. The fiscal-year narrowing below happens in JS, so this read is EVERY finalized payslip
@@ -16,10 +17,17 @@ export async function fetchYtdMap(scopedFrom, period) {
   // YTD map understates prior taxable income, which under-withholds TDS and under-remits to the IRD.
   // `.order('id')` is the unique tiebreaker fetchAllRows requires: paging a non-uniquely-ordered
   // query repeats rows on one page and skips them on the next, trading truncation for a worse bug.
-  const { data } = await fetchAllRows(() =>
+  const { data, error } = await fetchAllRows(() =>
     scopedFrom('hr_payslips', 'employee_id, gross, ot_amount, ssf_employee, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
       .eq('hr_payroll_runs.status', 'finalized')
       .order('id'))
+  // A failed read must NOT degrade to an empty YTD map. Empty means "no prior finalized months
+  // this FY", which is a real and ordinary state — the first month of the year — so computeMonthlyTds
+  // would treat a mid-year employee as a fresh starter, spread their remaining tax over twelve
+  // months instead of the months actually left, and under-withhold. Same money consequence as the
+  // truncation above, reachable with no row cap at all. Returned in `{ data, error }` shape so it
+  // composes with firstError() at the call sites.
+  if (error) return { data: null, error }
   const map = {}
   ;(data || []).forEach(r => {
     if (r.hr_payroll_runs?.status !== 'finalized') return
@@ -35,7 +43,7 @@ export async function fetchYtdMap(scopedFrom, period) {
     e.count += 1 // prior finalized months this FY — feeds tds.js's ytdMonths (mid-year-joiner fix)
     map[r.employee_id] = e
   })
-  return map
+  return { data: map, error: null }
 }
 
 // TADA claims (from the TADA Claims ledger) whose trip dates fall inside this BS period, per
@@ -52,10 +60,13 @@ export async function fetchApprovedTadaMap(scopedFrom, period) {
   const periodEnd   = formatAd(bsToAd(period.bs_year, period.bs_month, daysInBsMonth(period.bs_year, period.bs_month)))
   // Paged, for the same reason as fetchYtdMap: the period window is applied in JS below, so this
   // reads every approved-or-paid claim in the client's history, not just this month's.
-  const { data } = await fetchAllRows(() =>
+  const { data, error } = await fetchAllRows(() =>
     scopedFrom('hr_tada_claims', 'id, employee_id, total_amount, start_date, end_date, status, paid_method')
       .in('status', ['approved', 'paid'])
       .order('id'))
+  // As above: an empty map is indistinguishable from "nobody claimed TADA this month", so a
+  // failed read would silently drop a real reimbursement out of net pay.
+  if (error) return { data: null, error }
   const map = {}
   ;(data || []).forEach(c => {
     if (c.status === 'paid' && c.paid_method !== 'Payroll') return
@@ -65,7 +76,7 @@ export async function fetchApprovedTadaMap(scopedFrom, period) {
     e.ids.push(c.id)
     map[c.employee_id] = e
   })
-  return map
+  return { data: map, error: null }
 }
 
 // ── Draft-vs-live drift, shared by Payroll Run's Finalize gate and the Calculation page's

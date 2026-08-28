@@ -11,6 +11,8 @@ import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift } from
 import { ATTENDANCE_STATUSES, OT_MULTIPLIER } from '../payrollConstants'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { firstError } from '../../../shared/queryError'
+import ReportLoadError from '../../../components/ReportLoadError'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
 
@@ -204,6 +206,7 @@ export default function PayrollCalculation() {
   const [loading,    setLoading]    = useState(true)
   const [expandedId, setExpandedId] = useState(null)
   const [printRow,   setPrintRow]   = useState(null)
+  const [loadError,  setLoadError]  = useState(null)
 
   useEffect(() => {
     if (!clientId) return
@@ -225,10 +228,7 @@ export default function PayrollCalculation() {
   // reflects what Payroll SHOULD show right now — including if something changed since the last
   // Generate/Regenerate and the stored Payroll snapshot has gone stale (flagged per row below).
   async function loadAll(p) {
-    const [
-      { data: emps }, { data: comps }, { data: att }, { data: ot },
-      { data: advs }, { data: reps }, { data: runRow },
-    ] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date, end_date')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('hr_salary_components'),
@@ -248,6 +248,18 @@ export default function PayrollCalculation() {
       scopedFrom('hr_payroll_runs').eq('period_id', p.id).maybeSingle(),
     ])
     if (!periodReq.isCurrent(p.id)) return   // superseded by a newer period selection
+    // This page exists to be trusted against Payroll Run before someone Generates or Finalizes,
+    // which makes a silently-empty read worse here than almost anywhere: it would show confident
+    // live figures computed from nothing AND judge every stored payslip against them, so a real
+    // run would be labelled Stale — or a genuinely stale one cleared — on the strength of a
+    // failed request. Nothing is rendered until the reads are known good.
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setEmployees([]); setPayslips([]); setRun(null); return }
+    setLoadError(null)
+    const [
+      { data: emps }, { data: comps }, { data: att }, { data: ot },
+      { data: advs }, { data: reps }, { data: runRow },
+    ] = results
     setEmployees(emps || [])
     setComponents(comps || [])
     setAttendance(att || [])
@@ -256,15 +268,21 @@ export default function PayrollCalculation() {
     setRepayments(reps || [])
     setRun(runRow || null)
     if (runRow) {
-      const { data: slips } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
+      const { data: slips, error: slipErr } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
+      if (slipErr) { setLoadError(slipErr.message || String(slipErr)); setPayslips([]); return }
       setPayslips(slips || [])
     } else {
       setPayslips([])
     }
-    const [ytd, tada] = await Promise.all([fetchYtdMap(scopedFrom, p), fetchApprovedTadaMap(scopedFrom, p)])
+    const maps = await Promise.all([fetchYtdMap(scopedFrom, p), fetchApprovedTadaMap(scopedFrom, p)])
     if (!periodReq.isCurrent(p.id)) return   // superseded by a newer period selection
-    setYtdMap(ytd)
-    setTadaMap(tada)
+    // An empty YTD map is a legitimate value — the fiscal year's first month — so a failed read
+    // here does not look like a failure: every employee's TDS is simply recomputed as a fresh
+    // starter's, low, and then compared against the stored run, which duly reports itself stale.
+    const mapsFailed = firstError(maps)
+    if (mapsFailed) { setLoadError(mapsFailed); return }
+    setYtdMap(maps[0].data)
+    setTadaMap(maps[1].data)
   }
 
   async function handlePeriodChange(id) {
@@ -370,6 +388,11 @@ export default function PayrollCalculation() {
 
       {loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
+      ) : loadError ? (
+        /* Before the "No active employees" branch, deliberately. A failed read leaves `employees`
+           empty, so without this the page would tell an operator to go add employees they already
+           have — and the figures above would have been computed from nothing. */
+        <ReportLoadError error={loadError} />
       ) : employees.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>No active employees. Add employees in HR → Employees first.</div>
       ) : (

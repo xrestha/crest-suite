@@ -13,6 +13,8 @@ import { fetchSsfStartMap, ssfMonthsFrom } from '../gratuity/ssfEnrolment'
 import { leaveBalance } from '../leave/leaveBalance'
 import { tallyAttendance, calcAmount } from '../payroll/payrollCompute'
 import { fetchYtdMap } from '../payroll/payrollData'
+import { firstError } from '../../../shared/queryError'
+import { errorText } from '../../../shared/errorText'
 import { SSF_CAP, SSF_GRATUITY_PCT, GRATUITY_VESTING_MONTHS, SSF_EMPLOYEE_PCT } from '../payrollConstants'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
@@ -91,6 +93,8 @@ export default function FinalSettlement() {
   const [current,     setCurrent]     = useState(null) // the row being viewed/edited, if saved
   const [busy,        setBusy]        = useState(false)
   const [msg,         setMsg]         = useState('')
+  // A failed YTD read is not an employee with no prior payslips — see the load effect below.
+  const [ytdFailed,   setYtdFailed]   = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [refusal,     setRefusal]     = useState(null) // why Finalize refused
   const [reopenTarget, setReopenTarget] = useState(null)
@@ -176,13 +180,27 @@ export default function FinalSettlement() {
         // Deliberately not filtered by festival_name: it is free text and clients run Tihar too.
         scopedFrom('hr_festival_allowances', 'id, festival_name, bs_year, amount, tds, status')
           .eq('employee_id', empId).eq('bs_year', fyStart),
-        fetchYtdMap(scopedFrom, period).catch(() => ({})),
+        fetchYtdMap(scopedFrom, period).catch(err => ({ data: null, error: err })),
         scopedFrom('monthly_periods', 'id')
           .eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).maybeSingle(),
       ])
       if (cancelled) return
+      // This used to be `.catch(() => ({}))` — a failed YTD read degraded to an empty map, which
+      // is a REAL and ordinary value here (an employee finalized in the fiscal year's first month
+      // genuinely has no prior payslips). So the settlement would compute this person's tax as
+      // though they had earned nothing all year, withhold too little, and finalize that figure as
+      // a permanent record — with nothing on screen having gone wrong. The write actions are
+      // blocked while this is set, because an error nobody can act on is not a guard.
+      const loadFailed = firstError([fest, ytd, per])
+      if (loadFailed) {
+        setYtdFailed(true)
+        setMsg('error:' + errorText(loadFailed, 'operator') + " Until this loads, the tax on this settlement cannot be calculated, so it can't be saved or finalized.")
+        setAttendance([]); setAttendanceKnown(false)
+        return
+      }
+      setYtdFailed(false)
       setFestRows(fest.data || [])
-      setYtdMap(ytd || {})
+      setYtdMap(ytd.data || {})
 
       // Attendance for the final month. One row per employee per day, so it is paged — a
       // truncated read here would quietly pay a full month.
@@ -1002,8 +1020,8 @@ export default function FinalSettlement() {
                   their last working date, and blocks their Crest Staff login.
                 </p>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn btn-ghost" disabled={busy} onClick={saveDraft}>{current ? 'Update draft' : 'Save draft'}</button>
-                  <button className="btn btn-primary" disabled={busy} onClick={requestFinalize}>
+                  <button className="btn btn-ghost" disabled={busy || ytdFailed} onClick={saveDraft}>{current ? 'Update draft' : 'Save draft'}</button>
+                  <button className="btn btn-primary" disabled={busy || ytdFailed} onClick={requestFinalize}>
                     {busy ? 'Working…' : 'Finalize settlement'}
                   </button>
                 </div>
