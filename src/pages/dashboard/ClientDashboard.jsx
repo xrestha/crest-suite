@@ -1749,7 +1749,10 @@ export default function ClientDashboard() {
                       forecast — on that one day it listed "Sales Projection: NPR 13,721" right
                       under an identical "Sales: NPR 13,721", restating the actual under a label
                       that claims it was computed. A projection row is only shown on days that
-                      have no actual for the same metric. */}
+                      have no actual for the same metric. Rows are sorted by value, highest
+                      first, so the tooltip reads in the same top-to-bottom order as the lines
+                      it describes at that day — the default (series render order) put the two
+                      Target rows first because those series are drawn first to sit behind. */}
                   <Tooltip
                     content={({ active, payload, label }) => {
                       if (!active || !payload?.length) return null
@@ -1759,7 +1762,7 @@ export default function ClientDashboard() {
                         if (en.dataKey === 'salesProj' && row.sales != null) return false
                         if (en.dataKey === 'purchProj' && row.purchases != null) return false
                         return true
-                      })
+                      }).sort((a, b) => Number(b.value) - Number(a.value))
                       if (!shown.length) return null
                       return (
                         <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: big ? 12 : 11, padding: '8px 12px' }}>

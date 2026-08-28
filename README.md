@@ -173,6 +173,12 @@ drops a projection row on any day that has an actual for the same metric — fut
 their projection rows, and null-value rows are skipped as before. The anchor stays in the data;
 only the tooltip stops reporting it.
 
+Follow-up from the same screenshot: the rows are now sorted by value, highest first, so the
+tooltip reads in the same top-to-bottom order as the lines it describes at that day. The default
+order was series RENDER order — the two Target lines are drawn first so they sit behind the actual
+lines, which put them first in the tooltip regardless of where they sat on screen. The sort is
+per-day, so a day where purchases spike above sales reorders to match that day's stacking.
+
 ---
 
 ### S621 — 2026-08-28 — The "Bought a pack?" boxes accept a sum, like every other quantity box
