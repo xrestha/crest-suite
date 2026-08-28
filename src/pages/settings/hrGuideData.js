@@ -279,11 +279,11 @@ export const HR_GUIDE_GROUPS = [
         route: '/hr/payroll',
         plan: 'Manager only',
         summary:
-          'The transactional payroll page: Generate a draft for the BS month, review each employee\'s row (TDS and TADA are editable), Finalize to lock it, and — admin only — Reopen to unwind. Payslips print with the company letterhead; the run exports to Excel.',
+          'The transactional payroll page: Generate a draft for the BS month, review each employee\'s row (TDS and TADA are editable), Finalize to lock it, and Reopen to unwind (HR manager or above — it used to be Crest-admin only, which locked the owner out of their own correction). Payslips print with the company letterhead; the run exports to Excel.',
         workflow: [
           'Generate builds a draft from current Attendance, approved Overtime, Advances and approved TADA. Review the rows; edit TDS or TADA where judgment is needed.',
           'Finalize shows a consequence summary — payslip count, total net pay, advance recoveries to be recorded, TADA claims to be closed — because these are real writes to other ledgers, then locks the run.',
-          'Reopen (admin only) reverses exactly what Finalize wrote: deletes its advance-repayment rows (reactivating anything with balance again), and un-pays only TADA claims IT marked paid — never one a manager settled by hand.',
+          'Reopen (HR manager and above, S620) reverses exactly what Finalize wrote: deletes its advance-repayment rows (reactivating anything with balance again), and un-pays only TADA claims IT marked paid — never one a manager settled by hand.',
           'Regenerate rebuilds the draft from scratch — and resets any manual TDS/TADA edits, with an explicit confirm.',
         ],
         fields: [

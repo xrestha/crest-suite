@@ -159,6 +159,78 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S620 — 2026-08-28 — Six findings from the sister app, checked against this codebase rather than assumed
+
+A review of the HR payroll module arrived from the sister HSS app as six findings. Verified each
+against crest's own code before touching anything, which changed the answer on three of them.
+
+**One was void.** "No `:disabled` styling anywhere, 298 call sites" was measured against
+`index.css`/`App.css`. Crest's design system lives in `Layout.css`, which has `.btn:disabled` and a
+*more* considered field treatment than the one proposed — fields deliberately do not take the
+button's `opacity: 0.55`, with the reasoning written out (a button's label is a verb you may not
+press; a field's content is data that has to stay legible), plus the `-webkit-text-fill-color`
+override for the iOS UA stylesheet. Nothing to port. **Check the file layout before believing a
+zero-hit grep.**
+
+**One was worse than reported.** `fetchYtdMap` was said to bite "a tenant with ~85+ staff in one
+FY". It applies the fiscal-year filter in **JS**, not in the query, so it reads every finalized
+payslip the client has ever had — the 1000-row cap lands at roughly 20 staff × 4 years.
+`fetchApprovedTadaMap` is the same shape, and `hr_advances`/`hr_advance_repayments` are unfiltered
+lifetime ledgers in both payroll screens. A truncated YTD under-withholds TDS and under-remits to
+the IRD; a truncated repayments read over-deducts from take-home pay. `hr_attendance` on the line
+directly above each of them was already paged, which is what made the omission easy to read past.
+
+**And the same reads dropped their errors**, which is the same money consequence with no row cap
+needed: an empty YTD map is a *legitimate* value (the fiscal year's first month), so a failed read
+does not look like a failure, it looks like a fresh starter. `generate()`/`regenerate()` compute
+TDS from these maps and INSERT the result, so the wrong figure was persisted, and `regenerate()`
+hard-deletes every payslip before rebuilding — the check has to run before the DELETE.
+`FinalSettlement` had `.catch(() => ({}))`, the same fallback said out loud.
+
+**The freshness gate was a deadlock, not a false positive.** It compared `net_pay`, and TDS/TADA are
+deliberately hand-editable while a run is a draft — each edit rewrites `net_pay`. So an override
+registered as staleness, `finalize()` refuses while stale and offers no override branch, and the
+only escape (Regenerate) resets the very edit that caused it. A legitimate override could never be
+finalized. `payslipDrift()` now compares the six fields nobody can type into, plus the TADA **claim
+id set** rather than its amount — which keeps exactly what the amount comparison used to detect,
+since approving a claim changes the ids while a typed correction does not. Overrides are reported,
+never blocking.
+
+**`isAdmin` is not the owner.** Reopen on Payroll Run, Festival Allowance and Incentive Run was
+gated on the Crest *platform operator*, so the person accountable for a run had to phone support for
+their own correction. Now `hasHrAccess('manager')`. `FinalSettlement` is deliberately left
+admin-only — reopening it un-blocks a departed employee's login.
+
+**The dark text ladder was upside down.** Against the card: `text2` 5.45:1, `text3` 6.70:1 — every
+"quietest tier" hint outranking every secondary label. Light was correct the whole time (7.33 >
+5.76), which is why it never looked wrong, and both tiers cleared AA, so no contrast audit would
+ever have flagged it. Fixed by swapping the two values into the roles they already had the contrast
+for; no new colour enters the palette. **That fix would have shipped to new installs only**:
+`switchPreset` persists the full colours object and `loadSaved` merged it over the preset, so anyone
+who had ever picked a theme carried a frozen copy. Preset keys now resolve fresh; `'custom'` still
+wins, since there the saved values really are the user's edits.
+
+**The BS date audit is written but not run.** Fixing the calendar table never fixed the dates already
+written through it — `BsCalendarPicker` stores `formatAd(bsToAd(...))`, so a correction fixes every
+display and no committed value. Four eras, two faults; the one that matters is E3, where the table
+started at 2079 and every older year fell through to a 30-day approximation, which is the
+date-of-birth case. `scripts/bs-date-audit.mjs` derives the repair exactly
+(`current.bsToAd(era.adToBs(D))`) and loads the historical converters **from git** rather than
+retyping them, because a transcription slip in the old table would produce a confident wrong repair —
+the same class of bug being cleaned up. Verified without DB access: it reproduces the documented
+2-day epoch error, and reproduces S559's own example (born 30 Dec 1979 shown as 15 Poush 2036) to the
+day. Needs a service-role key and a backup to run.
+
+**Files:** `src/modules/hr/payroll/payrollData.js` (paging, `{ data, error }`, `payslipDrift`),
+`PayrollRun.jsx`, `PayrollCalculation.jsx`, `src/modules/hr/settlement/FinalSettlement.jsx`,
+`FestivalAllowance.jsx`, `IncentiveRun.jsx`, `src/context/ThemeContext.js`,
+`scripts/bs-date-audit.mjs` (new), SW cache `crest-v138`. **Docs:** `.claude/rules/hr-payroll.md`
+(the three payroll failures + the Reopen rule), `.claude/rules/bs-calendar.md` (the era table and why
+the audit refuses what it cannot prove), `.claude/rules/design-system.md` (a saved theme pins the
+user to a stale preset), `DESIGN.md`, `hrGuideData.js`, `Help.js`.
+
+---
+
 ### S619 — 2026-08-27 — "TypeError: Failed to fetch" is not a message, and two audiences need two wordings
 
 Reported live from the Add Item modal: a red line reading `TypeError: Failed to fetch` under a

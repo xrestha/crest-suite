@@ -269,3 +269,19 @@ column, and inline beats the class silently.
 **Day columns say the month.** `formatBsDay(day, bsMonth)` → "1st Bhadra", not a bare `1` that only
 reads correctly while the page header is on screen. Full rule in `DESIGN.md` and `CLAUDE.md`'s BS
 calendar section; Excel exports keep the numeric column.
+
+## A saved theme pins the user to the preset as it was, so a corrected token never ships (S620)
+
+`switchPreset` persists the **full** colours object to `localStorage`, and `loadSaved` merged
+`saved.colors` over the preset defaults. That merge existed to protect a snapshot taken before a new
+field (e.g. `cardShadow`) was added — but it also meant anyone who had ever picked a theme carried a
+frozen copy of it, so **fixing a palette value shipped to new installs only.** Found while
+correcting the dark text ladder, which would otherwise have reached almost nobody.
+
+`updateColor` flips the key to `'custom'` the moment anything is changed, so a saved blob under a
+**preset** key is always an unedited snapshot — its colours are pure redundancy. Preset keys now
+resolve fresh from `PRESETS`, which also subsumes what the merge was written for. Only `'custom'`
+still merges, because there the saved values genuinely are the user's own edits.
+
+The corollary for any future palette work: **a token is not shipped until `loadSaved` will hand it
+to an existing user.** Check that path before assuming a colour change is live.

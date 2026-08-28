@@ -269,6 +269,13 @@ and the pickers render) — this one names a day inside the period you already c
 year. Use `bsDayOrdinal(day)` alone where the month is already stated beside it. **Excel exports keep
 the numeric Day column** — text breaks a spreadsheet's sorting and filtering.
 
+**A date picked in BS is STORED as AD, so fixing the table never fixes the stored value.**
+`BsCalendarPicker` commits `formatAd(bsToAd(...))`. Two converter faults have shipped, and rows
+written under either are still wrong today with nothing to signal it — dates of birth worst, via
+the pre-2079 fallback. The era table, the exact repair derivation and `scripts/bs-date-audit.mjs`
+are in `.claude/rules/bs-calendar.md`. A picker given `lockYear`/`lockMonth` stores a day NUMBER
+instead and is unaffected — that distinction decides whether a new field can rot.
+
 **`BS_MONTHS` has exactly one definition and it lives here.** It was copy-pasted into 31 files until
 S614 (all byte-identical, so nothing rendered wrong — it was simply a list that only had to be edited
 once to disagree with itself). Three of those 31 hid from a `^const BS_MONTHS =` grep: one held the
@@ -568,5 +575,11 @@ back*, not merely displayed; and `Items.js`'s `checkAllUsage` feeds the force-de
 truncation reported a used item as unused. **Deliberately not wrapped**, so the next sweep does not
 churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and
 `persistSalesDay`'s legacy three-call fallback.
+
+**A read narrowed in JS is bigger than it reads.** S620's worst find looked scoped to one fiscal
+year and one month — `fetchYtdMap` and `fetchApprovedTadaMap` in `payrollData.js` apply those
+windows *after* the fetch, so each was pulling the client's entire history and hitting the cap at
+roughly 20 staff × 4 years. When judging whether a table needs paging, count what the QUERY
+returns, not what the function is named after.
 
 **Two traps when doing a sweep like this**, both hit live: (1) if the original chain continued past the line you're editing, the closing paren lands too early and the trailing `.order(...)` gets applied to fetchAllRows' *result* — a plain `{data,error}`, not a builder — which is a runtime `TypeError`, not a build error, so only actually loading the page catches it (`Purchases.js`, found exactly this way). (2) A CRA dev server left running shares `node_modules/.cache` with `npm run build` and will keep rewriting stale ESLint entries underneath it, producing phantom `'fetchAllRows' is defined but never used` errors on files where the import and the usage are both plainly present. Stop the dev server before trusting a CI build.

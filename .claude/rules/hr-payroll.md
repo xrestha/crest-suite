@@ -109,3 +109,54 @@ a destructive action must name the day it will wipe in the same words the roster
 `FinalSettlement.jsx` carried the twelve month names as its own `BS_MONTH_NAMES` — the same list as
 `BS_MONTHS`, under a different name, so no name-based search would ever have paired it with the
 other 30 copies. It now imports `BS_MONTHS`. **Never retype the month list**; there is exactly one.
+
+## The payroll data path: three failures that all look like a normal month (S620)
+
+Every one of these produced a complete, confident payroll. None of them raised anything.
+
+**Page every read that is narrowed in JS rather than in the query.** `fetchYtdMap` and
+`fetchApprovedTadaMap` in `payrollData.js` apply the fiscal-year and period windows *after* the
+fetch, so each reads the client's entire history — every finalized payslip ever, every
+approved-or-paid claim ever. Unpaged they stopped at 1000 rows, which for payslips is roughly 20
+staff × 4 years, and a truncated YTD understates prior taxable income, under-withholds TDS and
+under-remits to the IRD. `hr_advances`/`hr_advance_repayments` are worse: unfiltered lifetime
+ledgers in both `PayrollRun` and `PayrollCalculation`, and `buildAdvanceMap` derives outstanding as
+`amount − repaid`, so truncating the repayments side over-deducts from take-home pay. Note
+`.order('issued_date')` is NOT a unique tiebreaker — several advances share a date — so paging on it
+alone trades truncation for row-repeat/row-skip. Append `.order('id')`.
+
+**An empty map is a real value here, so a dropped read error is invisible.** No prior finalized
+payslips this fiscal year is a genuine state — the year's first month — so a failed `fetchYtdMap`
+does not look like a failure, it looks like a fresh starter, and `computeMonthlyTds` spreads the
+year's tax over twelve months instead of the months actually left. Both helpers now return
+`{ data, error }` so they compose with `firstError()`. The write paths matter most: `generate()` and
+`regenerate()` compute TDS from these maps and INSERT the result, so the wrong figure is *persisted*
+— and `regenerate()` hard-deletes every payslip first, so its check must run before the DELETE, not
+after. `FinalSettlement` had `.catch(() => ({}))`, the same fallback stated out loud; its writes are
+now blocked while the read is failing, because **an error nobody can act on is not a guard**.
+
+**Compare inputs, never `net_pay`, when asking whether a draft is stale.** TDS and TADA are
+deliberately hand-editable while a run is a draft and each edit rewrites `net_pay`, so a `net_pay`
+comparison could not tell an intended override from real staleness. On Payroll Run that was a
+deadlock, not a false alarm: `finalize()` refuses while stale and offers no override branch, and the
+only escape — Regenerate — resets the very edit that caused it, so a legitimate override could never
+be finalized. `payslipDrift(stored, live)` in `payrollData.js` is the one comparison, returning
+`'moved' | 'overridden' | null`. It checks the six computed fields nobody can type into, plus the
+TADA **claim id set** rather than its amount — which keeps exactly what the amount comparison used to
+detect, since approving or withdrawing a claim changes the ids while a typed correction does not. An
+override is reported (`overridden`), never blocking: the Finalize confirmation names it, and
+`PayrollCalculation` shows a neutral "Adjusted" chip where it used to show a red ⚠ Stale against a
+correct payslip. It lives in `payrollData.js` because that module exists so those two pages cannot
+drift; a third copy of the comparison is the failure it was written to prevent.
+
+## Reopen is an HR-manager action, not a Crest-admin one (S620)
+
+`isAdmin` is the **Crest platform operator**; the tenant's own owner is `isOwner`, and both resolve
+`hrRole` to `'manager'`. Payroll Run, Festival Allowance and Incentive Run all gated Reopen on
+`isAdmin`, so the person accountable for a run had to contact support to correct it. All three are
+now `hasHrAccess('manager')`, matching the guard already on each page.
+
+**`FinalSettlement.jsx` is deliberately still `isAdmin`** and is the one place this pattern was left
+alone: reopening a settlement un-blocks a departed employee's Crest Staff login and reverses their
+status stamp, which is a different order of consequence from re-running a month. Decide it on its own
+merits rather than sweeping it for consistency.

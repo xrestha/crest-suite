@@ -302,8 +302,14 @@ The palette is a dark charcoal neutral scale with a single warm accent; every ot
 - **Ink Border Light** (#1e2330): Secondary/internal borders (table row dividers, input borders) - quieter than the structural border.
 - **Ink Sidebar** (#0e1117): Sidebar rail, theme-matched to background.
 - **Parchment Text** (#e8e0d0): Primary text - warm off-white, not pure white.
-- **Slate Text** (#8a92a3): Secondary text - labels, metadata, table headers.
-- **Fog Text** (#9ca3af): Tertiary text - the quietest tier, timestamps and disabled-adjacent copy.
+- **Fog Text** (#9ca3af): Secondary text - labels, metadata, table headers. 6.70:1 on the card.
+- **Slate Text** (#8a92a3): Tertiary text - the quietest tier, timestamps and disabled-adjacent copy. 5.45:1.
+
+These two **swapped roles in S620**, and the swap is the whole fix: the values were always in
+the palette, just assigned the wrong way round, so every "quietest tier" hint was rendering
+*louder* than every secondary label on the dark preset. Light was ordered correctly the whole
+time (7.33 > 5.76), which is why nothing looked wrong. Both tiers cleared AA before and after —
+this was hierarchy, not accessibility, which is exactly why no contrast audit had caught it.
 
 ### Signal colors
 - **Success Green** (#34d399): Paid, approved, healthy stock, positive variance.
