@@ -1743,11 +1743,35 @@ export default function ClientDashboard() {
                   <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="day" tick={dayAxisTick} height={big ? 32 : 26} tickLine={false} axisLine={false} interval={0} />
                   <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
+                  {/* Custom content rather than contentStyle/formatter: the dashed projection
+                      series anchor at the last actual day so the line connects (see the trend
+                      build above), and Recharts' default tooltip can't tell an anchor from a
+                      forecast — on that one day it listed "Sales Projection: NPR 13,721" right
+                      under an identical "Sales: NPR 13,721", restating the actual under a label
+                      that claims it was computed. A projection row is only shown on days that
+                      have no actual for the same metric. */}
                   <Tooltip
-                    contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: big ? 12 : 11 }}
-                    labelStyle={{ color: colors.text1 }}
-                    formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
-                    labelFormatter={l => l}
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null
+                      const row = payload[0]?.payload || {}
+                      const shown = payload.filter(en => {
+                        if (en.value == null) return false
+                        if (en.dataKey === 'salesProj' && row.sales != null) return false
+                        if (en.dataKey === 'purchProj' && row.purchases != null) return false
+                        return true
+                      })
+                      if (!shown.length) return null
+                      return (
+                        <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: big ? 12 : 11, padding: '8px 12px' }}>
+                          <p style={{ color: colors.text1, margin: 0, fontWeight: 600 }}>{label}</p>
+                          {shown.map(en => (
+                            <p key={en.dataKey} style={{ color: en.color, margin: '4px 0 0' }}>
+                              {en.name} : NPR {Math.round(Number(en.value)).toLocaleString()}
+                            </p>
+                          ))}
+                        </div>
+                      )
+                    }}
                   />
                   {/* Frozen full-month reference lines, drawn first (so they sit BEHIND the more
                       prominent actual/adaptive-projection lines below) — thin, dotted, and each in

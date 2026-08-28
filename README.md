@@ -159,6 +159,22 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S622 — 2026-08-28 — A projection row that restates the actual is not a projection
+
+Reported from the dashboard trend tooltip as "something feels off": Day 12 showed six rows, with
+Purchases/Purchases Projection and Sales/Sales Projection as two identical pairs. The figures were
+right — the dashed projection series anchor at the last actual day so the line draws connected to
+the solid one, and Recharts' default tooltip cannot tell an anchor from a forecast, so on exactly
+that seam day it listed the actual a second time under a label claiming it was computed. Same
+family as the S594 rule: a number the page did not compute must not be shown as one.
+
+The trend chart (compact card and expanded modal share it) now uses a custom tooltip content that
+drops a projection row on any day that has an actual for the same metric — future days still show
+their projection rows, and null-value rows are skipped as before. The anchor stays in the data;
+only the tooltip stops reporting it.
+
+---
+
 ### S621 — 2026-08-28 — The "Bought a pack?" boxes accept a sum, like every other quantity box
 
 Reported from Item Master: the pack helper was a plain `<input type="number">`, so a case of four
