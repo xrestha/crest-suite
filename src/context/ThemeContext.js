@@ -41,7 +41,12 @@ export const PRESETS = {
   dark: {
     name: 'Dark', description: 'Classic charcoal & gold',
     bg: '#0f1117', card: '#181c27', border: '#2a2f3d', borderLt: '#1e2330', sidebar: '#0e1117',
-    text1: '#e8e0d0', text2: '#8a92a3', text3: '#9ca3af',
+    // Order matters and was inverted until now: measured against this preset's own card
+    // (#181c27) these two sat at text2 5.45:1 and text3 6.70:1, so every "quietest tier" hint
+    // outranked every secondary label — the ladder DESIGN.md describes, upside down. Neither
+    // value changed; they swapped into the roles they already had contrast for. Light was
+    // always correct (7.33 > 5.76), which is why this never looked obviously wrong.
+    text1: '#e8e0d0', text2: '#9ca3af', text3: '#8a92a3',
     accent: '#c9a84c', accentHover: '#d4b96a', accentText: '#0f1117',
     inputBg: '#0f1117', tableHover: 'rgba(255,255,255,0.03)', focusRing: 'rgba(201,168,76,0.15)',
     green: '#34d399', red: '#f87171', amber: '#fbbf24', purple: '#a78bfa',
@@ -177,8 +182,17 @@ function loadSaved() {
       const key = defaultKeyForSurface()
       return { key, colors: resolveColors(key) }
     }
-    const base = PRESETS[saved.key] || PRESETS.dark
-    return { key: saved.key, colors: { ...base, ...saved.colors } }
+    // A NON-CUSTOM key is always an unedited snapshot: updateColor flips the key to 'custom' the
+    // moment anything is changed, so `saved.colors` under a preset key is only ever a copy of that
+    // preset as it stood when it was picked. Merging it back over the preset therefore does not
+    // preserve a choice — it pins the user to a stale copy, and a corrected token never reaches
+    // anyone who has ever selected a theme. Found while fixing the dark text ladder above: the
+    // swap would have shipped to new installs only. Resolving fresh also subsumes what the merge
+    // was written for (a snapshot predating a newly-added field like cardShadow).
+    if (saved.key !== 'custom') return { key: saved.key, colors: resolveColors(saved.key) }
+    // `custom` IS the user's own edits, so here the saved values must win — with the preset
+    // underneath only to fill in fields that did not exist when the snapshot was taken.
+    return { key: 'custom', colors: { ...PRESETS.dark, ...saved.colors } }
   } catch {
     const key = defaultKeyForSurface()
     return { key, colors: resolveColors(key) }

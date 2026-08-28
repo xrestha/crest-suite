@@ -52,7 +52,7 @@ function calcFestivalTds({ emp, amount, ytd, fyStart }) {
 }
 
 export default function FestivalAllowance() {
-  const { clientId, isAdmin, hasHrAccess } = useAuth()
+  const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedUpsert, scopedUpdate } = useScopedDb()
   const today = getBsToday()
   const [bsYear,    setBsYear]    = useState(today.year)
@@ -269,7 +269,10 @@ export default function FestivalAllowance() {
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('csv')}>⬇ Bank CSV</button>
             {!finalized && <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={regenerate} disabled={busy}>↻ Regenerate</button>}
             {!finalized && <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => setStatus('finalized')} disabled={busy}>Finalize</button>}
-            {finalized && isAdmin && <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setStatus('draft')} disabled={busy}>Reopen</button>}
+            {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform operator, while
+                the tenant's own Owner is `isOwner` — both resolve hrRole to 'manager'. Gating this on
+                isAdmin made a client contact support to reopen their own finalized run. */}
+            {finalized && hasHrAccess('manager') && <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setStatus('draft')} disabled={busy}>Reopen</button>}
           </div>
 
           {/* Table */}

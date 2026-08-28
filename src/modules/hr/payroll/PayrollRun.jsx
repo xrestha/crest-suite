@@ -25,7 +25,7 @@ const inp = {
 }
 
 export default function PayrollRun() {
-  const { clientId, isAdmin, hasHrAccess } = useAuth()
+  const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const periodReq = useLatestRequest()
   const [periods,    setPeriods]    = useState([])
@@ -521,7 +521,14 @@ export default function PayrollRun() {
                 <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>⬇ Export</button>
                 {!finalized && <button className="btn btn-ghost" onClick={() => setConfirmAction('regenerate')} disabled={busy} style={{ fontSize: 12 }}>↻ Regenerate</button>}
                 {!finalized && <button className="btn btn-primary" onClick={requestFinalize} disabled={busy} style={{ fontSize: 12 }}>Finalize</button>}
-                {finalized && isAdmin && <button className="btn btn-ghost" onClick={() => setConfirmAction('reopen')} disabled={busy} style={{ fontSize: 12 }}>Reopen</button>}
+                {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform OPERATOR, while
+                    the tenant's own Owner is `isOwner`; both resolve hrRole to 'manager'. Gating on
+                    isAdmin therefore locked the one person accountable for this payroll out of
+                    reopening it, for a correction they would have to phone support to get. The page
+                    is already manager-gated and the confirmation below states what reopening
+                    reverses (advance repayments, TADA closures). Same change in FestivalAllowance
+                    and IncentiveRun. */}
+                {finalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={() => setConfirmAction('reopen')} disabled={busy} style={{ fontSize: 12 }}>Reopen</button>}
               </div>
             )}
             {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
