@@ -63,6 +63,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createClient } from '@supabase/supabase-js'
 
+const BS_MONTH_NAMES = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(__dirname, '..')
 
@@ -91,12 +93,18 @@ const current = await import('file://' + path.join(ROOT, 'src', 'utils', 'bsCale
 // ── Config ────────────────────────────────────────────────────────────────────────────────────
 // `verifiable: false` means the table has no updated_at, so a post-fix edit is indistinguishable
 // from an untouched row.
+// `labelCols` are columns ON the row that name it; `empCol` is a foreign key resolved to an
+// employee name in a second pass. A uuid is not something anyone can check against a personnel
+// file, and this script proposes edits to legal records — the report has to say WHOSE date it is
+// and at WHICH outlet, or it cannot be confirmed before it is applied.
 const TARGETS = [
-  { table: 'hr_employees',      cols: ['date_of_birth', 'join_date', 'end_date', 'retirement_date'], verifiable: true },
-  { table: 'hr_advances',       cols: ['issued_date'],            verifiable: false },
-  { table: 'hr_tada_claims',    cols: ['start_date', 'end_date'], verifiable: false },
-  { table: 'hr_leave_requests', cols: ['start_date', 'end_date'], verifiable: false },
-  { table: 'purchase_orders',   cols: ['expected_date'],          verifiable: false },
+  { table: 'hr_employees',      cols: ['date_of_birth', 'join_date', 'end_date', 'retirement_date'], audited: true,
+    labelCols: ['full_name', 'employee_code'],
+    labelOf: r => [r.full_name, r.employee_code].filter(Boolean).join(' · ') },
+  { table: 'hr_leave_requests', cols: ['start_date', 'end_date'], audited: true,  empCol: 'employee_id' },
+  { table: 'hr_advances',       cols: ['issued_date'],            audited: false, empCol: 'employee_id' },
+  { table: 'hr_tada_claims',    cols: ['start_date', 'end_date'], audited: false, empCol: 'employee_id' },
+  { table: 'purchase_orders',   cols: ['expected_date'],          audited: false },
 ]
 
 function loadEnvLocal() {
@@ -157,9 +165,8 @@ function repair(era, stored) {
 }
 
 // Paged read — this runs across every tenant at once, so the 1000-row cap is well within reach.
-async function readAll(table, cols, verifiable) {
-  const select = ['id', 'client_id', 'created_at', ...cols]
-  if (verifiable) select.push('updated_at')
+async function readAll(table, cols, extra = []) {
+  const select = ['id', 'client_id', 'created_at', ...cols, ...extra]
   const out = []
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase.from(table).select(select.join(', ')).order('id').range(from, from + 999)
@@ -170,6 +177,53 @@ async function readAll(table, cols, verifiable) {
   return out
 }
 
+// ── When was THIS FIELD actually written? ──────────────────────────────────────────────────────
+// The row's `created_at` is not the answer, and this cost a near-miss. A leaver's `end_date` is set
+// months after the row is created — Jeevan Tamang's was written 2026-08-22, a week AFTER the
+// calendar was fixed, so it was already correct while the row's creation date said "era E1" and the
+// script proposed changing it. The first version guarded that with `updated_at`, which turns out to
+// be dead: nothing maintains it (no trigger, and EmployeeForm never writes it), so it equals
+// `created_at` forever and the guard could never fire. A guard on a column nobody updates is not a
+// guard — it reported "0 need review" and meant nothing by it.
+//
+// `log_audit()` stores a full row snapshot per change, so the real per-field write time is in
+// `audit_logs`. Walking an id's history newest-first, the first entry where a column's value
+// CHANGED is when that column took the value it holds now.
+async function auditHistory(table, ids) {
+  const byId = {}
+  if (!ids.length) return byId
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from('audit_logs')
+      .select('record_id, created_at, old_data, new_data')
+      .eq('table_name', table).in('record_id', ids)
+      .order('created_at').order('id').range(from, from + 999)
+    if (error) return byId                       // degrade: callers treat "no history" as unprovable
+    for (const r of data || []) (byId[r.record_id] ||= []).push(r)
+    if ((data || []).length < 1000) break
+  }
+  return byId
+}
+
+// → ISO timestamp the column last changed, or null if this row has no usable history.
+function lastWriteOf(history, col) {
+  if (!history || !history.length) return null
+  for (let i = history.length - 1; i >= 0; i--) {
+    const o = history[i].old_data ? history[i].old_data[col] ?? null : null
+    const n = history[i].new_data ? history[i].new_data[col] ?? null : null
+    if (o !== n) return history[i].created_at
+  }
+  return null
+}
+
+// Resolve ids to names so the report can be checked against a personnel file. Best-effort: a
+// failure here must never stop the audit, so it degrades to showing the raw id.
+async function nameMap(table, ids, cols) {
+  if (!ids.length) return {}
+  const { data, error } = await supabase.from(table).select('id, ' + cols.join(', ')).in('id', ids)
+  if (error) return {}
+  return Object.fromEntries((data || []).map(r => [r.id, cols.map(c => r[c]).filter(Boolean).join(' · ')]))
+}
+
 async function main() {
   console.log(APPLY ? '-- BS DATE AUDIT — APPLYING REPAIRS --' : '-- BS DATE AUDIT — DRY RUN (no writes) --')
   console.log('Eras: ' + ERAS.map(e => e.id + ' < ' + e.until).join('   ') + '\n')
@@ -178,41 +232,65 @@ async function main() {
 
   for (const target of TARGETS) {
     let rows
-    try { rows = await readAll(target.table, target.cols, target.verifiable) }
+    const extra = [...(target.labelCols || []), ...(target.empCol ? [target.empCol] : [])]
+    try { rows = await readAll(target.table, target.cols, extra) }
     catch (e) { console.log(target.table + ': SKIPPED — ' + e.message + '\n'); continue }
 
+    // Only rows created before the last fix can be affected at all; fetch history for those.
+    const lastCutoff = ERAS[ERAS.length - 1].cutoff
+    const candidates = rows.filter(r => new Date(r.created_at) < lastCutoff)
+    const history = target.audited ? await auditHistory(target.table, candidates.map(r => r.id)) : {}
+
     const changes = [], review = []
-    for (const row of rows) {
-      const era = eraFor(row.created_at)
-      if (!era) continue                                   // written by the correct converter
+    for (const row of candidates) {
       for (const col of target.cols) {
         const stored = row[col]
         if (!stored) continue
+
+        // The write time of THIS FIELD, not of the row. Falls back to the row's creation date only
+        // where there is no history to consult.
+        const writtenAt = target.audited ? lastWriteOf(history[row.id], col) : null
+        const proven = !!writtenAt
+        const era = eraFor(writtenAt || row.created_at)
+        if (!era) continue                                 // written by the correct converter
+
         const r = repair(era, stored)
         if (!r || r.fixed === stored) continue
         // E3 only broke years the table did not cover; a 2079+ date written then is fine.
         if (era.id === 'E3' && r.bs.year >= 2079) continue
-        const rec = { id: row.id, col, stored, fixed: r.fixed, bs: r.bs, era: era.id }
-        // updated_at after the fix means the value may already have been re-picked and be right;
-        // "repairing" it would introduce the very error this script removes.
-        if (target.verifiable && row.updated_at && new Date(row.updated_at) >= era.cutoff) review.push(rec)
-        else changes.push(rec)
+
+        const rec = { id: row.id, col, stored, fixed: r.fixed, bs: r.bs, era: era.id,
+                      clientId: row.client_id, writtenAt: writtenAt || row.created_at, proven,
+                      label: target.labelOf ? target.labelOf(row) : null,
+                      empId: target.empCol ? row[target.empCol] : null }
+        // Auto-repair ONLY where the audit log proves when this field was written. Everything else
+        // is reported for a human, because applying the transform to an already-correct date
+        // corrupts it — and being unable to tell is not the same as it being safe.
+        if (proven) changes.push(rec)
+        else review.push(rec)
       }
     }
 
     console.log(target.table + ': ' + rows.length + ' rows scanned — ' + changes.length + ' repairable, ' + review.length + ' need review')
-    for (const c of [...changes, ...review].slice(0, 10)) {
-      console.log('   ' + c.col + ' ' + c.stored + ' -> ' + c.fixed +
-        '  (picked ' + c.bs.day + '/' + c.bs.month + '/' + c.bs.year + ' BS, ' + c.era + ')  id=' + c.id)
+    const flagged = [...changes, ...review]
+    const clients = await nameMap('clients', [...new Set(flagged.map(c => c.clientId).filter(Boolean))], ['name'])
+    const emps = await nameMap('hr_employees', [...new Set(flagged.map(c => c.empId).filter(Boolean))], ['full_name', 'employee_code'])
+    for (const c of flagged.slice(0, 20)) {
+      const who = c.label || emps[c.empId] || ('id ' + c.id)
+      const where = clients[c.clientId] || c.clientId || '?'
+      console.log('   ' + who + '  [' + where + ']')
+      console.log('      ' + c.col + ': ' + c.stored + ' -> ' + c.fixed +
+        '   (picked ' + c.bs.day + ' ' + BS_MONTH_NAMES[c.bs.month - 1] + ' ' + c.bs.year + ')')
+      console.log('      written ' + c.writtenAt.slice(0, 16).replace('T', ' ') + ' UTC, era ' + c.era +
+        (c.proven ? '  [from the audit log]' : '  [NO AUDIT HISTORY — row creation date assumed; NOT auto-repaired]'))
     }
-    const shown = changes.length + review.length
-    if (shown > 10) console.log('   ... ' + (shown - 10) + ' more not listed')
+    if (flagged.length > 20) console.log('   ... ' + (flagged.length - 20) + ' more not listed')
     totalChanged += changes.length
     totalReview += review.length
 
     if (APPLY && changes.length) {
-      if (!target.verifiable && !INCLUDE_UNVERIFIABLE) {
-        console.log('   NOT APPLIED — ' + target.table + ' has no updated_at, so a post-fix edit cannot be ruled out.')
+      if (!target.audited && !INCLUDE_UNVERIFIABLE) {
+        console.log('   NOT APPLIED — ' + target.table + ' has no audit trigger, so when each date was written cannot be established.')
         console.log('   Re-run with --include-unverifiable to repair it anyway.')
       } else {
         let n = 0
