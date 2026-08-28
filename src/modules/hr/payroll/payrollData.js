@@ -3,14 +3,23 @@
 // this logic across two files would risk them silently drifting apart, defeating the whole point
 // of the Calculation page (it exists to always match what Payroll actually computes).
 import { bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { fiscalYearOf } from './tds'
 
 // Year-to-date taxable per employee: sum of (gross − SSF) and tds from PRIOR finalized payslips
 // in the same fiscal year (months before the current one).
 export async function fetchYtdMap(scopedFrom, period) {
   const cur = fiscalYearOf(period.bs_year, period.bs_month)
-  const { data } = await scopedFrom('hr_payslips', 'employee_id, gross, ot_amount, ssf_employee, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
-    .eq('hr_payroll_runs.status', 'finalized')
+  // Paged. The fiscal-year narrowing below happens in JS, so this read is EVERY finalized payslip
+  // the client has ever had — one row per employee per month, for as long as they have run payroll.
+  // Unpaged that silently stops at PostgREST's 1000-row cap (~20 staff x 4 years), and a truncated
+  // YTD map understates prior taxable income, which under-withholds TDS and under-remits to the IRD.
+  // `.order('id')` is the unique tiebreaker fetchAllRows requires: paging a non-uniquely-ordered
+  // query repeats rows on one page and skips them on the next, trading truncation for a worse bug.
+  const { data } = await fetchAllRows(() =>
+    scopedFrom('hr_payslips', 'employee_id, gross, ot_amount, ssf_employee, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+      .eq('hr_payroll_runs.status', 'finalized')
+      .order('id'))
   const map = {}
   ;(data || []).forEach(r => {
     if (r.hr_payroll_runs?.status !== 'finalized') return
@@ -41,8 +50,12 @@ export async function fetchYtdMap(scopedFrom, period) {
 export async function fetchApprovedTadaMap(scopedFrom, period) {
   const periodStart = formatAd(bsToAd(period.bs_year, period.bs_month, 1))
   const periodEnd   = formatAd(bsToAd(period.bs_year, period.bs_month, daysInBsMonth(period.bs_year, period.bs_month)))
-  const { data } = await scopedFrom('hr_tada_claims', 'id, employee_id, total_amount, start_date, end_date, status, paid_method')
-    .in('status', ['approved', 'paid'])
+  // Paged, for the same reason as fetchYtdMap: the period window is applied in JS below, so this
+  // reads every approved-or-paid claim in the client's history, not just this month's.
+  const { data } = await fetchAllRows(() =>
+    scopedFrom('hr_tada_claims', 'id, employee_id, total_amount, start_date, end_date, status, paid_method')
+      .in('status', ['approved', 'paid'])
+      .order('id'))
   const map = {}
   ;(data || []).forEach(c => {
     if (c.status === 'paid' && c.paid_method !== 'Payroll') return
@@ -53,6 +66,43 @@ export async function fetchApprovedTadaMap(scopedFrom, period) {
     map[c.employee_id] = e
   })
   return map
+}
+
+// ── Draft-vs-live drift, shared by Payroll Run's Finalize gate and the Calculation page's
+// Stale badge ────────────────────────────────────────────────────────────────────────────────
+// Both used to compare `net_pay` alone. TDS and TADA are deliberately hand-editable while a run
+// is a draft, and each edit writes a recomputed net_pay — so overriding one TDS registered as
+// staleness. On Payroll Run that was a deadlock, not merely a false alarm: finalize() refuses
+// while stale and offers no override, and the only escape — Regenerate — resets the very edit
+// that caused it, so a legitimate override could never be finalized. On the Calculation page the
+// same comparison raised a permanent red ⚠ Stale against a payslip that was correct.
+//
+// The fix is to compare what no one can type into. `FRESHNESS_INPUT_FIELDS` are all computed, so
+// a difference in any of them is always genuine upstream movement (attendance, overtime, salary
+// setup, an advance instalment). TADA is caught by its CLAIM IDS instead of its amount, which
+// preserves exactly what the amount comparison used to detect — approving or withdrawing a claim
+// after Generate changes the id set, while a typed correction leaves it identical.
+//
+// Lives here rather than in either page because this module exists so those two cannot drift; a
+// third copy of the comparison is precisely the failure it was written to prevent.
+export const FRESHNESS_INPUT_FIELDS = [
+  'gross', 'ot_amount', 'absence_deduction', 'ssf_employee', 'other_deductions', 'advance_deduction',
+]
+
+// Order-independent identity for a payslip's TADA claim set.
+const claimKey = ids => (Array.isArray(ids) ? [...ids].sort().join(',') : '')
+
+const near = (a, b) => Math.round(a || 0) === Math.round(b || 0)
+
+// → 'moved'      the underlying data changed since Generate; the draft is genuinely out of date
+//   'overridden' inputs agree, so the only difference is a figure a human set by hand
+//   null         stored and live agree, or there is nothing stored to compare against
+export function payslipDrift(stored, live) {
+  if (!stored) return null
+  if (FRESHNESS_INPUT_FIELDS.some(f => !near(stored[f], live[f]))) return 'moved'
+  if (claimKey(stored.tada_claim_ids) !== claimKey(live.tada_claim_ids)) return 'moved'
+  if (!near(stored.tds, live.tds) || !near(stored.tada_amount, live.tada_amount)) return 'overridden'
+  return null
 }
 
 // Per-employee scheduled advance deduction for this period.

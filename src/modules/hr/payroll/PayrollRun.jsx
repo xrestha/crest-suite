@@ -10,7 +10,7 @@ import ConfirmModal from '../../../components/ConfirmModal'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { computePayslip } from './payrollCompute'
 import { computeMonthlyTds } from './tds'
-import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap } from './payrollData'
+import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift } from './payrollData'
 import PayslipBody from './PayslipBody'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -101,8 +101,16 @@ export default function PayrollRun() {
       // attendance-sheet OT on days an approved entry already covers (approved supersedes).
       scopedFrom('hr_overtime_entries', 'employee_id, bs_day, ot_hours, ot_type')
         .eq('bs_year', bsYear).eq('bs_month', bsMonth).eq('status', 'approved'),
-      scopedFrom('hr_advances').order('issued_date'),
-      scopedFrom('hr_advance_repayments'),
+      // Paged. Both are UNFILTERED lifetime ledgers — every advance the client has ever issued
+      // and every repayment ever recorded against one — so unlike the period-scoped reads above
+      // they grow without bound and cross the silent 1000-row cap on their own. buildAdvanceMap
+      // derives outstanding as (amount − repaid), so a truncated repayments read makes advances
+      // look LESS repaid than they are and over-deducts from take-home pay; a truncated advances
+      // read drops the deduction entirely. `.order('issued_date')` is not unique — several
+      // advances share a date — so `.order('id')` is appended as the tiebreaker fetchAllRows
+      // requires, or paging repeats rows on one page and skips them on the next.
+      fetchAllRows(() => scopedFrom('hr_advances').order('issued_date').order('id')),
+      fetchAllRows(() => scopedFrom('hr_advance_repayments').order('id')),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setEmployees(emps || [])
@@ -187,16 +195,21 @@ export default function PayrollRun() {
   // reimplementing the arithmetic — a second copy could drift and report false confidence.
   const freshness = (() => {
     if (!run || run.status === 'finalized' || employees.length === 0 || payslips.length === 0) {
-      return { stale: [], missing: [], departed: [], ok: true }
+      return { stale: [], missing: [], departed: [], overridden: [], ok: true }
     }
     let live
-    try { live = buildRows(run.id, ytdMap, tadaMap) } catch { return { stale: [], missing: [], departed: [], ok: true } }
+    try { live = buildRows(run.id, ytdMap, tadaMap) } catch { return { stale: [], missing: [], departed: [], overridden: [], ok: true } }
     const storedByEmp = Object.fromEntries(payslips.map(s => [s.employee_id, s]))
-    const stale = [], missing = []
+    const stale = [], missing = [], overridden = []
     live.forEach(row => {
       const stored = storedByEmp[row.employee_id]
       if (!stored) { missing.push(row.employee_id); return }
-      if (Math.round(stored.net_pay) !== Math.round(row.net_pay)) stale.push(row.employee_id)
+      // Compares the INPUTS, not net_pay — see payslipDrift's header for why the old net_pay
+      // comparison made an intended TDS override indistinguishable from real staleness, and
+      // deadlocked Finalize against Regenerate. An override is reported, never blocking.
+      const drift = payslipDrift(stored, row)
+      if (drift === 'moved') { stale.push(row.employee_id); return }
+      if (drift === 'overridden') overridden.push(row.employee_id)
     })
     // A third bucket: a payslip that exists in this run for someone who is no longer live.
     //
@@ -211,7 +224,7 @@ export default function PayrollRun() {
     // part of the month — so finalizing the run WITH it is the correct outcome. Blocking finalize
     // on it would strand the run: Regenerate destroys the payslip, Finalize refuses, and there is
     // no third move. It gates Regenerate instead, below.
-    return { stale, missing, departed, ok: stale.length === 0 && missing.length === 0 }
+    return { stale, missing, departed, overridden, ok: stale.length === 0 && missing.length === 0 }
   })()
 
   const nameOf = id => empMap[id]?.full_name || 'Unknown'
@@ -745,6 +758,17 @@ export default function PayrollRun() {
               <li><strong>{payslips.length}</strong> payslip{payslips.length === 1 ? '' : 's'}, NPR <strong>{fmt(netTotal)}</strong> total net pay</li>
               {advCount > 0 && <li>{advCount} advance/loan recover{advCount === 1 ? 'y' : 'ies'} will be recorded in Advances &amp; Loans</li>}
               {tadaCount > 0 && <li>{tadaCount} TADA claim{tadaCount === 1 ? '' : 's'} will be marked Paid</li>}
+              {/* Manually adjusted TDS/TADA no longer blocks Finalize (it is an intended edit, not
+                  staleness — see `freshness`), so this is the one place it gets stated. It belongs
+                  here rather than in the amber stale banner: nothing is wrong, but locking a
+                  hand-set figure as a permanent record is worth seeing at the moment you do it. */}
+              {freshness.overridden.length > 0 && (
+                <li>
+                  <strong>{freshness.overridden.length}</strong> payslip{freshness.overridden.length === 1 ? ' has' : 's have'}{' '}
+                  a manually adjusted TDS or TADA figure ({freshness.overridden.slice(0, 4).map(nameOf).join(', ')}
+                  {freshness.overridden.length > 4 ? `, +${freshness.overridden.length - 4} more` : ''}) — locked as entered, not recomputed
+                </li>
+              )}
             </ul>
             <p style={{ margin: 0 }}>Payslips are locked as a permanent record. This can be undone with Reopen.</p>
           </ConfirmModal>

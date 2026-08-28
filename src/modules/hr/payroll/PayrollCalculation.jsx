@@ -7,7 +7,7 @@ import Tip from '../../../components/Tip'
 import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
 import { computePayslip, calcAmount } from './payrollCompute'
 import { computeMonthlyTdsBreakdown } from './tds'
-import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap } from './payrollData'
+import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift } from './payrollData'
 import { ATTENDANCE_STATUSES, OT_MULTIPLIER } from '../payrollConstants'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -239,8 +239,12 @@ export default function PayrollCalculation() {
       // attendance-sheet OT on days an approved entry already covers (approved supersedes).
       scopedFrom('hr_overtime_entries', 'employee_id, bs_day, ot_hours, ot_type')
         .eq('bs_year', p.bs_year).eq('bs_month', p.bs_month).eq('status', 'approved'),
-      scopedFrom('hr_advances').order('issued_date'),
-      scopedFrom('hr_advance_repayments'),
+      // Paged — same reason as PayrollRun.jsx: both are unfiltered lifetime ledgers that grow
+      // without bound, and a truncated repayments read makes advances look less repaid than they
+      // are, over-deducting from net pay. `.order('id')` is the unique tiebreaker (issued_date
+      // is not unique).
+      fetchAllRows(() => scopedFrom('hr_advances').order('issued_date').order('id')),
+      fetchAllRows(() => scopedFrom('hr_advance_repayments').order('id')),
       scopedFrom('hr_payroll_runs').eq('period_id', p.id).maybeSingle(),
     ])
     if (!periodReq.isCurrent(p.id)) return   // superseded by a newer period selection
@@ -307,8 +311,15 @@ export default function PayrollCalculation() {
     // after the last Generate/Regenerate). Gated on `run` so "no run yet" doesn't itself flag every
     // employee as missing; that case is its own runStatusLabel branch.
     const missing = !!run && !stored
-    const stale = !!stored && Math.round(stored.net_pay) !== Math.round(netPay)
-    return { emp, comps, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay, stored, stale, missing }
+    // Same comparison Payroll Run's Finalize gate uses, from the same function, so the badge here
+    // and the block there can never disagree. It used to be `stored.net_pay !== netPay`, which
+    // flagged every hand-adjusted TDS/TADA as Stale — a red warning against a payslip that was
+    // correct and deliberate. `live` is assembled in buildRows' exact shape.
+    const live = { ...slip, tds: tdsBreakdown.tds, tada_amount: tadaAmount, tada_claim_ids: tada.ids }
+    const drift = payslipDrift(stored, live)
+    const stale = drift === 'moved'
+    const overridden = drift === 'overridden'
+    return { emp, comps, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay, stored, stale, overridden, missing }
   }) : []
 
   // otDoubleCountRisk is gone: approved OT entries now supersede attendance-sheet OT per day
@@ -399,7 +410,7 @@ export default function PayrollCalculation() {
                 </thead>
                 <tbody>
                   {rows.map(row => {
-                    const { emp, slip, tdsBreakdown, advDed, tadaAmount, netPay, stored, stale, missing } = row
+                    const { emp, slip, tdsBreakdown, advDed, tadaAmount, netPay, stored, stale, overridden, missing } = row
                     const expanded = expandedId === emp.id
                     return (
                       <Fragment key={emp.id}>
@@ -422,6 +433,15 @@ export default function PayrollCalculation() {
                               {stale && (
                                 <Tip text={`Payroll's stored net pay (NPR ${fmt(stored.net_pay)}) no longer matches this live calculation (NPR ${fmt(netPay)}) — something changed since the run was last Generated/Regenerated.`} width={290}>
                                   <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>⚠ Stale</span>
+                                </Tip>
+                              )}
+                              {/* Not a warning. The stored figure differs only because someone
+                                  set TDS or TADA by hand on the Payroll page, which is a supported
+                                  edit — this says so plainly rather than showing the red ⚠ Stale
+                                  it used to, which accused a correct payslip of being out of date. */}
+                              {overridden && (
+                                <Tip text={`Payroll's stored payslip matches this calculation on every computed figure, but its TDS or TADA was adjusted by hand (stored net NPR ${fmt(stored.net_pay)} vs NPR ${fmt(netPay)} computed). That is a deliberate edit, not stale data.`} width={300}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>Adjusted</span>
                                 </Tip>
                               )}
                             </div>
