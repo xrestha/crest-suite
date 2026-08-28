@@ -8,6 +8,7 @@ import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import FieldError, { fieldAria } from '../../../components/FieldError'
+import QtyInput from '../../../components/QtyInput'
 import { Navigate } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
 import { errorInfo } from '../../../shared/errorText'
@@ -550,26 +551,24 @@ export default function Items() {
                 borderRadius: 'var(--radius-sm)', padding: '12px 16px'
               }}>
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)', fontWeight: 600 }}>
-                  <Tip text={`Here to do the division for you, nothing more. Type what you actually bought — "500 ${form.uom} for NPR 388.50" — and the price above fills in. Neither box is saved. To record that this item ALWAYS comes in a pack, set it up on the Conversion tab instead: that is what the Purchase Bill reads to decide whether its Qty column means packs or ${form.uom}.`} width={320}>
+                  <Tip text={`Here to do the division for you, nothing more. Type what you actually bought — "500 ${form.uom} for NPR 388.50" — and the price above fills in. Both boxes take sums as well as plain numbers: "12*4" commits 48. Neither box is saved. To record that this item ALWAYS comes in a pack, set it up on the Conversion tab instead: that is what the Purchase Bill reads to decide whether its Qty column means packs or ${form.uom}.`} width={320}>
                     Bought a pack?
                   </Tip>
                 </span>
-                <input id="items-pack-qty"
+                <QtyInput id="items-pack-qty"
                   aria-label={`Pack size, in ${form.uom}`}
                   className="form-input"
-                  type="number" min="0" step="any"
                   value={pack.qty}
-                  onChange={e => setPackField('qty', e.target.value)}
+                  onChange={v => setPackField('qty', v)}
                   placeholder="500"
                   style={{ width: 92 }}
                 />
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{form.uom} for NPR</span>
-                <input id="items-pack-total"
+                <QtyInput id="items-pack-total"
                   aria-label="Price paid for that whole pack"
                   className="form-input"
-                  type="number" min="0" step="any"
                   value={pack.total}
-                  onChange={e => setPackField('total', e.target.value)}
+                  onChange={v => setPackField('total', v)}
                   placeholder="388.50"
                   style={{ width: 112 }}
                 />

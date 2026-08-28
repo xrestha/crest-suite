@@ -159,6 +159,25 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S621 — 2026-08-28 — The "Bought a pack?" boxes accept a sum, like every other quantity box
+
+Reported from Item Master: the pack helper was a plain `<input type="number">`, so a case of four
+dozen had to be worked out on a phone and the answer typed back — the exact transcription risk
+`QtyInput` was built to remove for Stock Count and Purchases. Both boxes on the line (pack size and
+pack price) are now `QtyInput`, so `12*4` commits 48 and `350+38.50` commits 388.50, with the same
+running preview above the box and the same Enter-applies / Esc-cancels behaviour.
+
+Nothing about what is stored changed: the raw expression never leaves `QtyInput`'s local draft, so
+`setPackField` still only ever sees a number, and `Price per <UOM>` is still the one figure saved —
+the pack boxes remain arithmetic on screen and are cleared every time the dialog reopens (S597).
+`type="number"` had to go with the swap (`QtyInput` renders `type="text"`, since a number input
+refuses to hold `12*4` at all) and `inputMode="decimal"` keeps the numeric keypad on mobile.
+
+Tip text, the Help page and the IMS module guide were updated to say the line takes sums — all three
+previously said "every quantity and rate box in Purchases and Stock Count", which was now incomplete.
+
+---
+
 ### S620 — 2026-08-28 — Six findings from the sister app, checked against this codebase rather than assumed
 
 A review of the HR payroll module arrived from the sister HSS app as six findings. Verified each
