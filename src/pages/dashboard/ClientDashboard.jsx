@@ -1767,11 +1767,25 @@ export default function ClientDashboard() {
                       return (
                         <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: big ? 12 : 11, padding: '8px 12px' }}>
                           <p style={{ color: colors.text1, margin: 0, fontWeight: 600 }}>{label}</p>
-                          {shown.map(en => (
-                            <p key={en.dataKey} style={{ color: en.color, margin: '4px 0 0' }}>
-                              {en.name} : NPR {Math.round(Number(en.value)).toLocaleString()}
-                            </p>
-                          ))}
+                          {shown.map(en => {
+                            // Actual-vs-target direction arrow on the two actual rows: ▲ green
+                            // when the day's actual sits above its frozen Target line, ▼ red
+                            // below. Direction colouring, deliberately literal — for purchases
+                            // "down" is usually the good direction, but a tooltip glyph states
+                            // where the line sits, not a verdict; the target rows themselves
+                            // carry no arrow. No arrow when no target is captured yet.
+                            const target = en.dataKey === 'sales' ? row.salesTarget
+                              : en.dataKey === 'purchases' ? row.purchTarget : null
+                            const arrow = target == null || Number(en.value) === target ? null
+                              : Number(en.value) > target
+                                ? <span style={{ color: 'var(--theme-green-text)' }}> ▲</span>
+                                : <span style={{ color: 'var(--theme-red-text)' }}> ▼</span>
+                            return (
+                              <p key={en.dataKey} style={{ color: en.color, margin: '4px 0 0' }}>
+                                {en.name} : NPR {Math.round(Number(en.value)).toLocaleString()}{arrow}
+                              </p>
+                            )
+                          })}
                         </div>
                       )
                     }}

@@ -179,6 +179,12 @@ order was series RENDER order — the two Target lines are drawn first so they s
 lines, which put them first in the tooltip regardless of where they sat on screen. The sort is
 per-day, so a day where purchases spike above sales reorders to match that day's stacking.
 
+Second follow-up: the two actual rows carry a direction arrow against their frozen Target for that
+day — ▲ green above the target line, ▼ red below (the `*-text` token variants, per the design
+rule). Direction colouring, deliberately literal per the request: for purchases "down" is usually
+the good direction, and the flip to verdict colouring (green = favourable) was offered and not
+taken. No arrow before a target snapshot exists or on an exact tie; target rows stay arrow-free.
+
 ---
 
 ### S621 — 2026-08-28 — The "Bought a pack?" boxes accept a sum, like every other quantity box
