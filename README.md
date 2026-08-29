@@ -215,6 +215,15 @@ point — **the flag is now visible enough to be cleared deliberately**, which t
 Entitlement logic lives in `SECURITY DEFINER` functions too, and nothing there fails loudly when a
 column stops being maintained.
 
+**No guide or Help edit was needed, for the interesting reason.** `posGuideData.js` already said POS
+"is a FLAT module (`clients.pos_enabled` only, no plan tiers; `guest_ordering` is its one flag)" and
+that guest ordering "needs the `guest_ordering` flag" — while the SQL had been auto-unlocking on
+`pos_plan = 'pro'` for seven weeks, and CLAUDE.md was wrong in the same direction as the code. **The
+guide was right and the implementation was wrong**, the inverse of the S612 audit that found the IMS
+guide teaching a fixed bug. So when a guide and the code disagree, don't assume the guide is the
+stale one: it was written by someone stating the intent, which is exactly what an entitlement bug
+violates. Worth reading as a spec to check code against, not only as a doc to keep in sync.
+
 ### S630 — 2026-08-29 — Supabase Advisor triage: four guards that fail open, and an overload nobody dropped
 
 Triage of a pasted Security Advisor report (lints `0028`/`0029`, "Public/Signed-In Users Can Execute
