@@ -89,6 +89,13 @@ const DAILY_TREND_COLORS = {
 // drift, and a third metric pair is one entry here plus its columns in the trend build.
 const PROJ_ACTUAL_KEY = { salesProj: 'sales', purchProj: 'purchases' }
 
+// Which frozen Target line each actual series is measured against, and which direction off that
+// line is the GOOD one (+1 = above is good, -1 = below is good). Selling more than the pace you
+// locked in is a win; spending more than it is not. Keyed by dataKey so a third metric pair is one
+// entry here, the same way PROJ_ACTUAL_KEY above works.
+const TARGET_KEY = { sales: 'salesTarget', purchases: 'purchTarget' }
+const GOOD_DIRECTION = { sales: 1, purchases: -1 }
+
 // Custom tooltip for Daily Purchases vs Sales, at module scope so React sees one stable component
 // type (an inline arrow is a brand-new type every parent render, remounting the tooltip subtree —
 // same hoisted shape as MenuEngineering's ScatterTooltipContent). Recharts clones this element
@@ -119,20 +126,34 @@ function TrendTooltipContent({ active, payload, label, big }) {
     <div style={{ ...TOOLTIP_CHROME, ...(big && { fontSize: 12 }), color: 'var(--theme-text1)', padding: '8px 12px', whiteSpace: 'nowrap' }}>
       <p style={{ margin: 0, fontWeight: 600 }}>{label}</p>
       {shown.map(en => {
-        // Actual-vs-target direction arrow on the two actual rows: ▲ green when the day's
-        // actual sits above its frozen Target line, ▼ red below. Direction colouring,
-        // deliberately literal — for purchases "down" is usually the good direction, but a
-        // tooltip glyph states where the line sits, not a verdict; the target rows themselves
-        // carry no arrow. No arrow when no target is captured yet.
-        const target = en.dataKey === 'sales' ? row.salesTarget
-          : en.dataKey === 'purchases' ? row.purchTarget : null
-        const arrow = target == null || Number(en.value) === target ? null
-          : Number(en.value) > target
-            ? <span style={{ color: 'var(--theme-green-text)' }}> ▲</span>
-            : <span style={{ color: 'var(--theme-red-text)' }}> ▼</span>
+        // Actual-vs-target gap on the two actual rows; the target rows themselves carry none, and
+        // nothing renders until that metric's Target line has been captured.
+        //
+        // SHAPE IS THE FACT, COLOUR IS THE VERDICT. ▲/▼ stays literal — it has to agree with the
+        // line you can see sitting above or below the dotted target two pixels away — while the
+        // colour asks whether that is the good direction for THIS metric (GOOD_DIRECTION above).
+        // This reverses the original call, which coloured both rows ▲ green / ▼ red on the
+        // reasoning that a tooltip glyph states a position rather than passing a verdict. Reported
+        // live and the report was right: a red ▼ on "Purchases : NPR 2,295" against a NPR 3,112
+        // target reads as a problem when it is the opposite — the one row on the chart where
+        // under-running the pace is exactly what you wanted.
+        const targetKey = TARGET_KEY[en.dataKey]
+        const target = targetKey ? row[targetKey] : null
+        const value = Number(en.value)
+        const gap = target == null ? null : value - target
+        // Percent of target, not rupees: the row already prints one NPR figure and the Target row
+        // prints the other, so the ratio is the thing neither of them gives you — and it reads the
+        // same on a quiet Sunday as on a delivery day. Guarded against a zero target.
+        const gapPct = gap && target ? Math.abs(gap / target) * 100 : null
+        const good = gap == null || gap === 0 ? null : Math.sign(gap) === GOOD_DIRECTION[en.dataKey]
         return (
           <p key={en.dataKey} style={{ margin: '4px 0 0' }}>
-            <span style={{ color: en.color }}>●</span> {en.name} : NPR {Math.round(Number(en.value)).toLocaleString()}{arrow}
+            <span style={{ color: en.color }}>●</span> {en.name} : NPR {Math.round(value).toLocaleString()}
+            {good != null && (
+              <span style={{ color: good ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                {' '}{gap > 0 ? '▲' : '▼'}{gapPct != null && ` ${gapPct < 1 ? gapPct.toFixed(1) : Math.round(gapPct)}%`}
+              </span>
+            )}
           </p>
         )
       })}
@@ -1717,13 +1738,13 @@ export default function ClientDashboard() {
             {salesTargetSnap && (
               <span style={{ color: 'var(--theme-text2)' }}>
                 <span style={{ color: DAILY_TREND_COLORS.salesTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
-                <Tip text={`Locked in on Day ${salesTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual sales line against it to see if you're ahead or behind pace — unlike Sales Proj. above, which updates every day to reflect today's pace instead.`}>Sales Target</Tip>
+                <Tip text={`Locked in on Day ${salesTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual sales line against it to see if you're ahead or behind pace — unlike Sales Proj. above, which updates every day to reflect today's pace instead. Hover any day: the tooltip shows how far that day ran off target, green when it went your way.`}>Sales Target</Tip>
               </span>
             )}
             {purchTargetSnap && (
               <span style={{ color: 'var(--theme-text2)' }}>
                 <span style={{ color: DAILY_TREND_COLORS.purchTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
-                <Tip text={`Locked in on Day ${purchTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual purchases line against it to see if you're ahead or behind pace — unlike Purch. Proj. above, which updates every day to reflect today's pace instead.`}>Purch. Target</Tip>
+                <Tip text={`Locked in on Day ${purchTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual purchases line against it to see if you're spending ahead of or behind that pace — unlike Purch. Proj. above, which updates every day to reflect today's pace instead. Hover any day: the tooltip shows how far that day ran off target, and here green means UNDER it — spending less than the pace you locked in is the win.`}>Purch. Target</Tip>
               </span>
             )}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}

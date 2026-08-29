@@ -159,6 +159,45 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S634 — 2026-08-29 — the trend tooltip's arrows carry a verdict now, not just a position
+
+Service worker `crest-v153`. No migration.
+
+Reported from a screenshot of Daily Purchases vs Sales: Day 13, *Purchases : NPR 2,295* against a
+*Purchases Target : NPR 3,112*, with a red ▼ beside it. The number was right and the colour said
+the wrong thing — running NPR 817 under the spending pace you locked in on Day 12 is the outcome
+you wanted.
+
+**This reverses a deliberate call, and the reversal is the interesting half.** The original comment
+argued the glyph "states where the line sits, not a verdict", and coloured both actual rows ▲ green
+/ ▼ red literally, acknowledging in the same breath that "for purchases 'down' is usually the good
+direction". That is a defensible position for a *shape* and an indefensible one for a *colour*:
+green and red are not neutral in a product sold to someone checking their food cost between
+services, and there is no reading of a red ▼ that isn't "something went wrong here".
+
+**Shape is the fact, colour is the verdict.** ▲/▼ stays literal, because it has to agree with the
+line the reader can see crossing the dotted target two pixels away — that was the right instinct.
+The colour now asks whether that direction is the good one *for this metric*, via a
+`GOOD_DIRECTION` map (`sales: +1`, `purchases: -1`) sitting next to the existing `TARGET_KEY`
+lookup, keyed on `dataKey` so a third metric pair stays one entry. Sales is unchanged in every
+case; only Purchases flips.
+
+**The gap is now printed as a percentage of target** (`▼ 26%`), not rupees. The row already prints
+one NPR figure and the Target row prints the other, so the ratio is the one thing neither of them
+gives you — and unlike a rupee gap it reads the same on a quiet Sunday as on a delivery day.
+Guarded against a zero target; sub-1% shows one decimal rather than rounding to `0%`.
+
+Both Target legend chips' `Tip` copy now names the rule, and the Purchases one says it outright
+(*"here green means UNDER it — spending less than the pace you locked in is the win"*) rather than
+leaving an owner to infer that the two lines are coloured by opposite conventions. Help page
+updated to match.
+
+**Known limit, deliberately left:** before this change shape and colour were redundant (▲ was always
+green), so hue carried nothing on its own. Now a green ▼ and a red ▼ both exist and only hue tells
+them apart — a red/green CVD reader gets the direction and the percentage from the glyph and the
+text, but loses the instant good/bad read. Judged the better trade than a colour that is actively
+wrong for every reader, and the percentage is what an owner acts on either way.
+
 ### S633 — 2026-08-29 — Swap History gets a tab of its own, and stops answering a question nobody asked
 
 Service worker `crest-v152`. No migration.
