@@ -185,6 +185,7 @@ DECLARE
   v_ghost2 uuid := '00000000-0000-0000-0000-0000000000fd';
   v_admin  uuid;
   v_ok     boolean;
+  v_n      integer;
 BEGIN
   -- ── 1. The premise: a profile-less caller really does make is_admin() return NULL ─────────
   PERFORM set_config('request.jwt.claims',
@@ -234,19 +235,25 @@ BEGIN
   PERFORM set_config('request.jwt.claims', '', true);
 
   -- ── 4. The stale overload is gone and the live one is intact ─────────────────────────────
-  IF EXISTS (
-    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'public' AND p.proname = 'submit_guest_order'
-      AND pg_get_function_identity_arguments(p.oid) = 'uuid, jsonb, text'
-  ) THEN
-    RAISE EXCEPTION 'the 3-arg submit_guest_order overload is still present';
+  -- Asserted on pg_proc.pronargs, NOT on pg_get_function_identity_arguments(). The first attempt
+  -- at this migration compared that function's output against 'uuid, jsonb, text' and the whole
+  -- run rolled back on a false alarm: it renders parameter NAMES too, so the real string is
+  -- 'p_table_id uuid, p_items jsonb, p_notes text' and neither comparison could ever match. The
+  -- failure mode is the nastier direction, because the two checks then disagree -- the "is it
+  -- gone?" test passes vacuously (it finds nothing, so it never raises) while the "is it still
+  -- there?" test fires. Same lesson as verifying an index by its leading column rather than its
+  -- name: assert on a catalog column, never on a formatted string whose shape you have assumed.
+  SELECT count(*) INTO v_n
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public' AND p.proname = 'submit_guest_order';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'expected exactly one submit_guest_order after the drop, found %', v_n;
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'public' AND p.proname = 'submit_guest_order'
-      AND pg_get_function_identity_arguments(p.oid) = 'uuid, jsonb, text, integer'
+    WHERE n.nspname = 'public' AND p.proname = 'submit_guest_order' AND p.pronargs = 4
   ) THEN
-    RAISE EXCEPTION 'the 4-arg submit_guest_order is missing -- guest ordering would be down';
+    RAISE EXCEPTION 'the surviving submit_guest_order is not the 4-arg one -- guest ordering would be down';
   END IF;
 
   -- ── 5. clear_stale_active_outlet: not callable, still wired ──────────────────────────────
