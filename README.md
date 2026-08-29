@@ -159,6 +159,45 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S632 — 2026-08-29 — Guest QR Ordering comes with the POS module, and S631 harmonised the wrong way
+
+Migration `20260829170000`. Service worker `crest-v151`. **This corrects a conclusion S631 reached
+below**, and the correction is the more useful half.
+
+S631 removed the `pos_plan = 'pro'` auto-unlock and left `feature_flags.guest_ordering` as the sole
+gate, on the strength of three sources agreeing: the SQL, `posGuideData.js`, and the original
+`20260707210000` migration calling it "a Pro-tier feature". A fourth source disagreed —
+`POS_MODULE_KEYS` in `AuthContext.js` grants it on `posEnabled` alone, and `FeatureAccessModal`
+renders it **locked with a "Plan" chip** once POS is on, i.e. *included with the module, not
+toggleable*. That disagreement wasn't live on anyone (the only POS-enabled outlet held the flag from
+S631's sweep), but the next client POS was switched on for would have seen guest ordering shown as
+included-and-locked on the admin screen while guests got *"Guest ordering is not enabled for this
+restaurant."*
+
+**The owner settled it: POS is flat and its features come with it.** So the three "agreeing" sources
+were agreeing about an accident of implementation, and the odd one out had it right.
+
+**The flag check was deleted, not widened.** The obvious edit is `flag OR pos_enabled`, mirroring
+`hasFeature()`. But both functions already return/raise at the `pos_enabled` gate *before* the flag
+is ever consulted, so at that point `flag OR pos_enabled` is unconditionally true — a condition that
+reads like a decision and can only have one answer, which is exactly how the next reader comes to
+believe a control exists. `feature_flags.guest_ordering` now gates nothing in SQL. **`pos_enabled` is
+the only thing standing between a client and a public guest menu**, so the migration asserts that
+check is still present — the one way this change could do real harm is by removing the flag check and
+losing that one too.
+
+Live impact: none. One outlet has POS on and already had the flag; every other client is stopped at
+the `pos_enabled` gate before and after.
+
+**The lesson, now in `feedback-module-guides`: agreement between a guide and the code is not
+evidence of correctness.** S631's write-up concluded "the guide was right and the code was wrong" —
+satisfying, and false. The guide had been written *from* the implementation, so it reproduced the
+implementation's mistake, and CLAUDE.md then agreed with both. **Count independent sources, not
+agreeing ones**; a doc derived from the code is the code wearing a second hat. And when docs and code
+disagree about an *entitlement*, that is a question for whoever sells the product, not a defect to
+close by making one match the other — both directions were internally coherent here, and only the
+owner could say which one was the feature.
+
 ### S631 — 2026-08-29 — the two S630 findings, fixed: `pos_plan` stops granting, and two silent reads on HR Employees
 
 Both items S630 recorded as found-but-not-fixed. Service worker bumped to `crest-v150`.

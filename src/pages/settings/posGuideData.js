@@ -1,9 +1,10 @@
 // Crest POS — deep per-page reference for Admin Settings → Guides → Crest POS.
 // Same shape and voice as imsGuideData.js: groups mirror Layout.js's POS_GROUPS nav order, and
 // every section defines all 10 keys (ModuleGuideTab renders `.length` with no null guards).
-// POS is a FLAT module (clients.pos_enabled only, no plan tiers; guest_ordering is its one
-// feature flag), so the `plan` chip carries the RANK gate instead — pos_role
-// staff/supervisor/manager is the real access axis.
+// POS is a FLAT module — clients.pos_enabled only, no plan tiers, and its features (Guest QR
+// Ordering, Loyalty) come WITH the module rather than being sold separately (S632). So the
+// `plan` chip carries the RANK gate instead — pos_role staff/supervisor/manager is the real
+// access axis.
 
 export const POS_GUIDE_GROUPS = [
   // ───────────────────────────── Overview ─────────────────────────────
@@ -239,11 +240,11 @@ export const POS_GUIDE_GROUPS = [
         id: 'guest-menu',
         title: 'Guest Menu & QR Ordering',
         route: '/pos/menu/:tableId',
-        plan: 'Public (via table QR) · ordering needs the guest_ordering flag',
+        plan: 'Public (via table QR) · included with the Crest POS module',
         summary:
-          'What a guest sees after scanning the table\'s QR: the live menu with VAT-inclusive prices and nutrition facts. With guest ordering enabled, they can build a cart and submit it — which lands as a REQUEST for staff to accept, never directly on the order.',
+          'What a guest sees after scanning the table\'s QR: the live menu with VAT-inclusive prices and nutrition facts. They can build a cart and submit it — which lands as a REQUEST for staff to accept, never directly on the order. Ordering comes with Crest POS; there is no separate flag to buy or switch on (S632).',
         workflow: [
-          'Guest scans the QR printed from Table Management → browses the live menu (always available, even without the ordering flag).',
+          'Guest scans the QR printed from Table Management → browses the live menu.',
           'With ordering on: build a cart → submit → the Orders floor shows a request badge with a chime → staff review and Accept, which merges the items into the table\'s order and fires tickets as usual.',
           'The guest\'s screen tracks a five-stage status — placed → confirmed → sent to kitchen → preparing → ready — driven by the real ticket status, including the prep-time countdown the kitchen entered on the KDS.',
         ],
