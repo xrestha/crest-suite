@@ -186,8 +186,17 @@ the only thing standing between a client and a public guest menu**, so the migra
 check is still present — the one way this change could do real harm is by removing the flag check and
 losing that one too.
 
+**Applied ✓ 2026-08-29.** No report to return — the assertions are the proof: both deployed bodies
+read back with `pg_get_functiondef` no longer consult `guest_ordering`, both still check
+`pos_enabled`, and anon kept EXECUTE on each.
+
 Live impact: none. One outlet has POS on and already had the flag; every other client is stopped at
-the `pos_enabled` gate before and after.
+the `pos_enabled` gate before and after. Which also means **S631's grandfather sweep turned out to be
+unnecessary** — it preserved access to something now included with the module, so those two flags are
+inert rather than live grants. Still the right call on what was known then: the alternative was
+silently cutting a paying client off on a guess about intent. Worth remembering as the shape —
+a sweep written to preserve access costs nothing when it turns out to be moot, and costs a customer
+when it is skipped and wasn't.
 
 **The lesson, now in `feedback-module-guides`: agreement between a guide and the code is not
 evidence of correctness.** S631's write-up concluded "the guide was right and the code was wrong" —
