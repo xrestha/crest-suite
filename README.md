@@ -197,6 +197,20 @@ renders **"Self-Service ?"** when its status is unknown instead of confidently o
 that button on an employee who already has a login is the failure the silence used to walk an
 operator into. The three page-level red cards were collapsed into one local `AlertCard`.
 
+**Applied ✓ 2026-08-29, and the leak was live.** The sweep grandfathered **two** clients that were
+relying on the implicit grant, out of three carrying any `pos_plan` (the third was `'starter'`, which
+the clause never granted on, and was correctly untouched). So this was not a theoretical finding.
+
+It also closed the S630 smoke test's open question retroactively: the guest order placed during that
+test went through **because** of `pos_plan`, not because anyone had set the `guest_ordering` flag —
+the test was itself a live demonstration of the leak, and nothing on screen could have shown that.
+
+One of the two has **`pos_enabled = false`**, so guest ordering is unreachable for them and always
+was — both functions check `pos_enabled` before consulting the flag. Nothing about them changed. But
+it names the residue this kind of fix leaves: the client now holds an explicit flag that would
+activate the day POS is switched on. That was equally true of the hidden column, which is the whole
+point — **the flag is now visible enough to be cleared deliberately**, which the column never was.
+
 **The generalisation, now in CLAUDE.md:** a retirement sweep that only greps `src/` has not finished.
 Entitlement logic lives in `SECURITY DEFINER` functions too, and nothing there fails loudly when a
 column stops being maintained.
