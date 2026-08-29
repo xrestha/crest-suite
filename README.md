@@ -159,6 +159,39 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S645 — 2026-08-29 — `/impeccable document`, sidecar only
+
+No service-worker bump: `.impeccable/design.json` ships in no bundle.
+
+The `/impeccable` hook had been asking for this since S641 added a Named Rule to `DESIGN.md`. The
+command's own playbook stops and asks before touching an existing `DESIGN.md`, and that stop is the
+important part of this entry, because **the default reading of "document" would have rewritten it**:
+a full run re-extracts tokens from the code and regenerates the file. Safe for auto-generated
+output, catastrophic here — ours is 667 hand-written lines carrying measured contrast figures, an
+S-number against every rule, and the reasoning behind each accepted exception. Auto-extraction can
+read the values back out of the code; it cannot reconstruct why any of them are what they are.
+
+**Sidecar only, and the diff was six lines.** The delta turned out to be exactly one rule — **The
+Signal Polarity Rule** (S644) — copied across verbatim, per the playbook's "do not reword", and
+placed beside The Signal Separation Rule, which it completes: Separation keeps two signals apart,
+Polarity decides which one a figure has earned. `generatedAt` bumped; 51 rules, 22 components, 52
+colorMeta entries otherwise untouched.
+
+**Diffing first is what kept it to six lines.** The sidecar's `rules` array is extracted more
+broadly than the `**The X Rule.**` pattern — 51 entries against 8 formally named ones — so a naive
+re-extract on that regex would have silently dropped the other 43. Compare and append; never
+regenerate that array from a pattern.
+
+**And the check the tooling cannot do was run by hand.** `context.mjs` reports sidecar staleness by
+comparing timestamps, which is blind to a value that is merely wrong — the S627 failure, where five
+`*-text` variants sat in the sidecar holding pre-retune Light values through two refreshes. All 50
+frontmatter colours were verified against `ThemeContext`'s Dark preset: clean, including the
+`*-text` variants that correctly resolve to their own base hex there (`applyTheme` does
+`t.greenText || t.green`), which reads as a redundancy and is not one.
+
+The rule is now in `.claude/rules/design-system.md` beside S627's, so the next session answers the
+playbook's stop-and-ask with "sidecar only" rather than discovering this the expensive way.
+
 ### S644 — 2026-08-29 — a tolerance band on the trend tooltip's verdict
 
 Service worker `crest-v162`. No migration.

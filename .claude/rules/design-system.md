@@ -385,3 +385,19 @@ Two checks whenever a preset value moves:
 - **Re-run `/impeccable document` so the sidecar is regenerated rather than left describing the
   previous palette.** `context.mjs` reports sidecar staleness, but it only compares timestamps: it
   cannot see a value that is merely wrong, which is how five of them survived two refreshes.
+
+**But `/impeccable document` in this project means SIDECAR ONLY (S645).** Its playbook offers three
+paths and the destructive one is the default reading: a full run re-extracts tokens from the code
+and **rewrites `DESIGN.md`**. That is safe for an auto-generated file and catastrophic here — ours is
+667 hand-written lines carrying measured contrast figures ("2.84:1 on Rosé Dawn"), S-number
+provenance on every rule, and the reasoning behind each accepted exception. Auto-extraction can read
+the values back out of the code; it cannot reconstruct why any of them are what they are. The
+playbook sanctions the narrow path explicitly — *"If the user only asks to refresh the sidecar,
+preserve DESIGN.md and write only `.impeccable/design.json`"* — and that is the one to take. **Answer
+its stop-and-ask with "sidecar only".**
+
+Two things make that refresh cheap and safe. **Diff before regenerating**: the sidecar's `rules`
+array is extracted more broadly than the `**The X Rule.**` pattern (51 entries against 8 formally
+named ones), so a naive re-extract silently drops the other 43 — compare and append instead. And
+**verify `colorMeta` against `ThemeContext` by hand while you are there**, because that is the one
+check the staleness hint cannot perform and the S627 finding above is exactly what it misses.

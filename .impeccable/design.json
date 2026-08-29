@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-29T03:37:39.962Z",
+  "generatedAt": "2026-08-29T14:16:35.108Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -1233,6 +1233,11 @@
         "name": "The Signal Separation Rule",
         "section": "colors",
         "body": "Two signal colours that a reader compares must stay distinguishable *without hue*. Measured under deuteranopia (~6% of men) and protanopia (~2%), not by eye. Light's `redText`/`amberText` shipped at ΔE 3.2 — danger and warning were one colour for a red-green colour-blind reader — and were retuned in S608 to `#8f2440`/`#a85200`, the only pair of 120 searched that clears both axes while every variant holds ≥4.5:1. Where a band is a *scale* rather than a status (food cost healthy/watch/too-high), colour is not enough on its own at all: `fcBand()` also returns a `✓`/`△`/`▲` shape mark, distinguished by fill rather than hue, so the band survives greyscale and a monochrome print. A figure a person reads and acts on carries the mark; a chart axis or sparkline may take colour alone."
+      },
+      {
+        "name": "The Signal Polarity Rule",
+        "body": "A signal colour is a **verdict**, so a figure compared against a target must be coloured by whether it moved in the *good* direction for that metric — not by which side of the line it landed on. Green and red are never neutral to an owner reading between services; there is no reading of a red ▼ that isn't \"something went wrong here\". The Daily Purchases vs Sales tooltip coloured both actual rows ▲ green / ▼ red literally, and reported live (S634) it painted `Purchases : NPR 2,295` against a NPR 3,112 target red — for running *under* the spending pace, which is the outcome you wanted. **Shape is the fact, colour is the verdict**: keep ▲/▼ literal so it agrees with the line the reader can see, and invert the colour per metric (`GOOD_DIRECTION` — sales `+1`, purchases `-1`). Applies wherever a cost sits beside a revenue: variance, budget-vs-actual, wastage, food-cost trend. Two consequences: shape stops being redundant with colour (a green ▼ and a red ▼ now both exist), so the magnitude must appear as **text** — the gap as a percentage of target, not a second currency figure — and any legend explaining the two series has to say the polarity out loud, because nothing else on screen admits that they are coloured by opposite conventions.",
+        "section": "colors"
       },
       {
         "name": "The Chart Palette Rule",
