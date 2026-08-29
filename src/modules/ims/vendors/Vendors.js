@@ -9,6 +9,7 @@ import Tip from '../../../components/Tip'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { Navigate, Link } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
+import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 
 const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '', payment_terms: '' }
 
@@ -16,8 +17,12 @@ export default function Vendors() {
   const { clientId, isAdmin, hasImsAccess } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom, scopedInsert } = useScopedDb()
-  const [vendors, setVendors] = useState([])
-  const [loading, setLoading] = useState(true)
+  // Seeded from the short-lived session cache so a revisit paints the last-known list instantly
+  // while the fresh read reloads quietly underneath (S460 pattern). Safe here: every save on this
+  // page writes only the one vendor being edited, never a baseline derived from this list.
+  const [cachedVendors] = useState(() => readPageCache('vendors', 'vendors', clientId))
+  const [vendors, setVendors] = useState(cachedVendors ?? [])
+  const [loading, setLoading] = useState(!cachedVendors)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [editing, setEditing] = useState(null)
@@ -31,9 +36,10 @@ export default function Vendors() {
   useEffect(() => { if (clientId) loadVendors() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadVendors() {
-    setLoading(true)
+    if (vendors.length === 0) setLoading(true) // a cached (or already-loaded) list keeps showing while this refreshes
     const { data } = await scopedFrom('vendors').order('name')
     setVendors(data || [])
+    writePageCache('vendors', 'vendors', clientId, data || [])
     setLoading(false)
   }
 

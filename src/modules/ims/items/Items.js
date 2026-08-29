@@ -12,6 +12,7 @@ import QtyInput from '../../../components/QtyInput'
 import { Navigate } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
 import { errorInfo } from '../../../shared/errorText'
+import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 
 const DEFAULT_CATEGORIES = [
   'Dairy & Bakery',
@@ -38,9 +39,14 @@ export default function Items() {
   const { clientId, isAdmin, hasImsAccess } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate } = useScopedDb()
-  const [items, setItems] = useState([])
-  const [categories, setCategories] = useState([])
-  const [loading, setLoading] = useState(true)
+  // Seeded from the short-lived session cache so a revisit paints the last-known list instantly
+  // while the fresh reads reload quietly underneath (S460 pattern). Safe here: saves on this page
+  // write only the one item being edited; the delete guard's usageMap is never cached — it always
+  // comes from the live reads.
+  const [cachedItems] = useState(() => readPageCache('items', 'items', clientId))
+  const [items, setItems] = useState(cachedItems ?? [])
+  const [categories, setCategories] = useState(() => readPageCache('items', 'categories', clientId) ?? [])
+  const [loading, setLoading] = useState(!cachedItems)
   const [showForm, setShowForm] = useState(false)
   const [activeTab, setActiveTab] = useState('details') // 'details' | 'conversion'
   const [form, setForm] = useState(EMPTY_FORM)
@@ -72,7 +78,7 @@ export default function Items() {
 
   useEffect(() => {
     if (!clientId) return
-    setLoading(true)
+    if (items.length === 0) setLoading(true) // a cached list keeps showing while this refreshes
     Promise.all([loadCategories(), loadItems(), checkAllUsage()])
       .finally(() => setLoading(false))
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -208,6 +214,7 @@ export default function Items() {
     const { data } = await scopedFrom('categories').order('sort_order')
     const filtered = (data || []).filter(c => c.name !== 'Sub-Recipes')
     setCategories(filtered)
+    writePageCache('items', 'categories', clientId, filtered)
     return filtered
   }
 
@@ -216,6 +223,7 @@ export default function Items() {
       .eq('is_sub_recipe', false)
       .order('name')
     setItems(data || [])
+    writePageCache('items', 'items', clientId, data || [])
   }
 
   async function initDefaultCategories() {

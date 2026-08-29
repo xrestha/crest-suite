@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
@@ -437,9 +437,6 @@ export default function Sales() {
   function getQtyNum(recipeId) {
     return parseFloat(bulkForm[recipeId] ?? sales[recipeId]) || 0
   }
-  function getRevenue(recipe) {
-    return getQtyNum(recipe.id) * (parseFloat(recipe.selling_price) || 0)
-  }
 
   // Period revenue for one recipe, across EVERY row (bulk + daily), priced the way every other
   // report in the codebase prices sales: the row's own unit_price snapshot wins, and the recipe's
@@ -461,17 +458,26 @@ export default function Sales() {
   const totalRevenue = recipes.reduce((s, r) => s + recipeRevenue(r), 0)
   const itemsWithSales = recipes.filter(r => (allDaySums[r.id] || 0) > 0).length
 
-  const sortedRecipes = [...recipes].sort((a, b) => {
-    switch (sortBy) {
-      case 'rev_desc':   return getRevenue(b) - getRevenue(a)
-      case 'rev_asc':    return getRevenue(a) - getRevenue(b)
-      case 'qty_desc':   return getQtyNum(b.id) - getQtyNum(a.id)
-      case 'qty_asc':    return getQtyNum(a.id) - getQtyNum(b.id)
-      case 'price_desc': return (parseFloat(b.selling_price) || 0) - (parseFloat(a.selling_price) || 0)
-      case 'price_asc':  return (parseFloat(a.selling_price) || 0) - (parseFloat(b.selling_price) || 0)
-      default:           return 0
-    }
-  })
+  // Sorted by the SAVED figures, not the live draft. It used to sort through getQtyNum(), which
+  // reads bulkForm — the very state the Qty box writes — so typing a quantity re-sorted the whole
+  // menu on every keystroke AND physically moved the row being typed in out from under the
+  // cursor. The order now refreshes when the period's data is saved or reloaded, which is also
+  // what lets this memoize.
+  const sortedRecipes = useMemo(() => {
+    const savedQty = id => parseFloat(sales[id]) || 0
+    const savedRev = r => savedQty(r.id) * (parseFloat(r.selling_price) || 0)
+    return [...recipes].sort((a, b) => {
+      switch (sortBy) {
+        case 'rev_desc':   return savedRev(b) - savedRev(a)
+        case 'rev_asc':    return savedRev(a) - savedRev(b)
+        case 'qty_desc':   return savedQty(b.id) - savedQty(a.id)
+        case 'qty_asc':    return savedQty(a.id) - savedQty(b.id)
+        case 'price_desc': return (parseFloat(b.selling_price) || 0) - (parseFloat(a.selling_price) || 0)
+        case 'price_asc':  return (parseFloat(a.selling_price) || 0) - (parseFloat(b.selling_price) || 0)
+        default:           return 0
+      }
+    })
+  }, [recipes, sortBy, sales])
 
   const categories = [...new Set(recipes.map(r => r.category).filter(Boolean))].sort()
 
@@ -482,6 +488,38 @@ export default function Sales() {
   const matchesMenuFilter = r =>
     (categoryFilter === 'all' || r.category === categoryFilter) &&
     (!menuSearchLc || r.name.toLowerCase().includes(menuSearchLc))
+
+  // Each list was written out twice in the JSX (once for the empty check, once for the .map), so
+  // every filter ran twice per render. Computed once here instead. The drafts (bulkForm/dailyForm)
+  // stay part of the "has sales" test on purpose — that is the filter's meaning.
+  const bulkRows = sortedRecipes.filter(r => !onlyWithSales || getQtyNum(r.id) > 0)
+  const dailyRows = recipes.filter(r => matchesMenuFilter(r) && (!onlyWithSales || parseFloat(getDailyQty(r.id)) > 0))
+
+  // Daily Breakdown pivot — one row per recipe × one column per day (~9,000 cells on a real
+  // month). Rebuilt per keystroke of the menu search before this memo; the totals are precomputed
+  // maps so the footer doesn't re-reduce the whole matrix per column per render.
+  const dailyPivot = useMemo(() => {
+    const pivot = {}
+    for (const e of monthlyEntries) {
+      if (!pivot[e.recipe_id]) pivot[e.recipe_id] = {}
+      pivot[e.recipe_id][e.bs_day] = (pivot[e.recipe_id][e.bs_day] || 0) + (parseFloat(e.qty_sold) || 0)
+    }
+    const activeDays = [...new Set(monthlyEntries.filter(e => e.bs_day > 0).map(e => e.bs_day))].sort((a, b) => a - b)
+    const hasBulk = monthlyEntries.some(e => e.bs_day === 0)
+    const activeRecipeIds = new Set(monthlyEntries.map(e => e.recipe_id))
+    const activeRecipes = recipes.filter(r => activeRecipeIds.has(r.id) && matchesMenuFilter(r))
+    const rowTotals = {}
+    activeRecipes.forEach(r => {
+      rowTotals[r.id] = Object.values(pivot[r.id] || {}).reduce((s, v) => s + v, 0)
+    })
+    const colTotals = {}
+    activeDays.forEach(d => {
+      colTotals[d] = activeRecipes.reduce((s, r) => s + (pivot[r.id]?.[d] || 0), 0)
+    })
+    const bulkColTotal = activeRecipes.reduce((s, r) => s + (pivot[r.id]?.[0] || 0), 0)
+    const grandTotal = activeRecipes.reduce((s, r) => s + (rowTotals[r.id] || 0), 0)
+    return { pivot, activeDays, hasBulk, activeRecipes, rowTotals, colTotals, bulkColTotal, grandTotal }
+  }, [monthlyEntries, recipes, categoryFilter, menuSearchLc]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const periodLabel = selectedPeriod
     ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
@@ -695,10 +733,10 @@ export default function Sales() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedRecipes.filter(r => !onlyWithSales || getQtyNum(r.id) > 0).length === 0 && (
+                      {bulkRows.length === 0 && (
                         <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>No items with sales entered yet.</td></tr>
                       )}
-                      {sortedRecipes.filter(r => !onlyWithSales || getQtyNum(r.id) > 0).map(recipe => {
+                      {bulkRows.map(recipe => {
                         const qty = getQty(recipe.id)
                         const rev = (parseFloat(qty) || 0) * (parseFloat(recipe.selling_price) || 0)
                         return (
@@ -852,10 +890,10 @@ export default function Sales() {
                       </tr>
                     </thead>
                     <tbody>
-                      {recipes.filter(r => matchesMenuFilter(r) && (!onlyWithSales || parseFloat(getDailyQty(r.id)) > 0)).length === 0 && (
+                      {dailyRows.length === 0 && (
                         <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>No menu items match this filter.</td></tr>
                       )}
-                      {recipes.filter(r => matchesMenuFilter(r) && (!onlyWithSales || parseFloat(getDailyQty(r.id)) > 0)).map(recipe => {
+                      {dailyRows.map(recipe => {
                         const rawVal = getDailyQty(recipe.id)
                         const qty = parseFloat(rawVal) || 0
                         const discRaw = getDailyDiscount(recipe.id)
@@ -943,29 +981,15 @@ export default function Sales() {
               </div>
             )
 
-            // Build pivot: pivot[recipe_id][bs_day] = qty
-            const pivot = {}
-            for (const e of monthlyEntries) {
-              if (!pivot[e.recipe_id]) pivot[e.recipe_id] = {}
-              pivot[e.recipe_id][e.bs_day] = (pivot[e.recipe_id][e.bs_day] || 0) + (parseFloat(e.qty_sold) || 0)
-            }
-
-            // Days with data (excluding bulk bs_day=0), sorted
-            const activeDays = [...new Set(monthlyEntries.filter(e => e.bs_day > 0).map(e => e.bs_day))].sort((a, b) => a - b)
-            const hasBulk = monthlyEntries.some(e => e.bs_day === 0)
-
-            // Recipes with any sales, narrowed by the Category/Search filter — totals below
-            // (colTotal/grandTotal) are computed from this same filtered list, so they always
-            // describe exactly what's on screen.
-            const activeRecipeIds = new Set(monthlyEntries.map(e => e.recipe_id))
-            const activeRecipes = recipes.filter(r => activeRecipeIds.has(r.id) && matchesMenuFilter(r))
+            // Pivot, totals and the filtered recipe list all come from the dailyPivot memo above —
+            // rebuilt only when the entries or the Category/Search filter change, not per render.
+            const { pivot, activeDays, hasBulk, activeRecipes, rowTotals, colTotals, bulkColTotal, grandTotal } = dailyPivot
 
             const today = getBsToday()
             const isCurrentMonth = selectedPeriod && today.year === selectedPeriod.bs_year && today.month === selectedPeriod.bs_month
 
-            const colTotal = (day) => activeRecipes.reduce((s, r) => s + (pivot[r.id]?.[day] || 0), 0)
-            const rowTotal = (recipeId) => Object.values(pivot[recipeId] || {}).reduce((s, v) => s + v, 0)
-            const grandTotal = activeRecipes.reduce((s, r) => s + rowTotal(r.id), 0)
+            const colTotal = (day) => colTotals[day] || 0
+            const rowTotal = (recipeId) => rowTotals[recipeId] || 0
 
             const fmtQty = (n) => n > 0 ? n.toLocaleString() : <span style={{ color: 'var(--theme-border)' }}>—</span>
 
@@ -1026,7 +1050,7 @@ export default function Sales() {
                         ))}
                         {hasBulk && (
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
-                            {(() => { const t = activeRecipes.reduce((s, r) => s + (pivot[r.id]?.[0] || 0), 0); return t > 0 ? t.toLocaleString() : '—' })()}
+                            {bulkColTotal > 0 ? bulkColTotal.toLocaleString() : '—'}
                           </td>
                         )}
                         <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 14 }}>{grandTotal.toLocaleString()}</td>

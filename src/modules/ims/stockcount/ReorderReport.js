@@ -216,7 +216,7 @@ export default function ReorderReport() {
   // sorts included) re-ran on every keystroke of the search box AND the inline par editor, whose
   // state is deliberately not a dependency here.
   const {
-    filtered, printRows, printGroups, reorderCount, totalShortfallValue, noPar,
+    filtered, printGroups, reorderCount, totalShortfallValue, noPar,
     reorderPrintRows, reorderPrintGroups, reorderPrintTotal,
   } = useMemo(() => {
     const q = search.toLowerCase()

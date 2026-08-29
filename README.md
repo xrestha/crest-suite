@@ -159,6 +159,41 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S626 — 2026-08-28 — The S625 tail: the rest of the per-keystroke fixes, and two caches that earned their keep
+
+Closes everything S625's "Not finished" list left open. CI-strict build clean, 416 tests pass, SW
+cache → v147.
+
+**StockMovements, Outstanding Payables and MenuPricing got the same indexed-memo treatment.**
+StockMovements' filter+sort over thousands of ledger rows (and the sub-recipe derivation beside it)
+now lives in one memo — `ITEM_SORTS`/`SUB_SORTS` moved to module scope so they aren't unstable
+dependencies. Outstanding Payables no longer rebuilds and re-sorts the whole bill ledger on every
+keystroke of the payment-amount box — the exact moment someone is entering money. MenuPricing's two
+tab bars stop running a fresh `recipes.filter()` per tab per keystroke (one counts map).
+
+**Sales.js's sort no longer reads the state being typed.** `sortedRecipes` sorted through
+`getQtyNum()`, which reads `bulkForm` — the very state the Qty box writes — so typing a quantity
+re-sorted the whole menu per keystroke AND physically moved the row out from under the cursor. It
+now sorts by the SAVED figures and memoizes; the order refreshes on save/reload. The two
+written-out-twice filter chains (empty-check + map) run once, and the Daily Breakdown's ~9,000-cell
+pivot with its column/row totals is a memo keyed on the entries and the Category/Search filter.
+
+**Stock.js took the smallest safe cut, per its own rule.** `visible` is memoized (it was a fresh
+filter pass several times per keystroke) with `filteredItems()` kept as its function shape so Save
+All / Clear All still read exactly the rendered list; the Print Sheet's high-value flags memo drops
+its per-search-keystroke item-value sort. The row-level `React.memo` extraction was considered and
+deliberately NOT done: it needs ref-wrapped stable callbacks around `saveRow` on the exact
+read-modify-write path a stale closure could corrupt — the PosOrders "smallest safe cut" case.
+
+**Items and Vendors adopted sessionDataCache; PurchaseOrders and Variance deliberately did not.**
+Items/Vendors revisits now paint the last-known list instantly while the fresh read reloads
+underneath — both safe because saves there write only the record being edited. PurchaseOrders was
+wired up and then reverted with the reasoning left in a comment: its core content is the PO list,
+which CANNOT be cached (confirmReceive writes `qty_received + receiving` off that state — a
+read-modify-write baseline a stale row would double-count), and caching only the reference lists is
+invisible behind the skeleton that must wait for the PO list anyway. Variance is the same shape —
+the report is the page. A cache that can't shorten the skeleton is dead code, not a win.
+
 ### S625 — 2026-08-28 — /impeccable optimize over the IMS module: round trips and keystrokes
 
 Three parallel surveys (network waterfalls, render-time recompute, bundle/cache) over all ~40 IMS

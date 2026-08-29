@@ -36,6 +36,10 @@ export default function PurchaseOrders() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
+  // Deliberately NOT on sessionDataCache (S460): the page's core content is the PO list, and
+  // confirmReceive writes `qty_received + receiving` off that state — a read-modify-write
+  // baseline — so a stale cached row could double-count a delivery. Caching only the reference
+  // lists would be invisible, since the skeleton must stay up until the PO list loads anyway.
   const [periods,        setPeriods]        = useState([])
   const periodReq = useLatestRequest()
   const [selectedPeriod, setSelectedPeriod] = useState(null)

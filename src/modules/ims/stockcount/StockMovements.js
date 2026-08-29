@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams, Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
@@ -13,6 +13,24 @@ import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+
+// Module scope so the memoized derivation below can reference them without them becoming
+// unstable dependencies (they're pure column definitions).
+const ITEM_SORTS = {
+  day:      { label: 'Day',          get: r => r.bsDay },
+  item:     { label: 'Item',         get: r => r.item.name || '' },
+  category: { label: 'Category',     get: r => r.category || '' },
+  qty:      { label: 'Qty Depleted', get: r => r.qtyAbs },
+  source:   { label: 'Source',       get: r => r.source || '' },
+  value:    { label: 'Value',        get: r => r.value },
+}
+const SUB_SORTS = {
+  name:      { label: 'Sub-Recipe',    get: r => r.name || '' },
+  qty:       { label: 'Qty Used',      get: r => r.qty },
+  batches:   { label: 'Batches Used',  get: r => r.batches },
+  batchCost: { label: 'Cost / Batch',  get: r => r.batchCost },
+  value:     { label: 'Value',         get: r => r.value },
+}
 
 export default function StockMovements() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -152,51 +170,46 @@ export default function StockMovements() {
     }
   }
 
-  // Text sorts read naturally A→Z on "asc"; numeric ones read biggest-first on "desc". One
-  // comparator handles both so the direction toggle means the same thing on every column.
-  const dirMul = sortDir === 'asc' ? 1 : -1
-  const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(b) : (a || 0) - (b || 0)) * dirMul
+  // A month of POS depletion is realistically thousands of ledger rows, and these full
+  // filter+sort passes used to re-run on every keystroke of either search box — memoized so they
+  // run once per actual input change (and not at all for unrelated state).
+  const {
+    filtered, totalValue, compValue, itemsAffected,
+    subRows, subValueTotal, subBatchTotal, subQtyIsComparable,
+  } = useMemo(() => {
+    // Text sorts read naturally A→Z on "asc"; numeric ones read biggest-first on "desc". One
+    // comparator handles both so the direction toggle means the same thing on every column.
+    const dirMul = sortDir === 'asc' ? 1 : -1
+    const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(b) : (a || 0) - (b || 0)) * dirMul
+    const q = search.toLowerCase()
 
-  const ITEM_SORTS = {
-    day:      { label: 'Day',          get: r => r.bsDay },
-    item:     { label: 'Item',         get: r => r.item.name || '' },
-    category: { label: 'Category',     get: r => r.category || '' },
-    qty:      { label: 'Qty Depleted', get: r => r.qtyAbs },
-    source:   { label: 'Source',       get: r => r.source || '' },
-    value:    { label: 'Value',        get: r => r.value },
-  }
-  const SUB_SORTS = {
-    name:      { label: 'Sub-Recipe',    get: r => r.name || '' },
-    qty:       { label: 'Qty Used',      get: r => r.qty },
-    batches:   { label: 'Batches Used',  get: r => r.batches },
-    batchCost: { label: 'Cost / Batch',  get: r => r.batchCost },
-    value:     { label: 'Value',         get: r => r.value },
-  }
+    const filtered = rows.filter(r => {
+      const matchSource = filterSource === 'all' || r.source === filterSource
+      const matchSearch = (r.item.name || '').toLowerCase().includes(q)
+      const matchDay = (dayFrom === '' || (r.bsDay || 0) >= Number(dayFrom)) && (dayTo === '' || (r.bsDay || 0) <= Number(dayTo))
+      return matchSource && matchSearch && matchDay
+    }).sort((a, b) => cmp(ITEM_SORTS[itemSort].get(a), ITEM_SORTS[itemSort].get(b)))
 
-  const filtered = rows.filter(r => {
-    const matchSource = filterSource === 'all' || r.source === filterSource
-    const matchSearch = (r.item.name || '').toLowerCase().includes(search.toLowerCase())
-    const matchDay = (dayFrom === '' || (r.bsDay || 0) >= Number(dayFrom)) && (dayTo === '' || (r.bsDay || 0) <= Number(dayTo))
-    return matchSource && matchSearch && matchDay
-  }).sort((a, b) => cmp(ITEM_SORTS[itemSort].get(a), ITEM_SORTS[itemSort].get(b)))
+    const totalValue = filtered.reduce((s, r) => s + r.value, 0)
+    const compValue = filtered.filter(r => r.source === 'pos_comp').reduce((s, r) => s + r.value, 0)
+    const itemsAffected = new Set(filtered.map(r => r.item?.name)).size
 
-  const totalValue = filtered.reduce((s, r) => s + r.value, 0)
-  const compValue = filtered.filter(r => r.source === 'pos_comp').reduce((s, r) => s + r.value, 0)
-  const itemsAffected = new Set(filtered.map(r => r.item?.name)).size
+    // Sub-recipe usage shares the search + source filters (both map cleanly onto the sales rows it
+    // derives from) but deliberately not the Day range — the derivation includes Bulk rows, which
+    // carry bs_day 0 and belong to no single day, so a day filter here would quietly drop them.
+    const ingQ = ingSearch.trim().toLowerCase()
+    const subRows = usage.rows
+      .map(r => usageForSource(r, filterSource))
+      .filter(r => r.qty > 0
+        && (r.name || '').toLowerCase().includes(q)
+        && subRecipeHasIngredient(r, ingQ))
+      .sort((a, b) => cmp(SUB_SORTS[subSort].get(a), SUB_SORTS[subSort].get(b)))
+    const subValueTotal = subRows.reduce((s, r) => s + r.value, 0)
+    const subBatchTotal = subRows.reduce((s, r) => s + r.batches, 0)
+    const subQtyIsComparable = new Set(subRows.map(r => r.yieldUom)).size === 1
 
-  // Sub-recipe usage shares the search + source filters (both map cleanly onto the sales rows it
-  // derives from) but deliberately not the Day range — the derivation includes Bulk rows, which
-  // carry bs_day 0 and belong to no single day, so a day filter here would quietly drop them.
-  const ingQ = ingSearch.trim().toLowerCase()
-  const subRows = usage.rows
-    .map(r => usageForSource(r, filterSource))
-    .filter(r => r.qty > 0
-      && (r.name || '').toLowerCase().includes(search.toLowerCase())
-      && subRecipeHasIngredient(r, ingQ))
-    .sort((a, b) => cmp(SUB_SORTS[subSort].get(a), SUB_SORTS[subSort].get(b)))
-  const subValueTotal = subRows.reduce((s, r) => s + r.value, 0)
-  const subBatchTotal = subRows.reduce((s, r) => s + r.batches, 0)
-  const subQtyIsComparable = new Set(subRows.map(r => r.yieldUom)).size === 1
+    return { filtered, totalValue, compValue, itemsAffected, subRows, subValueTotal, subBatchTotal, subQtyIsComparable }
+  }, [rows, filterSource, search, dayFrom, dayTo, itemSort, subSort, sortDir, usage, ingSearch])
 
   // Reconciliation. The sub-recipe figures come from sales_entries; the ledger is what was
   // actually written. They legitimately diverge — manual-sales depletion only started 2026-07-30
@@ -204,7 +217,7 @@ export default function StockMovements() {
   // nothing — so when the derivation's own raw-item value doesn't match the ledger's, say why
   // rather than leaving two numbers on one page disagreeing in silence.
   // Compared against the UNFILTERED ledger total, since the derivation ignores the day filter.
-  const ledgerTotalValue = rows.reduce((s, r) => s + r.value, 0)
+  const ledgerTotalValue = useMemo(() => rows.reduce((s, r) => s + r.value, 0), [rows])
   const reconGap = usage.derivedItemValue - ledgerTotalValue
   // `!loading` matters: the usage derivation resolves independently of the ledger fetch, so
   // without it there's a window where usage has landed but `rows` is still empty and the gap
@@ -421,7 +434,7 @@ export default function StockMovements() {
           </Tip>
           <div style={{ position: 'relative' }}>
             <input
-              style={{ background: 'var(--theme-card)', border: `1px solid ${ingQ ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '8px 12px 8px 30px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
+              style={{ background: 'var(--theme-card)', border: `1px solid ${ingSearch.trim() ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '8px 12px 8px 30px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Find ingredient in sub-recipes…" value={ingSearch} onChange={e => setIngSearch(e.target.value)} />
             <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
             {ingSearch && (

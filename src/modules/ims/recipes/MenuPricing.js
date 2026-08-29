@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -145,7 +145,13 @@ export default function MenuPricing() {
 
   useEffect(() => { load() }, [load])
 
-  const tabs    = ['All', ...Array.from(new Set(recipes.map(r => r.category))).sort()]
+  // One pass for the tab list AND per-tab counts — both tab bars used to run a fresh
+  // recipes.filter() per tab on every render (typing one price re-renders the whole page).
+  const { tabs, tabCounts } = useMemo(() => {
+    const tabCounts = {}
+    recipes.forEach(r => { tabCounts[r.category] = (tabCounts[r.category] || 0) + 1 })
+    return { tabs: ['All', ...Object.keys(tabCounts).sort()], tabCounts }
+  }, [recipes])
   const display = catTab === 'All' ? recipes : recipes.filter(r => r.category === catTab)
 
   function setDraft(id, val) {
@@ -260,7 +266,7 @@ export default function MenuPricing() {
 
       <div className="tab-bar" style={{ marginBottom: 16 }}>
         {tabs.map(t => {
-          const count = t === 'All' ? recipes.length : recipes.filter(r => r.category === t).length
+          const count = t === 'All' ? recipes.length : (tabCounts[t] || 0)
           return (
             <button key={t} className={`tab-btn${catTab === t ? ' tab-btn--active' : ''}`} onClick={() => setCatTab(t)}>
               {t} <span style={{ fontSize: 11, opacity: 0.65, marginLeft: 4 }}>{count}</span>
@@ -552,7 +558,7 @@ export default function MenuPricing() {
       {/* Category tabs */}
       <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
         {tabs.map(t => {
-          const count = t === 'All' ? recipes.length : recipes.filter(r => r.category === t).length
+          const count = t === 'All' ? recipes.length : (tabCounts[t] || 0)
           return (
             <button key={t} className={`tab-btn${catTab === t ? ' tab-btn--active' : ''}`} onClick={() => setCatTab(t)}>
               {t} <span style={{ fontSize: 11, opacity: 0.65, marginLeft: 4 }}>{count}</span>

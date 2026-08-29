@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -494,50 +494,58 @@ export default function OutstandingPayables() {
 
   function fmt(v) { return `NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })}` }
 
-  // ── Group line entries into BILLS (vendor + invoice + period + day) ──
-  const vendors = [...new Map(entries.map(e => [e.vendors?.name, e.vendors])).values()].filter(Boolean)
-  const vendorByName = Object.fromEntries(vendors.map(v => [v.name, v]))
   const AGING_LABELS = ['Current', '31–60 days', '61–90 days', '90+ days']
 
-  const billMap = {}
-  entries.forEach(e => {
-    const vName = e.vendors?.name || 'Unknown'
-    // e.billKey is stamped in load() by the same billKeyOf() the grand-total pass grouped on —
-    // reusing it here is what guarantees bill.total equals the total that was actually computed.
-    const key = e.billKey
-    if (!billMap[key]) billMap[key] = { key, vendorName: vName, invoice_ref: e.invoice_ref, period: e.period, bs_day: e.bs_day, entries: [] }
-    billMap[key].entries.push(e)
-  })
-  const bills = Object.values(billMap).map(b => {
-    const total     = b.entries.reduce((s, e) => s + e.value, 0)
-    const paid      = b.entries.reduce((s, e) => s + e.paidTotal, 0)
-    const remaining = b.entries.reduce((s, e) => s + e.remaining, 0)
-    const daysOld   = Math.max(0, ...b.entries.map(e => e.daysOld))
-    const payments  = b.entries.flatMap(e => (paymentsMap[e.id] || [])).sort((x, y) => (x.paid_at > y.paid_at ? 1 : -1))
-    const settledOn = b.entries.map(e => e.paid_at).filter(Boolean).sort().slice(-1)[0] || null
-    return { ...b, total, paid, remaining, daysOld, aging: aging(daysOld), isPartial: paid > EPS && remaining > EPS, payments, settledOn }
-  })
+  // ── Group line entries into BILLS (vendor + invoice + period + day) ──
+  // Memoized: this rebuilds and re-sorts the whole bill ledger (every credit line, unbounded by
+  // period), and it used to re-run on every keystroke of the payment-amount and note boxes —
+  // exactly while someone is entering money.
+  const { vendors, vendorByName, bills, periodOptions, filteredBills, byVendor, totalRemaining, overdueBills, urgentValue } = useMemo(() => {
+    const vendors = [...new Map(entries.map(e => [e.vendors?.name, e.vendors])).values()].filter(Boolean)
+    const vendorByName = Object.fromEntries(vendors.map(v => [v.name, v]))
 
-  // Period (BS month) options — lets a monthly credit run be narrowed to "this month's bills"
-  // before selecting/bulk-paying, on top of the existing Vendor/Aging filters.
-  const periodKey = b => `${b.period.bs_year}-${b.period.bs_month}`
-  const periodOptions = [...new Map(bills.map(b => [periodKey(b), b.period])).entries()]
-    .map(([key, p]) => ({ key, label: `${BS_MONTHS[(p.bs_month || 1) - 1]} ${p.bs_year}`, y: p.bs_year, m: p.bs_month }))
-    .sort((a, b) => (b.y - a.y) || (b.m - a.m))
+    const billMap = {}
+    entries.forEach(e => {
+      const vName = e.vendors?.name || 'Unknown'
+      // e.billKey is stamped in load() by the same billKeyOf() the grand-total pass grouped on —
+      // reusing it here is what guarantees bill.total equals the total that was actually computed.
+      const key = e.billKey
+      if (!billMap[key]) billMap[key] = { key, vendorName: vName, invoice_ref: e.invoice_ref, period: e.period, bs_day: e.bs_day, entries: [] }
+      billMap[key].entries.push(e)
+    })
+    const bills = Object.values(billMap).map(b => {
+      const total     = b.entries.reduce((s, e) => s + e.value, 0)
+      const paid      = b.entries.reduce((s, e) => s + e.paidTotal, 0)
+      const remaining = b.entries.reduce((s, e) => s + e.remaining, 0)
+      const daysOld   = Math.max(0, ...b.entries.map(e => e.daysOld))
+      const payments  = b.entries.flatMap(e => (paymentsMap[e.id] || [])).sort((x, y) => (x.paid_at > y.paid_at ? 1 : -1))
+      const settledOn = b.entries.map(e => e.paid_at).filter(Boolean).sort().slice(-1)[0] || null
+      return { ...b, total, paid, remaining, daysOld, aging: aging(daysOld), isPartial: paid > EPS && remaining > EPS, payments, settledOn }
+    })
 
-  const filteredBills = bills.filter(b => {
-    const matchV = filterVendor === 'all' || b.vendorName === filterVendor
-    const matchA = filterAging  === 'all' || b.aging.label === filterAging
-    const matchP = filterPeriod === 'all' || periodKey(b) === filterPeriod
-    return matchV && matchA && matchP
-  })
+    // Period (BS month) options — lets a monthly credit run be narrowed to "this month's bills"
+    // before selecting/bulk-paying, on top of the existing Vendor/Aging filters.
+    const periodKey = b => `${b.period.bs_year}-${b.period.bs_month}`
+    const periodOptions = [...new Map(bills.map(b => [periodKey(b), b.period])).entries()]
+      .map(([key, p]) => ({ key, label: `${BS_MONTHS[(p.bs_month || 1) - 1]} ${p.bs_year}`, y: p.bs_year, m: p.bs_month }))
+      .sort((a, b) => (b.y - a.y) || (b.m - a.m))
 
-  const byVendor = {}
-  filteredBills.forEach(b => { (byVendor[b.vendorName] = byVendor[b.vendorName] || []).push(b) })
+    const filteredBills = bills.filter(b => {
+      const matchV = filterVendor === 'all' || b.vendorName === filterVendor
+      const matchA = filterAging  === 'all' || b.aging.label === filterAging
+      const matchP = filterPeriod === 'all' || periodKey(b) === filterPeriod
+      return matchV && matchA && matchP
+    })
 
-  const totalRemaining = filteredBills.reduce((s, b) => s + (activeTab === 'outstanding' ? b.remaining : b.total), 0)
-  const overdueBills   = filteredBills.filter(b => b.daysOld > 60).length
-  const urgentValue    = filteredBills.filter(b => b.daysOld > 90).reduce((s, b) => s + b.remaining, 0)
+    const byVendor = {}
+    filteredBills.forEach(b => { (byVendor[b.vendorName] = byVendor[b.vendorName] || []).push(b) })
+
+    const totalRemaining = filteredBills.reduce((s, b) => s + (activeTab === 'outstanding' ? b.remaining : b.total), 0)
+    const overdueBills   = filteredBills.filter(b => b.daysOld > 60).length
+    const urgentValue    = filteredBills.filter(b => b.daysOld > 90).reduce((s, b) => s + b.remaining, 0)
+
+    return { vendors, vendorByName, bills, periodOptions, filteredBills, byVendor, totalRemaining, overdueBills, urgentValue }
+  }, [entries, paymentsMap, filterVendor, filterAging, filterPeriod, activeTab])
 
   const selectedBillObjs = bills.filter(b => selectedBills.has(b.key) && b.remaining > EPS)
   const selectedTotal    = selectedBillObjs.reduce((s, b) => s + b.remaining, 0)

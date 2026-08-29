@@ -523,13 +523,19 @@ export default function Stock() {
     setTimeout(() => setSaved(false), 2500)
   }
 
-  function filteredItems() {
+  // Memoized once per items/filter change — this used to be a fresh filter pass (with
+  // search.toLowerCase() inside the loop) on every render, called from the tables, the progress
+  // bar AND countedItems, i.e. several times per keystroke. filteredItems() keeps its function
+  // shape because Save All / Clear All read it at click time — they must see exactly the list the
+  // table renders.
+  const visible = useMemo(() => {
+    const q = search.toLowerCase()
     return items.filter(item => {
       const matchCat = filterCat === 'all' || item.category_id === filterCat
-      const matchSearch = item.name.toLowerCase().includes(search.toLowerCase())
-      return matchCat && matchSearch
+      return matchCat && item.name.toLowerCase().includes(q)
     })
-  }
+  }, [items, filterCat, search])
+  function filteredItems() { return visible }
 
   function countedItems(fk) {
     return filteredItems().filter(item => {
@@ -563,7 +569,9 @@ export default function Stock() {
     return getSystemRefQty(itemId) * parseFloat(item.per_uom_rate || 0)
   }
 
-  function getHighValueFlags() {
+  // Memoized: sorts every item's stock value, and the Print Sheet tab (its only consumer) has a
+  // search box — search isn't a dependency here, so typing in it no longer re-runs this.
+  const highValueFlags = useMemo(() => {
     const values = items.map(i => getStockValue(i.id, i)).filter(v => v > 0)
     if (values.length === 0) return new Set()
     const sorted = [...values].sort((a, b) => b - a)
@@ -577,7 +585,7 @@ export default function Stock() {
       if (value >= valueThreshold && value > 0 && freq >= freqThreshold) flagged.add(item.id)
     })
     return flagged
-  }
+  }, [items, stockData, purchases, returns, purchFreq]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Key used for items whose `category_id` is NULL (Items.js writes null when the field is left
   // blank) or points at a category this client no longer has. Both used to fall out of the rollup
@@ -648,7 +656,6 @@ export default function Stock() {
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
-  const visible = filteredItems()
 
   const TABS = [
     { id: 'opening',    label: 'Opening Stock', desc: 'Stock at start of month' },
@@ -950,7 +957,7 @@ export default function Stock() {
             </div>
 
             {(() => {
-              const flagged = getHighValueFlags()
+              const flagged = highValueFlags
               const grouped = categories
                 .map(c => ({ category: c, catItems: visible.filter(i => i.category_id === c.id) }))
                 .filter(g => g.catItems.length > 0)

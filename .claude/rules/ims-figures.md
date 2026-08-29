@@ -27,6 +27,14 @@ paths:
 Two standing notes for this page specifically:
 
 - **Every period-scoped read here is now `fetchAllRows`-paged**, not just `purchase_entries` (which is all the S529 sweep had wrapped). The 1000-row cap matters more here than anywhere else in IMS: a truncated read produces a believable COGS rather than an error, and this is the page a period is closed from. `wastages` is the one that realistically crosses it — daily entries are one row per item per day — while `opening_stock`/`closing_stock` are one row per item and would only bite a client past 1000 items.
+- **Save All / Clear All write in BULK, through `persistValuesBulk()` — not one item at a time.**
+  The old per-item loop cost one round trip per visible item (two on the wastage/staff-meal tabs,
+  which are delete-then-insert), so a real 300-item count took minutes on the page a month is
+  closed from. The bulk path must keep both halves of the `persistLocks` contract — await every
+  affected key's pending promise before starting, register itself as each key's new tail — or the
+  onBlur-autosave interleaving that lock exists to prevent comes back. Reasoning in
+  `.claude/rules/frontend-performance.md`; the offline queue path is deliberately still per-item,
+  since no network is involved.
 - **Stock Count includes sub-recipes; `MonthlySummary.js` excludes them** (`.eq('is_sub_recipe', false)`). Both are deliberate — Stock Count physically counts prep — but it means the two pages' COGS for the same month differ by exactly the sub-recipe amount, with nothing on either page saying so. Left as-is; if this is ever reconciled, it is a product decision about which figure "COGS" names, not a bug fix.
 
 **Variance-style reports must default to a CLOSED period.** Closing stock is counted at month end, so on an open period `closeQty` is 0 for every item, "actual used" becomes everything on hand plus everything bought, and the page paints a red "potential loss" figure on a month that structurally cannot have one. `Variance.js`/`TheoreticalVariance.js` now default to the most recent closed period and, if an open one is selected anyway, say the count is missing and render the figures neutral and unflagged rather than hiding them. `ShrinkageReport.js` and `ReorderReport.js` already did their own version of this.
