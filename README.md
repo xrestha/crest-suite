@@ -159,6 +159,41 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S627 — 2026-08-29 — /impeccable document: refreshing the sidecar found four things wrong in the docs
+
+Ran to clear the stale-sidecar flag `context.mjs` had been reporting. It cleared, but regenerating
+`.impeccable/design.json` against the real code turned up drift no audit had caught, because none
+of these layers render anything — **a wrong value in them has no symptom.** No code changed, so no
+service-worker bump; DESIGN.md's prose, sections and components are untouched.
+
+**DESIGN.md's frontmatter contradicted its own prose and the shipped code.** S620 swapped the
+neutral text tiers in `ThemeContext` (`text2: '#9ca3af'`, `text3: '#8a92a3'`) and rewrote the
+Colors prose to match, but never updated the frontmatter — the *normative* machine-readable layer —
+which sat on the pre-swap pairing for five days with the sidecar inheriting the inversion. Fixed,
+with a comment recording why so it doesn't get "corrected" back.
+
+**All five per-preset `*-text` variants in the sidecar held wrong values.** `accent-ink` carried
+**purple's** hex (`#7c33d9`) outright. The other four carried *Light* preset values captured before
+S608's colour-blindness retune — `redText`/`amberText` still at the exact ΔE 3.2 pair that retune
+existed to eliminate, i.e. the sidecar was still describing the defect as the design. All five now
+carry the Dark default as canonical (matching the frontmatter's documented convention) with Light's
+real current value named in the purpose.
+
+**The guest-menu palette was absent entirely** — 14 tokens for the one surface a paying customer
+sees. Added with roles, measured contrast ratios and synthesized ramps; colour coverage is now
+52/52 both directions with no orphaned entries. **Nine rules** that had landed in DESIGN.md since
+the last generation existed nowhere machine-readable (S604's body-flow scrollport trap, S603's
+disabled-field treatment and 16px zoom floor, S613's phone-as-reporting-surface and report-dialect
+decisions, S614's table-collapse/row-density/Day-label rules); rules went 41 → 50. `touch-input`
+was missing from the type-scale metadata.
+
+The Do's, Don'ts, key characteristics and north star are now **parsed out of DESIGN.md** by the
+refresh rather than hand-copied, so they are verbatim by construction and cannot drift again. The
+durable lesson — a token lives in four layers and only one of them ships — is now
+`.claude/rules/design-system.md`'s closing section, with the two checks to run when a preset value
+moves. Note `context.mjs` only compares timestamps, so it flags a stale sidecar but never a wrong
+one; that is how five bad values survived two refreshes.
+
 ### S626 — 2026-08-28 — The S625 tail: the rest of the per-keystroke fixes, and two caches that earned their keep
 
 Closes everything S625's "Not finished" list left open. CI-strict build clean, 416 tests pass, SW

@@ -285,3 +285,30 @@ still merges, because there the saved values genuinely are the user's own edits.
 
 The corollary for any future palette work: **a token is not shipped until `loadSaved` will hand it
 to an existing user.** Check that path before assuming a colour change is live.
+
+## A token lives in four layers and only one of them ships (S627)
+
+`ThemeContext.js`'s `PRESETS` is the only layer a user ever sees. `DESIGN.md`'s **frontmatter** is
+the normative machine-readable copy, its **prose** is what a human or an agent actually reads, and
+`.impeccable/design.json` is generated from both. A value that moves has to reach all four, or the
+lower three describe a product that no longer exists — and because nothing renders from them,
+**nothing fails when they are wrong.** That is the whole difficulty: this class of drift has no
+symptom.
+
+Found by refreshing the sidecar, not by any audit. S620 swapped `text2`/`text3` in the code and
+rewrote the Colors prose but left the **frontmatter** on the pre-swap pairing, so the normative
+layer contradicted both the code it describes and its own prose 290 lines below; the sidecar had
+inherited the inversion. The same pass found all five `*-text` variants in the sidecar holding
+*Light* preset values captured before S608's colour-blindness retune — `redText`/`amberText` still
+at the exact ΔE 3.2 pair that retune existed to eliminate — and `accent-ink` holding **purple's**
+hex outright.
+
+Two checks whenever a preset value moves:
+
+- **Grep the token name across `DESIGN.md` and confirm frontmatter, prose and `PRESETS` agree.**
+  The frontmatter carries the **Dark** default by convention, and on a dark preset every `*-text`
+  variant resolves to its own base colour (`applyTheme` does `t.greenText || t.green`) — so a
+  variant sharing its base's hex up there is correct, not a redundancy to clean up.
+- **Re-run `/impeccable document` so the sidecar is regenerated rather than left describing the
+  previous palette.** `context.mjs` reports sidecar staleness, but it only compares timestamps: it
+  cannot see a value that is merely wrong, which is how five of them survived two refreshes.

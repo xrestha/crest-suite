@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-24T00:00:00.000Z",
+  "generatedAt": "2026-08-29T03:37:39.962Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -134,25 +134,9 @@
       },
       "text-secondary": {
         "role": "neutral",
-        "displayName": "Slate Text",
-        "canonical": "#8a92a3",
-        "purpose": "Secondary text: labels, metadata, table column headers.",
-        "tonalRamp": [
-          "#22252b",
-          "#3a3f4a",
-          "#535a6a",
-          "#6c7589",
-          "#8a92a3",
-          "#a9afbc",
-          "#cccfd7",
-          "#f1f2f4"
-        ]
-      },
-      "text-tertiary": {
-        "role": "neutral",
         "displayName": "Fog Text",
         "canonical": "#9ca3af",
-        "purpose": "The quietest tier: timestamps, disabled-adjacent copy, icon buttons at rest.",
+        "purpose": "Secondary text: labels, metadata, table column headers. 6.70:1 on the card. Swapped with the tertiary tier in S620 — the values were always in the palette, just assigned the wrong way round, so every \"quietest tier\" hint rendered louder than every secondary label on Dark.",
         "tonalRamp": [
           "#22252a",
           "#3b4049",
@@ -161,6 +145,22 @@
           "#8b94a2",
           "#aab0bb",
           "#ccd0d6",
+          "#f1f2f4"
+        ]
+      },
+      "text-tertiary": {
+        "role": "neutral",
+        "displayName": "Slate Text",
+        "canonical": "#8a92a3",
+        "purpose": "The quietest tier: timestamps, disabled-adjacent copy, icon buttons at rest. 5.45:1. Both tiers cleared AA before and after the S620 swap — this was hierarchy, not accessibility, which is why no contrast audit caught it.",
+        "tonalRamp": [
+          "#22252b",
+          "#3a3f4a",
+          "#535a6a",
+          "#6c7589",
+          "#8a92a3",
+          "#a9afbc",
+          "#cccfd7",
           "#f1f2f4"
         ]
       },
@@ -315,81 +315,81 @@
       "signal-success-text": {
         "role": "text-variant",
         "displayName": "Success Green (as text)",
-        "canonical": "#2f7620",
-        "purpose": "Success/positive wording, a healthy KPI figure, a green variance number. The FILL half of the same role keeps --theme-green: badge tints, chart series, status dots, borders. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.signal-success} unchanged. Per-preset: latte #2f7620, dawn #417179, solarized #5f6d00, light #137538, bright #117c38.",
+        "canonical": "#34d399",
+        "purpose": "Success green used as text. Value shown is the DEFAULT (Dark) preset, where the variant deliberately resolves to its own base colour; Light declares its own darkened, hue-preserving value (#137538). Never resolve one of these to a literal — read the token.",
         "tonalRamp": [
-          "#183c10",
-          "#2a681c",
-          "#3b9428",
-          "#4dc134",
-          "#73d35f",
-          "#99df8b",
-          "#c3edbb",
-          "#edfaeb"
+          "#0e3f2d",
+          "#186d4e",
+          "#229b6f",
+          "#2cc990",
+          "#53daa9",
+          "#81e4c0",
+          "#b4efd9",
+          "#e6faf2"
         ]
       },
       "signal-danger-text": {
         "role": "text-variant",
         "displayName": "Danger Red (as text)",
-        "canonical": "#b00d30",
-        "purpose": "Error copy, an overdue figure, a negative margin, .btn-danger's label. Fills keep --theme-red. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.signal-danger} unchanged. Per-preset: latte #b00d30, dawn #965266, solarized #c32c2a, light #c92323, bright #cf2424.",
+        "canonical": "#f87171",
+        "purpose": "Danger red used as text. Retuned S608: with amber-text it is the only pair of 120 searched that clears both deuteranopia and protanopia while every variant still holds 4.5:1. Value shown is the DEFAULT (Dark) preset, where the variant deliberately resolves to its own base colour; Light declares its own darkened, hue-preserving value (#8f2440). Never resolve one of these to a literal — read the token.",
         "tonalRamp": [
-          "#470513",
-          "#7b0922",
-          "#b00d30",
-          "#e4113e",
-          "#f14167",
-          "#f57591",
-          "#f9aebe",
-          "#fde7ec"
+          "#490404",
+          "#7e0606",
+          "#b40909",
+          "#e90c0c",
+          "#f53838",
+          "#f86d6d",
+          "#fba8a8",
+          "#fee2e2"
         ]
       },
       "signal-warning-text": {
         "role": "text-variant",
         "displayName": "Warning Amber (as text)",
-        "canonical": "#925d13",
-        "purpose": "Needs-attention wording: pending counts, an expiry countdown, .amber-action-btn's label. The worst measured base-token failure in the product was this role on Rosé Dawn (a preset retired in S607; the measurement is why this variant exists) at 2.05:1. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.signal-warning} unchanged. Per-preset: latte #925d13, dawn #906020, solarized #816200, light #a44c08, bright #a55a05.",
+        "canonical": "#fbbf24",
+        "purpose": "Warning amber used as text. Retuned S608 alongside danger-text — at the previous values the two sat at ΔE 3.2 under deuteranopia, i.e. one colour for ~6% of men. Value shown is the DEFAULT (Dark) preset, where the variant deliberately resolves to its own base colour; Light declares its own darkened, hue-preserving value (#a85200). Never resolve one of these to a literal — read the token.",
         "tonalRamp": [
-          "#442b09",
-          "#754b0f",
-          "#a76a16",
-          "#d98a1c",
-          "#e8a64a",
-          "#eebe7c",
-          "#f5d9b2",
-          "#fcf4e8"
+          "#4b3701",
+          "#825f02",
+          "#b98703",
+          "#f0af04",
+          "#fbc332",
+          "#fcd369",
+          "#fde5a5",
+          "#fef6e1"
         ]
       },
       "signal-categorical-text": {
         "role": "text-variant",
         "displayName": "Categorical Violet (as text)",
-        "canonical": "#7c33d9",
-        "purpose": "The rationed 4th/5th category used as type. Fills keep --theme-purple. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.signal-categorical} unchanged. Per-preset: latte #7c33d9, dawn #746389, solarized #5d61a8, light #7c3aed, bright #7c3aed.",
+        "canonical": "#a78bfa",
+        "purpose": "The rationed categorical purple used as text. Value shown is the DEFAULT (Dark) preset, where the variant deliberately resolves to its own base colour; Light declares its own darkened, hue-preserving value (#7c3aed). Never resolve one of these to a literal — read the token.",
         "tonalRamp": [
-          "#230c40",
-          "#3d1570",
-          "#571e9f",
-          "#7026ce",
-          "#9153df",
-          "#af82e8",
-          "#d0b6f1",
-          "#f1eafb"
+          "#150349",
+          "#24057f",
+          "#3308b5",
+          "#430aeb",
+          "#6737f6",
+          "#906cf9",
+          "#bca7fb",
+          "#e9e2fe"
         ]
       },
       "accent-ink": {
         "role": "text-variant",
         "displayName": "Aged Brass Ink",
-        "canonical": "#7c33d9",
-        "purpose": "The accent used AS text on a normal surface: a link, an active nav item, a plan label, a table total. NOT accent-text, which is the foreground that sits ON an accent fill — the two are easy to confuse and mean opposite things. Declared only on the five LIGHT presets; a dark preset resolves this token to {colors.aged-brass} unchanged. Per-preset: latte #7c33d9, dawn #955a57, solarized #1e6da5, light #865f21, bright #3563db.",
+        "canonical": "#c9a84c",
+        "purpose": "The accent used AS text (a link, an active nav item, a plan label) — not accent-text, which is the foreground that sits ON an accent fill. Value shown is the DEFAULT (Dark) preset, where the variant deliberately resolves to its own base colour; Light declares its own darkened, hue-preserving value (#7a561e). Never resolve one of these to a literal — read the token.",
         "tonalRamp": [
-          "#230c40",
-          "#3d1570",
-          "#571e9f",
-          "#7026ce",
-          "#9153df",
-          "#af82e8",
-          "#d0b6f1",
-          "#f1eafb"
+          "#3b3012",
+          "#66531f",
+          "#91762c",
+          "#bc9939",
+          "#cfb15e",
+          "#dcc689",
+          "#eaddb8",
+          "#f8f4e7"
         ]
       },
       "accent-text": {
@@ -441,6 +441,230 @@
         "displayName": "Row Hover Tint",
         "canonical": "rgba(255,255,255,0.03)",
         "purpose": "The barely-there row-hover wash — 2-8% depending on preset. It is a pointer cue, not a selection state, and it must never be opaque enough to compete with the figures in the row. It is also what a sticky first column has to paint over, which is why .data-table--sticky-first sets an opaque card background."
+      },
+      "guest-paper": {
+        "role": "neutral",
+        "displayName": "Guest Paper",
+        "canonical": "#F0EDE5",
+        "purpose": "Card and input ground on the public menu — the dish is read on this. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#312b1c",
+          "#544a31",
+          "#786a45",
+          "#9b895a",
+          "#b3a37a",
+          "#c7bc9e",
+          "#ddd7c5",
+          "#f4f2ec"
+        ]
+      },
+      "guest-ground": {
+        "role": "neutral",
+        "displayName": "Guest Ground",
+        "canonical": "#E7E3D8",
+        "purpose": "Page behind the paper, one step back so a card can lift off it. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#2f2a1d",
+          "#524a33",
+          "#756948",
+          "#98885d",
+          "#afa27e",
+          "#c5bba0",
+          "#dcd6c6",
+          "#f3f1ec"
+        ]
+      },
+      "guest-pine": {
+        "role": "primary",
+        "displayName": "Pine",
+        "canonical": "#004643",
+        "purpose": "The guest surface’s single accent: brand, price, category heading, active chip, CTA fill. Rationed exactly as Aged Brass is elsewhere. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#004d49",
+          "#00857f",
+          "#00bdb5",
+          "#00f5ea",
+          "#2efff6",
+          "#66fff8",
+          "#a3fffb",
+          "#e0fffe"
+        ]
+      },
+      "guest-pine-deep": {
+        "role": "primary",
+        "displayName": "Pine Deep",
+        "canonical": "#00312F",
+        "purpose": "Pressed/hover state of a pine fill. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#004d49",
+          "#00857f",
+          "#00bdb5",
+          "#00f5eb",
+          "#2efff6",
+          "#66fff9",
+          "#a3fffb",
+          "#e0fffe"
+        ]
+      },
+      "guest-ink": {
+        "role": "neutral",
+        "displayName": "Guest Ink",
+        "canonical": "#1C1B17",
+        "purpose": "Dish names and body-strength text. 14.8:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#2a2923",
+          "#49463c",
+          "#686455",
+          "#86826e",
+          "#a19d8c",
+          "#bab7ab",
+          "#d6d4cd",
+          "#f1f1ee"
+        ]
+      },
+      "guest-sage": {
+        "role": "neutral",
+        "displayName": "Sage",
+        "canonical": "#4A5C58",
+        "purpose": "Dish descriptions. 6.1:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#222a29",
+          "#3b4946",
+          "#546964",
+          "#6d8882",
+          "#8ba29d",
+          "#aabbb7",
+          "#ccd6d4",
+          "#eef1f1"
+        ]
+      },
+      "guest-sage-lt": {
+        "role": "neutral",
+        "displayName": "Sage Light",
+        "canonical": "#566762",
+        "purpose": "Nutrition tags, covers line, table name, smallest meta. 4.7:1 on ground, 5.1:1 on paper. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#232a28",
+          "#3c4845",
+          "#566762",
+          "#6f857f",
+          "#8da09a",
+          "#acb9b5",
+          "#cdd5d3",
+          "#eef1f0"
+        ]
+      },
+      "guest-rule": {
+        "role": "neutral",
+        "displayName": "Guest Rule",
+        "canonical": "#D3CCBC",
+        "purpose": "Structural hairline; recedes on purpose. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#2e291e",
+          "#504835",
+          "#72664b",
+          "#948461",
+          "#ac9f81",
+          "#c2b9a3",
+          "#dbd5c8",
+          "#f3f1ed"
+        ]
+      },
+      "guest-control": {
+        "role": "primary",
+        "displayName": "Guest Control",
+        "canonical": "#4A7A75",
+        "purpose": "Outlines a tappable control, clearing WCAG 1.4.11. 4.1:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#1d302e",
+          "#32534f",
+          "#477571",
+          "#5c9892",
+          "#7db0ab",
+          "#a0c5c1",
+          "#c6dcda",
+          "#ecf3f3"
+        ]
+      },
+      "guest-veg": {
+        "role": "tertiary",
+        "displayName": "Veg Mark",
+        "canonical": "#4C7A2E",
+        "purpose": "Veg mark — a market convention, not a palette choice. 4.3:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#233815",
+          "#3c6024",
+          "#558934",
+          "#6fb243",
+          "#8cc667",
+          "#abd590",
+          "#cde6bc",
+          "#eef7e9"
+        ]
+      },
+      "guest-nonveg": {
+        "role": "tertiary",
+        "displayName": "Non-Veg Mark",
+        "canonical": "#A63A2B",
+        "purpose": "Non-veg mark. 5.5:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#3d1510",
+          "#69251b",
+          "#963427",
+          "#c24432",
+          "#d46859",
+          "#e09085",
+          "#ecbdb6",
+          "#f9e9e7"
+        ]
+      },
+      "guest-success": {
+        "role": "tertiary",
+        "displayName": "Guest Success",
+        "canonical": "#2F6B2A",
+        "purpose": "Ready to serve. 5.5:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#183716",
+          "#2a5f25",
+          "#3c8835",
+          "#4db045",
+          "#70c469",
+          "#96d491",
+          "#c0e5bd",
+          "#eaf6e9"
+        ]
+      },
+      "guest-warn": {
+        "role": "tertiary",
+        "displayName": "Guest Warning",
+        "canonical": "#8A5A17",
+        "purpose": "Allergens — a safety line, so never faint. 5.1:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#422b0b",
+          "#724a13",
+          "#a2691b",
+          "#d28923",
+          "#e1a34c",
+          "#e9bc7c",
+          "#f2d7b0",
+          "#fbf2e5"
+        ]
+      },
+      "guest-danger": {
+        "role": "tertiary",
+        "displayName": "Guest Danger",
+        "canonical": "#A03328",
+        "purpose": "Order dismissed, submit failed. 6.0:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
+        "tonalRamp": [
+          "#3d140f",
+          "#6a221b",
+          "#973026",
+          "#c43e31",
+          "#d56358",
+          "#e08d85",
+          "#edbbb6",
+          "#f9e8e7"
+        ]
       }
     },
     "typographyMeta": {
@@ -503,6 +727,10 @@
       "print-monospace": {
         "displayName": "Print Monospace",
         "purpose": "Thermal-printer receipts and KOTs, where fixed-width columns must stay aligned. Never inside the live app UI."
+      },
+      "touch-input": {
+        "displayName": "Touch Input",
+        "purpose": "Text-input only, scoped to .self-service. 16px is the threshold below which iOS Safari zooms the viewport on focus and never zooms back — not a taste step, and never usable as one. Pinning the viewport instead blocks pinch-zoom for everyone, which is why it is deliberately not done."
       }
     },
     "shadows": [
@@ -703,7 +931,7 @@
       "name": "Data Table",
       "kind": "custom",
       "refersTo": null,
-      "description": "The signature component — most of the product is built around it. 11px uppercase headers at wide tracking, 13px rows, light dividers, and a barely-there hover tint rather than a solid highlight. Actionable rows carry a right-aligned Actions column so a long queue never has to be scrolled to act on.",
+      "description": "The signature component — most of the product is built around it. 11px uppercase headers at wide tracking, 13px rows, light dividers, and a barely-there hover tint rather than a solid highlight. Actionable rows carry a right-aligned Actions column so a long queue never has to be scrolled to act on. Per S614: a cell holding two things is the one the auto layout collapses, so put nowrap on the cell (never a fixed width) and let .table-wrap scroll; row density is opted down through a table-level scoped class, never per cell.",
       "html": "<div class=\"ds-table-wrap\"><table class=\"ds-table\"><thead><tr><th>Employee</th><th>Trip</th><th class=\"ds-num\">Total</th><th>Status</th><th class=\"ds-num\">Actions</th></tr></thead><tbody><tr><td>Ronish Dangol</td><td>Cafe &rarr; Big Mart</td><td class=\"ds-num\">15</td><td><span class=\"ds-badge ds-badge-amber\">Pending</span></td><td class=\"ds-num\"><button class=\"ds-row-btn ds-row-approve\">Approve</button><button class=\"ds-row-btn ds-row-reject\">Reject</button></td></tr><tr><td>Sujan Rai</td><td>Cafe &rarr; Bhatbhateni</td><td class=\"ds-num\">240</td><td><span class=\"ds-badge ds-badge-green\">Paid</span></td><td class=\"ds-num\">&mdash;</td></tr></tbody></table></div>",
       "css": ".ds-table-wrap { overflow-x: auto; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }\n.ds-table th { text-align: left; padding: 10px 5px; color: var(--theme-text2, #8a92a3); font-weight: 500; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--theme-border, #2a2f3d); white-space: nowrap; }\n.ds-table td { padding: 11px 5px; color: var(--theme-text1, #e8e0d0); border-bottom: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-table tr:last-child td { border-bottom: none; }\n.ds-table tbody tr:hover td { background: var(--theme-table-hover, rgba(255,255,255,0.03)); }\n.ds-num { text-align: right; white-space: nowrap; }\n.ds-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 500; }\n.ds-badge-amber { background: rgba(251,191,36,0.12); color: var(--theme-amber, #fbbf24); }\n.ds-badge-green { background: rgba(52,211,153,0.10); color: var(--theme-green, #34d399); }\n.ds-row-btn { background: var(--theme-input-bg, #0f1117); border: 1px solid var(--theme-border-lt, #1e2330); border-radius: 12px; padding: 4px 10px; margin-left: 6px; font-size: 11px; font-family: inherit; cursor: pointer; transition: background 0.13s, border-color 0.13s; }\n.ds-row-approve { color: var(--theme-green, #34d399); }\n.ds-row-reject { color: var(--theme-red, #f87171); }\n.ds-row-btn:hover { border-color: currentColor; }"
     },
@@ -1010,6 +1238,51 @@
         "name": "The Chart Palette Rule",
         "section": "colors",
         "body": "Chart series come from the validated fixed-hex sets (`CHART_COLORS` / `VENDOR_SPLIT_COLORS`, `COST_BREAKDOWN_COLORS`), never the semantic tokens — and the sets themselves get re-measured whenever a slot moves. As shipped 2026-08-24/S609 the 8-series set is `#c9a84c #34d399 #60a5fa #f87171 #8b5cf6 #ea580c #22d3ee #f472b6`, worst pair ΔE 37.9 normal / 15.8 deuteranopia / 21.0 protanopia — all 28 pairs clear. It reached that only by moving two slots: blue and violet had sat at ΔE 0.4 under deuteranopia since the array was written, drawing two indistinguishable lines on any chart with five or more series. Two limits are accepted rather than hidden, and both rest on the same mitigation — these charts carry secondary encoding: paddingAngle gaps, on-slice percent labels, and name+value legends, so colour reinforces rather than carries. Tritanopia is not satisfied (worst pair ΔE 0.9); separating on the blue-yellow axis fights separating on red-green, and it is ~0.01% against ~8%. And the palette is tuned for the dark card — on Light, six of eight slots fall under the 3:1 non-text floor (worst `#22d3ee` at 1.81). Closing that means re-picking six hues that clear 3:1 on both surfaces *and* still separate under both red-green axes: a mid-tone set with a different character from today's vivid-on-charcoal one. That is a design decision, not a correction — do not make it silently while fixing something else."
+      },
+      {
+        "name": "A page that renders into the body flow needs its own scrollport",
+        "section": "layout",
+        "body": "index.css sets `html, body { overflow-x: hidden }`, so body becomes its own scroll container sized to its content and a `position: sticky` child of the body has a scrollport that never scrolls. Every IMS/HR/POS screen is immune (the app shell scrolls its own div); the three pages that render into the body — guest menu, /login, /pricing — each had a sticky bar that had never once stuck, measured at 390x780 going top 0 to -250 to -600. Fix per page: `height: 100dvh; overflow-y: auto; overscroll-behavior: contain` on the page root, and delete any `min-height: 100vh` it carried, since 100vh >= 100dvh hands the scroll straight back to the body. Relaxing the shared rule was measured and rejected — it loses the guard entirely (1610px of overflow on a probe page). Invisible to review: it computes to sticky in devtools, and only getBoundingClientRect().top across real scroll positions catches it."
+      },
+      {
+        "name": "Disabled and read-only: the surface carries the state, never the value",
+        "section": "components",
+        "body": "Because `.form-field input` sets its own background, border and color, it overrode the UA's disabled styling — so until S603 a disabled field rendered identical to an editable one, on Sales and Overheads, the two pages where a locked period most needs to be obvious. The well flattens to transparent and the border steps to --theme-border-lt; the value's colour is left alone. Deliberately NOT `.btn:disabled`'s opacity 0.55 — a button's label is a verb you may not press, a field's content is data, and a locked period's figures must stay legible precisely because they can no longer be corrected. Two UA behaviours must be overridden explicitly or the treatment is defeated: WebKit paints disabled text with -webkit-text-fill-color, and iOS Safari layers its own opacity on top. An inline-styled control escapes all of it — that is what `disabledStyle()` in shared/inlineFieldState.js exists for."
+      },
+      {
+        "name": "The 16px touch floor is a zoom trap, not a taste step",
+        "section": "components",
+        "body": "Under @media (pointer: coarse) inputs go to 16px and bare buttons to a 44px minimum height. Below 16px iOS Safari zooms the viewport on focus and never zooms back, which on a product whose till and stock count are tablet surfaces turns 'enter the quantity' into 'now pan sideways to find Save'. Scoped to pointer type rather than a width breakpoint because the trigger is the input method, not the screen size. The rule carries `!important` and that is load-bearing: 370 controls across ~46 files set font-size inline, and no selector beats an inline style. The button half is `:not([class])` so it cannot silently re-decide the classed buttons that already have tuned values. It does not retire 'reach for a class' — a class also brings the [aria-invalid] hook, the :disabled treatment and the shape scale."
+      },
+      {
+        "name": "The phone is a supported reporting surface",
+        "section": "layout",
+        "body": "`.stat-grid` is repeat(auto-fit, minmax(180px, 1fr)) and reflows on its own. Twenty-five report pages had overridden it inline with repeat(N, 1fr) up to N=6 — an inline style outranks every media query — so a phone rendered six crushed KPI columns on precisely the pages an owner checks between services. All removed; desktop is unchanged because auto-fit lands on the same count at desktop widths. Never pin a fixed column count on a KPI strip: if a row genuinely needs a different density, add a named variant in Layout.css that carries its own breakpoint."
+      },
+      {
+        "name": "Report pages are one dialect, till screens are another",
+        "section": "components",
+        "body": "A report is a report whichever module it belongs to — the person reading it is the same owner or accountant, arriving with the same expectations, often on the same afternoon. POS's four report pages had grown their own grammar (an inline-styled h2 where every other page opens with page-title, hand-rolled KPI tiles, a third tab family, mouse-only row drill-downs); that was drift, not a decision, and it is converged. The deliberate exception is the till: PosOrders and KitchenDisplay are position: fixed full-screen layers operated at arm's length on a busy floor, which is why their Modal usage needs its own zIndex. Do not converge those."
+      },
+      {
+        "name": "A cell holding two things collapses first, and the auto layout decides that, not you",
+        "section": "components",
+        "body": "table-layout is auto, so a column's width is bid for against its neighbours and a neighbour carrying white-space: nowrap always wins. The Purchases bill list is the reference case: its Item cell holds a name plus a category badge with a nowrap Vendor cell beside it, so a two-word name broke over two lines with the badge on a third and the row stood three lines tall to show one line of figures. The fix is nowrap on the cell, never a fixed width — .table-wrap's horizontal scroll exists to carry exactly this, and a width just moves the wrap somewhere else at the next screen size. Same failure with no second element at all: a Day cell holding 2026-08-17 collapses to its widest unbreakable fragment, 2026-, and breaks the date at every hyphen. Dates, codes, invoice refs and phone numbers all need nowrap for this reason."
+      },
+      {
+        "name": "Row density is a table-level decision, made once",
+        "section": "components",
+        "body": "The global td padding is 11px vertical. A table read as a dense ledger rather than a report of a dozen rows opts down through its own scoped class (table.purchases-table, 7px), never per cell — a per-cell inline padding is the shape that leaves one row taller than its neighbours the first time someone adds a column, and inline beats the class silently."
+      },
+      {
+        "name": "Day columns say the month",
+        "section": "components",
+        "body": "A Day column showing a bare 1 is legible only while the page header naming the month is on screen; print the sheet or read it back a month later and the number says nothing. Every period-scoped Day column renders formatBsDay(day, bsMonth) — '1st Bhadra' — and bsDayOrdinal(day) alone where the month is already stated beside it. Deliberately not the full-date form: this names a day inside the period already chosen, so it carries no year. Two behaviours are load-bearing: an absent or out-of-range month degrades to the bare ordinal rather than naming the wrong month, and day 0 (Sales' bulk sentinel) returns '' so each caller keeps its own dash. Excel exports keep the numeric column — text breaks a spreadsheet's sorting and filtering."
+      },
+      {
+        "name": "Expanding a row shows detail in place, directly beneath it",
+        "section": "components",
+        "body": "A `<tr className=\"detail-row\">` with a full-width colSpan cell, never a panel appended after the table. Two cascade notes, both of which bit on the first implementation: `table.data-table tr:hover td` is a descendant selector, so without the .detail-row overrides in Layout.css hovering an expanded detail tints its own cell and every cell of any table nested inside it, lighting the whole panel up as one hoverable row. And if the parent row toggles the expansion on click, every control inside it must stopPropagation() or acting on the record also collapses the panel you were reading."
       }
     ],
     "dos": [

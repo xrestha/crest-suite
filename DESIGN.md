@@ -10,8 +10,14 @@ colors:
   ink-border-lt: "#1e2330"
   ink-sidebar: "#0e1117"
   text-primary: "#e8e0d0"
-  text-secondary: "#8a92a3"
-  text-tertiary: "#9ca3af"
+  # Corrected 2026-08-29: these two were still carrying their PRE-S620 assignment. S620 swapped
+  # the roles in ThemeContext (`text2: '#9ca3af', text3: '#8a92a3'`) and updated the Colors prose
+  # below, but never this block — so the normative token layer disagreed with both the code it
+  # describes and its own prose, and the sidecar's colorMeta inherited the inversion. Fog is the
+  # secondary tier (6.70:1), Slate the quietest (5.45:1); read the Neutral section for why the
+  # swap was hierarchy rather than accessibility, which is exactly why no contrast audit caught it.
+  text-secondary: "#9ca3af"
+  text-tertiary: "#8a92a3"
   signal-success: "#34d399"
   signal-danger: "#f87171"
   signal-warning: "#fbbf24"
