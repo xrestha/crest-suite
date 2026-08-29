@@ -167,8 +167,8 @@ SECURITY DEFINER Function"). Most of it is noise this project already reasoned t
 and says the lint "can never reach zero on this project, and should not be treated as a number to
 drive down". That still holds, and the report confirms that migration is applied. The value was in
 auditing **inside** the functions, which no linter can do. Migration
-`20260829120000_fail_open_guards_and_stale_overload.sql` is written but **not yet applied** — this
-project applies migrations by hand in the Dashboard SQL Editor.
+`20260829120000_fail_open_guards_and_stale_overload.sql` — **run ✓ 2026-08-29**, all assertions
+passing.
 
 **The finding: four SECURITY DEFINER guards fail OPEN.** `is_admin()` is a `LANGUAGE sql` scalar,
 `select role = 'admin' from profiles where id = auth.uid()`, which returns **NULL, not false**, when
@@ -219,6 +219,19 @@ functions to raise — passing `admin_clear_audit_logs` a client_id that cannot 
 assertion ever fails the fall-through DELETE still removes nothing. It then re-checks that a real
 admin still passes, that the surviving overload is the 4-arg one, and that
 `clear_stale_active_outlet` is uncallable but still wired to its trigger.
+
+**The first apply rolled back, and the assertion was the thing that was wrong.** It compared
+`pg_get_function_identity_arguments(p.oid)` against `'uuid, jsonb, text'` — but that function
+renders parameter **names** as well as types, so the real value is
+`p_table_id uuid, p_items jsonb, p_notes text` and neither comparison could ever match. The Advisor
+export had shown the true format the whole time. What makes it worth recording is the asymmetry
+rather than the typo: the paired checks **disagreed**. "Is the 3-arg gone?" passed *vacuously*
+(`EXISTS` found nothing, so it never raised) while "is the 4-arg still there?" fired — one bad
+string producing a false alarm and a silent non-check at once. Re-asserted on `pg_proc.pronargs`,
+a value Postgres computes rather than text it formats for humans; the rules file already demanded
+exactly this for verifying an index by `pg_index.indkey[0]` instead of its name, and that bullet now
+carries the general form. Second apply committed clean — and because the first run *failed* on an
+assertion, we know they genuinely execute rather than passing by being skipped.
 
 **Found but NOT fixed — `pos_plan` is not vestigial.** CLAUDE.md and this README both state that
 `hr_plan`/`pos_plan` are "vestigial columns — no longer read or written anywhere" since S548. That is
