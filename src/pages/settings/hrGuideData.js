@@ -299,8 +299,11 @@ export const HR_GUIDE_GROUPS = [
           'On Finalize: payslips lock; one repayment row per active advance at min(installment, outstanding) — idempotent, so a Reopen + re-Finalize never doubles them; advances reaching zero auto-settle; auto-filled TADA claims are marked paid via payroll.',
         ],
         gotchas: [
-          'Finalize is BLOCKED outright while the draft is stale — the page recomputes every employee live through the same code that generated the draft and compares net pay; any mismatch, or an employee added since Generate, names itself in an amber banner pointing at Regenerate. There is deliberately no "finalize anyway": a stale draft pays wrong money.',
-          'Once finalized, the run is the permanent record — Payroll Calculation\'s Stale badge comparing it against live data is a prompt to investigate, not proof the payslip is wrong (the live data may have changed after a legitimate close).',
+          'Finalize is BLOCKED outright while the draft is stale — the page recomputes every employee live through the same code that generated the draft. Any employee whose figures MOVED, or who was added since Generate, names itself in an amber banner pointing at Regenerate. There is deliberately no "finalize anyway": a stale draft pays wrong money.',
+          'Staleness compares the six figures NOBODY CAN TYPE INTO — gross, OT amount, absence deduction, SSF employee, other deductions, advance deduction — plus the set of TADA claim IDs. Never net pay. TDS and TADA are deliberately hand-editable while a run is a draft and every edit rewrites net pay, so a net-pay comparison could not tell an intended override from real drift; before S620 that was a deadlock, because Finalize refused while stale and the only escape (Regenerate) reset the very edit that caused it.',
+          'A hand-adjusted TDS or TADA is reported, never blocking: an amber line names those payslips and says they are locked as entered rather than recomputed, and the Finalize confirmation repeats it. Only genuine movement blocks.',
+          'A third bucket exists and deliberately does NOT block: a stored payslip whose employee is no longer active (settled or deactivated mid-month). Blocking would strand the run with no legal move — instead Regenerate is gated behind a confirm, because Regenerate hard-deletes payslips and re-inserts only live employees, which would silently destroy a leaver\'s issued payslip.',
+          'Once finalized, the run is the permanent record — Payroll Calculation\'s badges comparing it against live data are a prompt to investigate, not proof the payslip is wrong (the live data may have changed after a legitimate close).',
         ],
         connections: 'Reads Attendance, Overtime (approved, per-day supersede), Pay Setup, Advances, TADA Claims. Finalized payslips feed HR Reports, Festival/Incentive tax projections, Self-Service payslips, and the Dashboard\'s SSF-deadline card.',
       },
@@ -316,8 +319,9 @@ export const HR_GUIDE_GROUPS = [
           'Print the working panel as the explanation sheet to hand over.',
         ],
         fields: [
-          { label: '⚠ Stale', desc: 'The stored payslip\'s net pay no longer matches a live recompute (compared rounded) — pay inputs changed after Generate. The fix lives on Payroll Run: Regenerate.' },
-          { label: 'Not generated', desc: 'A run exists for the month but never picked this employee up (typically added after Generate) — distinct from Stale.' },
+          { label: '⚠ Stale (red)', desc: 'One of the six COMPUTED figures moved since Generate — gross, OT amount, absence deduction, SSF employee, other deductions, advance deduction — or the set of TADA claims changed. Real upstream drift: attendance, overtime, pay setup or an advance instalment. The fix lives on Payroll Run: Regenerate.' },
+          { label: 'Adjusted (neutral)', desc: 'Someone hand-edited TDS or TADA on the draft and the payslip is otherwise a perfect match. Deliberately NOT the red ⚠ Stale it used to show: an intended override is not drift, and flagging it as such put a red warning against a correct payslip.' },
+          { label: 'Not generated', desc: 'A run exists for the month but never picked this employee up (typically added after Generate) — distinct from both of the above.' },
           { label: 'OT superseded', desc: 'Shows attendance OT withheld because an approved Overtime entry covers the same day — so a figure that differs from the attendance sheet is explained rather than mysterious.' },
         ],
         formulas: [
@@ -327,7 +331,7 @@ export const HR_GUIDE_GROUPS = [
           'Totals render only when EVERY row has a stored payslip — a partial sum would read as the month\'s total.',
           'The printable working uses no hover tooltips on purpose: hovers don\'t print, so every explanation is a visible row or caption.',
         ],
-        connections: 'Same inputs as Payroll Run. The Stale badge is the review-side of Payroll Run\'s finalize-block — one detects drift, the other refuses to lock it in.',
+        connections: 'Same inputs as Payroll Run, through the same shared comparison — the two pages call one payslipDrift(), so this page can never disagree with the banner on the other. The Stale badge is the review-side of Payroll Run\'s finalize-block: one detects drift, the other refuses to lock it in.',
       },
       {
         id: 'pay-engine',
@@ -344,6 +348,7 @@ export const HR_GUIDE_GROUPS = [
         fields: [
           { label: 'SSF (Social Security Fund)', desc: 'Employee 11%, employer 20% (31% total on the challan), on a base capped at NPR 100,000 of basic. Deducted only when enrolment AND the registration number are both present. SSF contributors also get the 1% first tax slab (Social Security Tax) waived entirely.' },
           { label: 'Join-date proration', desc: 'Days of the month before an employee\'s join date count as unpaid days, so a mid-month hire is paid from their join date — and because SSF and TDS derive from the absence-adjusted figure, both follow automatically.' },
+          { label: 'End-date proration', desc: 'The mirror image, added S600: days strictly AFTER an employee\'s last working day are unpaid days too, so a leaver draws a partial month. Without it the monthly run paid a full contractual month and Final Settlement added its own partial month on top — the same month paid roughly 1.5×. It is deliberately NOT implemented by writing absent rows for post-exit days: absent_days is a reported figure, and that would misreport a departure as absenteeism.' },
         ],
         formulas: [
           'TDS method: each month, project annual taxable income (YTD actuals + this month\'s rate for the remaining months), compute annual tax, take the cumulative share due through this month, subtract tax already withheld. Self-correcting: a raise mid-year adjusts the remaining months rather than back-billing.',
@@ -492,14 +497,17 @@ export const HR_GUIDE_GROUPS = [
         ],
         fields: [
           { label: 'Vested', desc: 'Twelve months of service or more. Under twelve, gratuity is accruing but not yet owed on exit.' },
-          { label: 'SSF offset', desc: 'For SSF-enrolled staff, a slice of the employer\'s 20% already funds the SSF gratuity scheme — that portion is not a cash liability again.' },
+          { label: 'SSF offset', desc: 'For SSF-enrolled staff, a slice of the employer\'s 20% already funds the SSF gratuity scheme — that portion is not a cash liability again. It is netted off only for the months contributions were ACTUALLY made, never across the whole service (see gotchas).' },
         ],
         formulas: [
           'Accrual = basic ÷ 12 per month of service (one month\'s basic per year, 8.33%/yr). Total accrued = basic ÷ 12 × service months.',
-          'SSF covered = 3.33% of min(basic, 100,000) per enrolled month. Net cash liability = max(0, accrued − SSF covered).',
+          'SSF covered = 3.33% of min(basic, 100,000) × the number of months SSF was actually contributed, capped at months served. Net cash liability = max(0, accrued − SSF covered).',
+          'The SSF gate is enrolment AND registration number, matching payroll — a flagged employee with a blank SSF number had nothing contributed on their behalf, so netting an SSF-funded share off their gratuity would underpay them.',
         ],
         gotchas: [
           'Daily and hourly staff are excluded entirely — there is no fixed monthly basic to accrue on — and the page states how many were skipped rather than silently shrinking the roster.',
+          'WHEN SSF started is not in the schema — hr_employees.ssf_enrolled is a bare boolean with no date — so it is derived from evidence: the first finalized payslip that actually carries an SSF deduction. SSF only began in 2075/76 and most clients enrolled later, so "enrolled since they joined" is close to never true; multiplying the offset across an entire service cost a ten-year employee enrolled two years ago roughly NPR 320,000 (fixed S600).',
+          'No evidence means NO offset, never a guess. An employee with no SSF-bearing payslip on record is treated as unknown coverage and the full accrual is paid — because the wrong guess in the other direction silently reduces what a leaver receives once, with nothing to catch it.',
         ],
         connections: 'Final Settlement computes the individual payout with the same accrual-minus-SSF arithmetic. Basic comes from Pay Setup; service months from the join date on Employees.',
       },
@@ -590,7 +598,7 @@ export const HR_GUIDE_GROUPS = [
           'Light or dark follows the phone\'s own setting. Employees cannot reach Settings → Appearance, so a fixed theme was the only one they could ever have.',
           'Every screen surfaces a failed load as an error rather than an empty list — "no payslips" always means no payslips, never a swallowed network failure.',
         ],
-        connections: 'Payslips come from finalized Payroll Runs; leave requests land in Leave Management\'s queue; TADA claims in TADA\'s queue; roster from published Roster days; swap requests into the Roster\'s swap panel. Login enablement and blocking live on Employees.',
+        connections: 'Payslips come from finalized Payroll Runs; leave requests land in Leave Management\'s queue; TADA claims in TADA\'s queue; roster from published Roster days; swap requests into the Roster\'s Shift Swaps tab. Login enablement and blocking live on Employees.',
       },
     ],
   },

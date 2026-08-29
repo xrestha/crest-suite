@@ -18,7 +18,7 @@ export const POS_GUIDE_GROUPS = [
         route: null,
         plan: null,
         summary:
-          'Crest POS is a till system built to feed the rest of Crest: every closed bill posts its revenue into IMS Sales Entry and its ingredient depletion into the Stock Movements ledger, so the food-cost figures the suite is sold on come from real service, not re-typed totals. It is sold flat — pos_enabled on or off, no tiers; the only feature flag is guest_ordering (QR ordering from the table).',
+          'Crest POS is a till system built to feed the rest of Crest: every closed bill posts its revenue into IMS Sales Entry and its ingredient depletion into the Stock Movements ledger, so the food-cost figures the suite is sold on come from real service, not re-typed totals. It is sold flat — pos_enabled on or off, no tiers, and no feature flag of its own: everything in this guide, Guest QR Ordering and Loyalty included, comes WITH the module (S632). pos_enabled is the only thing standing between a client and a public guest menu.',
         workflow: [
           'Setup once: activate the till device on POS Setup, build tables and ticket routing in Table Management, create PIN staff on POS Staff.',
           'Service: staff PIN in, take orders on the floor grid, Send Order fires KOT/BOT tickets (printed and on the Kitchen Display), Charge closes the bill.',
@@ -256,7 +256,7 @@ export const POS_GUIDE_GROUPS = [
           'The page authorizes itself server-side from the table id (table → client → POS enabled) since a guest has no login — an invalid or stale QR gets nothing.',
           'The guest\'s cart and submitted request survive a page reload (kept on the device), and the countdown simply disappears rather than ever showing negative "your food is late" minutes.',
         ],
-        connections: 'Menu content and On-POS visibility come from Menu Pricing (IMS guide). Requests surface on the Orders floor; ticket status flows back from the KDS. The QR itself is printed per table in Table Management. guest_ordering is toggled per client by the platform admin.',
+        connections: 'Menu content and On-POS visibility come from Menu Pricing (IMS guide). Requests surface on the Orders floor; ticket status flows back from the KDS. The QR itself is printed per table in Table Management. There is nothing to toggle: guest ordering is gated on pos_enabled alone, so it is live the moment POS is on. The feature_flags.guest_ordering switch still shown in the admin Feature Access modal is inert and grants nothing (S632).',
       },
     ],
   },

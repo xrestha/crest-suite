@@ -53,17 +53,19 @@ export const IMS_GUIDE_GROUPS = [
           'A single-screen KPI and chart snapshot of the client\'s currently open period — purchases, revenue, food cost %, variance, and reorder needs — with quick links into the deeper pages. Read-only; no data entry happens here.',
         workflow: [
           'Loads the client\'s open monthly_periods row automatically. If none exists, shows a banner linking to Periods.',
-          'Renders two KPI rows, then four charts (Spend by Category, Daily Purchases vs Sales with a projected month-end trendline, Top Items by Spend, Food Cost % monthly trend).',
+          'Renders two KPI rows, then four chart cards — two of which carry two views behind an in-card tab: Spend by Category / Top Items by Spend, Daily Purchases vs Sales, Food Cost % monthly trend, and Revenue vs Cost Breakdown / Sales Mix.',
           'Below the charts: a Top Variance Items table and an Items to Reorder panel (both Growth+), each linking to their full report.',
           'If the open period\'s BS month has already passed, a banner offers a one-click "Close & Start Next" shortcut.',
         ],
         fields: [
           { label: 'Menu Health tile', desc: 'Count of recipes priced under their target_fc_pct, with an estimated monthly NPR opportunity if repriced to target — the same underlying calculation as Menu Repricing, just summarized to one number.' },
           { label: 'Fixed Costs % of Revenue / Est. Net Margin % (Growth+)', desc: 'Pulls every overhead bucket (Fixed + Labor + Tax & Fees combined), unlike Recipe Costing\'s per-recipe allocation which uses only the Fixed Overheads bucket.' },
-          { label: 'Projection dashed line', desc: 'Only appears on the current open BS month once ≥5 days of dated sales entries exist; a least-squares trendline extended to month-end, clamped to 1.25× the last 7 days\' actual peak so one wild day can\'t blow up the projection.' },
+          { label: 'Projection dashed line', desc: 'Only appears on the current open BS month once ≥5 days of dated sales entries exist; a least-squares trendline extended to month-end, clamped to 1.25× the last 7 days\' actual peak so one wild day can\'t blow up the projection. It is LIVE — it refits on every load, so it answers "if today\'s pace continues, where do we land" and has no memory of what it said yesterday.' },
+          { label: 'Target dotted line', desc: 'The opposite: captured ONCE, the first time each metric crosses the 5-day threshold in the open period, and never moved again for the rest of the month. That is what makes it a target — comparing today against a forecast made when the month was young. It gets its own hue per metric (blue for sales, orange for purchases) rather than a third dash pattern in the same colour, which at compact-card size reads as soup.' },
+          { label: 'Tooltip arrows on the actual rows', desc: 'Hovering a day shows how far it ran off its Target. The ARROW is literal — ▲ above the target line, ▼ below — because it has to agree with the line you can see. The COLOUR is the verdict, and the two metrics have opposite polarity: for Sales, above target is green; for Purchases the reverse, because spending under the pace you locked in is the win. The percentage beside it is the gap as a share of that day\'s target.' },
         ],
         formulas: [
-          'Food Cost % = Net Purchases ÷ Revenue × 100 (green ≤35%, amber ≤45%, red >45%).',
+          'Food Cost % = Net Purchases ÷ Revenue × 100. The band is the CLIENT\'s own fc_warning_pct / fc_critical_pct from Settings — 35 and 45 are only the defaults — and it carries a shape marker (✓ Healthy / △ Watch / ▲ Too high) as well as a colour, so the verdict survives colour-blindness and a black-and-white print.',
           'Est. Net Margin % = (Revenue − Net Purchases − Overhead Total) ÷ Revenue × 100.',
           'Reorder shortfall = Par Qty − Current Stock, where Current Stock is the physical closing count if one exists, else max(0, Opening + Net Purchases − theoretical usage).',
         ],
@@ -83,11 +85,11 @@ export const IMS_GUIDE_GROUPS = [
         workflow: [
           'Client view: a table of the client\'s own periods, newest first, with a + New Period button (pick BS Year + BS Month) and a Close & Start Next / Reopen action per row.',
           'Admin "all clients" view (no client selected): one row per property showing its currently open period, an EXPIRED flag if that month has passed, and inline Close & Start Next / End Period / Create / Edit actions.',
-          'Closing a period: confirms, sets status=closed, creates next month\'s period as open, then carries the closed period\'s physical Closing Stock counts forward into the new period\'s Opening Stock.',
+          'Closing a period: PREFLIGHTS the closing count and states what it found inside the confirmation (red when nothing is counted), then sets status=closed, creates next month\'s period as open, carries the closed period\'s physical Closing Stock counts forward into the new period\'s Opening Stock, and mints the frozen Monthly Owner Report snapshot for that month.',
           '"End Period" (admin only, all-clients view) closes the current period without opening a new one — blocks further entry until someone creates the next period manually.',
         ],
         fields: [
-          { label: 'BS Year / BS Month', desc: 'Nepali calendar, years 2070–2100 supported. Month 1 = Baisakh … 12 = Chaitra. Nepal\'s fiscal year runs Shrawan (month 4) through Ashadh (month 3 of the following BS year).' },
+          { label: 'BS Year / BS Month', desc: 'Nepali calendar; the form accepts 2070–2100. Month 1 = Baisakh … 12 = Chaitra. Nepal\'s fiscal year runs Shrawan (month 4) through Ashadh (month 3 of the following BS year). Note the real day-length table covers BS 2000–2087 — a period created beyond 2087 falls back to a 30-day approximation, which is fine for a placeholder and wrong for anything dated.' },
           { label: 'Show Archived', desc: 'Closed periods older than 12 months are hidden by default; toggle to reveal them.' },
           { label: 'Reopen', desc: 'Sets a closed period back to open. No carry-forward logic re-runs — opening stock for that period already exists from when it was first created.' },
         ],
@@ -96,9 +98,11 @@ export const IMS_GUIDE_GROUPS = [
         ],
         gotchas: [
           'Two different unique-constraint errors can fire on Create: "already have an open period" (one_open_per_client) vs "a period for that exact month already exists" — the UI must distinguish which, since the fix is different.',
-          'The app warns but does not hard-block having more than one open period at once for a client.',
+          'At most ONE open period per client, enforced by a partial unique index in the database — not merely warned about. Practical consequence: Reopen on a PAST closed period always fails while a later period is open, which is the only realistic moment anyone reopens one.',
+          'The close preflight informs, it never blocks — an admin correcting history legitimately closes uncounted months. And a preflight that could not run says so rather than staying silent: closing an uncounted month freezes "closing stock = 0 for every item" into a Monthly Report that nothing recomputes, and COGS subtracts closing stock.',
+          'Admin does not need to reopen a period to edit it — every period-scoped entry page exempts admin from the closed-period lock. Reopening only matters for handing edit access back to the client\'s own login; if admin is making the correction, edit in place and then re-run "Resync Opening Stock".',
         ],
-        connections: 'Every other IMS page reads/writes against the period selected here. Closing here directly feeds Stock Count\'s Opening tab for the new period.',
+        connections: 'Every other IMS page reads/writes against the period selected here. Closing here directly feeds Stock Count\'s Opening tab for the new period, and mints the Monthly Owner Report snapshot. For a POS client it is also where unposted bills are recovered — "Post POS bills to Inventory".',
       },
       {
         id: 'items',
@@ -513,7 +517,7 @@ export const IMS_GUIDE_GROUPS = [
         fields: [],
         formulas: [
           'COGS (per category, summed to total) = Opening + Net Purchases − Wastage − Staff Meals − Closing.',
-          'Food Cost % = COGS ÷ Net Sales Revenue × 100 (green ≤35%, amber 36–45%, red >45%; stated target band 28–35%).',
+          'Food Cost % = COGS ÷ Net Sales Revenue × 100, banded against the client\'s own fc_warning_pct / fc_critical_pct (defaults 35 / 45) with a ✓ / △ / ▲ marker beside the colour; the stated industry target band is 28–35%.',
           'Purchase-Based FC% = Net Purchases ÷ Revenue × 100 — a simpler proxy ignoring opening/closing stock, useful when physical counts are missing.',
         ],
         gotchas: [

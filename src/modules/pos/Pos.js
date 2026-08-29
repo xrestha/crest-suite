@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
 
@@ -48,6 +48,14 @@ export default function Pos() {
   }
 
   const canManage = hasPosAccess('manager')
+
+  // Layout.js tags this nav item minPosRole:'manager' and the module guide documents it as
+  // "Manager only", but nothing enforced that at the route — a staff PIN account could reach /pos
+  // by URL and get the page with its one control hidden. Not a leak (the device secret is behind a
+  // rank check inside get_pos_device_secret, server-side, which is where it belongs), but it is the
+  // reachable-but-hidden mismatch CLAUDE.md's "a page reachable by URL needs the guard its nav item
+  // implies" rule exists to close. Placed after every hook, per that rule.
+  if (!canManage) return <Navigate to="/dashboard" replace />
 
   return (
     <div style={{ padding: '40px 28px', maxWidth: 520 }}>

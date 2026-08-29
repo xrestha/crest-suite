@@ -159,6 +159,104 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S637 — 2026-08-29 — a fourth admin guide: Crest Suite, the four pages that belonged to no module
+
+Service worker `crest-v156`. No migration. New: `src/pages/settings/suiteGuideData.js` (3 groups,
+8 sections).
+
+The gap S636 left. `/owner-dashboard`, `/owner-report`, `/pnl` and `/group-dashboard` appeared in no
+guide, because the guides are per-module and these four belong to none — **they read ACROSS
+modules, which is the entire product they are sold as.** Admin → Settings → Guides now has a fourth
+pill, `Crest Suite`, beside IMS / HR / POS.
+
+Eight sections, in three groups:
+
+- **Overview** — Suite Pro is an add-on priced per outlet ON TOP of the modules, not a bundle
+  containing them; one tier only (`NULL | 'pro'`); `SuiteGate` never redirects, because the nav
+  entry has to stay visible to be sold; `requireModules` varies per feature and Owner Dashboard's
+  `['ims','hr']` is not the default anyone should assume.
+- **Owner** — Owner Dashboard, Monthly Owner/Manager Report, Consolidated P&L.
+- **Multi-Outlet** — how selected-outlet indirection works, the Group Console, Outlet Access, and
+  the HQ→branch master-data push.
+
+Written from the code rather than from memory: `SuiteGate`'s props were read off all four call
+sites, the P&L's `LINES` off its own declaration, Owner Dashboard's labour accrual off
+`loadLaborCost`, and the Group Console's coverage banner off its own JSX.
+
+**Every `plan:` chip carries BOTH gates, because they are checked by different mechanisms and
+neither implies the other**: `suite_plan = 'pro'` (SuiteGate) AND the Owner/admin role test inside
+the page. That distinction is the reason three of these four pages shipped reachable by any staff
+account — and why the consequence was worse than a leak, since the RESTRICTIVE staff-isolation
+policies return an empty list with no error, so Consolidated P&L rendered real Revenue with every
+cost table empty: Net Profit = Revenue, 100% margin, in green.
+
+**Demand Forecast and Fixed Assets are Suite Pro too and deliberately stay in the IMS guide**,
+cross-referenced rather than duplicated — they read IMS data, and a figure documented twice is a
+figure that will eventually be described two different ways.
+
+The section contract (all 10 keys, arrays where the renderer calls `.length`, unique ids) and every
+`route:` were validated against `ModuleGuideTab` and `App.js` before commit, the same mechanical
+checks S636 ran over the other three.
+
+### S636 — 2026-08-29 — audit of all three admin module guides, and the drift they had accumulated
+
+Service worker `crest-v155`. No migration.
+
+The guides drift silently — nothing renders from them, so nothing fails when they are wrong — and
+they are the reference an operator reads instead of the code. Audited all three against the current
+codebase.
+
+**Mechanical checks first, and these came back clean.** Every `route:` in all three guides exists in
+`App.js` (45 IMS + 19 HR + 15 POS). Every IMS `plan:` chip matches its route's `minPlan`, S548's
+retier included — `overheads` Growth, `reorder_report` Growth, `vendor_balance_confirmation`
+Starter. Every HR and POS rank chip matches the page's own `hasXAccess` early return. No guide
+mentions `is_premium`, `hr_plan`, `pos_plan`, `ims_plan` or a Suite tier below Pro.
+
+**What was actually wrong:**
+
+- **POS, S632.** The header comment was updated when guest ordering became part of the module; the
+  prose two lines below it was not, and still said "the only feature flag is guest_ordering", with a
+  second line claiming the flag "is toggled per client by the platform admin". It gates nothing —
+  `pos_enabled` is the only gate — so the guide was describing a control that no longer exists.
+- **HR payroll staleness, S620.** Both payroll sections still described the *superseded* rule: that
+  the draft check "compares net pay", and that `⚠ Stale` means "net pay no longer matches". S620
+  replaced that precisely because a net-pay comparison could not distinguish an intended TDS/TADA
+  override from real drift — and on Payroll Run that was a deadlock, not a false alarm. Now
+  documented as it works: six computed fields plus the TADA claim ID set, never net pay; a
+  hand-edited figure is a neutral **Adjusted** chip and does not block; the third bucket (a payslip
+  whose employee is no longer active) deliberately does not block either, and gates Regenerate
+  instead.
+- **HR gratuity, S600.** "SSF covered = 3.33% per enrolled month" hid the thing that mattered: WHEN
+  enrolment started is not in the schema, so it is derived from the first finalized payslip carrying
+  an SSF deduction, and **no evidence means no offset**. Multiplying the offset across a whole
+  service cost a ten-year employee enrolled two years ago roughly NPR 320,000.
+- **HR pay engine, S600.** Join-date proration was documented and end-date proration was not — the
+  fix that stopped a leaver's final month being paid roughly 1.5×.
+- **IMS dashboard.** "four charts" listed the pre-S556/S557 set, before Spend by Category absorbed
+  Top Items and Revenue vs Cost absorbed Sales Mix. The frozen Target line had no entry at all, and
+  neither did S634's tooltip verdict arrows.
+- **IMS food-cost bands.** Two places stated 35/45 as fixed thresholds. They are per-client
+  settings (`fc_warning_pct`/`fc_critical_pct`) with those as defaults, and the band carries a
+  ✓/△/▲ marker as well as a colour.
+- **IMS Periods.** No mention of S613's closing-count preflight — on the action that freezes
+  "closing stock = 0" into a Monthly Report nothing recomputes. A gotcha still claimed the app
+  "warns but does not hard-block" more than one open period, contradicting the gotcha directly above
+  it that names the unique index; that constraint has existed since 2026-07-13. "Years 2070–2100
+  supported" overstated the calendar, which is real to 2087 and approximate beyond.
+- **HR self-service** still pointed swap requests at "the Roster's swap panel", which S633 made a tab.
+
+**One finding was in the code, not the guide.** `/pos` (POS Setup) is tagged `minPosRole: 'manager'`
+in the nav and documented "Manager only", and had **no route guard** — a staff PIN account could
+reach it by URL. Not a leak: its one control is behind `canManage` and the device secret is
+rank-checked inside `get_pos_device_secret`, server-side, which is where it belongs. But it is the
+reachable-but-hidden mismatch S601/S617 kept finding, so it got the one-line guard rather than
+having the guide downgraded to match.
+
+**Known gap, deliberately left:** `/owner-dashboard`, `/owner-report`, `/pnl` and `/group-dashboard`
+appear in no guide. They are Suite-level rather than module-level, and the guides are per-module —
+though the IMS guide already covers two Suite-gated pages (Demand Forecast, Fixed Assets), so the
+boundary is not really principled. A fourth Suite guide is the honest fix.
+
 ### S635 — 2026-08-29 — the Holiday Calendar had no holidays in it, and Martyrs' Day was on the wrong date
 
 Service worker `crest-v154`. No migration. New: `src/modules/hr/holidays/holidayData.js` +
