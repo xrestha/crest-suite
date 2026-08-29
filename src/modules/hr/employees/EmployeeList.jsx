@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { supabase } from '../../../supabaseClient'
+import { errorText } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
@@ -39,6 +40,27 @@ function fmtDate(dateStr) {
   return dateStr ? new Date(dateStr).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
 }
 
+// Three separate failures on this page each need the same page-level red card, so it lives here
+// once rather than being pasted per call site.
+function AlertCard({ children, onDismiss }) {
+  return (
+    <div
+      role="alert"
+      className="card"
+      style={{
+        marginBottom: 12, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+        borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
+        background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+      }}
+    >
+      <span style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>{children}</span>
+      {onDismiss && (
+        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={onDismiss} aria-label="Dismiss">×</button>
+      )}
+    </div>
+  )
+}
+
 export default function EmployeeList() {
   const { clientId, profile, hasHrAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
@@ -72,6 +94,12 @@ export default function EmployeeList() {
   // own page-level error surface — ssMsg only renders inside that modal.
   const [ssRemoving, setSsRemoving] = useState(null) // employee id currently being revoked
   const [ssRemoveErr, setSsRemoveErr] = useState('')
+  // Both reads below used to drop their error and coalesce to an empty result, which on this page
+  // is not a harmless blank: an empty roster reads as "no staff", and an empty self-service map
+  // reads as "nobody has a login" — see the row action, which would then offer Enable to someone
+  // who already has one. A failed read is not an empty result (S594).
+  const [loadErr, setLoadErr] = useState('')
+  const [ssStatusErr, setSsStatusErr] = useState('')
   const [linkCopied, setLinkCopied] = useState(false)
 
   // Row selection for the bulk Activate/Deactivate action, keyed by employee id. This toggles
@@ -88,7 +116,16 @@ export default function EmployeeList() {
 
   async function fetchEmployees() {
     if (employees.length === 0) setLoading(true) // a cached list keeps showing while this refreshes
-    const { data } = await scopedFrom('hr_employees').order('full_name')
+    const { data, error } = await scopedFrom('hr_employees').order('full_name')
+    if (error) {
+      // Leave whatever is already on screen. A cached list is stale but true; [] is a lie that
+      // reads as "this client has no employees" — and it would also be written to the cache,
+      // so the lie would survive the next visit.
+      setLoadErr(errorText(error, 'operator'))
+      setLoading(false)
+      return
+    }
+    setLoadErr('')
     setEmployees(data || [])
     writePageCache('employees', 'employees', effectiveClientId, data || [])
     setLoading(false)
@@ -97,7 +134,15 @@ export default function EmployeeList() {
   // profiles doesn't follow the standard client-scoped RLS pattern (self-or-admin only), so this
   // goes through a dedicated RPC rather than a raw/scoped query — see get_hr_self_service_status.
   async function fetchSelfServiceStatus() {
-    const { data } = await supabase.rpc('get_hr_self_service_status', { p_client_id: effectiveClientId })
+    const { data, error } = await supabase.rpc('get_hr_self_service_status', { p_client_id: effectiveClientId })
+    if (error) {
+      // Keep the last known map rather than blanking it, and let the row render "unknown" instead
+      // of confidently offering Enable — creating a second login for an employee who already has
+      // one is the failure this silence used to walk an operator into.
+      setSsStatusErr(errorText(error, 'operator'))
+      return
+    }
+    setSsStatusErr('')
     setSelfServiceMap(Object.fromEntries((data || []).map(r => [r.employee_id, r.profile_id])))
   }
 
@@ -256,19 +301,22 @@ export default function EmployeeList() {
         </div>
       </div>
 
+      {loadErr && (
+        <AlertCard onDismiss={() => setLoadErr('')}>
+          Couldn't load the employee list, so what's shown below may be out of date or incomplete: {loadErr}
+        </AlertCard>
+      )}
+
+      {ssStatusErr && (
+        <AlertCard onDismiss={() => setSsStatusErr('')}>
+          Couldn't check who has Self-Service, so that column is showing "?" rather than guessing: {ssStatusErr}
+        </AlertCard>
+      )}
+
       {ssRemoveErr && (
-        <div
-          role="alert"
-          className="card"
-          style={{
-            marginBottom: 12, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-            borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
-            background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
-          }}
-        >
-          <span style={{ fontSize: 12, color: 'var(--theme-red-text)' }}>Couldn't remove Self-Service access: {ssRemoveErr}</span>
-          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={() => setSsRemoveErr('')} aria-label="Dismiss">×</button>
-        </div>
+        <AlertCard onDismiss={() => setSsRemoveErr('')}>
+          Couldn't remove Self-Service access: {ssRemoveErr}
+        </AlertCard>
       )}
 
       {/* Stat cards */}
@@ -493,6 +541,10 @@ export default function EmployeeList() {
                               </Tip>
                             </span>
                           )
+                        ) : ssStatusErr ? (
+                          <Tip text="Self-Service status couldn't be loaded, so this is unknown — not 'no login'. Reload before enabling: if this employee already has Self-Service, enabling it again will fail.">
+                            <span className="badge badge-gray" style={{ fontSize: 10 }}>Self-Service ?</span>
+                          </Tip>
                         ) : (
                           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEnableSelfService(e)}>
                             Enable Self-Service

@@ -35,6 +35,15 @@ layer was perfect — which is the point: a detector that checks colour and shap
 
 Three rules came out of it:
 
+- **This rule is not confined to report pages, and the `paths:` list above is why it keeps being
+  re-found (S631).** `EmployeeList.jsx` — an ordinary CRUD screen this file never loads for — held
+  the same shape twice: `const { data } = …` then `data || []`, on the employee roster *and* on
+  `get_hr_self_service_status`. The roster one also wrote the empty result to the page cache, so the
+  lie outlived the failed request. Consequences were the report-page kind exactly: a failed read
+  rendered as "this client has no employees", and unknown self-service status rendered as "nobody has
+  a login" — offering **Enable Self-Service** to an employee who already had one. When you touch any
+  page that reads and renders, apply this whether or not the page calls itself a report.
+
 - **A failed read is not an empty period, and it must never render as one.** Every read on the two
   new IMS report pages destructured `{ data }` and dropped `error`, then ran the result through
   `|| []`. An RLS rejection, a network blip, a PostgREST schema-cache miss or the documented

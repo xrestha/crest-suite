@@ -159,6 +159,48 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S631 — 2026-08-29 — the two S630 findings, fixed: `pos_plan` stops granting, and two silent reads on HR Employees
+
+Both items S630 recorded as found-but-not-fixed. Service worker bumped to `crest-v150`.
+
+**`pos_plan` no longer unlocks Guest QR Ordering** (migration `20260829150000`). `submit_guest_order`
+and `get_guest_menu` each gated on `v_guest_ordering_flag OR v_pos_plan = 'pro'`, so a client with a
+stale `pos_plan` had a Pro feature off a column nothing writes, no admin screen displays and no MRR
+figure prices.
+
+**The sweep grants rather than revokes, and runs first.** Every client relying on the implicit grant
+gets `feature_flags.guest_ordering = true` written *before* the clause is removed — so nobody is
+without access at any instant and no live guest menu goes dark mid-transaction. That follows
+CLAUDE.md's rule that a tier move needs a grandfather sweep in the same deploy, and S574's precedent
+of folding a raiser into an explicit column so no entitlement changes. **The point isn't to keep
+giving the feature away — it's that the grant becomes visible.** Afterwards it's an ordinary flag on
+Admin → Feature Access that can be revoked deliberately; an invisible grant can't be revoked because
+nobody knows it exists. The migration ends with a report naming exactly who was swept, and *no rows
+at all* is the good outcome: it means the clause was granting nothing.
+
+Two details worth keeping. **Which clients the sweep touches has to be captured as it runs** — a temp
+table, populated in the loop — because deriving it afterwards from `pos_plan = 'pro'` is wrong in the
+direction that matters: once the sweep completes, a client who *bought* guest ordering is
+indistinguishable from one riding the implicit grant, and the report would accuse both. And the two
+function bodies were **patched programmatically rather than retyped** — extracted from their current
+migrations, three surgical edits each by `sed`, then diffed against the originals to prove nothing
+else moved. `get_guest_menu` is ~80 lines whose previous migration needed `DROP` + `CREATE` for a
+column change; only the body changes here, so `CREATE OR REPLACE` keeps anon's EXECUTE (`DROP`
+discards grants), asserted rather than assumed.
+
+**HR → Employees dropped two read errors, not one.** S630 caught `fetchSelfServiceStatus`; the same
+pass found `fetchEmployees` doing it too — `const { data } = …` then `data || []`, so a failed read
+renders as *"this client has no employees"* **and gets written to the page cache**, where the lie
+survives the next visit. Both now surface through `errorText(err, 'operator')` and leave whatever is
+on screen alone rather than blanking it: a cached list is stale but true. The self-service column
+renders **"Self-Service ?"** when its status is unknown instead of confidently offering Enable —
+that button on an employee who already has a login is the failure the silence used to walk an
+operator into. The three page-level red cards were collapsed into one local `AlertCard`.
+
+**The generalisation, now in CLAUDE.md:** a retirement sweep that only greps `src/` has not finished.
+Entitlement logic lives in `SECURITY DEFINER` functions too, and nothing there fails loudly when a
+column stops being maintained.
+
 ### S630 — 2026-08-29 — Supabase Advisor triage: four guards that fail open, and an overload nobody dropped
 
 Triage of a pasted Security Advisor report (lints `0028`/`0029`, "Public/Signed-In Users Can Execute
