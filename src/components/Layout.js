@@ -1020,8 +1020,13 @@ export default function Layout() {
           {panel === 'admin' && isAdmin && (
             <>
               {renderDashboardRow()}
-              {renderSuiteGroup()}
               {renderPinnedGroup()}
+              {/* Crest Suite renders LAST on this panel, unlike every other one. On a module
+                  panel it sits high because it is the Owner's own primary destination; on the
+                  admin panel it is a client-facing layer the operator is looking at from the
+                  outside, and Clients / Periods / Guest Menu / Audit Log / Settings are the
+                  actual work. Five Suite rows above them pushed the operator's daily tools
+                  below the fold. */}
               <NavLink to="/admin/clients"
                 className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
                 style={newTrialCount > 0 && pendingTrialCount === 0 ? {
@@ -1053,6 +1058,7 @@ export default function Layout() {
               {renderNavItem({ to: '/admin/guest-menu', label: 'Guest Menu', icon: QrCode })}
               {renderNavItem({ to: '/admin/audit', label: 'Audit Log', icon: History })}
               {renderNavItem({ to: '/settings', label: 'Settings', icon: Settings })}
+              {renderSuiteGroup()}
             </>
           )}
 

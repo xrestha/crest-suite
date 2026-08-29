@@ -159,6 +159,19 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S640 — 2026-08-29 — Crest Suite renders last on the admin panel
+
+Service worker `crest-v159`. No migration.
+
+Reported from a screenshot: on the Crest-admin panel the new CREST SUITE group sat directly under
+Admin Dashboard, pushing **Clients, Periods, Guest Menu, Audit Log and Settings** — the operator's
+actual daily tools — below five Suite rows and below the fold.
+
+Moved to the end of that panel only. The other three panels are unchanged, and the asymmetry is the
+point: on a module panel Suite sits high because those pages are the **Owner's own** primary
+destinations, while on the admin panel Suite is a client-facing layer the operator is inspecting
+from outside. Same rows, different reader, different rank.
+
 ### S639 — 2026-08-29 — every Suite feature actually inside the Crest Suite section
 
 Service worker `crest-v158`. No migration.
