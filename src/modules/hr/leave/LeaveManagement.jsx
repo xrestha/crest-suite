@@ -156,11 +156,21 @@ export default function LeaveManagement() {
     const periodMap = {}
     periods.forEach(p => { periodMap[`${p.bs_year}:${p.bs_month}`] = p })
     const days = workingDaysInRange(req.start_date, req.end_date)
+    // One DELETE per PERIOD, not per day. This used to await a delete inside the day loop, so
+    // rejecting a two-week leave cost 14 sequential round trips (a month's medical leave, 22+) —
+    // seconds of spinner on a button whose work is a single set operation. Grouping by period_id
+    // and passing the days as an `.in()` makes it one request per BS month the leave spans, which
+    // is almost always one. Same shape as syncAttendance's upsert directly above.
+    const daysByPeriod = new Map()
     for (const d of days) {
       const p = periodMap[`${d.bsYear}:${d.bsMonth}`]
       if (!p) continue
-      await scopedDelete('hr_attendance').eq('employee_id', req.employee_id).eq('period_id', p.id).eq('bs_day', d.bsDay)
+      if (!daysByPeriod.has(p.id)) daysByPeriod.set(p.id, [])
+      daysByPeriod.get(p.id).push(d.bsDay)
     }
+    await Promise.all([...daysByPeriod.entries()].map(([periodId, bsDays]) =>
+      scopedDelete('hr_attendance')
+        .eq('employee_id', req.employee_id).eq('period_id', periodId).in('bs_day', bsDays)))
   }
 
   async function approveRequest(req) {

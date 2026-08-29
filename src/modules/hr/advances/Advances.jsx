@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import SearchableSelect from '../../../components/SearchableSelect'
@@ -56,8 +57,14 @@ export default function Advances() {
     setLoading(true)
     const [{ data: emps }, { data: advs }, { data: reps }] = await Promise.all([
       scopedFrom('hr_employees', 'id, full_name, employee_code, status').order('full_name'),
-      scopedFrom('hr_advances').order('issued_date', { ascending: false }),
-      scopedFrom('hr_advance_repayments').order('repaid_date'),
+      // Both are unfiltered lifetime ledgers — every advance and every repayment the client has
+      // ever recorded — so they page, for the same reason PayrollRun and PayrollCalculation page
+      // them (S620). Outstanding is derived as `amount − repaid`, so truncating the REPAYMENTS
+      // side alone overstates what every employee still owes. `.order('id')` is the unique
+      // tiebreaker: `issued_date`/`repaid_date` are not unique (several advances share a date), and
+      // paging on a non-unique sort repeats a row on one page and skips it on the next.
+      fetchAllRows(() => scopedFrom('hr_advances').order('issued_date', { ascending: false }).order('id')),
+      fetchAllRows(() => scopedFrom('hr_advance_repayments').order('repaid_date').order('id')),
     ])
     setEmployees(emps || [])
     setAdvances(advs || [])
@@ -67,31 +74,42 @@ export default function Advances() {
 
   useEffect(() => { load() }, [load])
 
-  const empMap = Object.fromEntries((employees || []).map(e => [e.id, e]))
+  // Memoized: the Add Advance and Record Repayment forms are controlled inputs on this component,
+  // so every keystroke rebuilt the employee index and the whole repayment ledger index, then made
+  // four more passes for the KPI strip — none of which the form can change.
+  const empMap = useMemo(
+    () => Object.fromEntries((employees || []).map(e => [e.id, e])), [employees])
 
   // Per-advance repayment totals and rows
-  const repayMap = {}
-  ;(repayments || []).forEach(r => {
-    if (!repayMap[r.advance_id]) repayMap[r.advance_id] = { total: 0, rows: [] }
-    repayMap[r.advance_id].total += parseFloat(r.amount) || 0
-    repayMap[r.advance_id].rows.push(r)
-  })
+  const repayMap = useMemo(() => {
+    const m = {}
+    ;(repayments || []).forEach(r => {
+      if (!m[r.advance_id]) m[r.advance_id] = { total: 0, rows: [] }
+      m[r.advance_id].total += parseFloat(r.amount) || 0
+      m[r.advance_id].rows.push(r)
+    })
+    return m
+  }, [repayments])
 
-  const filtered = (advances || []).filter(a => {
+  const filtered = useMemo(() => (advances || []).filter(a => {
     if (filterType !== 'all' && a.type !== filterType) return false
     if (filterStatus !== 'all' && a.status !== filterStatus) return false
     return true
-  })
+  }), [advances, filterType, filterStatus])
 
-  // Summary stats (active only)
-  const activeAdvances = advances.filter(a => a.status === 'active')
-  const totalOutstanding = activeAdvances.reduce((s, a) => {
-    const repaid = repayMap[a.id]?.total || 0
-    return s + Math.max(0, parseFloat(a.amount) - repaid)
-  }, 0)
-  const employeesWithActive = new Set(activeAdvances.map(a => a.employee_id)).size
-  const advanceCount = activeAdvances.filter(a => a.type === 'advance').length
-  const loanCount    = activeAdvances.filter(a => a.type === 'loan').length
+  // Summary stats (active only) — one pass instead of four over the same subset.
+  const { totalOutstanding, employeesWithActive, advanceCount, loanCount } = useMemo(() => {
+    let totalOutstanding = 0, advanceCount = 0, loanCount = 0
+    const empIds = new Set()
+    for (const a of advances) {
+      if (a.status !== 'active') continue
+      totalOutstanding += Math.max(0, parseFloat(a.amount) - (repayMap[a.id]?.total || 0))
+      empIds.add(a.employee_id)
+      if (a.type === 'advance') advanceCount++
+      else if (a.type === 'loan') loanCount++
+    }
+    return { totalOutstanding, employeesWithActive: empIds.size, advanceCount, loanCount }
+  }, [advances, repayMap])
 
   // Both setters clear the edited field's own error: a border still red under a corrected box
   // teaches the user these messages are stale and worth ignoring.

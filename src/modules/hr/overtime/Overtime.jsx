@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -167,13 +167,22 @@ export default function Overtime() {
   }
 
   // ── Derived ───────────────────────────────────────────────────────────────────
-  const empMap = Object.fromEntries(employees.map(e => [e.id, e]))
+  // Memoized: the Add/Edit OT form is a set of controlled inputs on this same component, so every
+  // keystroke rebuilt the employee index and made four more passes over the month's entries —
+  // `approved` was walked twice on its own, once for the count and once for the hours.
+  const empMap = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees])
 
-  const filtered = entries.filter(e => statusTab === 'all' || e.status === statusTab)
+  const filtered = useMemo(
+    () => entries.filter(e => statusTab === 'all' || e.status === statusTab), [entries, statusTab])
 
-  const pendingCount  = entries.filter(e => e.status === 'pending').length
-  const approvedCount = entries.filter(e => e.status === 'approved').length
-  const approvedHrs   = entries.filter(e => e.status === 'approved').reduce((s, e) => s + parseFloat(e.ot_hours || 0), 0)
+  const { pendingCount, approvedCount, approvedHrs } = useMemo(() => {
+    let pendingCount = 0, approvedCount = 0, approvedHrs = 0
+    for (const e of entries) {
+      if (e.status === 'pending') pendingCount++
+      else if (e.status === 'approved') { approvedCount++; approvedHrs += parseFloat(e.ot_hours || 0) }
+    }
+    return { pendingCount, approvedCount, approvedHrs }
+  }, [entries])
 
   const maxDay = daysInBsMonth(form.bs_year, form.bs_month)
 

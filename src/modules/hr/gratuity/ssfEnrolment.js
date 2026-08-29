@@ -1,5 +1,6 @@
 import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 import { monthsBetween } from './gratuityCompute'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 
 // When did SSF contributions actually start for each employee?
 //
@@ -22,12 +23,22 @@ import { monthsBetween } from './gratuityCompute'
  * Employees absent from the map have no SSF-bearing finalized payslip on record.
  */
 export async function fetchSsfStartMap(scopedFrom) {
-  const { data, error } = await scopedFrom(
-    'hr_payslips',
-    'employee_id, ssf_employee, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))',
-  )
-    .gt('ssf_employee', 0)
-    .eq('hr_payroll_runs.status', 'finalized')
+  // Paged. This reads every SSF-bearing finalized payslip in the client's history — one row per
+  // enrolled employee per month — and picks the EARLIEST per employee below. Unpaged it stopped at
+  // PostgREST's 1000-row cap (~20 staff x 4 years) with no error and, since an unordered query has
+  // no guarantee about which 1000 come back, the rows dropped could be exactly the early ones the
+  // map is looking for. That reports a later SSF start than the truth, which shortens the
+  // contribution count and shrinks the gratuity offset on a leaver's final settlement — or, if an
+  // employee's rows are dropped entirely, returns `null` for them and applies no offset at all.
+  // `.order('id')` is the unique tiebreaker fetchAllRows requires.
+  const { data, error } = await fetchAllRows(() =>
+    scopedFrom(
+      'hr_payslips',
+      'employee_id, ssf_employee, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))',
+    )
+      .gt('ssf_employee', 0)
+      .eq('hr_payroll_runs.status', 'finalized')
+      .order('id'))
 
   if (error) throw error
 

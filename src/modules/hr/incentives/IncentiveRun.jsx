@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { getBsToday } from '../../../utils/bsCalendar'
 import { computeBonusTds, fiscalYearOf } from '../payroll/tds'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import IncentiveConfigs from './IncentiveConfigs'
 
 const LIFE_INS_CAP    = 40000
@@ -82,8 +83,13 @@ export default function IncentiveRun() {
       scopedFrom('hr_employees', 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, life_insurance_premium, health_insurance_premium')
         .in('status', ['active', 'probation']).order('full_name'),
       runLabel ? scopedFrom('hr_incentives').eq('bs_year', bsYear).eq('run_label', runLabel) : Promise.resolve({ data: [] }),
-      scopedFrom('hr_payslips', 'employee_id, gross, ssf_employee, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
-        .eq('hr_payroll_runs.status', 'finalized'),
+      // Paged, for the same reason as FestivalAllowance: the FY filter below is applied in JS, so
+      // this reads the client's whole payslip history and silently stopped at the 1000-row cap.
+      // The YTD map feeds calcIncentiveTds — a truncated one under-withholds on the incentive.
+      fetchAllRows(() =>
+        scopedFrom('hr_payslips', 'employee_id, gross, ssf_employee, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+          .eq('hr_payroll_runs.status', 'finalized')
+          .order('id')),
     ])
     setEmployees(emps || [])
     setRows(inc || [])

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
@@ -43,8 +44,16 @@ export default function EmployeeList() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
 
-  const [employees, setEmployees] = useState([])
-  const [loading, setLoading]     = useState(true)
+  // Seeded from the short-lived session cache so a revisit paints the last-known roster instantly
+  // instead of a skeleton (S460 pattern). This page passes both of the tests that decide whether a
+  // page may adopt it: nothing here batch-saves using on-screen state as a baseline (the bulk
+  // Activate/Deactivate writes an ABSOLUTE `access_blocked` to explicitly selected ids, and every
+  // other save writes only the one employee being edited), and the cached section is the page's
+  // core content, so it genuinely shortens the skeleton rather than caching a reference list
+  // behind a read the user still waits for.
+  const [cachedEmployees] = useState(() => readPageCache('employees', 'employees', effectiveClientId))
+  const [employees, setEmployees] = useState(cachedEmployees ?? [])
+  const [loading, setLoading]     = useState(!cachedEmployees)
   const [search, setSearch]       = useState('')
   const [statusFilter, setStatus] = useState('all')
   const [supFilter, setSupFilter] = useState('all')
@@ -78,9 +87,10 @@ export default function EmployeeList() {
   }, [effectiveClientId]) // eslint-disable-line
 
   async function fetchEmployees() {
-    setLoading(true)
+    if (employees.length === 0) setLoading(true) // a cached list keeps showing while this refreshes
     const { data } = await scopedFrom('hr_employees').order('full_name')
     setEmployees(data || [])
+    writePageCache('employees', 'employees', effectiveClientId, data || [])
     setLoading(false)
   }
 
@@ -174,34 +184,56 @@ export default function EmployeeList() {
     setTimeout(() => setLinkCopied(false), 2000)
   }
 
-  // Resolve supervisor names + the set of employees actually used as a supervisor (for the filter).
-  const nameById = Object.fromEntries(employees.map(e => [e.id, e.full_name]))
-  const supervisorList = employees
-    .filter(e => employees.some(x => x.supervisor_id === e.id))
-    .sort((a, b) => a.full_name.localeCompare(b.full_name))
+  // Everything below is memoized because the search box is a controlled input: without it, one
+  // keystroke re-ran all of it over the full employee list — including four full scans for the
+  // stat cards, none of which depend on `search` at all.
+  const nameById = useMemo(
+    () => Object.fromEntries(employees.map(e => [e.id, e.full_name])), [employees])
 
-  const filtered = employees.filter(e => {
-    const matchSearch = !search ||
-      e.full_name.toLowerCase().includes(search.toLowerCase()) ||
-      (e.employee_code || '').toLowerCase().includes(search.toLowerCase()) ||
-      (e.department || '').toLowerCase().includes(search.toLowerCase()) ||
-      (e.designation || '').toLowerCase().includes(search.toLowerCase())
-    const matchStatus = statusFilter === 'all' || e.status === statusFilter
-    const matchSup = supFilter === 'all'
-      || (supFilter === 'none' ? !e.supervisor_id : e.supervisor_id === supFilter)
-    const matchRetire = !retiringOnly || !!retireInfo(e.retirement_date)?.soon
-    return matchSearch && matchStatus && matchSup && matchRetire
-  })
+  // The employees actually used as somebody's supervisor, for the filter dropdown. This was
+  // `employees.filter(e => employees.some(...))` — a nested scan, so O(n^2) per keystroke (40,000
+  // comparisons at 200 staff). One pass to collect the referenced ids, then one filter.
+  const supervisorList = useMemo(() => {
+    const referenced = new Set(employees.map(e => e.supervisor_id).filter(Boolean))
+    return employees
+      .filter(e => referenced.has(e.id))
+      .sort((a, b) => a.full_name.localeCompare(b.full_name))
+  }, [employees])
 
-  const total      = employees.length
-  const active     = employees.filter(e => e.status === 'active').length
-  const probation  = employees.filter(e => e.status === 'probation').length
-  const payrollAmt = employees
-    .filter(e => e.status === 'active' || e.status === 'probation')
-    .reduce((s, e) => s + parseFloat(e.basic_salary || 0), 0)
-  // Active/probation employees retiring within the next 180 days.
-  const retiringSoon = employees.filter(e =>
-    (e.status === 'active' || e.status === 'probation') && retireInfo(e.retirement_date)?.soon).length
+  const filtered = useMemo(() => {
+    // Hoisted out of the predicate: this ran four times per employee per keystroke.
+    const q = search.trim().toLowerCase()
+    return employees.filter(e => {
+      const matchSearch = !q ||
+        e.full_name.toLowerCase().includes(q) ||
+        (e.employee_code || '').toLowerCase().includes(q) ||
+        (e.department || '').toLowerCase().includes(q) ||
+        (e.designation || '').toLowerCase().includes(q)
+      const matchStatus = statusFilter === 'all' || e.status === statusFilter
+      const matchSup = supFilter === 'all'
+        || (supFilter === 'none' ? !e.supervisor_id : e.supervisor_id === supFilter)
+      const matchRetire = !retiringOnly || !!retireInfo(e.retirement_date)?.soon
+      return matchSearch && matchStatus && matchSup && matchRetire
+    })
+  }, [employees, search, statusFilter, supFilter, retiringOnly])
+
+  // The four stat-card figures, in ONE pass rather than four scans of the same array. They are
+  // headline counts over the whole roster, so they never move while someone types in the search
+  // box — the memo is what stops them being recomputed anyway.
+  const { total, active, probation, payrollAmt, retiringSoon } = useMemo(() => {
+    let active = 0, probation = 0, payrollAmt = 0, retiringSoon = 0
+    for (const e of employees) {
+      const onPayroll = e.status === 'active' || e.status === 'probation'
+      if (e.status === 'active') active++
+      if (e.status === 'probation') probation++
+      if (onPayroll) {
+        payrollAmt += parseFloat(e.basic_salary || 0)
+        // Active/probation employees retiring within the next 180 days.
+        if (retireInfo(e.retirement_date)?.soon) retiringSoon++
+      }
+    }
+    return { total: employees.length, active, probation, payrollAmt, retiringSoon }
+  }, [employees])
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
 

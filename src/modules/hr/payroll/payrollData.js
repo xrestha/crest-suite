@@ -116,6 +116,35 @@ export function payslipDrift(stored, live) {
   return null
 }
 
+// Index a flat result set by employee_id, once, instead of re-filtering it per employee.
+//
+// Both Payroll Run and Payroll Calculation build one payslip per employee and each needed that
+// employee's slice of three arrays — `components`, `attendance`, `otEntries`. Written as a
+// `.filter()` inside the `employees.map()`, that is a full scan of each array per employee, and
+// `attendance` is one row per employee per DAY: at 40 staff on a 30-day month it is ~1,200 rows
+// scanned 40 times over, per render, for a partition that could be computed in one pass.
+//
+// `.filter()` preserves source order and so does appending in source order, so the slices are
+// byte-identical to what the filters produced — which matters, because both callers feed these
+// straight into computePayslip on a path that WRITES payslips.
+//
+// Lives here for the same reason the fetch helpers do: these two pages must not drift.
+export function groupByEmployee(rows, key = 'employee_id') {
+  const m = new Map()
+  for (const r of rows || []) {
+    const k = r[key]
+    const bucket = m.get(k)
+    if (bucket) bucket.push(r)
+    else m.set(k, [r])
+  }
+  return m
+}
+
+const EMPTY = []
+// Reads a bucket without allocating a new array per miss — an employee with no attendance rows is
+// ordinary (a mid-month joiner), not an edge case.
+export const sliceFor = (index, empId) => index.get(empId) || EMPTY
+
 // Per-employee scheduled advance deduction for this period.
 // For each active advance: deduct min(installment, outstanding).
 // If no installment set, deduct full outstanding (treated as one-time advance).

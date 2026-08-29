@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback } from 'react'
+import { Fragment, useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -132,24 +132,40 @@ export default function TadaClaims() {
     }))
   }
 
-  const empMap = Object.fromEntries(employees.map(e => [e.id, e]))
-  const itemsByClaimId = {}
-  items.forEach(i => { (itemsByClaimId[i.claim_id] = itemsByClaimId[i.claim_id] || []).push(i) })
+  // Memoized: the Add Claim modal is a form of controlled inputs on this same component, so every
+  // keystroke while filing a claim re-ran all of it — including a BS conversion per claim in
+  // monthClaims and four more scans for the KPI strip.
+  const empMap = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees])
+  const itemsByClaimId = useMemo(() => {
+    const m = {}
+    items.forEach(i => { (m[i.claim_id] = m[i.claim_id] || []).push(i) })
+    return m
+  }, [items])
 
   // Buckets each claim by its start_date's BS month — hr_tada_claims carries no bs_year/bs_month
   // column of its own to filter on directly.
-  const monthClaims = monthFilter === 'all' ? claims : claims.filter(c => {
+  const monthClaims = useMemo(() => monthFilter === 'all' ? claims : claims.filter(c => {
     if (!c.start_date) return false
     const bs = adToBs(new Date(c.start_date + 'T00:00:00'))
     return `${bs.year}-${bs.month}` === monthFilter
-  })
+  }), [claims, monthFilter])
 
-  const filtered = filterStatus === 'all' ? monthClaims : monthClaims.filter(c => c.status === filterStatus)
+  const filtered = useMemo(
+    () => filterStatus === 'all' ? monthClaims : monthClaims.filter(c => c.status === filterStatus),
+    [monthClaims, filterStatus])
 
-  const pendingCount  = monthClaims.filter(c => c.status === 'pending').length
-  const pendingTotal  = monthClaims.filter(c => c.status === 'pending').reduce((s, c) => s + parseFloat(c.total_amount), 0)
-  const approvedTotal = monthClaims.filter(c => c.status === 'approved').reduce((s, c) => s + parseFloat(c.total_amount), 0)
-  const paidThisYear  = monthClaims.filter(c => c.status === 'paid').reduce((s, c) => s + parseFloat(c.total_amount), 0)
+  // One pass for all four figures. `pending` was scanned twice on its own — once for the count and
+  // once for the total.
+  const { pendingCount, pendingTotal, approvedTotal, paidThisYear } = useMemo(() => {
+    let pendingCount = 0, pendingTotal = 0, approvedTotal = 0, paidThisYear = 0
+    for (const c of monthClaims) {
+      const amt = parseFloat(c.total_amount) || 0
+      if (c.status === 'pending')       { pendingCount++; pendingTotal += amt }
+      else if (c.status === 'approved') approvedTotal += amt
+      else if (c.status === 'paid')     paidThisYear += amt
+    }
+    return { pendingCount, pendingTotal, approvedTotal, paidThisYear }
+  }, [monthClaims])
 
   function setAdd(f, v) { setAddForm(p => ({ ...p, [f]: v })) }
   function setItem(idx, f, v) {

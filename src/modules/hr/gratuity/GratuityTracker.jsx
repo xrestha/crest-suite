@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -48,26 +48,41 @@ export default function GratuityTracker() {
     setLoading(false)
   }
 
-  const gratuityOf = e => calcGratuity(e, { ssfMonths: ssfMonthsFrom(ssfStart[e.id]) })
+  const gratuityOf = useCallback(
+    e => calcGratuity(e, { ssfMonths: ssfMonthsFrom(ssfStart[e.id]) }), [ssfStart])
 
-  const rows = employees
+  // `allRows` is the same set as `rows` minus the vested/vesting filter, so calcGratuity used to
+  // run TWICE per employee — once for the table and once again for the filter-pill counts, on
+  // every render including each click of those pills. Computed once here and filtered below;
+  // `.filter()` preserves order, so both lists are exactly what they were.
+  const allRows = useMemo(() => employees
     .filter(e => (e.pay_basis || 'monthly') === 'monthly')  // only monthly staff; daily/hourly have no fixed monthly basic
-    .map(e => ({ ...e, g: gratuityOf(e) }))
-    .filter(r => {
-      if (filter === 'vested')  return r.g.vested
-      if (filter === 'vesting') return !r.g.vested
-      return true
-    })
     .filter(r => dept === 'all' || r.department === dept)
+    .map(e => ({ ...e, g: gratuityOf(e) })), [employees, dept, gratuityOf])
 
-  const depts = [...new Set(employees.map(e => e.department).filter(Boolean))].sort()
+  const rows = useMemo(() => allRows.filter(r => {
+    if (filter === 'vested')  return r.g.vested
+    if (filter === 'vesting') return !r.g.vested
+    return true
+  }), [allRows, filter])
 
-  const totalAccrued   = rows.reduce((a, r) => a + r.g.totalAccrued,   0)
-  const totalSsf       = rows.reduce((a, r) => a + r.g.ssfCovered,     0)
-  const totalNet       = rows.reduce((a, r) => a + r.g.netLiability,   0)
-  const totalMonthly   = rows.reduce((a, r) => a + r.g.monthlyAccrual, 0)
-  const vestedCount    = rows.filter(r => r.g.vested).length
-  const nonMonthly     = employees.filter(e => (e.pay_basis || 'monthly') !== 'monthly').length
+  const depts = useMemo(
+    () => [...new Set(employees.map(e => e.department).filter(Boolean))].sort(), [employees])
+
+  // One pass for the five figures below the table, rather than five walks of the same list.
+  const { totalAccrued, totalSsf, totalNet, totalMonthly, vestedCount } = useMemo(() => {
+    let totalAccrued = 0, totalSsf = 0, totalNet = 0, totalMonthly = 0, vestedCount = 0
+    for (const r of rows) {
+      totalAccrued  += r.g.totalAccrued
+      totalSsf      += r.g.ssfCovered
+      totalNet      += r.g.netLiability
+      totalMonthly  += r.g.monthlyAccrual
+      if (r.g.vested) vestedCount++
+    }
+    return { totalAccrued, totalSsf, totalNet, totalMonthly, vestedCount }
+  }, [rows])
+  const nonMonthly = useMemo(
+    () => employees.filter(e => (e.pay_basis || 'monthly') !== 'monthly').length, [employees])
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
@@ -92,11 +107,6 @@ export default function GratuityTracker() {
     XLSX.utils.book_append_sheet(wb, ws, 'Gratuity Accrual')
     XLSX.writeFile(wb, `Gratuity_Accrual_${new Date().toISOString().slice(0,10)}.xlsx`)
   }
-
-  // Re-compute filter counts without the current filter applied
-  const allRows = employees.filter(e => (e.pay_basis || 'monthly') === 'monthly')
-    .filter(r => dept === 'all' || r.department === dept)
-    .map(e => ({ ...e, g: gratuityOf(e) }))
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
 

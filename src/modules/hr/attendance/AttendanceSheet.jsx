@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -89,12 +89,23 @@ export default function AttendanceSheet() {
 
   useEffect(() => {
     if (!period) { setRosterRows([]); return }
-    scopedFrom('hr_roster', 'employee_id, shift_type_id, bs_day')
+    // Paged, for the same reason the attendance read below is: `hr_roster` is one row per employee
+    // per rostered day, so a month crosses PostgREST's 1000-row cap at ~33 staff. Truncated, the
+    // missing rows read as "not on the roster that day" and assignedHoursFor() silently falls back
+    // to STANDARD_HOURS_PER_DAY — so the OT auto-calc measures overtime against 8 hours instead of
+    // the employee's real shift, and that OT is what payroll pays.
+    fetchAllRows(() => scopedFrom('hr_roster', 'employee_id, shift_type_id, bs_day')
       .eq('bs_year', period.bs_year).eq('bs_month', period.bs_month)
+      .order('id'))
       .then(({ data }) => setRosterRows(data || []))
   }, [period?.bs_year, period?.bs_month, scopedFrom]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const rosterByKey = Object.fromEntries(rosterRows.map(r => [`${r.employee_id}:${r.bs_day}`, r.shift_type_id]))
+  // Memoized: this sheet is a grid of controlled inputs, so every keystroke in any of ~7 fields
+  // per employee re-renders the page — and this rebuilt an index over the whole month's roster
+  // (up to ~1,000 rows) on each one, for a lookup table that changes only when the period does.
+  const rosterByKey = useMemo(
+    () => Object.fromEntries(rosterRows.map(r => [`${r.employee_id}:${r.bs_day}`, r.shift_type_id])),
+    [rosterRows])
   function assignedHoursFor(empId, day) {
     const shiftTypeId = rosterByKey[`${empId}:${day}`]
     return shiftTypeId ? shiftHours(shiftTypesById[shiftTypeId]) : STANDARD_HOURS_PER_DAY

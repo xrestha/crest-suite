@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -66,8 +66,21 @@ export default function HrStaff() {
   const [pwMsg,       setPwMsg]       = useState('')
 
   const effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
-  const linkedEmployeeIds = new Set(staff.map(p => p.hr_employee_id).filter(Boolean))
-  const unlinkedEmployees = employees.filter(e => !linkedEmployeeIds.has(e.id))
+  const linkedEmployeeIds = useMemo(
+    () => new Set(staff.map(p => p.hr_employee_id).filter(Boolean)), [staff])
+  const unlinkedEmployees = useMemo(
+    () => employees.filter(e => !linkedEmployeeIds.has(e.id)), [employees, linkedEmployeeIds])
+
+  // The search filter was written out twice in the table body — once for the `.length === 0`
+  // empty check and once for the `.map()` — so every keystroke ran it twice over the staff list,
+  // and the two copies could drift into disagreeing about what "no matches" means. Also hoists
+  // `search.trim().toLowerCase()` out of the predicate, where it ran once per row per keystroke.
+  const visibleStaff = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return staff
+    return staff.filter(p =>
+      (p.full_name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q))
+  }, [staff, search])
 
   useEffect(() => { if (clientId) init() }, [clientId]) // eslint-disable-line
 
@@ -96,12 +109,21 @@ export default function HrStaff() {
       const expected = roles.find(r => r.label === p.hr_job_title)?.level
       return expected && expected !== p.hr_role
     })
-    for (const p of mismatched) {
+    // In parallel, not one after another. Each is an independent single-row UPDATE by id, so
+    // sequencing them bought no atomicity — it just made a page load that already finished wait on
+    // N Edge Function round trips (the heaviest request the app makes: cold start, then a service-
+    // role call) before the roles on screen settled.
+    const fixes = await Promise.all(mismatched.map(async p => {
       const level = roles.find(r => r.label === p.hr_job_title)?.level
       const { error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_hr_role', userId: p.id, hr_role: level, hr_job_title: p.hr_job_title },
       })
-      if (!error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, hr_role: level } : s))
+      return error ? null : { id: p.id, level }
+    }))
+    const applied = fixes.filter(Boolean)
+    if (applied.length > 0) {
+      const levelById = Object.fromEntries(applied.map(f => [f.id, f.level]))
+      setStaff(prev => prev.map(s => s.id in levelById ? { ...s, hr_role: levelById[s.id] } : s))
     }
   }
 
@@ -138,13 +160,26 @@ export default function HrStaff() {
     const updated = customRoles.map((r, idx) => idx === i ? { ...r, level } : r)
     const ok = await saveRoles(updated)
     if (!ok) return
-    // Sync existing staff whose job title matches the changed role
+    // Sync existing staff whose job title matches the changed role — in parallel, and reporting
+    // EVERY row that failed rather than silently dropping each error in turn. Sequencing these
+    // never made them atomic: a failure mid-loop already left some staff moved and some not, with
+    // nothing on screen to say which, so the manager saw the new level and believed it applied.
     const affected = staff.filter(p => p.hr_job_title === changedLabel && p.hr_role !== level)
-    for (const p of affected) {
+    const outcomes = await Promise.all(affected.map(async p => {
       const { error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_hr_role', userId: p.id, hr_role: level, hr_job_title: changedLabel },
       })
-      if (!error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, hr_role: level } : s))
+      return { p, error }
+    }))
+    const moved = outcomes.filter(o => !o.error).map(o => o.p.id)
+    if (moved.length > 0) {
+      const movedSet = new Set(moved)
+      setStaff(prev => prev.map(s => movedSet.has(s.id) ? { ...s, hr_role: level } : s))
+    }
+    const failed = outcomes.filter(o => o.error)
+    if (failed.length > 0) {
+      setRolesError(`Saved the role, but ${failed.length} staff account(s) could not be moved to the new level: ` +
+        failed.map(o => o.p.full_name || o.p.email).join(', ') + '. Change their level individually, or try again.')
     }
   }
 
@@ -347,16 +382,10 @@ export default function HrStaff() {
               </tr>
             </thead>
             <tbody>
-              {staff.filter(p => {
-                const q = search.trim().toLowerCase()
-                return !q || (p.full_name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q)
-              }).length === 0 && (
+              {visibleStaff.length === 0 && (
                 <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>No staff match "{search}".</td></tr>
               )}
-              {staff.filter(p => {
-                const q = search.trim().toLowerCase()
-                return !q || (p.full_name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q)
-              }).map(p => {
+              {visibleStaff.map(p => {
                 const displayTitle = p.hr_job_title || effectiveRoles.find(r => r.level === p.hr_role)?.label || ''
                 return (
                   <tr key={p.id}>

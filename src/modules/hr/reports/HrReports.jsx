@@ -10,6 +10,7 @@ import { fiscalYearOf } from '../payroll/tds'
 import { SSF_CAP } from '../payrollConstants'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
@@ -120,29 +121,47 @@ export default function HrReports() {
 
   async function loadAll(periodId, p) {
     setLoadError(null)
+    // Started here, awaited at the bottom. The YTD read filters on nothing but the fiscal year `p`
+    // falls in — it does not need the run or its payslips — so waiting out those two round trips
+    // before issuing it was pure serialisation. It is also the page's biggest read (every finalized
+    // payslip the client has, paged), so it is the one worth overlapping.
+    const ytdPromise = loadYtd(p, periodId)
     const { data: runRow, error: runErr } = await scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle()
-    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    if (!periodReq.isCurrent(periodId)) { await ytdPromise; return }   // superseded by a newer period selection
     // S612 silent-zero rule: a failed read here would wear the "no payroll run this period"
     // empty state — and the challan/TDS sheets on this page are figures an accountant files on.
-    if (runErr) { setLoadError(runErr.message); setRun(null); setPayslips([]); return }
+    if (runErr) { setLoadError(runErr.message); setRun(null); setPayslips([]); await ytdPromise; return }
     setRun(runRow || null)
     if (runRow) {
       const { data: slips, error: slipErr } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
-      if (!periodReq.isCurrent(periodId)) return
-      if (slipErr) { setLoadError(slipErr.message); setPayslips([]); return }
+      if (!periodReq.isCurrent(periodId)) { await ytdPromise; return }
+      if (slipErr) { setLoadError(slipErr.message); setPayslips([]); await ytdPromise; return }
       setPayslips(slips || [])
     } else {
       setPayslips([])
     }
-    await loadYtd(p)
+    await ytdPromise
   }
 
   // YTD TDS per employee: sum tds from finalized payslips in the same fiscal year, up to this period.
-  async function loadYtd(p) {
+  // `periodId` is only for the staleness check: this now runs CONCURRENTLY with the run/payslip
+  // reads rather than after them, so it needs its own `isCurrent` guard — without one, arrowing
+  // through the period list could land an older fiscal year's YTD map under a newer period's
+  // figures, which is exactly the overlapping-load race useLatestRequest exists to stop.
+  async function loadYtd(p, periodId) {
     if (!p) { setYtdTds({}); return }
     const cur = fiscalYearOf(p.bs_year, p.bs_month)
-    const { data, error } = await scopedFrom('hr_payslips', 'employee_id, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
-      .eq('hr_payroll_runs.status', 'finalized')
+    // Paged. The fiscal-year narrowing happens in JS below, so this reads EVERY finalized
+    // payslip the client has ever had — one row per employee per month, for as long as they have
+    // run payroll — not just this FY's. Unpaged it silently stopped at PostgREST's 1000-row cap
+    // (~20 staff x 4 years), and a truncated map understates YTD TDS on the TDS certificate and
+    // the challan sheet, which is a figure an accountant files on. Same shape and same fix as
+    // payrollData.js's fetchYtdMap; `.order('id')` is the unique tiebreaker fetchAllRows requires.
+    const { data, error } = await fetchAllRows(() =>
+      scopedFrom('hr_payslips', 'employee_id, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+        .eq('hr_payroll_runs.status', 'finalized')
+        .order('id'))
+    if (periodId !== undefined && !periodReq.isCurrent(periodId)) return
     // A failed read must not zero every YTD TDS figure on the filing sheets (S612).
     if (error) { setLoadError(error.message); setYtdTds({}); return }
     const map = {}

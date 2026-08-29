@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -10,7 +10,7 @@ import ConfirmModal from '../../../components/ConfirmModal'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { computePayslip } from './payrollCompute'
 import { computeMonthlyTds } from './tds'
-import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift } from './payrollData'
+import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift, groupByEmployee, sliceFor } from './payrollData'
 import PayslipBody from './PayslipBody'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -57,7 +57,7 @@ export default function PayrollRun() {
   // Tax Invoice already prints (settings.vat_number is Nepal's PAN, reused as-is — not a new ID).
   const [bizInfo, setBizInfo] = useState({ name: '', address: '', vatNumber: '' })
 
-  const empMap = Object.fromEntries(employees.map(e => [e.id, e]))
+  const empMap = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees])
 
   useEffect(() => {
     if (!clientId) return
@@ -166,10 +166,16 @@ export default function PayrollRun() {
 
   function buildRows(runId, ytdMap, tadaMap) {
     const advMap = buildAdvanceMap(advances, repayments)
+    // Partition the three per-employee arrays once, rather than scanning each of them again for
+    // every employee. `attendance` is one row per employee per DAY — ~1,200 rows at 40 staff — so
+    // the old `.filter()` inside this `.map()` walked it 40 times over. Same slices, same order.
+    const compsBy = groupByEmployee(components)
+    const attBy   = groupByEmployee(attendance)
+    const otBy    = groupByEmployee(otEntries)
     return employees.map(emp => {
-      const comps        = components.filter(c => c.employee_id === emp.id)
-      const att          = attendance.filter(a => a.employee_id === emp.id)
-      const empOtEntries = otEntries.filter(e => e.employee_id === emp.id)
+      const comps        = sliceFor(compsBy, emp.id)
+      const att          = sliceFor(attBy, emp.id)
+      const empOtEntries = sliceFor(otBy, emp.id)
       const advDed       = Math.round(advMap[emp.id] || 0)
       // `breakdown` is Calculation-page-only (not a hr_payslips column) — dropped before insert.
       const { breakdown, ...slip } = computePayslip(emp, comps, att, period, 0, empOtEntries, advDed)
@@ -212,7 +218,11 @@ export default function PayrollRun() {
   // detected this; the detection just lived on a page nobody has to visit before finalizing.
   // Deliberately reuses buildRows (the same function Generate persists from) rather than
   // reimplementing the arithmetic — a second copy could drift and report false confidence.
-  const freshness = (() => {
+  // Memoized. This runs the WHOLE payroll engine — computePayslip plus a TDS slab walk for every
+  // employee — and as a bare render-body IIFE it re-ran on every state change on the page: opening
+  // the Finalize confirm, a status message, a busy flag, a TDS blur. None of those move any of its
+  // inputs. Its dependency list is exactly the loaded data the comparison reads.
+  const freshness = useMemo(() => {
     if (!run || run.status === 'finalized' || employees.length === 0 || payslips.length === 0) {
       return { stale: [], missing: [], departed: [], overridden: [], ok: true }
     }
@@ -244,7 +254,9 @@ export default function PayrollRun() {
     // on it would strand the run: Regenerate destroys the payslip, Finalize refuses, and there is
     // no third move. It gates Regenerate instead, below.
     return { stale, missing, departed, overridden, ok: stale.length === 0 && missing.length === 0 }
-  })()
+    // buildRows is a stable closure over exactly these, so listing them is listing its inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run, payslips, employees, components, attendance, otEntries, advances, repayments, period, ytdMap, tadaMap])
 
   const nameOf = id => empMap[id]?.full_name || 'Unknown'
 

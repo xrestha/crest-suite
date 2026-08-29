@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
@@ -13,6 +13,7 @@ import {
   computePlannedLaborCost, computeRecommendedHeadcount,
 } from './laborForecast'
 import { fmtTime, shiftTextColor } from './rosterHelpers'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import ShiftPicker from './ShiftPicker'
 import SuggestPopover from './SuggestPopover'
 import ShiftSettingsPanel from './ShiftSettingsPanel'
@@ -135,11 +136,13 @@ export default function Roster() {
         const k = `${bs.year}:${bs.month}`
         if (!months.has(k)) months.set(k, bs)
       })
-      for (const bs of months.values()) {
-        const { data } = await scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, generated_at, holiday_name, holiday_multiplier')
-          .is('recipe_id', null).eq('bs_year', bs.year).eq('bs_month', bs.month)
-        all.push(...(data || []))
-      }
+      // One read per BS month the week spans — in parallel, not one after the other. A week
+      // straddling a month boundary needs two, and awaiting them in sequence doubled the wait
+      // for no reason: neither read's filter depends on the other's result.
+      const results = await Promise.all([...months.values()].map(bs =>
+        scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, generated_at, holiday_name, holiday_multiplier')
+          .is('recipe_id', null).eq('bs_year', bs.year).eq('bs_month', bs.month)))
+      for (const { data } of results) all.push(...(data || []))
     } else {
       const { data } = await scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, generated_at, holiday_name, holiday_multiplier')
         .is('recipe_id', null).eq('bs_year', bsYear).eq('bs_month', bsMonth)
@@ -249,6 +252,17 @@ export default function Roster() {
     init()
   }, [clientId, scopedFrom, scopedDelete, scopedInsert])
 
+  // One BS month of roster rows, PAGED. `hr_roster` is one row per employee per rostered day —
+  // the same cardinality as `hr_attendance`, which AttendanceSheet.jsx pages for exactly this
+  // reason — so a fully-rostered 30-day month crosses PostgREST's 1000-row cap at ~33 staff. Over
+  // it the read returns the first 1000 rows with no error and nothing in the data to say so, and
+  // the board then paints real shifts as empty cells. `.order('id')` is the unique tiebreaker
+  // fetchAllRows requires; without one, paging repeats a row on one page and skips it on the next.
+  const monthRosterRows = useCallback((year, month, cols) =>
+    fetchAllRows(() => scopedFrom('hr_roster', cols)
+      .eq('bs_year', year).eq('bs_month', month)
+      .order('id')), [scopedFrom])
+
   // ── Load roster entries for the visible date range ─────────────────────────
   const loadRoster = useCallback(async () => {
     if (!clientId) return
@@ -263,14 +277,10 @@ export default function Roster() {
         const k  = `${bs.year}:${bs.month}`
         if (!months.has(k)) months.set(k, bs)
       })
-      for (const bs of months.values()) {
-        const { data } = await scopedFrom('hr_roster')
-          .eq('bs_year', bs.year).eq('bs_month', bs.month)
-        all.push(...(data || []))
-      }
+      const results = await Promise.all([...months.values()].map(bs => monthRosterRows(bs.year, bs.month)))
+      for (const { data } of results) all.push(...(data || []))
     } else {
-      const { data } = await scopedFrom('hr_roster')
-        .eq('bs_year', bsYear).eq('bs_month', bsMonth)
+      const { data } = await monthRosterRows(bsYear, bsMonth)
       all = data || []
     }
 
@@ -278,7 +288,7 @@ export default function Roster() {
     all.forEach(r => { map[rKey(r.bs_year, r.bs_month, r.bs_day, r.employee_id)] = r })
     setRoster(map)
     setLoading(false)
-  }, [clientId, viewMode, weekStart, bsYear, bsMonth, scopedFrom])
+  }, [clientId, viewMode, weekStart, bsYear, bsMonth, monthRosterRows])
 
   useEffect(() => { loadRoster() }, [loadRoster])
 
@@ -300,11 +310,10 @@ export default function Roster() {
         const k = `${bs.year}:${bs.month}`
         if (!months.has(k)) months.set(k, bs)
       })
-      for (const bs of months.values()) {
-        const { data } = await scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
-          .eq('bs_year', bs.year).eq('bs_month', bs.month)
-        all.push(...(data || []))
-      }
+      const results = await Promise.all([...months.values()].map(bs =>
+        scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
+          .eq('bs_year', bs.year).eq('bs_month', bs.month)))
+      for (const { data } of results) all.push(...(data || []))
     } else {
       const { data } = await scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
         .eq('bs_year', bsYear).eq('bs_month', bsMonth)
@@ -382,7 +391,7 @@ export default function Roster() {
   function isOnApprovedLeave(empId, col) {
     const ranges = approvedLeaveByEmp[empId]
     if (!ranges || ranges.length === 0) return false
-    const d = formatAd(bsToAd(col.bsYear, col.bsMonth, col.bsDay))
+    const d = adDateFor(col)
     return ranges.some(r => d >= r.start && d <= r.end)
   }
 
@@ -462,53 +471,87 @@ export default function Roster() {
   }
 
   // ── Compute columns for current view ──────────────────────────────────────
-  let columns = []
-  if (viewMode === 'weekly') {
-    columns = weekDays(weekStart).map(d => {
-      const bs = adToBs(d)
-      return {
-        bsYear: bs.year, bsMonth: bs.month, bsDay: bs.day,
-        label:    WEEKDAYS[d.getDay()],
-        sublabel: `${bs.day} ${BS_MONTHS_SHORT[bs.month - 1]}`,
-      }
-    })
-  } else {
+  //
+  // Everything from here to `forecastRowByKey` is memoized, and the reason is the drag-select:
+  // `onMouseEnter` calls `setSelection` on every cell the pointer crosses, so dragging across a
+  // 32-column row is 32 full re-renders of this component. Unmemoized, each one rebuilt the
+  // columns (a bsToAd per day), re-ran shiftTextColor's contrast search (up to 100 HSL→RGB
+  // iterations per shift type), and recomputed the whole labor-forecast strip — 32 columns x
+  // three passes over every employee. Measured at 40 staff x 32 days: 1.94 ms per render of
+  // derivations alone, 62 ms across one drag, before React reconciles a single cell.
+  //
+  // The CELLS are deliberately left unmemoized. React.memo on a roster cell needs ref-wrapped
+  // handlers, and these sit on the optimistic-write path (assignShiftBulk paints state, then
+  // writes) — a stale closure there saves a wrong shift rather than merely rendering an old
+  // number. Same call as Stock Count's saveRow and PosOrders: take the derived lists, leave the
+  // row alone.
+  const columns = useMemo(() => {
+    if (viewMode === 'weekly') {
+      return weekDays(weekStart).map(d => {
+        const bs = adToBs(d)
+        return {
+          bsYear: bs.year, bsMonth: bs.month, bsDay: bs.day,
+          label:    WEEKDAYS[d.getDay()],
+          sublabel: `${bs.day} ${BS_MONTHS_SHORT[bs.month - 1]}`,
+        }
+      })
+    }
+    const out = []
     const total = daysInBsMonth(bsYear, bsMonth)
     for (let d = 1; d <= total; d++) {
       const adDate = bsToAd(bsYear, bsMonth, d)
-      columns.push({
+      out.push({
         bsYear, bsMonth, bsDay: d,
         label:    d,
         sublabel: WEEKDAYS[adDate.getDay()].slice(0, 2),
       })
     }
-  }
+    return out
+  }, [viewMode, weekStart, bsYear, bsMonth])
 
-  const colChunks = viewMode === 'monthly'
+  const colChunks = useMemo(() => viewMode === 'monthly'
     ? [columns.slice(0, 16), columns.slice(16)]
-    : [columns]
+    : [columns], [viewMode, columns])
 
-  const shiftMap     = Object.fromEntries(shiftTypes.map(s => [s.id, s]))
-  // Chip LABEL colours, derived once per render from each shift's fill colour and the current
-  // card surface (the chip is that fill at 0x22 alpha over the card). See rosterHelpers.js —
-  // the fill stays the categorical hue, only the type is corrected for contrast.
-  const shiftTextById = Object.fromEntries(
+  // The board calls this once per CELL — employees x columns, so ~1,280 calls at 40 staff on a
+  // monthly view, each doing its own BS→AD conversion and string format. The conversion depends
+  // only on the column, so it is done once per column here; `adDateFor` falls back to computing
+  // for a column outside the visible set, which is what openCopyWeek passes (next week's days).
+  const colAdByKey = useMemo(() => {
+    const m = {}
+    for (const c of columns) m[`${c.bsYear}:${c.bsMonth}:${c.bsDay}`] = formatAd(bsToAd(c.bsYear, c.bsMonth, c.bsDay))
+    return m
+  }, [columns])
+  function adDateFor(col) {
+    return colAdByKey[`${col.bsYear}:${col.bsMonth}:${col.bsDay}`]
+      ?? formatAd(bsToAd(col.bsYear, col.bsMonth, col.bsDay))
+  }
+
+  const shiftMap = useMemo(() => Object.fromEntries(shiftTypes.map(s => [s.id, s])), [shiftTypes])
+  // Chip LABEL colours, derived from each shift's fill colour and the current card surface (the
+  // chip is that fill at 0x22 alpha over the card). See rosterHelpers.js — the fill stays the
+  // categorical hue, only the type is corrected for contrast. Keyed on the shift types and the
+  // theme, which is all it actually depends on; it had been re-searching for a passing contrast
+  // ratio on every render, including every step of a drag.
+  const shiftTextById = useMemo(() => Object.fromEntries(
     shiftTypes.map(s => [s.id, shiftTextColor(s.color, colors.card, 0x22 / 255)])
-  )
-  const depts        = ['All', ...Array.from(new Set(employees.map(e => e.department).filter(Boolean))).sort()]
-  const filteredEmps = deptFilter === 'All' ? employees : employees.filter(e => e.department === deptFilter)
+  ), [shiftTypes, colors.card])
+  const depts = useMemo(
+    () => ['All', ...Array.from(new Set(employees.map(e => e.department).filter(Boolean))).sort()],
+    [employees])
+  const filteredEmps = useMemo(
+    () => deptFilter === 'All' ? employees : employees.filter(e => e.department === deptFilter),
+    [employees, deptFilter])
 
-  function empHrs(empId) {
-    return computeEmpHours(columns, roster, shiftMap, empId)
-  }
-
-  function dayHrs(col) {
-    return computeDayHours(col, filteredEmps, roster, shiftMap)
-  }
-
-  function dayLaborCost(col) {
-    return computePlannedLaborCost(col, filteredEmps, roster, shiftMap, daysInBsMonth(col.bsYear, col.bsMonth))
-  }
+  // Hours per employee across the visible columns, built in ONE pass instead of a
+  // columns-length scan per row. The board reads it once per employee row, and candidatesFor()
+  // read it again per candidate — an O(employees x columns) walk repeated per employee.
+  const empHrsById = useMemo(() => {
+    const m = {}
+    for (const emp of employees) m[emp.id] = computeEmpHours(columns, roster, shiftMap, emp.id)
+    return m
+  }, [employees, columns, roster, shiftMap])
+  const empHrs = empId => empHrsById[empId] ?? 0
 
   // Ranked "who should cover this day" candidates for SuggestPopover — pulled from filteredEmps
   // (whatever the board's current Department filter shows), excluding anyone already scheduled
@@ -546,9 +589,9 @@ export default function Roster() {
   const [copyBusy,  setCopyBusy]  = useState(false)
   const [copyError, setCopyError] = useState('')
 
-  const weekShiftCount = viewMode === 'weekly'
+  const weekShiftCount = useMemo(() => viewMode === 'weekly'
     ? columns.reduce((n, col) => n + filteredEmps.filter(e => roster[rKey(col.bsYear, col.bsMonth, col.bsDay, e.id)]).length, 0)
-    : 0
+    : 0, [viewMode, columns, filteredEmps, roster])
 
   async function openCopyWeek() {
     if (!clientId || copyBusy) return
@@ -576,15 +619,17 @@ export default function Roster() {
       pairs.forEach(p => { const k = `${p.to.year}:${p.to.month}`; if (!months.has(k)) months.set(k, p.to) })
       const existingId = new Map()   // target cell key -> hr_roster.id
       const publishedTargetDays = new Set()
-      for (const bs of months.values()) {
-        const [rows, pub] = await Promise.all([
-          scopedFrom('hr_roster', 'id, employee_id, bs_year, bs_month, bs_day')
-            .eq('bs_year', bs.year).eq('bs_month', bs.month),
-          scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
-            .eq('bs_year', bs.year).eq('bs_month', bs.month),
-        ])
+      // Both months' reads run together rather than month-then-month; neither filters on the other.
+      const monthReads = await Promise.all([...months.values()].map(bs => Promise.all([
+        monthRosterRows(bs.year, bs.month, 'id, employee_id, bs_year, bs_month, bs_day'),
+        scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
+          .eq('bs_year', bs.year).eq('bs_month', bs.month),
+      ])))
+      for (const [rows, pub] of monthReads) {
         // A failed read here would understate what the copy is about to destroy, so it stops the
-        // whole thing rather than opening a dialog full of confident zeros.
+        // whole thing rather than opening a dialog full of confident zeros. A TRUNCATED read did
+        // the same damage silently until the roster read above was paged — truncation returns no
+        // error, so the dialog under-counted the shifts the mirror was about to overwrite and clear.
         if (rows.error) throw rows.error
         if (pub.error)  throw pub.error
         for (const r of rows.data || []) {
@@ -656,16 +701,20 @@ export default function Roster() {
 
   // Per-day labor-forecast rows for the Labor Forecast tab — one row per visible column,
   // combining scheduled hours/cost (from the roster) with the demand forecast (if any).
-  const laborForecastRows = columns.map(col => {
+  // Three passes over every employee, per column — the single most expensive thing on the page,
+  // and it was recomputed on every drag step even though a drag changes none of its inputs.
+  const laborForecastRows = useMemo(() => columns.map(col => {
     const f = forecastByDay[`${col.bsYear}:${col.bsMonth}:${col.bsDay}`]
-    const scheduledHrs   = dayHrs(col)
-    const plannedCost    = dayLaborCost(col)
+    const scheduledHrs   = computeDayHours(col, filteredEmps, roster, shiftMap)
+    const plannedCost    = computePlannedLaborCost(col, filteredEmps, roster, shiftMap, daysInBsMonth(col.bsYear, col.bsMonth))
     const scheduledCount = filteredEmps.filter(emp => roster[rKey(col.bsYear, col.bsMonth, col.bsDay, emp.id)]).length
     const recommended    = computeRecommendedHeadcount(f?.covers, coversPerStaffTarget)
     const costPct        = f?.revenue > 0 ? (plannedCost / f.revenue) * 100 : null
     return { col, scheduledHrs, plannedCost, scheduledCount, recommended, costPct, forecastRevenue: f?.revenue ?? null, forecastCovers: f?.covers ?? null, holiday: f?.holiday ?? null }
-  })
-  const forecastRowByKey = Object.fromEntries(laborForecastRows.map(r => [`${r.col.bsYear}:${r.col.bsMonth}:${r.col.bsDay}`, r]))
+  }), [columns, forecastByDay, filteredEmps, roster, shiftMap, coversPerStaffTarget])
+  const forecastRowByKey = useMemo(
+    () => Object.fromEntries(laborForecastRows.map(r => [`${r.col.bsYear}:${r.col.bsMonth}:${r.col.bsDay}`, r])),
+    [laborForecastRows])
 
   if (!hasHrAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
@@ -1090,7 +1139,7 @@ export default function Roster() {
                               Total hrs/day
                             </td>
                             {cols.map((col, i) => {
-                              const h = dayHrs(col)
+                              const h = forecastRowByKey[`${col.bsYear}:${col.bsMonth}:${col.bsDay}`]?.scheduledHrs ?? 0
                               return (
                                 <td key={i} style={{
                                   textAlign: 'center', padding: '8px 2px', fontSize: 11,

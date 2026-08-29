@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { bsToAd, getBsToday } from '../../../utils/bsCalendar'
 import { computeBonusTds, fiscalYearOf } from '../payroll/tds'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 
 const LIFE_INS_CAP    = 40000
 const HEALTH_INS_CAP  = 20000
@@ -82,8 +83,15 @@ export default function FestivalAllowance() {
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('hr_festival_allowances')
         .eq('bs_year', bsYear).eq('festival_name', festival),
-      scopedFrom('hr_payslips', 'employee_id, gross, ssf_employee, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
-        .eq('hr_payroll_runs.status', 'finalized'),
+      // Paged. The FY narrowing below happens in JS, so this reads every finalized payslip the
+      // client has ever had — one row per employee per month. Unpaged it stopped at the 1000-row
+      // cap (~20 staff x 4 years) with no error, and the YTD map it builds feeds calcFestivalTds:
+      // a truncated YTD gross understates prior taxable income and under-withholds tax on the
+      // festival bonus. Same shape as payrollData.js's fetchYtdMap.
+      fetchAllRows(() =>
+        scopedFrom('hr_payslips', 'employee_id, gross, ssf_employee, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+          .eq('hr_payroll_runs.status', 'finalized')
+          .order('id')),
     ])
     setEmployees(emps || [])
     setRows(fa || [])

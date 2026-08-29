@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect, Fragment, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -7,7 +7,7 @@ import Tip from '../../../components/Tip'
 import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
 import { computePayslip, calcAmount } from './payrollCompute'
 import { computeMonthlyTdsBreakdown } from './tds'
-import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift } from './payrollData'
+import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift, groupByEmployee, sliceFor } from './payrollData'
 import { ATTENDANCE_STATUSES, OT_MULTIPLIER } from '../payrollConstants'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -294,51 +294,62 @@ export default function PayrollCalculation() {
 
   const periodLabel = period ? `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : '—'
   const monthDays = period ? daysInBsMonth(period.bs_year, period.bs_month) : 0
-  const advMap = buildAdvanceMap(advances, repayments)
-  const payslipByEmp = Object.fromEntries(payslips.map(s => [s.employee_id, s]))
+  // Memoized as one block. `rows` recomputes the full payroll — computePayslip plus a TDS slab
+  // walk — for every employee, and this page's only interactive state is `expandedId`/`printRow`,
+  // so opening a single employee's detail panel re-ran the whole month's payroll for everyone.
+  // The three `.filter()`s were also a full scan per employee of arrays that are one row per
+  // employee per DAY; they are partitioned once now, in the same source order.
+  const rows = useMemo(() => {
+    const advMap = buildAdvanceMap(advances, repayments)
+    const payslipByEmp = Object.fromEntries(payslips.map(s => [s.employee_id, s]))
+    const compsBy = groupByEmployee(components)
+    const attBy   = groupByEmployee(attendance)
+    const otBy    = groupByEmployee(otEntries)
 
-  const rows = period ? employees.map(emp => {
-    const comps        = components.filter(c => c.employee_id === emp.id)
-    const att           = attendance.filter(a => a.employee_id === emp.id)
-    const empOtEntries = otEntries.filter(e => e.employee_id === emp.id)
-    const advDed        = Math.round(advMap[emp.id] || 0)
-    const slip           = computePayslip(emp, comps, att, period, 0, empOtEntries, advDed)
-    const ytd             = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0, count: 0 }
-    const tdsBreakdown = computeMonthlyTdsBreakdown({
-      period,
-      // Actual income earned this month, not contractual gross — see the matching comment in
-      // PayrollRun.jsx's buildRows (S365). Must stay identical between the two files.
-      monthlyGross: slip.gross - slip.absence_deduction + slip.ot_amount,
-      monthlySsf:   slip.ssf_employee,
-      ytdGross:     ytd.gross,
-      ytdSsf:       ytd.ssf,
-      ytdWithheld:  ytd.withheld,
-      ytdMonths:    ytd.count,
-      // Mirrors PayrollRun's gate exactly — these two must agree or every SSF-enrolled employee
-      // with a blank number shows a permanent false Stale flag against a correct payslip.
-      isSsf:        !!(emp.ssf_enrolled && String(emp.ssf_no || '').trim()),
-      isMarried:    emp.marital_status === 'married',
-      annualLifeInsurance:   parseFloat(emp.life_insurance_premium) || 0,
-      annualHealthInsurance: parseFloat(emp.health_insurance_premium) || 0,
-    })
-    const tada = tadaMap[emp.id] || { total: 0, ids: [] }
-    const tadaAmount = Math.round(tada.total)
-    const netPay = slip.net_pay - tdsBreakdown.tds + tadaAmount
-    const stored = payslipByEmp[emp.id]
-    // Distinct from `stale` below — a run exists but never picked up this employee at all (added
-    // after the last Generate/Regenerate). Gated on `run` so "no run yet" doesn't itself flag every
-    // employee as missing; that case is its own runStatusLabel branch.
-    const missing = !!run && !stored
-    // Same comparison Payroll Run's Finalize gate uses, from the same function, so the badge here
-    // and the block there can never disagree. It used to be `stored.net_pay !== netPay`, which
-    // flagged every hand-adjusted TDS/TADA as Stale — a red warning against a payslip that was
-    // correct and deliberate. `live` is assembled in buildRows' exact shape.
-    const live = { ...slip, tds: tdsBreakdown.tds, tada_amount: tadaAmount, tada_claim_ids: tada.ids }
-    const drift = payslipDrift(stored, live)
-    const stale = drift === 'moved'
-    const overridden = drift === 'overridden'
-    return { emp, comps, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay, stored, stale, overridden, missing }
-  }) : []
+    const rows = period ? employees.map(emp => {
+      const comps        = sliceFor(compsBy, emp.id)
+      const att           = sliceFor(attBy, emp.id)
+      const empOtEntries = sliceFor(otBy, emp.id)
+      const advDed        = Math.round(advMap[emp.id] || 0)
+      const slip           = computePayslip(emp, comps, att, period, 0, empOtEntries, advDed)
+      const ytd             = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0, count: 0 }
+      const tdsBreakdown = computeMonthlyTdsBreakdown({
+        period,
+        // Actual income earned this month, not contractual gross — see the matching comment in
+        // PayrollRun.jsx's buildRows (S365). Must stay identical between the two files.
+        monthlyGross: slip.gross - slip.absence_deduction + slip.ot_amount,
+        monthlySsf:   slip.ssf_employee,
+        ytdGross:     ytd.gross,
+        ytdSsf:       ytd.ssf,
+        ytdWithheld:  ytd.withheld,
+        ytdMonths:    ytd.count,
+        // Mirrors PayrollRun's gate exactly — these two must agree or every SSF-enrolled employee
+        // with a blank number shows a permanent false Stale flag against a correct payslip.
+        isSsf:        !!(emp.ssf_enrolled && String(emp.ssf_no || '').trim()),
+        isMarried:    emp.marital_status === 'married',
+        annualLifeInsurance:   parseFloat(emp.life_insurance_premium) || 0,
+        annualHealthInsurance: parseFloat(emp.health_insurance_premium) || 0,
+      })
+      const tada = tadaMap[emp.id] || { total: 0, ids: [] }
+      const tadaAmount = Math.round(tada.total)
+      const netPay = slip.net_pay - tdsBreakdown.tds + tadaAmount
+      const stored = payslipByEmp[emp.id]
+      // Distinct from `stale` below — a run exists but never picked up this employee at all (added
+      // after the last Generate/Regenerate). Gated on `run` so "no run yet" doesn't itself flag every
+      // employee as missing; that case is its own runStatusLabel branch.
+      const missing = !!run && !stored
+      // Same comparison Payroll Run's Finalize gate uses, from the same function, so the badge here
+      // and the block there can never disagree. It used to be `stored.net_pay !== netPay`, which
+      // flagged every hand-adjusted TDS/TADA as Stale — a red warning against a payslip that was
+      // correct and deliberate. `live` is assembled in buildRows' exact shape.
+      const live = { ...slip, tds: tdsBreakdown.tds, tada_amount: tadaAmount, tada_claim_ids: tada.ids }
+      const drift = payslipDrift(stored, live)
+      const stale = drift === 'moved'
+      const overridden = drift === 'overridden'
+      return { emp, comps, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay, stored, stale, overridden, missing }
+    }) : []
+    return rows
+  }, [period, employees, components, attendance, otEntries, advances, repayments, ytdMap, tadaMap, payslips, run])
 
   // otDoubleCountRisk is gone: approved OT entries now supersede attendance-sheet OT per day
   // (S570), so two sources can no longer double-pay and there is nothing to flag. Only a genuine

@@ -159,6 +159,74 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S628 — 2026-08-29 — /impeccable optimize over the HR module: the same two shapes, plus four silent truncations
+
+The IMS sweep's two shapes (S625/S626) reappeared across HR, and the row-cap sweep that S620 ran
+through `payrollData.js` turned out to have stopped at that file. Service worker bumped to
+`crest-v148`.
+
+**Four reads narrowed in JS were still unpaged, and every one of them feeds a tax or gratuity
+figure.** All read the client's *entire* payslip history and apply the fiscal-year window
+afterwards, so each silently stopped at PostgREST's 1000-row cap — roughly 20 staff x 4 years —
+returning the first 1000 rows with no error and nothing in the data to say so. `HrReports`'
+`loadYtd` (YTD TDS on the TDS certificate and the challan sheet, the figures an accountant files
+on), `FestivalAllowance` and `IncentiveRun` (both feed `calcBonusTds`, so a truncated YTD gross
+under-withholds tax on the bonus), and `fetchSsfStartMap` — the worst of the four, because it picks
+the *earliest* SSF-bearing payslip per employee off an unordered query, so the rows the cap dropped
+could be exactly the ones it was looking for, reporting a later SSF start, a shorter contribution
+count and a smaller gratuity offset on a leaver's final settlement. All four now go through
+`fetchAllRows` with `.order('id')`, matching `fetchYtdMap` beside them.
+
+**`hr_roster` has `hr_attendance`'s cardinality and none of its paging.** One row per employee per
+rostered day, so a 30-day month crosses the cap at ~33 staff. Over it the Roster board paints real
+shifts as empty cells, and `AttendanceSheet`'s OT auto-calc — whose `hr_attendance` read is paged,
+with a comment explaining this exact threshold ten lines below the unpaged roster read — falls back
+to `STANDARD_HOURS_PER_DAY`, measuring overtime against 8 hours instead of the employee's real
+shift. Worst of the three: Copy Week reads the target week to count what the mirror will overwrite
+and clear, and its comment says a failed read "would understate what the copy is about to destroy,
+so it stops the whole thing" — but truncation returns no error, so it did precisely that, silently.
+`hr_advance_repayments` was unpaged in `Advances` and `HrDashboard` too; outstanding is derived as
+`amount − repaid`, so truncating that side alone **overstates** what every employee owes.
+
+**A loop with an await in it, again.** `LeaveManagement.revertAttendance` deleted one attendance
+row per day, so rejecting a two-week leave was 14 sequential round trips and a month's medical
+leave 22+. Now grouped by `period_id` with the days as an `.in()` — one request per BS month, which
+is almost always one. `HrStaff` invoked the `admin-user-ops` Edge Function — the heaviest request
+the app makes — once per staff member in two loops, one of them on **every page load**; both are
+`Promise.all` now, and the role-level change reports every row that failed instead of dropping each
+error in turn. Roster's three month-loaders each awaited their two months in sequence; `HrReports`
+awaited its biggest read behind two it does not depend on.
+
+**The Roster board recomputed everything on every mouse-enter.** Drag-select calls `setSelection`
+per cell crossed, so dragging a 32-column row is 32 full re-renders — and each rebuilt the columns,
+re-ran `shiftTextColor`'s up-to-100-iteration contrast search per shift type, and recomputed the
+labor-forecast strip (32 columns x three passes over every employee) plus a BS→AD conversion per
+cell. Measured at 40 staff x 32 days: **2.75 ms → 0.19 ms per render, 14.5x less work per drag
+step**, derivations alone. The cells are deliberately left unmemoized — their handlers sit on the
+optimistic-write path, where a stale closure saves a wrong shift rather than rendering a stale
+number. Same call as Stock Count's `saveRow`.
+
+**Both payroll pages ran the whole engine in the render body.** `PayrollRun`'s freshness check and
+`PayrollCalculation`'s `rows` each call `computePayslip` plus a TDS slab walk for every employee —
+re-running on a status message, a busy flag, or expanding one employee's detail panel. Both are
+memoized on their real inputs now. Inside them, three `.filter()`s per employee over arrays that
+are one row per employee per *day* became one `groupByEmployee` pass: **56,000 element visits →
+1,400** at 40 staff on a 30-day month. That helper lives in `payrollData.js` for the reason the
+fetch helpers do — those two pages must not drift — and `payrollData.test.js` asserts the slices are
+byte-identical to what the filters produced, because both feed a path that *writes* payslips.
+
+Also memoized, all per-keystroke or per-interaction before: `EmployeeList` (an O(n²) supervisor
+scan, `search.toLowerCase()` four times per row, four stat scans), `TadaClaims`, `Advances`,
+`Overtime`, `HrStaff` (its search filter was written out twice, once for the empty check and once
+for the map), `AttendanceSheet`'s roster index, and `GratuityTracker`, which ran `calcGratuity`
+twice per employee — once for the table, once for the filter-pill counts. `EmployeeList` also
+adopts `sessionDataCache`: it passes both tests — no batch-save uses on-screen state as a baseline,
+and the cached section is the page's core content, so it actually shortens the skeleton.
+
+Deliberately not touched: `hr_overtime_entries` (by exception, not per-day, so nowhere near the
+cap), single-parent reads (`.eq('run_id')`, `.eq('employee_id')`, `.maybeSingle()`), and the
+self-service PWA, which already parallelizes every load it makes.
+
 ### S627 — 2026-08-29 — /impeccable document: refreshing the sidecar found four things wrong in the docs
 
 Ran to clear the stale-sidecar flag `context.mjs` had been reporting. It cleared, but regenerating

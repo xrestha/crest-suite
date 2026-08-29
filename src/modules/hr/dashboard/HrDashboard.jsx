@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { useHrApprovalCounts } from './useHrApprovalCounts'
@@ -122,8 +123,13 @@ export default function HrDashboard() {
       scopedFrom('hr_payroll_runs', 'id, monthly_periods(bs_year, bs_month)')
         .eq('status', 'finalized')
         .order('created_at', { ascending: false }).limit(1),
-      scopedFrom('hr_advances', 'id, amount').eq('status', 'active'),
-      scopedFrom('hr_advance_repayments', 'advance_id, amount'),
+      // Both sides of the Advances Outstanding KPI are paged. `hr_advance_repayments` is an
+      // unfiltered lifetime ledger — one row per advance per payroll month — so it crosses the
+      // 1000-row cap first, and because outstanding is `amount − repaid`, truncating the
+      // repayments side alone makes the dashboard OVERSTATE what staff still owe. `.order('id')`
+      // is the unique tiebreaker fetchAllRows requires.
+      fetchAllRows(() => scopedFrom('hr_advances', 'id, amount').eq('status', 'active').order('id')),
+      fetchAllRows(() => scopedFrom('hr_advance_repayments', 'advance_id, amount').order('id')),
     ])
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 

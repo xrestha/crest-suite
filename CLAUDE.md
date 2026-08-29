@@ -286,7 +286,7 @@ and one declared it inside a component body. Import it; never retype it.
 
 ### HR payroll engine
 
-See `.claude/rules/hr-payroll.md` (auto-loads when editing `src/modules/hr/`). Headline rules: pure functions in `payrollCompute.js`; monthly pay prorates for `join_date`; `payrollData.js` helpers must be robust to what Finalize changes (S565 Stale-badge trap); `hr_tada_claims` has no period columns. As of S570: SSF needs enrolment flag **and** `ssf_no` (three call sites must agree); approved OT supersedes attendance OT per `bs_day` (so OT queries must select `bs_day`); Payroll Run blocks Finalize on a stale draft. As of S600: Final Settlement WRITES (draft-first, then advances/employee/login, then finalize) and `computePayslip` prorates for `end_date` as well as `join_date` — so any query feeding it must select `end_date`; gratuity is one shared module whose SSF offset counts only the months contributions were actually made.
+See `.claude/rules/hr-payroll.md` (auto-loads when editing `src/modules/hr/`). Headline rules: pure functions in `payrollCompute.js`; monthly pay prorates for `join_date`; `payrollData.js` helpers must be robust to what Finalize changes (S565 Stale-badge trap); `hr_tada_claims` has no period columns. As of S570: SSF needs enrolment flag **and** `ssf_no` (three call sites must agree); approved OT supersedes attendance OT per `bs_day` (so OT queries must select `bs_day`); Payroll Run blocks Finalize on a stale draft. As of S600: Final Settlement WRITES (draft-first, then advances/employee/login, then finalize) and `computePayslip` prorates for `end_date` as well as `join_date` — so any query feeding it must select `end_date`; gratuity is one shared module whose SSF offset counts only the months contributions were actually made. As of S628: four payslip-history reads that narrow in JS are now paged (`fetchSsfStartMap` included — a truncated one shrinks a leaver's gratuity offset), and the per-employee slicing both payroll pages do goes through `groupByEmployee`/`sliceFor`, whose slice-equivalence is asserted by a test because it feeds a path that WRITES payslips.
 
 ### Page-revisit caching (`src/shared/sessionDataCache.js`, added S460)
 
@@ -589,5 +589,15 @@ year and one month — `fetchYtdMap` and `fetchApprovedTadaMap` in `payrollData.
 windows *after* the fetch, so each was pulling the client's entire history and hitting the cap at
 roughly 20 staff × 4 years. When judging whether a table needs paging, count what the QUERY
 returns, not what the function is named after.
+
+**S628 found four more of that exact shape in HR** — `HrReports`' YTD TDS, Festival Allowance's and
+Incentive Run's YTD gross, and `fetchSsfStartMap` — every one on a tax or gratuity figure, all
+sitting a file or two from the `payrollData.js` helpers S620 had just fixed. It also found
+**`hr_roster` unpaged while `hr_attendance` beside it was paged**, on the same page, ten lines
+apart, at the same cardinality. **Decide by rows-per-what, not by table name:** per-employee-per-day
+and per-anything-per-month both cross 1000 inside one real client-year. And note the guard problem
+— truncation returns **no error**, so every `if (error)` check written against a failed read passes
+happily over a short one. Details and the HR-specific consequences are in
+`.claude/rules/frontend-performance.md`.
 
 **Two traps when doing a sweep like this**, both hit live: (1) if the original chain continued past the line you're editing, the closing paren lands too early and the trailing `.order(...)` gets applied to fetchAllRows' *result* — a plain `{data,error}`, not a builder — which is a runtime `TypeError`, not a build error, so only actually loading the page catches it (`Purchases.js`, found exactly this way). (2) A CRA dev server left running shares `node_modules/.cache` with `npm run build` and will keep rewriting stale ESLint entries underneath it, producing phantom `'fetchAllRows' is defined but never used` errors on files where the import and the usage are both plainly present. Stop the dev server before trusting a CI build.

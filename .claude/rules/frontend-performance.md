@@ -4,11 +4,16 @@ paths:
   - "src/shared/sessionDataCache.js"
   - "src/shared/hooks/useLatestRequest.js"
   - "src/modules/ims/**"
+  - "src/modules/hr/**"
 ---
 
 # Round trips and keystrokes: the two shapes that make a page feel slow
 
-From the `/impeccable optimize` sweep over IMS (S625/S626). Both shapes are invisible in review —
+From the `/impeccable optimize` sweeps over IMS (S625/S626) and HR (S628). **The HR sweep found
+every one of these shapes again**, which is the argument for the rule rather than a note on it —
+`src/modules/hr/**` was not on the `paths:` list above until S628, so none of this loaded while
+anyone worked there. A rule scoped to the module it was learned in is a rule the next module
+repeats. Both shapes are invisible in review —
 the code reads correctly, nothing errors, and the cost only appears on a real client's data volume
 at a real network latency (150–500 ms per round trip). Neither is caught by any detector in this
 project.
@@ -46,6 +51,15 @@ A backward walk over periods (Overheads' carry-forward) is the same shape wearin
 `.in()` over every candidate, then walk the result **in memory**. That also removes the
 failed-read-mid-walk ambiguity, since there is now one error to check.
 
+**A table's cardinality, not its name, decides whether it needs paging.** `hr_attendance` was
+swept (one row per employee per day, crosses at ~34 staff) and `hr_roster` — the same shape, read
+on the same page, ten lines above it — was not. Its truncation painted real shifts as empty cells
+on the Roster board, made Attendance's OT auto-calc measure overtime against a fallback 8 hours,
+and made Copy Week under-count what it was about to overwrite on a dialog whose own comment says a
+failed read must stop the copy. **Truncation returns no error, so every guard written against a
+failed read passes.** Before deciding a table is safe, write down its rows-per-what: per employee
+per day and per-anything-per-month both cross 1000 inside one real client-year.
+
 **Bulking a read means re-checking the 1000-row cap.** Collapsing N per-period queries into one
 `.in()` multiplies the row count — page it with `fetchAllRows` and give the sort a unique
 tiebreaker, or the fix trades a slow page for a silently truncated one.
@@ -82,6 +96,36 @@ box writes. Typing a quantity re-sorted the whole menu *and physically moved the
 the cursor*. Sort by the **saved** figures (`sales`), so the order refreshes on save/reload rather
 than mid-keystroke; that is also what makes the memo possible, since the draft is no longer a
 dependency.
+
+### The trigger is not always a keystroke
+
+A controlled input is the most common cause, not the only one. Any state a *pointer gesture* writes
+has the same effect, and those fire faster than typing:
+
+- **A drag-select.** Roster's `onMouseEnter` calls `setSelection` on every cell the pointer crosses,
+  so one drag across a 32-column row is 32 full re-renders. It was rebuilding the columns, re-running
+  a 100-iteration contrast search per shift type, and recomputing a 32-column labor strip each time
+  — 2.75 ms → 0.19 ms per render once memoized, measured at 40 staff.
+- **A row disclosure.** `PayrollCalculation`'s only interactive state is `expandedId`, and expanding
+  one employee's detail panel re-ran `computePayslip` plus a TDS slab walk for *every* employee.
+- **A status message or a busy flag.** `PayrollRun`'s freshness check was a bare render-body IIFE
+  running the whole payroll engine, so `setMsg`, `setBusy` and opening the Finalize confirm each
+  re-ran it. None of those move any of its inputs.
+
+Ask what the page's cheapest state write is, not whether it has a text box.
+
+### A `.filter()` per row over a per-row-per-day array is the same shape wearing a join
+
+Both payroll pages built one payslip per employee and took that employee's slice of `components`,
+`attendance` and `otEntries` with a `.filter()` inside the `employees.map()`. `attendance` is one
+row per employee per **day** — ~1,200 rows at 40 staff — so it was walked 40 times over: 56,000
+element visits where 1,400 would do. `groupByEmployee`/`sliceFor` in `payrollData.js` partition
+each array once.
+
+Two properties are load-bearing, and the second is why there is a test rather than just a helper:
+`.filter()` preserves source order and so does appending in source order, so the slices are
+**byte-identical** to what the filters produced — which matters because both callers feed them
+straight into `computePayslip` on a path that WRITES payslips. `payrollData.test.js` asserts it.
 
 ### When NOT to memoize the row
 
