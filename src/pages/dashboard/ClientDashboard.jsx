@@ -96,6 +96,19 @@ const PROJ_ACTUAL_KEY = { salesProj: 'sales', purchProj: 'purchases' }
 const TARGET_KEY = { sales: 'salesTarget', purchases: 'purchTarget' }
 const GOOD_DIRECTION = { sales: 1, purchases: -1 }
 
+// How far off target still counts as ON target. Without a dead zone every single day earns a
+// verdict — NPR 3,115 against a NPR 3,112 target painted red — and a chart where all thirty days
+// are lit green or red has stopped saying anything at all. The band is what makes a colour mean
+// "this day actually moved" rather than "this day exists".
+//
+// TWO thresholds, whichever is more forgiving, because one is wrong at each end of the range: 2%
+// of a NPR 3,000 delivery day is NPR 60 and fairly ignored, but on a quiet Sunday with a NPR 200
+// target even a 10% swing is NPR 20 and means nothing. Same shape as the delivery-partner
+// commission check in POS, which needed a percentage AND a rupee tolerance before it stopped
+// raising false alarms on per-bill rounding.
+const TARGET_TOLERANCE_PCT = 2
+const TARGET_TOLERANCE_NPR = 100
+
 // Custom tooltip for Daily Purchases vs Sales, at module scope so React sees one stable component
 // type (an inline arrow is a brand-new type every parent render, remounting the tooltip subtree —
 // same hoisted shape as MenuEngineering's ScatterTooltipContent). Recharts clones this element
@@ -145,13 +158,22 @@ function TrendTooltipContent({ active, payload, label, big }) {
         // prints the other, so the ratio is the thing neither of them gives you — and it reads the
         // same on a quiet Sunday as on a delivery day. Guarded against a zero target.
         const gapPct = gap && target ? Math.abs(gap / target) * 100 : null
-        const good = gap == null || gap === 0 ? null : Math.sign(gap) === GOOD_DIRECTION[en.dataKey]
+        // Inside the band the DIRECTION is noise, so the glyph goes neutral too — ≈ rather than a
+        // ▲/▼ nobody should read anything into. The percentage still prints, in grey: saying
+        // "≈ 1.2%" is more honest than hiding the number, because it shows the reader what we are
+        // calling on target rather than asking them to trust it.
+        const onTarget = gap != null && target != null &&
+          Math.abs(gap) <= Math.max(Math.abs(target) * (TARGET_TOLERANCE_PCT / 100), TARGET_TOLERANCE_NPR)
+        const good = gap == null || gap === 0 || onTarget ? null : Math.sign(gap) === GOOD_DIRECTION[en.dataKey]
+        const mark = gap == null ? null
+          : onTarget ? { glyph: '≈', color: 'var(--theme-text3)' }
+          : { glyph: gap > 0 ? '▲' : '▼', color: good ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }
         return (
           <p key={en.dataKey} style={{ margin: '4px 0 0' }}>
             <span style={{ color: en.color }}>●</span> {en.name} : NPR {Math.round(value).toLocaleString()}
-            {good != null && (
-              <span style={{ color: good ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-                {' '}{gap > 0 ? '▲' : '▼'}{gapPct != null && ` ${gapPct < 1 ? gapPct.toFixed(1) : Math.round(gapPct)}%`}
+            {mark && (
+              <span style={{ color: mark.color }}>
+                {' '}{mark.glyph}{gapPct != null && ` ${gapPct < 1 ? gapPct.toFixed(1) : Math.round(gapPct)}%`}
               </span>
             )}
           </p>
@@ -1738,13 +1760,13 @@ export default function ClientDashboard() {
             {salesTargetSnap && (
               <span style={{ color: 'var(--theme-text2)' }}>
                 <span style={{ color: DAILY_TREND_COLORS.salesTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
-                <Tip text={`Locked in on Day ${salesTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual sales line against it to see if you're ahead or behind pace — unlike Sales Proj. above, which updates every day to reflect today's pace instead. Hover any day: the tooltip shows how far that day ran off target, green when it went your way.`}>Sales Target</Tip>
+                <Tip text={`Locked in on Day ${salesTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual sales line against it to see if you're ahead or behind pace — unlike Sales Proj. above, which updates every day to reflect today's pace instead. Hover any day: the tooltip shows how far that day ran off target, green when it went your way. A grey ≈ means the day landed close enough to count as on target.`}>Sales Target</Tip>
               </span>
             )}
             {purchTargetSnap && (
               <span style={{ color: 'var(--theme-text2)' }}>
                 <span style={{ color: DAILY_TREND_COLORS.purchTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
-                <Tip text={`Locked in on Day ${purchTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual purchases line against it to see if you're spending ahead of or behind that pace — unlike Purch. Proj. above, which updates every day to reflect today's pace instead. Hover any day: the tooltip shows how far that day ran off target, and here green means UNDER it — spending less than the pace you locked in is the win.`}>Purch. Target</Tip>
+                <Tip text={`Locked in on Day ${purchTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual purchases line against it to see if you're spending ahead of or behind that pace — unlike Purch. Proj. above, which updates every day to reflect today's pace instead. Hover any day: the tooltip shows how far that day ran off target, and here green means UNDER it — spending less than the pace you locked in is the win. A grey ≈ means the day landed close enough to count as on target.`}>Purch. Target</Tip>
               </span>
             )}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}

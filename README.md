@@ -159,6 +159,33 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S644 — 2026-08-29 — a tolerance band on the trend tooltip's verdict
+
+Service worker `crest-v162`. No migration.
+
+S634 gave the Daily Purchases vs Sales tooltip a polarity-aware verdict colour. It applied that
+verdict to **any** difference at all, so NPR 3,115 against a NPR 3,112 target painted red — and a
+chart where all thirty days are lit green or red has stopped saying anything. The band is what makes
+a colour mean *this day actually moved* rather than *this day exists*.
+
+**Two thresholds, whichever is more forgiving — 2% of target or NPR 100.** One is wrong at each end
+of the range: 2% of a NPR 3,000 delivery day is NPR 60 and fairly ignored, but on a quiet Sunday
+with a NPR 200 target even a 10% swing is NPR 20 and means nothing. Same shape as the
+delivery-partner commission check in POS, which needed a percentage AND a rupee tolerance before it
+stopped raising false alarms on per-bill rounding.
+
+**Inside the band the direction is noise, so the glyph goes neutral too** — a grey `≈` rather than a
+▲/▼ nobody should read anything into. **The percentage still prints**, in grey: saying "≈ 1.2%"
+shows the reader what is being called on-target instead of asking them to trust it. Day 13's
+NPR 2,295 against NPR 3,112 is 26% under and unchanged — still a green ▼.
+
+An exact match now renders `≈` where it previously rendered nothing, which is the same improvement
+in miniature: landing on target is worth stating.
+
+Legend Tips, the Help page and the IMS module guide all name the neutral state; the general rule —
+*a verdict needs a dead zone, or it cries wolf* — is in `.claude/rules/design-system.md` beside the
+polarity rule it completes.
+
 ### S643 — 2026-08-29 — Admin → Clients shows the money it changes
 
 Service worker `crest-v161`. No migration. New: `src/shared/clientMrr.js` + `clientMrr.test.js`

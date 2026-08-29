@@ -210,6 +210,17 @@ line the reader can see; let the colour ask whether that direction is good for t
 `GOOD_DIRECTION` map keyed by series (`sales: +1`, `purchases: -1`) is the whole mechanism. Applies
 anywhere a cost sits beside a revenue: variance, budget-vs-actual, food-cost trend, wastage.
 
+**A verdict needs a dead zone, or it cries wolf (S644).** Without one, every value earns a colour —
+NPR 3,115 against a NPR 3,112 target painted red — and a chart where all thirty days are lit green
+or red has stopped saying anything. Inside the band the DIRECTION is noise too, so the glyph goes
+neutral as well (`≈`, in `--theme-text3`) rather than showing a ▲/▼ nobody should read into; the
+percentage still prints, because showing what you are calling on-target is more honest than hiding
+it. Use **two thresholds, whichever is more forgiving** — a percentage and an absolute floor —
+because one is wrong at each end of the range: 2% of a NPR 3,000 day is fairly ignored, while on a
+quiet day with a NPR 200 target even a 10% swing is NPR 20 and means nothing. Same shape as the
+delivery-partner commission check in POS, which needed both before it stopped raising false alarms
+on per-bill rounding.
+
 **Two consequences worth pricing in.** Colour becomes the sole carrier of the verdict once shape
 stops being redundant with it (a green ▼ and a red ▼ now both exist), so give the reader the
 magnitude in text — the gap as a **percentage of target** rather than a second currency figure, so
