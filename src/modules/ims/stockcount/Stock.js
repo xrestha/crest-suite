@@ -155,7 +155,7 @@ export default function Stock() {
     // entries are one row per item per day — but opening/closing are one row per item, so a client
     // past 1000 items would silently lose stock too. Each needs a unique tiebreaker in its sort or
     // paging can repeat a row on one page and skip it on the next.
-    const [{ data: opening }, { data: closing }, { data: wastages }, { data: staffMealsData }, { data: purch }, { data: rets }] = await Promise.all([
+    const [{ data: opening }, { data: closing }, { data: wastages }, { data: staffMealsData }, { data: purch }, { data: rets }, reqRes] = await Promise.all([
       fetchAllRows(() => supabase.from('opening_stock').select('*').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('closing_stock').select('*').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('id, item_id, qty, bs_day, reason, items(name, uom, per_uom_rate)').eq('period_id', periodId).order('id')),
@@ -165,6 +165,15 @@ export default function Stock() {
       fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).eq('type', 'staff').order('id')),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
+      // Independent of the six reads above but previously awaited after them — one extra serial
+      // round trip on every load of the heaviest page. A failure degrades to "no requisitions",
+      // exactly what the old try/catch did.
+      fetchAllRows(() => supabase
+        .from('requisition_lines')
+        .select('item_id, qty_issued, requisitions!inner(client_id, period_id, status)')
+        .eq('requisitions.period_id', periodId)
+        .eq('requisitions.status', 'issued')
+        .order('id')).catch(() => ({ data: null })),
     ])
 
     const data = {}
@@ -213,20 +222,9 @@ export default function Stock() {
     setReturns(retMap)
 
     // Requisitioned map — qty issued via store requisitions
-    let reqMap = {}
-    try {
-      const { data: reqLines } = await fetchAllRows(() => supabase
-        .from('requisition_lines')
-        .select('item_id, qty_issued, requisitions!inner(client_id, period_id, status)')
-        .eq('requisitions.period_id', periodId)
-        .eq('requisitions.status', 'issued')
-        .order('id'))
-      if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-      ;(reqLines || []).forEach(r => { reqMap[r.item_id] = (reqMap[r.item_id] || 0) + parseFloat(r.qty_issued || 0) })
-      setRequisitioned(reqMap)
-    } catch (_) {
-      setRequisitioned({})
-    }
+    const reqMap = {}
+    ;(reqRes?.data || []).forEach(r => { reqMap[r.item_id] = (reqMap[r.item_id] || 0) + parseFloat(r.qty_issued || 0) })
+    setRequisitioned(reqMap)
 
     try {
       await cacheStockData(periodId, { stockData: data, purchases: purchMap, returns: retMap, requisitioned: reqMap })
@@ -371,9 +369,61 @@ export default function Stock() {
     await performSaveAll(visibleItems)
   }
 
+  // Bulk counterpart of persistValue for Save All / Clear All. The old shape was one saveRow per
+  // visible item — one round trip each (two on the delete-then-insert tabs), fully serial through
+  // the per-key locks — so a real 300-item count paid 300–600 sequential round trips per click,
+  // i.e. minutes, on the page a month is closed from. This writes the same rows in at most two
+  // requests. It keeps the persistLocks guarantee: it starts only after every pending single-cell
+  // save for these keys has settled, and registers itself as each key's tail so a later onBlur
+  // autosave chains after it — no delete/insert pair can interleave with it.
+  async function persistValuesBulk(fieldKey, entries) {
+    if (entries.length === 0) return
+    if (!navigator.onLine) {
+      // Offline writes go to the local queue — per-item is fine there, no network involved.
+      for (const e of entries) await persistValue(e.itemId, fieldKey, e.qty)
+      return
+    }
+    const periodId = selectedPeriod.id
+    const priors = entries.map(e => persistLocks.current[`${e.itemId}:${fieldKey}`] || Promise.resolve())
+    const run = Promise.all(priors).then(async () => {
+      const allIds = entries.map(e => e.itemId)
+      const zeros = entries.filter(e => e.qty <= 0).map(e => e.itemId)
+      const positives = entries.filter(e => e.qty > 0)
+      if (fieldKey === 'opening') {
+        if (zeros.length) await supabase.from('opening_stock').delete().eq('period_id', periodId).in('item_id', zeros)
+        if (positives.length) await supabase.from('opening_stock').upsert(
+          positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty })), { onConflict: 'period_id,item_id' })
+      } else if (fieldKey === 'closing') {
+        if (zeros.length) await supabase.from('closing_stock').delete().eq('period_id', periodId).in('item_id', zeros)
+        if (positives.length) {
+          const countedAt = new Date().toISOString()
+          await supabase.from('closing_stock').upsert(
+            positives.map(e => ({ period_id: periodId, item_id: e.itemId, physical_qty: e.qty, counted_at: countedAt })), { onConflict: 'period_id,item_id' })
+        }
+      } else if (fieldKey === 'wastage') {
+        // Same shape as persistValueDirect: only the undated catch-all rows are this tab's to replace.
+        await supabase.from('wastages').delete().eq('period_id', periodId).in('item_id', allIds).is('bs_day', null)
+        if (positives.length) await supabase.from('wastages').insert(
+          positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, bs_day: null })))
+      } else if (fieldKey === 'staff_meal') {
+        await supabase.from('staff_meals').delete().eq('period_id', periodId).in('item_id', allIds).eq('type', 'staff')
+        if (positives.length) await supabase.from('staff_meals').insert(
+          positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, type: 'staff' })))
+      }
+    }).catch(() => {}) // same policy as persistValue: a failed save must not wedge the chains
+    entries.forEach(e => { persistLocks.current[`${e.itemId}:${fieldKey}`] = run })
+    return run
+  }
+
   async function performSaveAll(visibleItems) {
     setSaveAllLoading(true)
-    for (const item of visibleItems) { await saveRow(item.id) }
+    const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
+    // Same source saveRow reads for Save All: current on-screen state, no override.
+    const entries = visibleItems.map(item => ({
+      itemId: item.id,
+      qty: parseFloat((stockData[item.id] || {})[fieldKey]) || 0,
+    }))
+    await persistValuesBulk(fieldKey, entries)
     setSaveAllLoading(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
@@ -417,7 +467,7 @@ export default function Stock() {
 
   async function performClearAll(fieldKey, visibleItems) {
     setSaveAllLoading(true)
-    for (const item of visibleItems) { await persistValue(item.id, fieldKey, 0) }
+    await persistValuesBulk(fieldKey, visibleItems.map(item => ({ itemId: item.id, qty: 0 })))
     setStockData(prev => {
       const next = { ...prev }
       visibleItems.forEach(item => { next[item.id] = { ...next[item.id], [fieldKey]: 0 } })

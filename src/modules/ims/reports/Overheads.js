@@ -152,15 +152,32 @@ export default function Overheads() {
     setRows(grouped)
   }
 
-  // Walks backward through chronologically-prior periods (nearest first) and returns the first
-  // one's saved overhead rows, or null if none of them ever had any.
+  // Returns the chronologically nearest prior period's saved overhead rows, or null if none of
+  // them ever had any. One .in() read over all candidates, then the walk happens in memory — the
+  // old shape queried one period at a time, so a client with a gap in their overhead history paid
+  // one round trip per empty month on the page's primary workflow (first visit to a new month).
+  // A single read also removes the failed-mid-walk ambiguity: a failed read must not read as
+  // "those periods had nothing" — the caller would carry forward from an older period than the
+  // truth, as an editable draft (S612).
   async function findMostRecentOverheads(candidatePeriods) {
+    if (candidatePeriods.length === 0) return { rows: null, error: null }
+    // Paged: rows-per-period × period count can cross the silent 1000-row cap on a long-lived
+    // client, and a truncated read here could drop the nearest period's rows entirely (S529).
+    // The id tiebreaker keeps created_at's paging stable.
+    const { data, error } = await fetchAllRows(() => scopedFrom('overheads')
+      .in('period_id', candidatePeriods.map(p => p.id))
+      .order('created_at').order('id'))
+    if (error) return { rows: null, error: error.message }
+    const byPeriod = new Map()
+    ;(data || []).forEach(r => {
+      const list = byPeriod.get(r.period_id)
+      if (list) list.push(r)
+      else byPeriod.set(r.period_id, [r])
+    })
+    // candidatePeriods arrives nearest-first; the first with rows wins, same as the old walk.
     for (const p of candidatePeriods) {
-      const { data, error } = await scopedFrom('overheads').eq('period_id', p.id).order('created_at')
-      // A failed read mid-walk must not read as "that period had nothing" — the caller would
-      // carry forward from an older period than the truth, as an editable draft (S612).
-      if (error) return { rows: null, error: error.message }
-      if (data && data.length > 0) return { rows: data, error: null }
+      const rows = byPeriod.get(p.id)
+      if (rows && rows.length > 0) return { rows, error: null }
     }
     return { rows: null, error: null }
   }

@@ -125,12 +125,25 @@ export default function MenuEngineering() {
     setLoading(true)
     setLoadError(null)
 
-    // Load recipes (menu items only — exclude sub-recipes)
-    const { data: recipes, error: recErr } = await scopedFrom('recipes', 'id, name, category, selling_price')
-      .neq('is_active', false)
-      .neq('category', 'Sub-Recipe')
+    // Recipes (menu items only — exclude sub-recipes) and this period's sales are independent
+    // reads — the sales read used to sit third in a serial chain behind the cost computation,
+    // which it needs nothing from. Comps (source='pos_comp') excluded from sales, since the
+    // BCG-style revenue/margin quadrant below is about what actually sold at menu price, not what
+    // was given away.
+    const [{ data: recipes, error: recErr }, { data: sales, error: salesErr }] = await Promise.all([
+      scopedFrom('recipes', 'id, name, category, selling_price')
+        .neq('is_active', false)
+        .neq('category', 'Sub-Recipe'),
+      supabase
+        .from('sales_entries')
+        .select('recipe_id, qty_sold, discount')
+        .eq('period_id', periodId)
+        .neq('source', 'pos_comp'),
+    ])
     // S612 silent-zero rule: a failed read must not render the "no menu items found" empty state.
     if (recErr) { setLoadError(recErr.message); setItems([]); setLoading(false); return }
+    // A failed sales read would classify every dish as a zero-sale Dog (S612).
+    if (salesErr) { setLoadError(salesErr.message); setItems([]); setLoading(false); return }
 
     // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
     // hand-rolled ingMap reading only direct item_id ingredients (as this used to) silently
@@ -139,17 +152,6 @@ export default function MenuEngineering() {
     const ingMap = (recipes || []).length > 0
       ? await computeRecipeCosts(supabase, recipes.map(r => r.id))
       : {}
-
-    // Load sales for this period — comps (source='pos_comp') excluded, since the BCG-style
-    // revenue/margin quadrant below is about what actually sold at menu price, not what was
-    // given away.
-    const { data: sales, error: salesErr } = await supabase
-      .from('sales_entries')
-      .select('recipe_id, qty_sold, discount')
-      .eq('period_id', periodId)
-      .neq('source', 'pos_comp')
-    // A failed sales read would classify every dish as a zero-sale Dog (S612).
-    if (salesErr) { setLoadError(salesErr.message); setItems([]); setLoading(false); return }
 
     if (!recipes) { setLoading(false); return }
 

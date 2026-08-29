@@ -159,6 +159,54 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S625 — 2026-08-28 — /impeccable optimize over the IMS module: round trips and keystrokes
+
+Three parallel surveys (network waterfalls, render-time recompute, bundle/cache) over all ~40 IMS
+pages, then fixes for everything above the felt-lag bar. Bundle came back clean (no static `xlsx`
+regressions, no heavy deps, no timer leaks). 416 tests pass; production build clean; SW cache →
+v146.
+
+**Stock Count "Save All"/"Clear All" no longer writes one item at a time.** The old loop was one
+serial round trip per visible item — two on the delete-then-insert tabs (wastage/staff meal) — so a
+real 300-item count paid 300–600 sequential round trips per click: literal minutes, on the page a
+month is closed from. New `persistValuesBulk()` does the same writes in at most two requests
+(bulk upsert + `.in()` delete for opening/closing; `.in()` delete + bulk insert for wastage/staff
+meal). It keeps the `persistLocks` no-interleaving guarantee: it starts only after every pending
+single-cell save for those keys settles, and registers itself as each key's tail so a later onBlur
+autosave chains after it. Offline path unchanged (per-item queue, no network).
+
+**Serial-await waterfalls collapsed across eight more files.** Items' `checkAllUsage` ran its 8
+independent usage reads one after another on every page load — now `Promise.all` (saves ~7 round
+trips). Requisition issue and PO receive updated lines one per round trip — now parallel (PO
+receive also names *every* failed line instead of the first; sequencing never bought atomicity, the
+purchase_entries insert had already committed). Purchase-bill save fetched items `.single()` per
+line — now one `.in()`. Outstanding Payables' three follow-up reads (terms/payments/returns) were
+serial though mutually independent — now one batch. Recipes' open-period lookup and MenuPricing's
+pairings read joined their pages' first `Promise.all`; MenuEngineering's sales read no longer waits
+behind the cost computation; `computeRecipeCosts` starts its `cost_price` read before the explode
+walk; Stock's requisition read joined the main 6-query batch. Overheads' carry-forward walk
+(one query per prior period, unbounded with gaps) became one paged `.in()` read walked in memory.
+
+**The per-keystroke recompute pages got indexed and memoized.** VendorReport was the worst by an
+order of magnitude: `vendorDayNet` re-filtered the entire purchases AND returns arrays per CELL of
+the Daily Breakdown matrix (days × vendors × entries ≈ millions of element visits per keystroke of
+the vendor search box), and vendorSummary/allBills/discountedBills re-scanned per vendor and per
+bill. One `useMemo` pass now builds index maps (per-vendor, per-bill, per-vendor-per-day nets);
+every derivation reads those. Recipes computes a per-recipe cost map once per data change instead
+of exploding sub-recipe trees per row per keystroke (and its ingredient grouping went from
+O(recipes × rows) filter-per-recipe to one grouped pass); Items' category tabs no longer re-filter
+the whole item list per tab per keystroke (one counts map, built alongside `filtered` — its role
+guard moved below the hooks per the S601 pattern); SupplierPriceTracker memoizes the full-history
+regroup that re-ran on every keystroke of the search box and inline price editor; ReorderReport's
+four unconditional `localeCompare` sorts became one memo with a cached `Intl.Collator`, and the
+JSX-mutating `filtered.sort()` moved into it.
+
+**Not finished, deliberately:** the sweep was interrupted at "pi" with StockMovements,
+Sales.js (its sort reads the very state the qty box writes, so rows move under the typing finger —
+needs a decision, not just a memo), OutstandingPayables' render-side bill regroup, Stock.js's
+row-level render memoization, and the sessionDataCache adoption gaps (Items, Vendors,
+PurchaseOrders, Variance) still open. All are documented findings; none block what shipped.
+
 ### S624 — 2026-08-28 — A /simplify pass over the S623 batch: same job, one definition
 
 Four parallel cleanup reviewers (reuse / simplification / efficiency / altitude) over the last four

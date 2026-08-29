@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
@@ -212,49 +212,70 @@ export default function ReorderReport() {
     if (e.key === 'Escape') setEditingPar(p => { const n = { ...p }; delete n[itemId]; return n })
   }
 
-  const filtered = rows.filter(r => {
-    const matchCat    = filterCat === 'all' || r.category === filterCat
-    const matchStatus = filterStatus === 'all' || r.needsReorder
-    const matchSearch = r.item.name.toLowerCase().includes(search.toLowerCase())
-    return matchCat && matchStatus && matchSearch
-  })
+  // All the table/print/share derivations in one memo — previously every one of these (four full
+  // sorts included) re-ran on every keystroke of the search box AND the inline par editor, whose
+  // state is deliberately not a dependency here.
+  const {
+    filtered, printRows, printGroups, reorderCount, totalShortfallValue, noPar,
+    reorderPrintRows, reorderPrintGroups, reorderPrintTotal,
+  } = useMemo(() => {
+    const q = search.toLowerCase()
+    const collate = new Intl.Collator().compare
 
-  // Par-setting sheet ignores the Reorder/All status filter — a client setting par levels
-  // for the first time needs every item, not just the ones currently below par.
-  const printRows = rows
-    .filter(r => (filterCat === 'all' || r.category === filterCat) && r.item.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => a.item.name.localeCompare(b.item.name))
-  const printGroups = Object.values(
-    printRows.reduce((acc, r) => {
-      (acc[r.category] = acc[r.category] || { category: r.category, items: [] }).items.push(r)
-      return acc
-    }, {})
-  ).sort((a, b) => a.category.localeCompare(b.category))
+    // Display order (reorder-needed first, biggest shortfall value first) applied here rather
+    // than by a .sort() in the JSX, which re-sorted (and mutated) the array on every render.
+    const filtered = rows.filter(r => {
+      const matchCat    = filterCat === 'all' || r.category === filterCat
+      const matchStatus = filterStatus === 'all' || r.needsReorder
+      const matchSearch = r.item.name.toLowerCase().includes(q)
+      return matchCat && matchStatus && matchSearch
+    }).sort((a, b) => {
+      if (a.needsReorder !== b.needsReorder) return a.needsReorder ? -1 : 1
+      return b.shortfallValue - a.shortfallValue
+    })
 
-  const reorderCount        = rows.filter(r => r.needsReorder).length
-  const totalShortfallValue = rows.filter(r => r.needsReorder).reduce((s, r) => s + r.shortfallValue, 0)
-  const noPar               = rows.filter(r => r.par === 0).length
+    // Par-setting sheet ignores the Reorder/All status filter — a client setting par levels
+    // for the first time needs every item, not just the ones currently below par.
+    const printRows = rows
+      .filter(r => (filterCat === 'all' || r.category === filterCat) && r.item.name.toLowerCase().includes(q))
+      .sort((a, b) => collate(a.item.name, b.item.name))
+    const printGroups = Object.values(
+      printRows.reduce((acc, r) => {
+        (acc[r.category] = acc[r.category] || { category: r.category, items: [] }).items.push(r)
+        return acc
+      }, {})
+    ).sort((a, b) => collate(a.category, b.category))
 
-  // Purchase list (print + WhatsApp) — always reorder-needed items only, regardless of the
-  // on-screen status filter (a list handed to staff to go buy is never useful with "OK" items
-  // mixed in), but still respects Category/search so a client can scope it (e.g. "just Meats &
-  // Poultry today"). Sorted by category then name for a predictable, groupable printout.
-  const reorderPrintRowsAll = rows
-    .filter(r => r.needsReorder && (filterCat === 'all' || r.category === filterCat) && r.item.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => a.category.localeCompare(b.category) || a.item.name.localeCompare(b.item.name))
+    const reorderCount        = rows.filter(r => r.needsReorder).length
+    const totalShortfallValue = rows.filter(r => r.needsReorder).reduce((s, r) => s + r.shortfallValue, 0)
+    const noPar               = rows.filter(r => r.par === 0).length
 
-  // Print Reorder List / Share via WhatsApp / Export Excel all narrow to just the checked rows
-  // once any are checked (still within reorderPrintRowsAll's own reorder-only/Category/Search
-  // scope for the first two — checking an "OK" item under Status: All simply has no effect on
-  // those, exactly like the on-screen Status filter already doesn't), else behave as before.
-  const reorderPrintRows = selectedIds.size > 0 ? reorderPrintRowsAll.filter(r => selectedIds.has(r.item.id)) : reorderPrintRowsAll
-  const reorderPrintGroups = Object.values(
-    reorderPrintRows.reduce((acc, r) => {
-      (acc[r.category] = acc[r.category] || { category: r.category, items: [] }).items.push(r)
-      return acc
-    }, {})
-  ).sort((a, b) => a.category.localeCompare(b.category))
-  const reorderPrintTotal = reorderPrintRows.reduce((s, r) => s + r.shortfallValue, 0)
+    // Purchase list (print + WhatsApp) — always reorder-needed items only, regardless of the
+    // on-screen status filter (a list handed to staff to go buy is never useful with "OK" items
+    // mixed in), but still respects Category/search so a client can scope it (e.g. "just Meats &
+    // Poultry today"). Sorted by category then name for a predictable, groupable printout.
+    const reorderPrintRowsAll = rows
+      .filter(r => r.needsReorder && (filterCat === 'all' || r.category === filterCat) && r.item.name.toLowerCase().includes(q))
+      .sort((a, b) => collate(a.category, b.category) || collate(a.item.name, b.item.name))
+
+    // Print Reorder List / Share via WhatsApp / Export Excel all narrow to just the checked rows
+    // once any are checked (still within reorderPrintRowsAll's own reorder-only/Category/Search
+    // scope for the first two — checking an "OK" item under Status: All simply has no effect on
+    // those, exactly like the on-screen Status filter already doesn't), else behave as before.
+    const reorderPrintRows = selectedIds.size > 0 ? reorderPrintRowsAll.filter(r => selectedIds.has(r.item.id)) : reorderPrintRowsAll
+    const reorderPrintGroups = Object.values(
+      reorderPrintRows.reduce((acc, r) => {
+        (acc[r.category] = acc[r.category] || { category: r.category, items: [] }).items.push(r)
+        return acc
+      }, {})
+    ).sort((a, b) => collate(a.category, b.category))
+    const reorderPrintTotal = reorderPrintRows.reduce((s, r) => s + r.shortfallValue, 0)
+
+    return {
+      filtered, printRows, printGroups, reorderCount, totalShortfallValue, noPar,
+      reorderPrintRows, reorderPrintGroups, reorderPrintTotal,
+    }
+  }, [rows, filterCat, filterStatus, search, selectedIds])
 
   function printReorderList() {
     setPrintMode('reorder')
@@ -464,7 +485,6 @@ export default function ReorderReport() {
               </thead>
               <tbody>
                 {filtered
-                  .sort((a, b) => { if (a.needsReorder !== b.needsReorder) return a.needsReorder ? -1 : 1; return b.shortfallValue - a.shortfallValue })
                   .map(row => {
                     const isEditing = row.item.id in editingPar
                     const isSaving  = savingPar[row.item.id]

@@ -175,11 +175,16 @@ export default function Purchases() {
     // column happened to hold a per-unit figure; it is now always per BASE unit (items are stored in
     // their smallest unit), which a conversion item's rate box is not. An exact !== on floats also
     // re-fired this prompt on rates that had not moved.
+    // One .in() read for every line's item, not one .single() per line — a 20-line bill was
+    // paying 20 serial round trips here, after the save had already visibly completed.
+    const { data: freshItems } = await supabase.from('items')
+      .select('id, name, uom, per_uom_rate, purchase_unit, conversion_factor')
+      .in('id', [...new Set(validLines.map(l => l.item_id))])
+    const freshById = new Map((freshItems || []).map(i => [i.id, i]))
     const changed = []
     for (const l of validLines) {
       const capturedRate = parseFloat(l.rate)
-      const { data: fi } = await supabase.from('items')
-        .select('id, name, uom, per_uom_rate, purchase_unit, conversion_factor').eq('id', l.item_id).single()
+      const fi = freshById.get(l.item_id)
       if (!fi) continue
       const cf = getCf(fi)
       const masterRate = (parseFloat(fi.per_uom_rate) || 0) * cf
@@ -227,9 +232,8 @@ export default function Purchases() {
     if (hasGroupId) {
       await supabase.from('purchase_entries').delete().eq('purchase_group_id', groupId)
     } else {
-      for (const e of groupEntries) {
-        await supabase.from('purchase_entries').delete().eq('id', e.id)
-      }
+      // Legacy pre-purchase_group_id bills: one .in() delete, not one round trip per entry.
+      await supabase.from('purchase_entries').delete().in('id', groupEntries.map(e => e.id))
     }
     loadPurchases(selectedPeriod.id)
     loadReturns(selectedPeriod.id)

@@ -139,49 +139,54 @@ export default function OutstandingPayables() {
     }
 
     const vendorIds = [...new Set((data || []).map(e => e.vendors?.id).filter(Boolean))]
+    const today = new Date()
+    const ids = (data || []).map(e => e.id)
+
+    // The three follow-up reads all derive their filter from the bills read above (a genuine
+    // dependency) but are mutually independent — awaiting them one by one cost three serial round
+    // trips on every load, and this page reloads after every recorded payment.
+    const [vtRes, pmtRes, retRes] = await Promise.all([
+      vendorIds.length > 0
+        ? supabase.from('vendors').select('id, payment_terms').in('id', vendorIds)
+        : Promise.resolve({ data: null, error: null }),
+      ids.length > 0
+        ? scopedFrom('payable_payments').in('purchase_entry_id', ids).order('paid_at', { ascending: true })
+        : Promise.resolve({ data: [], error: null }),
+      ids.length > 0
+        ? scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate').in('purchase_entry_id', ids)
+        : Promise.resolve({ data: [], error: null }),
+    ])
+
     if (vendorIds.length > 0) {
-      const { data: vt, error: vtErr } = await supabase.from('vendors').select('id, payment_terms').in('id', vendorIds)
-      if (vtErr) {
-        if (vtErr.code === '42703') setTermsSetupNeeded(true)
+      if (vtRes.error) {
+        if (vtRes.error.code === '42703') setTermsSetupNeeded(true)
       } else {
         const map = {}
-        vt.forEach(v => { map[v.id] = v.payment_terms })
+        ;(vtRes.data || []).forEach(v => { map[v.id] = v.payment_terms })
         setVendorTerms(map)
         setTermsSetupNeeded(false)
       }
     }
 
-    const today = new Date()
-    const ids = (data || []).map(e => e.id)
-
+    // A failed payments read would render every credit bill as fully unpaid (S612).
+    if (pmtRes.error) { setLoadError(pmtRes.error.message); setEntries([]); setPaymentsMap({}); setLoading(false); return }
     let pmtMap = {}
-    if (ids.length > 0) {
-      const { data: pmts, error: pmtErr } = await scopedFrom('payable_payments')
-        .in('purchase_entry_id', ids)
-        .order('paid_at', { ascending: true })
-      // A failed payments read would render every credit bill as fully unpaid (S612).
-      if (pmtErr) { setLoadError(pmtErr.message); setEntries([]); setPaymentsMap({}); setLoading(false); return }
-      ;(pmts || []).forEach(p => {
-        if (!pmtMap[p.purchase_entry_id]) pmtMap[p.purchase_entry_id] = []
-        pmtMap[p.purchase_entry_id].push(p)
-      })
-    }
+    ;(pmtRes.data || []).forEach(p => {
+      if (!pmtMap[p.purchase_entry_id]) pmtMap[p.purchase_entry_id] = []
+      pmtMap[p.purchase_entry_id].push(p)
+    })
     setPaymentsMap(pmtMap)
 
     // Goods sent back reduce what's owed. ReturnsTab always writes purchase_entry_id (it refuses
     // to save without one) and copies the linked purchase's payment_method, so a return against a
     // Credit bill is always attributable to the exact line it cancels — no allocation guesswork.
+    // A failed returns read would overstate what's owed on every returned bill (S612).
+    if (retRes.error) { setLoadError(retRes.error.message); setEntries([]); setPaymentsMap({}); setLoading(false); return }
     let returnedByEntry = {}
-    if (ids.length > 0) {
-      const { data: rets, error: retErr } = await scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate')
-        .in('purchase_entry_id', ids)
-      // A failed returns read would overstate what's owed on every returned bill (S612).
-      if (retErr) { setLoadError(retErr.message); setEntries([]); setPaymentsMap({}); setLoading(false); return }
-      ;(rets || []).forEach(r => {
-        returnedByEntry[r.purchase_entry_id] =
-          (returnedByEntry[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0)
-      })
-    }
+    ;(retRes.data || []).forEach(r => {
+      returnedByEntry[r.purchase_entry_id] =
+        (returnedByEntry[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0)
+    })
 
     const enriched = (data || []).map(e => {
       const pr = e.monthly_periods

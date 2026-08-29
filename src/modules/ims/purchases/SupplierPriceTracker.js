@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -66,14 +66,23 @@ export default function SupplierPriceTracker() {
 
   // ── Data derivation ────────────────────────────────────────────────────────
 
-  const periodMap = {}
-  periods.forEach(p => { periodMap[p.id] = p })
+  const periodMap = useMemo(() => {
+    const m = {}
+    periods.forEach(p => { m[p.id] = p })
+    return m
+  }, [periods])
 
-  const itemMap = {}
-  items.forEach(i => { itemMap[i.id] = i })
+  const itemMap = useMemo(() => {
+    const m = {}
+    items.forEach(i => { m[i.id] = i })
+    return m
+  }, [items])
 
-  const vendorMap = {}
-  vendors.forEach(v => { vendorMap[v.id] = v })
+  const vendorMap = useMemo(() => {
+    const m = {}
+    vendors.forEach(v => { m[v.id] = v })
+    return m
+  }, [vendors])
 
   const selectedPeriod = selectedPeriodId === 'all' ? null : periodMap[selectedPeriodId]
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : 'All Months'
@@ -236,26 +245,34 @@ export default function SupplierPriceTracker() {
 
   // ── Derived data for table ─────────────────────────────────────────────────
 
-  const vendorPurchases = getPurchasesForVendor(selectedVendorId)
+  // Memoized: this regroups the client's ENTIRE purchase history (unbounded by construction —
+  // see the load comment), and used to re-run on every keystroke of the search box and the
+  // inline price editor.
+  const vendorPurchases = useMemo(
+    () => getPurchasesForVendor(selectedVendorId),
+    [allPurchases, selectedVendorId, selectedPeriodId, periodMap, itemMap]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filteredKeys = Object.keys(vendorPurchases).filter(key => {
-    const history = vendorPurchases[key]
-    const item = itemMap[history[0]?.item_id] || itemMap[key]
-    if (!item) return false
-    if (search && !item.name.toLowerCase().includes(search.toLowerCase())) return false
-    if (filterTrend !== 'all' && getTrend(history) !== filterTrend) return false
-    return true
-  }).sort((a, b) => {
-    const ta = getTrend(vendorPurchases[a])
-    const tb = getTrend(vendorPurchases[b])
-    if (ta === 'up' && tb !== 'up') return -1
-    if (ta !== 'up' && tb === 'up') return 1
-    const ia = itemMap[vendorPurchases[a][0]?.item_id]
-    const ib = itemMap[vendorPurchases[b][0]?.item_id]
-    return (ia?.name || '').localeCompare(ib?.name || '')
-  })
-
-  const risingCount = filteredKeys.filter(k => getTrend(vendorPurchases[k]) === 'up').length
+  const { filteredKeys, risingCount } = useMemo(() => {
+    const q = search.toLowerCase()
+    const filteredKeys = Object.keys(vendorPurchases).filter(key => {
+      const history = vendorPurchases[key]
+      const item = itemMap[history[0]?.item_id] || itemMap[key]
+      if (!item) return false
+      if (q && !item.name.toLowerCase().includes(q)) return false
+      if (filterTrend !== 'all' && getTrend(history) !== filterTrend) return false
+      return true
+    }).sort((a, b) => {
+      const ta = getTrend(vendorPurchases[a])
+      const tb = getTrend(vendorPurchases[b])
+      if (ta === 'up' && tb !== 'up') return -1
+      if (ta !== 'up' && tb === 'up') return 1
+      const ia = itemMap[vendorPurchases[a][0]?.item_id]
+      const ib = itemMap[vendorPurchases[b][0]?.item_id]
+      return (ia?.name || '').localeCompare(ib?.name || '')
+    })
+    const risingCount = filteredKeys.filter(k => getTrend(vendorPurchases[k]) === 'up').length
+    return { filteredKeys, risingCount }
+  }, [vendorPurchases, search, filterTrend, itemMap])
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 

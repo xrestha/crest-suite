@@ -299,22 +299,26 @@ export default function PurchaseOrders() {
     )
     if (purchErr) { setReceiveError(purchErr.message); setReceiveSaving(false); return }
 
-    // Stock/purchase history is now written for every line — if a qty_received update fails
-    // partway through this loop, that line would otherwise still show its old remaining qty and
-    // let staff receive (and double-book) the same delivery again next time. Stop on first
-    // failure and say exactly which lines are now out of sync, instead of failing silently.
-    for (const l of toReceive) {
-      const { error: updErr } = await supabase.from('purchase_order_items')
+    // Stock/purchase history is now written for every line — a line whose qty_received update
+    // fails would otherwise still show its old remaining qty and let staff receive (and
+    // double-book) the same delivery again next time. The updates are independent, so they run in
+    // parallel (serially this was one round trip per line); sequencing never bought atomicity —
+    // the purchase_entries insert above has already committed either way. Every failed line is
+    // named, instead of only the first.
+    const updResults = await Promise.all(toReceive.map(l =>
+      supabase.from('purchase_order_items')
         .update({ qty_received: l.qty_received + parseFloat(l.receiving) })
         .eq('id', l.id)
-      if (updErr) {
-        setReceiveError(
-          `Stock was recorded, but updating "${l.name || l.item_id}"'s received qty failed (${updErr.message}). ` +
-          `Reload this PO before receiving again to avoid double-counting.`
-        )
-        setReceiveSaving(false)
-        return
-      }
+        .then(r => ({ line: l, error: r.error }))))
+    const failedUpds = updResults.filter(r => r.error)
+    if (failedUpds.length > 0) {
+      const names = failedUpds.map(f => `"${f.line.name || f.line.item_id}"`).join(', ')
+      setReceiveError(
+        `Stock was recorded, but updating the received qty failed for ${names} (${failedUpds[0].error.message}). ` +
+        `Reload this PO before receiving again to avoid double-counting.`
+      )
+      setReceiveSaving(false)
+      return
     }
 
     const updatedLines = receiveLines.map(l => ({

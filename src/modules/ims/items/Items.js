@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -106,20 +106,25 @@ export default function Items() {
       { table: 'vendor_returns',     label: 'VR', qtyCol: 'qty' },
     ]
     const map = {}
-    for (const { table, label, qtyCol } of referenceTables) {
-      // Paged (S528/S529): purchase_entries alone crosses PostgREST's silent 1000-row cap on any
-      // real client, and a truncated read here reported a used item as unused — feeding both the
-      // "unused" filter and the force-delete guard.
-      const { data, error } = await fetchAllRows(() => supabase.from(table)
+    // The eight reads are fully independent of each other — awaiting them one by one put 8 serial
+    // round trips on the critical path of every Items page load. Fetch them together; the paging
+    // (S528/S529) is unchanged: purchase_entries alone crosses PostgREST's silent 1000-row cap on
+    // any real client, and a truncated read here reported a used item as unused — feeding both the
+    // "unused" filter and the force-delete guard.
+    const results = await Promise.all(referenceTables.map(({ table, qtyCol }) =>
+      fetchAllRows(() => supabase.from(table)
         .select(qtyCol ? `item_id, ${qtyCol}` : 'item_id').in('item_id', myItemIds).order('id'))
-      if (error || !data) continue // table may not exist for this client/plan — skip quietly
+        .catch(() => ({ data: null, error: true }))))
+    referenceTables.forEach(({ label, qtyCol }, idx) => {
+      const { data, error } = results[idx]
+      if (error || !data) return // table may not exist for this client/plan — skip quietly
       data.forEach(row => {
         if (!row.item_id) return
         if (qtyCol && (!row[qtyCol] || parseFloat(row[qtyCol]) <= 0)) return
         if (!map[row.item_id]) map[row.item_id] = []
         if (!map[row.item_id].includes(label)) map[row.item_id].push(label)
       })
-    }
+    })
     setUsageMap(map)
   }
 
@@ -410,26 +415,41 @@ export default function Items() {
     return `1 ${pu.toUpperCase()} = ${cf} ${bu.toUpperCase()}`
   }
 
-  const catsWithItems   = categories.filter(c => items.some(i => i.category_id === c.id))
+  const catsWithItems   = useMemo(
+    () => categories.filter(c => items.some(i => i.category_id === c.id)),
+    [categories, items])
   const showCategoryCol = filterCat === 'all'
 
-  const filtered = items.filter(item => {
-    const matchCat = filterCat === 'all' || item.category_id === filterCat
+  // One memoized pass replaces what used to be a fresh filter here PLUS a full items.filter()
+  // inside every category tab's render (O(tabs × items), with the same predicate re-evaluated
+  // ~20× per keystroke of the search box). tabCounts is the per-category count of items matching
+  // search + usage (category deliberately excluded — each tab shows what it WOULD hold).
+  const { filtered, tabCounts } = useMemo(() => {
     const s = search.toLowerCase()
-    const matchSearch = item.name.toLowerCase().includes(s) || (item.item_code || '').toLowerCase().includes(s)
-    const usage = usageMap[item.id] || []
-    const matchUsage =
-      filterUsage === 'all'    ? true :
-      filterUsage === 'unused' ? usage.length === 0 :
-      filterUsage === 'stock'  ? (usage.includes('OS') || usage.includes('CS')) :
-      usage.includes(filterUsage)
-    return matchCat && matchSearch && matchUsage
-  }).sort((a, b) => {
-    if (!sortConvFirst) return 0
-    const aHas = !!(a.purchase_unit && a.conversion_factor > 1)
-    const bHas = !!(b.purchase_unit && b.conversion_factor > 1)
-    return bHas - aHas
-  })
+    const tabCounts = { all: 0 }
+    const searchMatched = []
+    items.forEach(item => {
+      const matchSearch = item.name.toLowerCase().includes(s) || (item.item_code || '').toLowerCase().includes(s)
+      const usage = usageMap[item.id] || []
+      const matchUsage =
+        filterUsage === 'all'    ? true :
+        filterUsage === 'unused' ? usage.length === 0 :
+        filterUsage === 'stock'  ? (usage.includes('OS') || usage.includes('CS')) :
+        usage.includes(filterUsage)
+      if (!matchSearch || !matchUsage) return
+      searchMatched.push(item)
+      tabCounts.all += 1
+      if (item.category_id) tabCounts[item.category_id] = (tabCounts[item.category_id] || 0) + 1
+    })
+    const filtered = (filterCat === 'all' ? searchMatched : searchMatched.filter(i => i.category_id === filterCat))
+      .sort((a, b) => {
+        if (!sortConvFirst) return 0
+        const aHas = !!(a.purchase_unit && a.conversion_factor > 1)
+        const bHas = !!(b.purchase_unit && b.conversion_factor > 1)
+        return bHas - aHas
+      })
+    return { filtered, tabCounts }
+  }, [items, search, usageMap, filterUsage, filterCat, sortConvFirst])
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
@@ -758,18 +778,7 @@ export default function Items() {
       {/* Category tabs */}
       <div className="no-print" style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--theme-border)', marginBottom: 0, flexWrap: 'wrap' }}>
         {[{ id: 'all', name: 'All Items' }, ...catsWithItems].map(tab => {
-          const count = items.filter(i => {
-            const matchCat = tab.id === 'all' || i.category_id === tab.id
-            const s = search.toLowerCase()
-            const matchSearch = i.name.toLowerCase().includes(s) || (i.item_code || '').toLowerCase().includes(s)
-            const usage = usageMap[i.id] || []
-            const matchUsage =
-              filterUsage === 'all'    ? true :
-              filterUsage === 'unused' ? usage.length === 0 :
-              filterUsage === 'stock'  ? (usage.includes('OS') || usage.includes('CS')) :
-              usage.includes(filterUsage)
-            return matchCat && matchSearch && matchUsage
-          }).length
+          const count = tabCounts[tab.id] || 0
           const active = filterCat === tab.id
           return (
             <button key={tab.id} onClick={() => setFilterCat(tab.id)} style={{

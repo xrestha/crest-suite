@@ -100,9 +100,12 @@ export default function Recipes() {
     // the cache window (or a reload after save/delete) keeps showing the current list while this
     // reloads quietly underneath.
     if (!hasLoadedOnceRef.current) setLoading(true)
-    const [{ data: r }, { data: i }] = await Promise.all([
+    const [{ data: r }, { data: i }, { data: openPeriods }] = await Promise.all([
       scopedFrom('recipes').order('name'),
-      scopedFrom('items').eq('is_active', true).eq('is_sub_recipe', false).order('name')
+      scopedFrom('items').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
+      // Independent of the recipe/item reads — used to be a third serial round-trip level after
+      // the ingredients fetch, for a lookup that needs nothing from either.
+      scopedFrom('monthly_periods', 'id').eq('status', 'open').limit(1),
     ])
 
     // Fetch ingredients separately — scoped to this client's recipe IDs
@@ -111,18 +114,25 @@ export default function Recipes() {
       ? await supabase.from('recipe_ingredients').select('*, items(name, uom, per_uom_rate, item_code, yield_pct, nutrition)').in('recipe_id', recipeIds)
       : { data: [] }
 
-    // Attach ingredients to recipes
+    // Attach ingredients to recipes — grouped in one pass (a filter per recipe was
+    // O(recipes × ingredient rows) on every load)
+    const ingsByRecipe = new Map()
+    ;(ings || []).forEach(ri => {
+      const list = ingsByRecipe.get(ri.recipe_id)
+      if (list) list.push(ri)
+      else ingsByRecipe.set(ri.recipe_id, [ri])
+    })
     const allRecipes = (r || []).map(recipe => ({
       ...recipe,
-      recipe_ingredients: (ings || []).filter(ri => ri.recipe_id === recipe.id)
+      recipe_ingredients: ingsByRecipe.get(recipe.id) || []
     }))
 
     // Manually attach sub_recipe data to each ingredient
+    const recipesById = new Map(allRecipes.map(x => [x.id, x]))
     allRecipes.forEach(recipe => {
       (recipe.recipe_ingredients || []).forEach(ri => {
         if (ri.sub_recipe_id) {
-          const sr = allRecipes.find(x => x.id === ri.sub_recipe_id)
-          ri.sub_recipe = sr || null
+          ri.sub_recipe = recipesById.get(ri.sub_recipe_id) || null
         }
       })
     })
@@ -131,11 +141,8 @@ export default function Recipes() {
     setAndCache(setItems, 'items', i || [])
     hasLoadedOnceRef.current = true
 
-    // Fetch overhead + sales data for open period to power overhead panel
-    const { data: periods } = await scopedFrom('monthly_periods', 'id')
-      .eq('status', 'open')
-      .limit(1)
-    const openPeriodId = periods?.[0]?.id || null
+    // Overhead + sales data for the open period to power the overhead panel
+    const openPeriodId = openPeriods?.[0]?.id || null
 
     if (openPeriodId) {
       const [{ data: ohRows }, { data: salesRows }] = await Promise.all([
@@ -185,7 +192,7 @@ export default function Recipes() {
   }, [printRecipe])
 
   // Sub-recipes available as ingredients (all recipes with category Sub-Recipe)
-  const subRecipes = recipes.filter(r => r.category === 'Sub-Recipe')
+  const subRecipes = useMemo(() => recipes.filter(r => r.category === 'Sub-Recipe'), [recipes])
 
   // Options for the searchable ingredient/sub-recipe pickers
   const itemOptions = useMemo(() => items.map(i => ({ value: i.id, label: i.name })), [items])
@@ -690,7 +697,10 @@ export default function Recipes() {
 
   // ── Derived values for edit form ──────────────────────────────
   const isSubRecipeForm = recipeForm.category === 'Sub-Recipe'
-  const liveCost = calcLiveCost(ingredients, items, recipes)
+  // Memoized: these walk the item list per ingredient row and used to re-run on every keystroke
+  // anywhere on the page (including the list view's search box, where the edit form isn't even
+  // on screen).
+  const liveCost = useMemo(() => calcLiveCost(ingredients, items, recipes), [ingredients, items, recipes])
   const livePrice = parseFloat(recipeForm.selling_price) || 0
   const liveVat = (recipeForm.vat_rate === '' || recipeForm.vat_rate == null) ? 0.13 : parseFloat(recipeForm.vat_rate)
   const liveFcPct = livePrice > 0 ? (liveCost / livePrice) * 100 : null
@@ -699,7 +709,9 @@ export default function Recipes() {
   const suggestedPrice = liveCost > 0 && !isSubRecipeForm ? getSuggestedPrice(liveCost, liveVat, liveFcTarget) : null
   const liveYieldQty = parseFloat(recipeForm.yield_qty) || 1
   const liveCostPerUnit = isSubRecipeForm && liveYieldQty > 0 ? liveCost / liveYieldQty : null
-  const liveNutri = showNutrition ? calcLiveNutrition(ingredients, items, recipes) : null
+  const liveNutri = useMemo(
+    () => showNutrition ? calcLiveNutrition(ingredients, items, recipes) : null,
+    [showNutrition, ingredients, items, recipes])
 
   // ── Tab state ─────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState('all')
@@ -728,8 +740,6 @@ export default function Recipes() {
     })
   }
 
-  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-
   // ── Filtered list ─────────────────────────────────────────────
   // The filter pills below and the FC% cell colour in the table MUST come from the same numbers.
   // They didn't: the pills read these client-configured thresholds while the cells were coloured
@@ -737,42 +747,64 @@ export default function Recipes() {
   // then painted red. Both now go through fcBand() (src/shared/imsFormulas.js).
   const { warn: fcWarn, critical: fcCrit } = fcThresholds(settings)
   const ingQ = ingSearch.trim().toLowerCase()
-  const filtered = recipes.filter(r => {
-    const matchSearch = r.name.toLowerCase().includes(search.toLowerCase())
-    const matchCat = filterCat === 'all' || r.category === filterCat
-    const matchIngredient = !ingQ || recipeHasIngredient(r, ingQ, recipes)
-    const matchFC = (() => {
-      if (fcFilter === 'all') return true
-      const cost = calcRecipeCost(r, recipes)
-      const price = parseFloat(r.selling_price) || 0
-      const fcPct = price > 0 ? (cost / price) * 100 : null
-      if (fcPct == null) return false
-      if (fcFilter === 'good')  return fcPct <= fcWarn
-      if (fcFilter === 'watch') return fcPct > fcWarn && fcPct <= fcCrit
-      if (fcFilter === 'high')  return fcPct > fcCrit
-      return true
-    })()
-    return matchSearch && matchCat && matchIngredient && matchFC
-  })
 
-  const regularRecipes = filtered.filter(r => r.category !== 'Sub-Recipe')
-  const subRecipeList = filtered.filter(r => r.category === 'Sub-Recipe')
+  // Cost per saved recipe, computed once per data change. calcRecipeCost recursively explodes
+  // sub-recipe trees, and it used to run per rendered row (and again inside the FC filter) on
+  // every keystroke of either search box — hundreds of thousands of iterations per character on a
+  // real menu.
+  const recipeCostById = useMemo(() => {
+    const m = new Map()
+    recipes.forEach(r => m.set(r.id, calcRecipeCost(r, recipes)))
+    return m
+  }, [recipes])
+  const costOf = (r) => recipeCostById.get(r.id) ?? calcRecipeCost(r, recipes)
 
-  // Build tab list: user-defined order first, then any orphaned categories (recipes tagged with a removed category)
-  const usedCats = [...new Set(recipes.filter(r => r.category !== 'Sub-Recipe').map(r => r.category))]
-  const presentCats = [
-    ...recipeCategories.filter(c => usedCats.includes(c)),
-    ...usedCats.filter(c => !recipeCategories.includes(c)),
-  ]
-  const tabs = [
-    { key: 'all', label: 'All Recipes', count: regularRecipes.length },
-    ...presentCats.map(c => ({
-      key: c,
-      label: c,
-      count: filtered.filter(r => r.category === c).length
-    })),
-    { key: 'sub-recipes', label: '⚙ Sub-Recipes', count: subRecipeList.length },
-  ]
+  const { filtered, regularRecipes, subRecipeList, tabs } = useMemo(() => {
+    const q = search.toLowerCase()
+    const filtered = recipes.filter(r => {
+      const matchSearch = r.name.toLowerCase().includes(q)
+      const matchCat = filterCat === 'all' || r.category === filterCat
+      const matchIngredient = !ingQ || recipeHasIngredient(r, ingQ, recipes)
+      const matchFC = (() => {
+        if (fcFilter === 'all') return true
+        const cost = recipeCostById.get(r.id) || 0
+        const price = parseFloat(r.selling_price) || 0
+        const fcPct = price > 0 ? (cost / price) * 100 : null
+        if (fcPct == null) return false
+        if (fcFilter === 'good')  return fcPct <= fcWarn
+        if (fcFilter === 'watch') return fcPct > fcWarn && fcPct <= fcCrit
+        if (fcFilter === 'high')  return fcPct > fcCrit
+        return true
+      })()
+      return matchSearch && matchCat && matchIngredient && matchFC
+    })
+
+    const regularRecipes = []
+    const subRecipeList = []
+    const countByCat = {}
+    filtered.forEach(r => {
+      if (r.category === 'Sub-Recipe') subRecipeList.push(r)
+      else regularRecipes.push(r)
+      countByCat[r.category] = (countByCat[r.category] || 0) + 1
+    })
+
+    // Tab list: user-defined order first, then any orphaned categories (recipes tagged with a
+    // removed category)
+    const usedCats = [...new Set(recipes.filter(r => r.category !== 'Sub-Recipe').map(r => r.category))]
+    const presentCats = [
+      ...recipeCategories.filter(c => usedCats.includes(c)),
+      ...usedCats.filter(c => !recipeCategories.includes(c)),
+    ]
+    const tabs = [
+      { key: 'all', label: 'All Recipes', count: regularRecipes.length },
+      ...presentCats.map(c => ({ key: c, label: c, count: countByCat[c] || 0 })),
+      { key: 'sub-recipes', label: '⚙ Sub-Recipes', count: subRecipeList.length },
+    ]
+    return { filtered, regularRecipes, subRecipeList, tabs }
+  }, [recipes, search, filterCat, ingQ, fcFilter, fcWarn, fcCrit, recipeCategories, recipeCostById])
+
+  // Role guard AFTER every hook (S601 pattern) — the memos above must run on every render.
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   const tabFiltered = activeTab === 'all'
     ? regularRecipes
@@ -993,7 +1025,7 @@ export default function Recipes() {
                   </thead>
                   <tbody>
                     {tabFiltered.map(recipe => {
-                      const cost = calcRecipeCost(recipe, recipes)
+                      const cost = costOf(recipe)
                       const yieldQty = parseFloat(recipe.yield_qty) || 1
                       const costPerUnit = cost / yieldQty
                       const rowHidden = selectedIds.size > 0 && !selectedIds.has(recipe.id)
@@ -1060,7 +1092,7 @@ export default function Recipes() {
                   </thead>
                   <tbody>
                     {tabFiltered.map(recipe => {
-                      const cost = calcRecipeCost(recipe, recipes)
+                      const cost = costOf(recipe)
                       const price = parseFloat(recipe.selling_price) || 0
                       const fcPct = price > 0 ? (cost / price) * 100 : null
                       const fcB = fcBand(fcPct, settings)

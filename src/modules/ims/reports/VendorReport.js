@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -117,25 +117,67 @@ export default function VendorReport() {
   }
 
   // Per-vendor discount: sum unique bill discounts attributed to each vendor
-  const vendorDiscountMap = (() => {
-    const seen = new Set()
+  // One pass over purchases/returns into index maps. Everything below reads these — the old shape
+  // re-filtered the full purchases array per vendor (eight passes each), per bill, and per CELL of
+  // the Daily Breakdown matrix (days × vendors × entries — millions of element visits on every
+  // keystroke of the vendor search box).
+  const ix = useMemo(() => {
+    const billKey = e => e.purchase_group_id || `${e.vendor_id}|${e.invoice_ref || ''}|${e.bs_day}`
+    const purByVendor = new Map()     // vendor_id (or null) -> purchase entries
+    const retByVendor = new Map()
+    const retByEntry = new Map()      // purchase_entry_id -> return rows
+    const billMap = new Map()         // bill key -> entries, insertion order = first encounter
+    const netByVendorDay = new Map()  // vendor_id -> Map(bs_day -> net)
+    const netByDay = new Map()
+    const netByVendor = new Map()
+    const addNet = (vid, day, amt) => {
+      netByDay.set(day, (netByDay.get(day) || 0) + amt)
+      netByVendor.set(vid, (netByVendor.get(vid) || 0) + amt)
+      let m = netByVendorDay.get(vid)
+      if (!m) { m = new Map(); netByVendorDay.set(vid, m) }
+      m.set(day, (m.get(day) || 0) + amt)
+    }
+    purchases.forEach(p => {
+      const vid = p.vendor_id ?? null
+      let list = purByVendor.get(vid)
+      if (!list) { list = []; purByVendor.set(vid, list) }
+      list.push(p)
+      const gid = billKey(p)
+      let bl = billMap.get(gid)
+      if (!bl) { bl = []; billMap.set(gid, bl) }
+      bl.push(p)
+      addNet(vid, p.bs_day, p.qty * p.rate)
+    })
+    returns.forEach(r => {
+      const vid = r.vendor_id ?? null
+      let list = retByVendor.get(vid)
+      if (!list) { list = []; retByVendor.set(vid, list) }
+      list.push(r)
+      if (r.purchase_entry_id != null) {
+        let l = retByEntry.get(r.purchase_entry_id)
+        if (!l) { l = []; retByEntry.set(r.purchase_entry_id, l) }
+        l.push(r)
+      }
+      addNet(vid, r.bs_day, -(r.qty * r.rate))
+    })
+    return { billKey, purByVendor, retByVendor, retByEntry, billMap, netByVendorDay, netByDay, netByVendor }
+  }, [purchases, returns])
+
+  const vendorDiscountMap = useMemo(() => {
     const map = {}
-    purchases.forEach(e => {
-      const disc = parseFloat(e.discount_amount) || 0
+    ix.billMap.forEach(entries => {
+      const disc = Math.max(0, ...entries.map(p => parseFloat(p.discount_amount) || 0))
       if (disc <= 0) return
-      const gid = e.purchase_group_id || `${e.vendor_id}|${e.invoice_ref || ''}|${e.bs_day}`
-      if (seen.has(gid)) return
-      seen.add(gid)
-      const vid = e.vendor_id || '__none__'
+      const vid = entries[0].vendor_id || '__none__'
       map[vid] = (map[vid] || 0) + disc
     })
     return map
-  })()
+  }, [ix])
 
   // Vendor summary — net spend (ex-VAT, after discount and returns)
-  const vendorSummary = vendors.map(vendor => {
-    const vPurchases  = purchases.filter(p => p.vendor_id === vendor.id)
-    const vReturns    = returns.filter(r => r.vendor_id === vendor.id)
+  const vendorSummary = useMemo(() => vendors.map(vendor => {
+    const vPurchases  = ix.purByVendor.get(vendor.id) || []
+    const vReturns    = ix.retByVendor.get(vendor.id) || []
     const gross       = vPurchases.reduce((s, p) => s + p.qty * p.rate, 0)
     const discount    = vendorDiscountMap[vendor.id] || 0
     const returned    = vReturns.reduce((s, r) => s + r.qty * r.rate, 0)
@@ -150,9 +192,9 @@ export default function VendorReport() {
     const fonepay = vPurchases.filter(p => p.payment_method === 'FonePay').reduce((s, p) => s + p.qty * p.rate, 0)
       - vReturns.filter(r => r.payment_method === 'FonePay').reduce((s, r) => s + r.qty * r.rate, 0)
     return { vendor, gross, discount, returned, net, count, returnCount, days, cash, credit, fonepay }
-  }).filter(r => r.gross > 0 || r.returned > 0)
+  }).filter(r => r.gross > 0 || r.returned > 0), [vendors, ix, vendorDiscountMap])
 
-  const unassigned = purchases.filter(p => !p.vendor_id)
+  const unassigned = ix.purByVendor.get(null) || []
   const unassignedTotal = unassigned.reduce((s, p) => s + p.qty * p.rate, 0)
 
   const grandGross    = purchases.reduce((s, p) => s + p.qty * p.rate, 0)
@@ -160,22 +202,18 @@ export default function VendorReport() {
   const grandReturn   = returns.reduce((s, r) => s + r.qty * r.rate, 0)
   const grandNet      = grandGross - grandDiscount - grandReturn
 
-  const allDays = [...new Set([...purchases.map(p => p.bs_day), ...returns.map(r => r.bs_day)])].sort((a, b) => a - b)
-  const activeVendors = vendors.filter(v => purchases.some(p => p.vendor_id === v.id))
+  const allDays = useMemo(() => [...ix.netByDay.keys()].sort((a, b) => a - b), [ix])
+  const activeVendors = useMemo(
+    () => vendors.filter(v => (ix.purByVendor.get(v.id) || []).length > 0),
+    [vendors, ix])
 
   // Discount Received — one row per bill that has a discount
-  const discountedBills = (() => {
-    const seen = new Set()
+  const discountedBills = useMemo(() => {
     const bills = []
-    purchases.forEach(e => {
-      const disc = parseFloat(e.discount_amount) || 0
+    ix.billMap.forEach(billEntries => {
+      const disc = Math.max(0, ...billEntries.map(p => parseFloat(p.discount_amount) || 0))
       if (disc <= 0) return
-      const gid = e.purchase_group_id || `${e.vendor_id}|${e.invoice_ref || ''}|${e.bs_day}`
-      if (seen.has(gid)) return
-      seen.add(gid)
-      const billEntries = purchases.filter(p =>
-        (p.purchase_group_id || `${p.vendor_id}|${p.invoice_ref || ''}|${p.bs_day}`) === gid
-      )
+      const e = billEntries[0]
       const billTotal   = billEntries.reduce((s, p) => s + p.qty * p.rate, 0)
       const vatSubtotal = billEntries.filter(p => p.vat_inclusive).reduce((s, p) => s + p.qty * p.rate, 0)
       const vatTaxable  = billTotal > 0 ? vatSubtotal * (1 - disc / billTotal) : 0
@@ -189,7 +227,7 @@ export default function VendorReport() {
       })
     })
     return bills.sort((a, b) => a.day - b.day)
-  })()
+  }, [ix])
 
   const vendorDiscountRows = (() => {
     const map = {}
@@ -205,19 +243,13 @@ export default function VendorReport() {
 
   // Bill-level drilldown — one row per bill (vendor + invoice + day), any payment method,
   // with a payment status: Cash/FonePay settle immediately, Credit follows payable_payments/aging.
-  const allBills = (() => {
-    const seen = new Set()
+  const allBills = useMemo(() => {
     const bills = []
-    purchases.forEach(e => {
-      const gid = e.purchase_group_id || `${e.vendor_id}|${e.invoice_ref || ''}|${e.bs_day}`
-      if (seen.has(gid)) return
-      seen.add(gid)
-      const billEntries = purchases.filter(p =>
-        (p.purchase_group_id || `${p.vendor_id}|${p.invoice_ref || ''}|${p.bs_day}`) === gid
-      )
+    ix.billMap.forEach((billEntries, gid) => {
+      const e = billEntries[0]
       const total = billEntries.reduce((s, p) => s + p.qty * p.rate, 0)
       const disc  = Math.max(0, ...billEntries.map(p => parseFloat(p.discount_amount) || 0))
-      const billReturns = returns.filter(r => billEntries.some(p => p.id === r.purchase_entry_id))
+      const billReturns = billEntries.flatMap(p => ix.retByEntry.get(p.id) || [])
       const returnedAmt = billReturns.reduce((s, r) => s + r.qty * r.rate, 0)
       const net = total - disc - returnedAmt
       const paymentMethod = e.payment_method || 'Cash'
@@ -250,7 +282,7 @@ export default function VendorReport() {
       })
     })
     return bills.sort((a, b) => a.day - b.day)
-  })()
+  }, [ix, paymentsMap, selectedPeriod])
 
   const drilldownBills = drilldownVendor
     ? allBills.filter(b => b.vendor_id === drilldownVendor.id && (drilldownDay == null || b.day === drilldownDay))
@@ -275,22 +307,18 @@ export default function VendorReport() {
   const singleVendor = vendorSearch && filteredActiveVendors.length === 1 ? filteredActiveVendors[0] : null
   const singleVendorDays = singleVendor ? allDays.filter(day => vendorDayNet(singleVendor.id, day) !== 0) : []
 
+  // Map lookups off `ix` — each of these used to be two full filter+reduce passes over purchases
+  // AND returns, called once per matrix cell.
   function vendorDayNet(vendorId, day) {
-    const gross = purchases.filter(p => p.vendor_id === vendorId && p.bs_day === day).reduce((s, p) => s + p.qty * p.rate, 0)
-    const ret   = returns.filter(r => r.vendor_id === vendorId && r.bs_day === day).reduce((s, r) => s + r.qty * r.rate, 0)
-    return gross - ret
+    return ix.netByVendorDay.get(vendorId)?.get(day) || 0
   }
 
   function dayNet(day) {
-    const gross = purchases.filter(p => p.bs_day === day).reduce((s, p) => s + p.qty * p.rate, 0)
-    const ret   = returns.filter(r => r.bs_day === day).reduce((s, r) => s + r.qty * r.rate, 0)
-    return gross - ret
+    return ix.netByDay.get(day) || 0
   }
 
   function vendorNet(vendorId) {
-    const gross = purchases.filter(p => p.vendor_id === vendorId).reduce((s, p) => s + p.qty * p.rate, 0)
-    const ret   = returns.filter(r => r.vendor_id === vendorId).reduce((s, r) => s + r.qty * r.rate, 0)
-    return gross - ret
+    return ix.netByVendor.get(vendorId) || 0
   }
 
   function openVendorDrilldown(vendor, day = null) {

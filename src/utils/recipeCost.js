@@ -153,12 +153,15 @@ export async function explodeRecipeTree(supabase, recipeIds) {
 export async function computeRecipeCosts(supabase, recipeIds) {
   if (!recipeIds || recipeIds.length === 0) return {}
 
+  // cost_price needs nothing from the explode walk — start it first so it runs concurrently with
+  // the walk's own round trips instead of adding a serial one after them.
+  const manualCostsPromise = supabase.from('recipes').select('id, cost_price').in('id', recipeIds)
   const breakdown = await explodeRecipeIngredients(supabase, recipeIds)
   const itemIds = [...new Set(Object.values(breakdown).flatMap(rows => rows.map(r => r.item_id)))]
 
   const [{ data: rates }, { data: manualCosts }] = await Promise.all([
     itemIds.length > 0 ? supabase.from('items').select('id, per_uom_rate').in('id', itemIds) : Promise.resolve({ data: [] }),
-    supabase.from('recipes').select('id, cost_price').in('id', recipeIds),
+    manualCostsPromise,
   ])
   const rateMap = {}
   ;(rates || []).forEach(i => { rateMap[i.id] = parseFloat(i.per_uom_rate) || 0 })

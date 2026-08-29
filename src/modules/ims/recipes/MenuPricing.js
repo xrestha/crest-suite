@@ -53,13 +53,16 @@ export default function MenuPricing() {
     if (!effectiveClientId) return
     setLoading(true)
 
-    const [{ data: recipeData }, { data: subRecipeData }] = await Promise.all([
+    const [{ data: recipeData }, { data: subRecipeData }, { data: suggData }] = await Promise.all([
       scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, pos_enabled, cost_price')
         .eq('is_active', true)
         .neq('category', 'Sub-Recipe')
         .order('name'),
       scopedFrom('recipes', 'id, yield_qty')
         .eq('category', 'Sub-Recipe'),
+      // Manual pairings — independent of everything else here; used to be a third serial round
+      // trip at the tail of the load.
+      scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id'),
     ])
 
     const allIds = [
@@ -129,8 +132,7 @@ export default function MenuPricing() {
 
     setRecipes(processed)
 
-    // Load manual pairings (recipe_suggestions)
-    const { data: suggData } = await scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id')
+    // Manual pairings (fetched above, in parallel)
     const sMap = {}
     ;(suggData || []).forEach(s => {
       if (!sMap[s.recipe_id]) sMap[s.recipe_id] = []

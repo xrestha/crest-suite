@@ -287,9 +287,10 @@ export default function Requisitions() {
     setSaving(true)
     const { error: hErr } = await scopedUpdate('requisitions', { status: 'issued' }).eq('id', selectedReq.id)
     if (hErr) { setSaving(false); return }
-    for (const line of issueLines) {
-      await supabase.from('requisition_lines').update({ qty_issued: parseFloat(line.qty_issued || 0) }).eq('id', line.id)
-    }
+    // The per-line updates are independent of each other — serially they cost one round trip per
+    // line (a 20-line requisition took seconds to issue).
+    await Promise.all(issueLines.map(line =>
+      supabase.from('requisition_lines').update({ qty_issued: parseFloat(line.qty_issued || 0) }).eq('id', line.id)))
     await loadReqs(selectedPeriod.id)
     backToList()
     setSaving(false)
