@@ -159,6 +159,77 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S630 — 2026-08-29 — Supabase Advisor triage: four guards that fail open, and an overload nobody dropped
+
+Triage of a pasted Security Advisor report (lints `0028`/`0029`, "Public/Signed-In Users Can Execute
+SECURITY DEFINER Function"). Most of it is noise this project already reasoned through — migration
+`20260812100000` ends by naming the nine anon-executable functions that are permanent and correct,
+and says the lint "can never reach zero on this project, and should not be treated as a number to
+drive down". That still holds, and the report confirms that migration is applied. The value was in
+auditing **inside** the functions, which no linter can do. Migration
+`20260829120000_fail_open_guards_and_stale_overload.sql` is written but **not yet applied** — this
+project applies migrations by hand in the Dashboard SQL Editor.
+
+**The finding: four SECURITY DEFINER guards fail OPEN.** `is_admin()` is a `LANGUAGE sql` scalar,
+`select role = 'admin' from profiles where id = auth.uid()`, which returns **NULL, not false**, when
+no row matches. So the natural guard `IF NOT public.is_admin() THEN RAISE` evaluates `NOT NULL` →
+NULL, `IF NULL THEN` never fires, and execution falls through to the privileged body. Worst is
+`admin_clear_audit_logs`: all three parameters `DEFAULT NULL` and each clause is
+`(p_x IS NULL OR col = p_x)`, so an argument-less call collapses every clause to TRUE and the body is
+an **unfiltered `DELETE FROM audit_logs` — the whole forensic record, every tenant** — and
+`authenticated` holds EXECUTE. `find_user_id_by_email` (an email → user-uuid oracle over all of
+`auth.users`, in its other spelling `NULL <> 'admin'`), `get_cooccurrence` and
+`get_hr_self_service_status` leak rather than destroy.
+
+Reachable because `handle_new_user()` ends `exception when others then return new`, so any failure of
+its profile insert leaves an auth account that signs in normally and **permanently** has no
+`profiles` row — a persistent state, not a race. An issued access token also outlives the profile by
+up to its TTL after an admin deletes a user. Deliberately left alone: tightening that handler can
+hard-fail signups, which is a separate decision.
+
+**Fixed at the guard, not in `is_admin()`** — hardening the helper would not close `get_cooccurrence`
+or `get_hr_self_service_status`, whose second operand (`p_client_id = <profile lookup>`) is
+independently NULL for the same caller, and `false OR NULL` is still NULL; both would keep falling
+open while looking fixed. `COALESCE(<whole condition>, false)` handles every NULL source at once and
+matches `set_active_outlet` (S617), the one place that already got this right. `get_pos_device_secret`
+matches the shape and was left alone: its preceding `IS DISTINCT FROM` check is NULL-safe and raises
+first, so the fail-open line below it is unreachable.
+
+**`submit_guest_order` has had two live overloads since 2026-07-07.** `20260707230000`'s comment
+claims appending a trailing defaulted parameter is "CREATE OR REPLACE-compatible … no DROP needed".
+It is not — Postgres keys `CREATE OR REPLACE` on the full argument-type signature, so that migration
+created a **second** function, and every later fix (the covers clamp, the `unique_violation` handler)
+landed only on the 4-arg body. The DoS control is unaffected either way, because it is a partial
+unique index on the table rather than logic in the function. What made it worth dropping is the
+covers default: a 3-key call writes `covers = 1`, and `PosOrders.jsx` **skips the covers numpad
+entirely** when a pending guest request exists, so staff are never prompted and the bill silently
+records one cover into the Covers Report. `GuestMenu.jsx` always sends four, so nothing reached it.
+
+`clear_stale_active_outlet()` kept the default PUBLIC EXECUTE — created seven hours after the
+`20260812100000` sweep, making it the tenth entry on a list that migration predicted would settle at
+nine. It `RETURNS trigger`, so it is not invocable; the drift is the point. Revoked with `REVOKE ALL`
+and no grant back, following `guard_pos_order_close` rather than the older `assign_*` pattern that
+grants `authenticated` back for no reason — a trigger function needs EXECUTE only at `CREATE TRIGGER`
+time, and `guard_pos_order_close` has fired on every POS bill close since 2026-08-19 holding no
+grants at all, which is the proof.
+
+The migration asserts behaviourally rather than inferring from statements having run: it sets a
+profile-less JWT claim, proves `is_admin()` really does return NULL for it, and requires all four
+functions to raise — passing `admin_clear_audit_logs` a client_id that cannot match, so that if that
+assertion ever fails the fall-through DELETE still removes nothing. It then re-checks that a real
+admin still passes, that the surviving overload is the 4-arg one, and that
+`clear_stale_active_outlet` is uncallable but still wired to its trigger.
+
+**Found but NOT fixed — `pos_plan` is not vestigial.** CLAUDE.md and this README both state that
+`hr_plan`/`pos_plan` are "vestigial columns — no longer read or written anywhere" since S548. That is
+true of the frontend and false of the SQL layer: `submit_guest_order` (both overloads) and
+`get_guest_menu` still unlock Guest QR Ordering on `v_pos_plan = 'pro'`, and `billing-export` exports
+the column. So a client carrying a stale `pos_plan = 'pro'` gets a Pro feature without the
+`guest_ordering` flag, invisibly, off a column no admin screen shows and nothing maintains — the same
+plan-raiser shape S548 and S574 existed to remove. Left for a decision rather than swept into a
+security fix, because removing the clause changes who can use guest ordering and may need a
+grandfather sweep the way S548's retier did.
+
 ### S629 — 2026-08-29 — /impeccable optimize over the POS module: the backfill that could not finish, and a bill rebuilt per keystroke
 
 Third module through the same sweep (IMS S625/S626, HR S628), and the same shapes turned up again —
