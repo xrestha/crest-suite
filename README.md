@@ -233,6 +233,29 @@ exactly this for verifying an index by `pg_index.indkey[0]` instead of its name,
 carries the general form. Second apply committed clean — and because the first run *failed* on an
 assertion, we know they genuinely execute rather than passing by being skipped.
 
+**Smoke-tested against live production.** Five checks ran straight against PostgREST with the public
+anon key, no login and no writes (`submit_guest_order` raises `Table not found` on its first line, so
+a bogus table id never reaches the INSERT): the 4-key payload resolves, **the 3-key payload resolves
+to the 4-arg body via `p_covers`'s default**, `clear_stale_active_outlet` is now `PGRST202` to anon
+where the Advisor had listed it executable, `get_cooccurrence` stays `42501` to anon, and
+`get_guest_menu` still returns `200` as the control proving the schema cache is healthy rather than
+empty. **That second one had been reasoning, not evidence** — it was the whole justification for
+choosing `DROP` over the rules file's "keep the old signature", and it is now measured.
+
+Then the parts needing a real session. **Combo Builder** rendered actual pairing rows (COFFEE +
+SANDWICH, COFFEE + VEG MOMO), which can only happen if `get_cooccurrence` returned data — so the
+rewritten guard admits a real admin JWT through the API, not just in-transaction. And the guest-order
+write, end to end on a dummy outlet: covers set to **4** on the phone came back as **4** on the POS
+order screen with the numpad correctly skipped — not 1 (the DB fallback) and not 2 (the guest menu's
+default), so the number could only have come through the surviving overload.
+
+**Found but NOT fixed — `EmployeeList.jsx` drops a read error.** `fetchSelfServiceStatus()` destructures
+only `{ data }` and does `data || []`, so a failed `get_hr_self_service_status` renders identically to
+"nobody has self-service" — which is why that page could not serve as a smoke test at all, in either
+direction. Same shape as the S594 report-page rule, on a page nobody had applied it to. Live
+consequence is small but real: if the RPC fails, an employee who *does* have a self-service login shows
+"Enable Self-Service", and pressing it tries to create a second login for them.
+
 **Found but NOT fixed — `pos_plan` is not vestigial.** CLAUDE.md and this README both state that
 `hr_plan`/`pos_plan` are "vestigial columns — no longer read or written anywhere" since S548. That is
 true of the frontend and false of the SQL layer: `submit_guest_order` (both overloads) and
