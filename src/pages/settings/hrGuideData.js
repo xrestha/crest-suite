@@ -134,7 +134,8 @@ export const HR_GUIDE_GROUPS = [
           'The per-fiscal-year list of company holidays, typed Public (gazetted — banks closed, statutory) or Optional (floating), each with an optional demand multiplier for forecasting. The only HR page open to staff rank, so anyone can check what is coming.',
         workflow: [
           'Pick the BS fiscal year, add holidays with month/day, type, and (optionally) a demand multiplier — e.g. 1.5 for a day you expect 50% more covers.',
-          'Five fixed national days can be seeded automatically: Constitution Day (3 Ashwin), Prithvi Narayan Shah\'s Birthday (27 Poush), Martyrs\' Day (5 Magh), Democracy Day (7 Falgun), Republic Day (15 Jestha).',
+          '"Seed FY …" fills the whole year from the Nepal Gazette — seven fixed national days (New Year 1 Baishakh, Republic Day 15 Jestha, Constitution Day 3 Ashwin, Prithvi Jayanti 27 Poush, Maghe Sankranti 1 Magh, Martyrs\' Day 16 Magh, Democracy Day 7 Falgun) plus every gazetted movable holiday held for that BS year: Dashain, Tihar, Chhath, Shivaratri, the three Lhosars, Holi and the rest.',
+          'Pressing Seed again is safe — it never touches a holiday already entered or edited, and it reports what it could not cover.',
         ],
         fields: [
           { label: 'Public vs Optional', desc: 'Public (gazetted) entries are what the Overtime module reads to auto-suggest the 2× holiday OT rate. Optional holidays are informational.' },
@@ -146,6 +147,9 @@ export const HR_GUIDE_GROUPS = [
         gotchas: [
           'If this calendar is left empty, Overtime never offers the 2× holiday rate — the 1.5× weekday rate is all anyone gets, silently.',
           'Days are validated against the real BS month length (28-32 days) — there is no 30-day assumption anywhere in the module.',
+          'Movable dates are TRANSCRIBED per BS year from the gazette, never computed — Nepal publishes them only in Falgun of the preceding year, so the last quarter of the current fiscal year (Baishakh–Ashadh) carries fixed-date holidays only until that gazette exists. Seed says so on screen rather than looking complete.',
+          'Eid al-Fitr, Eid al-Adha, Mohammad Jayanti, Guru Nanak Jayanti and Bhoto Jatra have no gazetted date at all and are never seeded — add them by hand each year.',
+          'Holi is seeded twice, for Hill (7 Chaitra) and Terai (8 Chaitra) districts — delete whichever does not apply to the outlet, or it pays 2× OT on a day that is not its holiday.',
         ],
         connections: 'Public entries → Overtime\'s holiday-rate auto-suggest → payroll OT amounts. Demand multipliers → Demand Forecast and Roster planning.',
       },

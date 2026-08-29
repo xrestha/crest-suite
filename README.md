@@ -159,6 +159,69 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S635 — 2026-08-29 — the Holiday Calendar had no holidays in it, and Martyrs' Day was on the wrong date
+
+Service worker `crest-v154`. No migration. New: `src/modules/hr/holidays/holidayData.js` +
+`holidayData.test.js` (16 assertions).
+
+Reported from a screenshot of FY 2083/84: five holidays, none of them Dashain, in Bhadra — with
+Dashain five weeks away. The page was working exactly as built. `FIXED_HOLIDAYS` held the five
+holidays whose BS date never moves, the button said **Seed Fixed**, and the empty state told the
+owner to "add movable ones (Dashain, Tihar, Holi, etc.) manually". Nobody transcribes thirty
+gazette rows by hand, so in practice the calendar stayed empty of precisely the days it exists to
+flag — and `Overtime.jsx` reads this table to decide the **2× public-holiday rate**, so a missing
+Dashain pays 1.5× on the biggest working days of the Nepali year.
+
+**Martyrs' Day was seeded on Magh 5. Sahid Diwas is Magh 16** — the day the four martyrs were
+executed in 1997 BS. Wrong since the page shipped, in both directions at once: 2× offered on an
+ordinary Wednesday, weekday rate on the real holiday.
+
+**Research, not recall.** The Nepal Gazette notice of 18 Falgun 2082 (Ministry of Home Affairs)
+gazettes 52 days for BS 2083; the dates were taken from it and cross-read against Hamro Patro and
+NepalHRM, all three agreeing on every entry, and every date then validated against `bsCalendar.js`'s
+own 2083 month lengths (Fulpati on Ashwin 31 only exists because Ashwin 2083 has 31 days — it has 30
+in 2084).
+
+**Three kinds of holiday, and only one is derivable**, which is now the organising idea of the file:
+
+- **FIXED** — same BS date every year. Grew from five to seven: Nepali New Year (Baishakh 1) and
+  Maghe Sankranti (Magh 1) were missing and are as fixed as the rest. The per-row `yearOffset` field
+  is gone; `resolveYear()` already encoded the same rule and two sources for one value is one too
+  many.
+- **MOVABLE** — lunar, or AD-fixed and therefore moving in BS. 36 rows transcribed for BS 2083,
+  keyed by **real BS year**, because a Nepali FY spans two of them and the gazette is published per
+  BS year.
+- **SIGHTED** — Eid al-Fitr, Eid al-Adha, Mohammad Jayanti, Guru Nanak Jayanti, Bhoto Jatra. No
+  gazetted date at all. Named on screen so their absence reads as a known gap, never an oversight.
+
+**The button seeds a fiscal year and reports its own coverage.** FY 2083/84 goes from 5 rows to 39.
+It is additive and name-keyed, so a client's own entry or edit is never overruled — the gazette is a
+starting point for a movable date, not an authority over a decision the owner made. The one
+exception is a **fixed** holiday found on the wrong date: those are definitional, so Magh 5 is
+corrected to Magh 16 and the correction is named in the result rather than applied silently.
+
+**`missing` is the half that matters.** BS 2084's gazette will not exist until Falgun 2083, so
+Baishakh–Ashadh 2084 genuinely cannot be filled — and the seed says so by name instead of adding 39
+rows and looking complete. An owner who reads "39 added" and later finds no Buddha Jayanti has no
+way to tell a gap in our table from a gap in the gazette.
+
+**`optional` decides money, not styling.** `Overtime.jsx` pays 2× on `public` rows only, so a Newar
+jatra, a women-only parva and Christmas are `optional` while every nationwide day off is `public`.
+Holi is the awkward one — a real day off in both halves of the country, a day apart in each — so both
+are seeded as public with the region in the name and the result tells the owner to delete the one
+that does not apply, rather than guessing at their district.
+
+**The test caught a live defect before it shipped.** Three `Dashain holiday` rows and two
+`Tihar holiday` rows shared a name, and the name is the seed's dedupe key — so Kartik 5, 6 and 26
+would have been silently dropped on every press, in the middle of the two festivals the whole change
+is about. They are named by BS day now. A second test covers the mirror-image trap: renaming
+`Prithvi Narayan Shah's Birthday` to `Prithvi Jayanti (National Unity Day)` would have given every
+client who ever pressed the old button **two** Poush 27 holidays, so `FIXED_HOLIDAYS` entries carry a
+`legacy` name list and a rename updates the existing row instead of inserting beside it.
+
+**Extending this is a transcription job, never a calculation.** Verify each date in two places before
+adding a BS year; a wrong date here is a wrong figure on a real payslip.
+
 ### S634 — 2026-08-29 — the trend tooltip's arrows carry a verdict now, not just a position
 
 Service worker `crest-v153`. No migration.

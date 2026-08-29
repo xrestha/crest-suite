@@ -5,22 +5,9 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth } from '../../../utils/bsCalendar'
+import { errorText } from '../../../shared/errorText'
+import { FIXED_HOLIDAYS, SIGHTED_HOLIDAYS, resolveYear, movableForFy } from './holidayData'
 import { fiscalYearOf } from '../payroll/tds'
-
-// Fixed-date Nepal gazetted public holidays (same BS date every year).
-// yearOffset: 0 = same BS year as FY start (Shrawan year), 1 = following BS year.
-const FIXED_HOLIDAYS = [
-  { name: 'Constitution Day (Sambidhan Diwas)',         bs_month: 6,  bs_day: 3,  yearOffset: 0 },
-  { name: "Prithvi Narayan Shah's Birthday",            bs_month: 9,  bs_day: 27, yearOffset: 0 },
-  { name: "Martyrs' Day (Sahid Diwas)",                 bs_month: 10, bs_day: 5,  yearOffset: 0 },
-  { name: 'National Democracy Day (Prajatantra Diwas)', bs_month: 11, bs_day: 7,  yearOffset: 0 },
-  { name: 'Republic Day (Ganatantra Diwas)',            bs_month: 2,  bs_day: 15, yearOffset: 1 },
-]
-
-// Actual BS year for a holiday given FY start year and month.
-function resolveYear(fyYear, bs_month) {
-  return bs_month >= 4 ? fyYear : fyYear + 1
-}
 
 function fyLabel(fy) {
   return `FY ${fy}/${(fy + 1).toString().slice(2)}`
@@ -59,6 +46,9 @@ export default function HolidayCalendar() {
   const [form, setForm] = useState({ open: false, editing: null, ...BLANK })
   const [busy, setBusy] = useState(false)
   const [msg,  setMsg]  = useState('')
+  // What the last seed actually did — kept out of `msg` because the coverage note is several
+  // sentences and belongs on the page, not squeezed into the header's one-line status span.
+  const [seedReport, setSeedReport] = useState(null)
 
   const load = useCallback(async () => {
     if (!clientId) return
@@ -116,23 +106,68 @@ export default function HolidayCalendar() {
     await load()
   }
 
-  async function seedFixed() {
+  // Seed one fiscal year from both tables. Deliberately additive and name-keyed: a client who has
+  // already entered "Bijaya Dashami" by hand keeps their row, and a client who has customised a
+  // movable date (a local jatra observed a day apart) is never overruled — the gazette is a
+  // starting point for those, not an authority over a decision the owner already made.
+  //
+  // The one exception is a FIXED holiday found on the wrong date. Those dates are definitional, so
+  // a mismatch is an error rather than a preference, and skipping it would leave the Magh 5
+  // Martyrs' Day bug sitting in every calendar that already has one. The correction is named in
+  // the result so it is never silent.
+  async function seedYear() {
     if (!clientId) { setMsg('error:No client selected'); return }
-    const existingNames = new Set(fyHolidays.map(h => h.name))
-    const toInsert = FIXED_HOLIDAYS
-      .filter(h => !existingNames.has(h.name))
-      .map(h => ({
-        bs_year: fyYear + h.yearOffset,
-        bs_month: h.bs_month,
-        bs_day: h.bs_day,
+    setBusy(true); setMsg(''); setSeedReport(null)
+
+    const byName = new Map(fyHolidays.map(h => [h.name, h]))
+    const toInsert = []
+    const corrections = []
+
+    FIXED_HOLIDAYS.forEach(h => {
+      const bs_year = resolveYear(fyYear, h.bs_month)
+      const existing = byName.get(h.name) || (h.legacy || []).map(n => byName.get(n)).find(Boolean)
+      if (!existing) {
+        toInsert.push({ bs_year, bs_month: h.bs_month, bs_day: h.bs_day, name: h.name, holiday_type: 'public' })
+        return
+      }
+      const movedDate = existing.bs_month !== h.bs_month || existing.bs_day !== h.bs_day
+      const renamed   = existing.name !== h.name
+      if (!movedDate && !renamed) return
+      corrections.push({
+        id: existing.id,
         name: h.name,
-        holiday_type: 'public',
-      }))
-    if (toInsert.length === 0) { setMsg('ok:All fixed holidays already added'); return }
-    setBusy(true)
-    const { error } = await scopedInsert('hr_holiday_calendar', toInsert)
-    if (error) { setMsg('error:' + error.message); setBusy(false); return }
-    await load(); setMsg(`ok:Added ${toInsert.length} fixed holiday${toInsert.length > 1 ? 's' : ''}`); setBusy(false)
+        renamed: renamed ? existing.name : null,
+        from: `${BS_MONTHS[existing.bs_month - 1]} ${existing.bs_day}`,
+        to: `${BS_MONTHS[h.bs_month - 1]} ${h.bs_day}`,
+        movedDate,
+        patch: { bs_year, bs_month: h.bs_month, bs_day: h.bs_day, name: h.name },
+      })
+    })
+
+    const { rows: movable, missing } = movableForFy(fyYear)
+    movable.forEach(h => {
+      if (byName.has(h.name)) return
+      toInsert.push({
+        bs_year: h.bs_year, bs_month: h.m, bs_day: h.d, name: h.name,
+        holiday_type: h.optional ? 'optional' : 'public',
+      })
+    })
+
+    if (toInsert.length > 0) {
+      const { error } = await scopedInsert('hr_holiday_calendar', toInsert)
+      if (error) { setMsg('error:' + errorText(error, 'operator')); setBusy(false); return }
+    }
+    for (const c of corrections) {
+      const { error } = await scopedUpdate('hr_holiday_calendar', c.patch).eq('id', c.id)
+      if (error) { setMsg('error:' + errorText(error, 'operator')); setBusy(false); return }
+    }
+
+    await load()
+    setSeedReport({ added: toInsert.length, corrections, missing })
+    setMsg(toInsert.length || corrections.length
+      ? `ok:${toInsert.length} added${corrections.length ? `, ${corrections.length} corrected` : ''}`
+      : 'ok:Already up to date')
+    setBusy(false)
   }
 
   const bs_month_form = parseInt(form.bs_month, 10)
@@ -162,9 +197,9 @@ export default function HolidayCalendar() {
             {fyYears.map(y => <option key={y} value={y}>{fyLabel(y)}</option>)}
           </select>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Tip text="Adds 5 fixed-date Nepal gazetted holidays for this FY: Constitution Day (Ashwin 3), Prithvi Narayan Shah's Birthday (Poush 27), Martyrs' Day (Magh 5), Democracy Day (Falgun 7), Republic Day (Jestha 15). Movable holidays (Dashain, Tihar, Holi, etc.) must be added manually each year." width={340}>
-              <button className="btn btn-ghost" onClick={seedFixed} disabled={busy} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-                ＋ Seed Fixed
+            <Tip text={`Fills this fiscal year from the Nepal Gazette — the fixed-date holidays (New Year, Republic Day, Constitution Day, Prithvi Jayanti, Maghe Sankranti, Martyrs' Day, Democracy Day) plus every gazetted movable one we hold for it: Dashain, Tihar, Chhath, Shivaratri, the three Lhosars, Holi and the rest. Safe to press again — it never touches a holiday you have already entered or edited, and it tells you what it could not cover. ${SIGHTED_HOLIDAYS} have no gazetted date and always need adding by hand.`} width={360}>
+              <button className="btn btn-ghost" onClick={seedYear} disabled={busy} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                ＋ Seed {fyLabel(fyYear)}
               </button>
             </Tip>
             <button className="btn btn-primary" onClick={openAdd} style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
@@ -174,6 +209,38 @@ export default function HolidayCalendar() {
           {msg && <span role="status" style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
       </div>
+
+      {/* What the seed did, and what it could not do. The coverage gap is the important half: a
+          fiscal year runs into a BS year whose gazette is published only in Falgun of the year
+          before, so the tail of the current FY genuinely cannot be filled yet — and saying so is
+          the difference between a known gap and a calendar the owner believes is complete. */}
+      {seedReport && (
+        <div className="card" role="status" style={{ padding: '12px 16px', marginBottom: 16, fontSize: 12, color: 'var(--theme-text2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <strong style={{ color: 'var(--theme-text1)' }}>
+              {seedReport.added > 0 ? `Added ${seedReport.added} holiday${seedReport.added > 1 ? 's' : ''} to ${fyLabel(fyYear)}.` : `${fyLabel(fyYear)} was already up to date.`}
+            </strong>
+            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setSeedReport(null)}>Dismiss</button>
+          </div>
+          {seedReport.corrections.map(c => (
+            <div key={c.id} style={{ color: 'var(--theme-amber-text)' }}>
+              {c.movedDate ? (
+                <>Corrected <strong>{c.name}</strong>: {c.from} → {c.to}. The old date was wrong, so overtime worked on the real holiday was being paid at the weekday rate.</>
+              ) : (
+                <>Renamed <strong>{c.renamed}</strong> to <strong>{c.name}</strong> — same day, current wording.</>
+              )}
+            </div>
+          ))}
+          {seedReport.missing.length > 0 && (
+            <div>
+              No movable holidays are held for <strong>BS {seedReport.missing.join(' and ')}</strong> yet — Nepal gazettes them only in Falgun of the preceding year, so {seedReport.missing.length > 1 ? 'those months' : 'that part of this fiscal year'} carries fixed-date holidays only for now. Add any you need by hand.
+            </div>
+          )}
+          <div style={{ color: 'var(--theme-text3)' }}>
+            {SIGHTED_HOLIDAYS} have no gazetted date and are never seeded. Holi is seeded for both Hill (Chaitra 7) and Terai (Chaitra 8) — delete whichever does not apply to your outlet.
+          </div>
+        </div>
+      )}
 
       {/* Stat cards */}
       <div className="stat-grid" style={{ marginBottom: 20 }}>
@@ -210,7 +277,7 @@ export default function HolidayCalendar() {
           <div className="empty-state-icon">📆</div>
           <p className="empty-state-text">
             No holidays for {fyLabel(fyYear)} yet.{' '}
-            Click <strong>Seed Fixed</strong> to add the 5 fixed-date Nepal gazetted holidays, then add movable ones (Dashain, Tihar, Holi, etc.) manually.
+            Click <strong>Seed {fyLabel(fyYear)}</strong> to fill it from the Nepal Gazette — Dashain, Tihar, Chhath, Shivaratri, the Lhosars and the fixed-date national holidays. {SIGHTED_HOLIDAYS} carry no gazetted date and need adding by hand.
           </p>
         </div>
       ) : (
