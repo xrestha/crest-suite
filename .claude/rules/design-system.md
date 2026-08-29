@@ -281,6 +281,23 @@ hand-rolled KPI grids (Overheads ×2, TheoreticalVariance, MenuEngineering) move
 same reasoning already produced `.dash-3col-*` and `.dash-spend-purchases-row`: a fixed-count grid
 belongs in a CSS class with a breakpoint, never in an inline style.
 
+**Lowering the floor is only half the change (S642).** Narrowing a column without narrowing its
+contents just moves the wrapping somewhere else. The Admin Dashboard had six tiles against a 190px
+floor, which fits five — so one tile sat alone on a second row and the table below started a full
+row lower. Getting six across meant the floor (190→158, gap 14→10) *and* everything inside coming
+down with it: card padding, the headline numbers, and the adoption pills, which had been sized for
+the old inner width and would have re-wrapped at the new one. Budget the inner width first — column
+floor minus the card's horizontal padding — and check the widest real string against it.
+
+**Every tile in a strip shares the row's height, so one long value makes all of them taller.** A
+list of client names inside a KPI tile takes `nowrap` + `ellipsis` + a `title`, never wrapping: a
+single long property name would otherwise undo the row you just reclaimed.
+
+**10px is the floor for real text.** `--font-size-micro` is 10px and `--font-size-chevron`'s 9px is
+for a glyph, not a label — so when a pill will not fit at 10px, take the space from padding,
+gap and borders (a tinted fill carries the colour identity without one), or shorten the label. Do
+not invent a 9px text step.
+
 **POS REPORT pages use the product shell; POS TILL screens do not.** `SalesReport`, `CoversReport`,
 `KotLog` and `PosExceptionReport` are reports that happen to read POS data — they now carry
 `page-header`/`page-title`/`page-subtitle`, `stat-grid`/`stat-card` tiles, `tab-bar` tabs and

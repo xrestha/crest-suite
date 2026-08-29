@@ -114,3 +114,11 @@ defaults) via `fcBand()`, and it carries a ✓/△/▲ marker so the verdict is 
 figure containing the prorated labour estimate — Prime Cost %, True Net Margin % — must disclose
 that **inline under the number**, not in a hover: a print or a screenshot loses the hover, and both
 tiles carry a red/amber/green verdict.
+
+### MRR arithmetic is shared with Admin → Clients (S643)
+
+`AdminDashboardOverview.jsx` no longer owns `clientMRR()`. It lives in `src/shared/clientMrr.js`
+(`clientMRR` / `clientMrrBreakdown`, pure over `(client, planPrices)`) because Admin → Clients needs
+the same per-client figure — that page activates modules, extends dates and toggles Suite, so it
+changes MRR and used to show none of it. `clientMrr.test.js` pins every rule; the reasoning for each
+is in CLAUDE.md's billed-axis section. **Never re-derive a client's monthly value here.**

@@ -6,7 +6,8 @@ import { supabase } from '../../supabaseClient'
 import Tip from '../../components/Tip'
 import { BS_MONTHS, adToBs } from '../../utils/bsCalendar'
 import { getSubStatus, getDateStatus } from '../../utils/subscription'
-import { DEFAULT_PLAN_PRICES, SUITE_ADDON } from '../../data/pricingPlans'
+import { DEFAULT_PLAN_PRICES } from '../../data/pricingPlans'
+import { clientMRR } from '../../shared/clientMrr'
 
 // Cross-tenant admin overview — every client's periods/profiles in one unscoped read to build
 // the platform-wide table, so this stays on raw supabase.from() rather than scopedDb (there is
@@ -96,45 +97,15 @@ export default function AdminDashboardOverview() {
   const wantToSub    = trialSignups.filter(c => c.subscribe_requested)
   const activeClientIds = new Set(activeTodayClients.map(c => c.id))
 
-  // MRR: IMS (tiered) + HR (flat) + POS (flat), matching the real advertised pricing model in
-  // src/data/pricingPlans.js — editable in Settings > Plan Pricing (admin-only global row, falls
-  // back to these same defaults if unset).
+  // MRR: IMS (tiered) + HR (flat) + POS (flat) + the Suite add-on. The arithmetic lives in
+  // src/shared/clientMrr.js so Admin -> Clients can show the same per-client figure without a
+  // second copy of rules that each cost something to get right. Prices are editable in
+  // Settings > Plan Pricing (admin-only global row) and fall back to the shipped defaults.
   const planPrices = settings.plan_prices || DEFAULT_PLAN_PRICES
-  const imsPrices = planPrices.ims || DEFAULT_PLAN_PRICES.ims
-  const hrPrice = planPrices.hr ?? DEFAULT_PLAN_PRICES.hr
-  const posPrice = planPrices.pos ?? DEFAULT_PLAN_PRICES.pos
-  // Same 25%-off-monthly conversion as Settings > Plan Pricing's Annual tab and the per-client
-  // Billing Cycle toggle ("Annual · Save 25%") — a client billed annually pays this discounted
-  // rate, so their MRR contribution should reflect that instead of the full monthly price.
-  function monthlyRate(base, billingCycle) {
-    return billingCycle === 'annual' ? Math.round(base * 0.75) : base
-  }
-  function clientMRR(c) {
-    // Each branch now also checks the module is actually enabled, not just that an end-date
-    // happens to be set in the future — a client who had IMS (or HR/POS) once, then had it
-    // toggled off without the corresponding *_ends_at ever being cleared, was still being
-    // counted as paying for that module here, overstating MRR/ARR and the per-row Monthly Value.
-    const imsEnd = c.ims_ends_at || c.subscription_ends_at
-    const imsActive = c.ims_enabled !== false && imsEnd && Math.ceil((new Date(imsEnd) - Date.now()) / 86400000) > 0
-
-    // Crest Suite Pro is an ADD-ON priced on top of the module sum, not a bundle that replaces
-    // it. It used to be the latter — three discounted tiers covering IMS+HR+POS together — so
-    // this branch returned early and ignored the modules entirely. Now it adds. Tracked by its
-    // own suite_ends_at (independent of any single module's expiry), falling back to IMS's
-    // active window only for pre-migration rows set before suite_ends_at existed.
-    const suiteEnd = c.suite_ends_at || (imsActive ? imsEnd : null)
-    const suiteActive = c.suite_plan && suiteEnd && Math.ceil((new Date(suiteEnd) - Date.now()) / 86400000) > 0
-
-    let val = 0
-    if (imsActive) val += monthlyRate(imsPrices[c.plan] || 0, c.billing_cycle)
-    if (c.hr_enabled && c.hr_ends_at && Math.ceil((new Date(c.hr_ends_at) - Date.now()) / 86400000) > 0) val += monthlyRate(hrPrice, c.billing_cycle)
-    if (c.pos_enabled && c.pos_ends_at && Math.ceil((new Date(c.pos_ends_at) - Date.now()) / 86400000) > 0) val += monthlyRate(posPrice, c.billing_cycle)
-    if (suiteActive) val += c.billing_cycle === 'annual' ? SUITE_ADDON.annual : SUITE_ADDON.monthly
-    return val
-  }
-  const estMRR = active.reduce((sum, c) => sum + clientMRR(c), 0)
+  const mrrOf = c => clientMRR(c, planPrices)
+  const estMRR = active.reduce((sum, c) => sum + mrrOf(c), 0)
   const estARR  = estMRR * 12
-  const payingCount = active.filter(c => clientMRR(c) > 0).length
+  const payingCount = active.filter(c => mrrOf(c) > 0).length
 
   // Sort: needs-attention first, then healthy active, then inactive
   const needsAttention = new Set(
@@ -168,7 +139,7 @@ export default function AdminDashboardOverview() {
 
   const statCard = (borderColor) => ({
     background: 'var(--theme-card)', border: `1px solid ${borderColor || 'var(--theme-border)'}`,
-    borderRadius: 'var(--radius-lg)', boxShadow: 'var(--theme-card-shadow)', padding: '16px 18px'
+    borderRadius: 'var(--radius-lg)', boxShadow: 'var(--theme-card-shadow)', padding: '12px 14px'
   })
 
   // Props that turn an attention card into a real filter control. A card naming a count the
@@ -215,20 +186,42 @@ export default function AdminDashboardOverview() {
         </>
       ) : (
         <>
-          {/* ── 5 KPI cards ── */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, marginBottom: 20, alignItems: 'start' }}>
+          {/* ── 6 KPI cards, sized to sit on ONE row ──
+              There are six tiles and the old 190px floor fitted five, so Trial Signups sat alone on
+              a second row with empty space beside it and the properties table started a full row
+              lower. The floor is the lever, never a pinned track count (S613): 158px with a 10px
+              gap gives six columns from ~1010px of content width, and still degrades to five, then
+              fewer, on smaller screens.
+              Everything inside the tiles came down to match — statCard's padding, the headline
+              numbers and the adoption pills — because narrowing a column without narrowing its
+              contents only moves the wrapping somewhere else. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(158px, 1fr))', gap: 10, marginBottom: 20, alignItems: 'start' }}>
 
             {/* 1 — Active Properties + module adoption */}
             <div style={statCard()}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Active Properties</div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>{active.length}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>{active.length}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>{inactive.length} inactive · {adminClients.length} total</div>
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS {imsCount}</span>
-                <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.18)' }}>HR {hrCount}</span>
-                <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)', border: '1px solid rgba(167,139,250,0.2)' }}>POS {posCount}</span>
+              {/* Four adoption pills on ONE row. The card's inner width is ~161px (a 190px grid
+                  floor less statCard's 36px of horizontal padding), so at the previous 11px/2px-7px
+                  sizing "★ SUITE n" wrapped to a second line — which made this the tallest tile in
+                  the strip and pushed the whole properties table down by a row's worth of height.
+                  Shrunk to 10px/1px-5px with a 4px gap, and the Suite pill trimmed to its star and
+                  count, which is the only one of the four whose label could go without losing the
+                  module name. That measures ~155px, so it fits with a little headroom.
+                  flexWrap stays as the safety net: a narrower viewport should wrap, never clip. */}
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                <span title={`${imsCount} properties with Crest IMS enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)' }}>IMS {imsCount}</span>
+                <span title={`${hrCount} properties with Crest HR enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)' }}>HR {hrCount}</span>
+                <span title={`${posCount} properties with Crest POS enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)' }}>POS {posCount}</span>
                 {suiteCount > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.20)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.45)' }}>★ SUITE {suiteCount}</span>
+                  // The word is dropped, not the axis: S552's rule is that a billed axis must be
+                  // visible on the screens that bill it, and the star keeps its accent fill, its
+                  // heavier weight and a Tip naming it. The full "★ SUITE" pill still renders per
+                  // row in the table below, where there is width for it.
+                  <Tip text={`Crest Suite Pro is on ${suiteCount} ${suiteCount === 1 ? 'property' : 'properties'} — the owner layer sold per outlet on top of the modules.`} width={250}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'rgba(201,168,76,0.20)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.45)' }}>★ {suiteCount}</span>
+                  </Tip>
                 )}
               </div>
             </div>
@@ -239,14 +232,19 @@ export default function AdminDashboardOverview() {
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: activeTodayClients.length > 0 ? 'var(--theme-green)' : 'var(--theme-border)', flexShrink: 0 }} />
                 Active Today
               </div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: activeTodayClients.length > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 24, fontWeight: 800, color: activeTodayClients.length > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
                 {activeTodayClients.length}
               </div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5, lineHeight: 1.7 }}>
                 {activeTodayClients.length === 0
                   ? 'No logins in last 24 h'
                   : <>
-                      {activeTodayClients.slice(0, 4).map(c => <div key={c.id}>· {c.name}</div>)}
+                      {/* Truncate rather than wrap: every tile in the strip shares the row's
+                          height, so one long property name at this narrower column would make
+                          all six taller — the exact cost this layout change exists to remove. */}
+                      {activeTodayClients.slice(0, 4).map(c => (
+                        <div key={c.id} title={c.name} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>· {c.name}</div>
+                      ))}
                       {activeTodayClients.length > 4 && <div>and {activeTodayClients.length - 4} more</div>}
                     </>}
               </div>
@@ -255,7 +253,7 @@ export default function AdminDashboardOverview() {
             {/* 3 — Expiring ≤30 days + churn risk sub-count */}
             <button {...filterCard(churnRisk.length > 0 ? 'churn' : 'expiring', churnRisk.length > 0 ? 'rgba(248,113,113,0.30)' : expiring30.length > 0 ? 'rgba(217,119,6,0.15)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Expiring ≤30 Days</div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: churnRisk.length > 0 ? 'var(--theme-red-text)' : expiring30.length > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 24, fontWeight: 800, color: churnRisk.length > 0 ? 'var(--theme-red-text)' : expiring30.length > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>
                 {expiring30.length}
               </div>
               {churnRisk.length > 0 ? (
@@ -268,7 +266,7 @@ export default function AdminDashboardOverview() {
             {/* 4 — No Open Period */}
             <button {...filterCard('noPeriod', noPeriod.length > 0 ? 'rgba(248,113,113,0.35)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>No Open Period</div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: noPeriod.length > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>{noPeriod.length}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: noPeriod.length > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>{noPeriod.length}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Active clients — need setup</div>
             </button>
 
@@ -290,7 +288,7 @@ export default function AdminDashboardOverview() {
               onClick={() => navigate('/admin/clients')}
             >
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Trial Signups</div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: trialSignups.length > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 24, fontWeight: 800, color: trialSignups.length > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
                 {trialSignups.length}
               </div>
               {wantToSub.length > 0 ? (
@@ -371,7 +369,7 @@ export default function AdminDashboardOverview() {
                     const bandCount = visibleSorted.filter(x => bandOf(x) === band).length
                     const bandColor = { attention: 'var(--theme-amber-text)', healthy: 'var(--theme-green-text)', inactive: 'var(--theme-text3)' }[band]
 
-                    const mrr     = clientMRR(c)
+                    const mrr     = mrrOf(c)
                     const endDate = c.ims_ends_at || c.subscription_ends_at
                     // IMS-specific status, matching this column's own tooltip ("IMS subscription
                     // countdown") — getSubStatus(c) instead took Math.max across ims/hr/pos/
@@ -570,8 +568,8 @@ export default function AdminDashboardOverview() {
                       is stating what the platform earns (S574). When narrowed, it says "Shown". */}
                   {(() => {
                     const shownActive = visibleSorted.filter(c => c.is_active)
-                    const shownMRR = shownActive.reduce((sum, c) => sum + clientMRR(c), 0)
-                    const shownPaying = shownActive.filter(c => clientMRR(c) > 0).length
+                    const shownMRR = shownActive.reduce((sum, c) => sum + mrrOf(c), 0)
+                    const shownPaying = shownActive.filter(c => mrrOf(c) > 0).length
                     const narrowed = !!(activeFilter || searchQ)
                     return (
                       <tr style={{ borderTop: '2px solid var(--theme-border)' }}>

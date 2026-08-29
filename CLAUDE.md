@@ -78,6 +78,20 @@ Plan ranks: `starter (0) < growth (1) < pro (2)`. Keys auto-unlocked by plan liv
 
 **A billed axis must be visible on the screens that bill it (S552).** `suite_plan` was selected by `AdminDashboardOverview.jsx` and priced into `clientMRR()` at NPR 2,000/outlet, and rendered **nowhere** — the client list showed IMS/HR/POS pills off the three `*_enabled` flags and nothing for Suite, so a Suite Pro client looked identical to one without it while its revenue sat in the MRR figure on the same page. The Sub Status column tracks IMS only (plus a bolted-on HR hint), so a lapsing Suite was silent too. Both admin surfaces now carry a `★ SUITE` pill and the dashboard warns on `Suite exp. Nd` / `Suite lapsed`, resolving through the same `suite_ends_at → IMS window` fallback `clientMRR()` uses so the pill and the money can never disagree. **Anything added to `clients` that changes what a client pays needs a place in the admin list in the same change** — a module flag gets one for free by joining the pill map; an axis like this one does not.
 
+**And the screen that CHANGES what a client pays must show the money, not just the axis (S643).**
+S552 put the `★ SUITE` pill on Admin → Clients; the *figure* stayed on the dashboard. But Clients is
+where modules are activated, dates extended and Suite toggled — every one of those moves MRR — so
+the operator was editing revenue on a page that never named it, while the dashboard reported a
+platform total nobody could attribute to a client. The arithmetic now lives in
+**`src/shared/clientMrr.js`** (`clientMRR` / `clientMrrBreakdown`, pure over `(client,
+planPrices)`), imported by both. Do not write a second copy: each of its rules is one that was
+wrong once — a module counts only when ENABLED *and* paid through, Suite ADDS rather than replaces,
+Suite resolves via `suite_ends_at` with the IMS window as a legacy fallback, and annual is 25% off
+*except* Suite's annual, which is a published price. Two presentation rules ride with it: **zero is
+a real state and says why** ("Not billing", never `NPR 0`, which reads as a price we charge), and an
+unbilled module is **omitted** from the breakdown rather than listed at zero — except a *live*
+module priced at zero, whose line stays, because dropping it would read as the module being off.
+
 **Suite has ONE tier** (S548): `suite_plan` is `NULL | 'pro'`. It was `starter|growth|pro`, but both call sites were `minTier="growth"` — so Suite Starter unlocked nothing at all and Suite Pro added nothing over Suite Growth on its own axis. It is also an **add-on priced per outlet on top of a client's modules**, not a bundle containing them: turning it on implies only that IMS is enabled (`requireModules`' floor) and says nothing about HR, POS, or which IMS tier the client is on. `requireModules` (array, default `['ims','hr']` — Owner Dashboard's original behavior) varies per feature; Monthly Owner Report, Demand Forecast and Fixed Assets pass `['ims']`. Don't assume every caller needs Owner Dashboard's set.
 
 ### Which tier a feature belongs in

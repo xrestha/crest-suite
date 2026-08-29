@@ -6,6 +6,9 @@ import { getSubStatus, GRACE_DAYS } from '../utils/subscription'
 import { fetchAllRows } from '../shared/fetchAllRows'
 import { useAutoPurgeBackup, refreshBackupPermission } from '../modules/admin/dataExport/useAutoPurgeBackup'
 import Tip from '../components/Tip'
+import { useSettings } from '../context/SettingsContext'
+import { DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
+import { clientMrrBreakdown } from '../shared/clientMrr'
 import ClientDrawer from './adminClients/ClientDrawer'
 import FeatureAccessModal from './adminClients/FeatureAccessModal'
 
@@ -44,6 +47,10 @@ function relativeTime(iso) {
 }
 
 export default function AdminClients() {
+  const { settings } = useSettings()
+  // One definition with the Admin Dashboard's own figure (src/shared/clientMrr.js). Prices come
+  // from Settings > Plan Pricing, falling back to the shipped defaults.
+  const planPrices = settings.plan_prices || DEFAULT_PLAN_PRICES
   const [clients, setClients]         = useState([])
   const [loading, setLoading]         = useState(true)
   const [showNewForm, setShowNewForm] = useState(false)
@@ -55,6 +62,14 @@ export default function AdminClients() {
   const [lastSeenMap, setLastSeenMap] = useState({})
   const [lastUserMap, setLastUserMap] = useState({})
   const [search, setSearch]           = useState('')
+
+  // Platform totals. Only ACTIVE properties are summed, matching the Admin Dashboard exactly —
+  // an inactive property is locked out of the app, so counting its modules as revenue would
+  // overstate MRR on the one screen an operator uses to decide who to chase.
+  const activeClients = clients.filter(c => c.is_active)
+  const platformMRR   = activeClients.reduce((sum, c) => sum + clientMrrBreakdown(c, planPrices).total, 0)
+  const payingCount   = activeClients.filter(c => clientMrrBreakdown(c, planPrices).total > 0).length
+  const activeCount   = activeClients.length
 
   // Pre-purge backup: fires opportunistically for any trial whose purge deadline is within 72h.
   const autoBackup = useAutoPurgeBackup(clients, () => loadClients())
@@ -211,7 +226,22 @@ export default function AdminClients() {
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 className="page-title">Clients</h1>
-          <p className="page-subtitle">{clients.length} propert{clients.length !== 1 ? 'ies' : 'y'} on the platform</p>
+          {/* The money belongs on the screen where the money is CHANGED. This page activates
+              modules, extends dates and toggles Suite — every one of those moves MRR — and until
+              now it was the only admin screen that never said so, while the dashboard reported a
+              platform figure nobody could attribute to a client. Same clientMRR() as the
+              dashboard, so the two can never disagree. */}
+          <p className="page-subtitle">
+            {clients.length} propert{clients.length !== 1 ? 'ies' : 'y'} on the platform
+            {' · '}
+            <Tip
+              text={`Monthly recurring revenue across every active property, summed from the same per-client figure shown on each card. ${payingCount} of ${activeCount} active ${payingCount === 1 ? 'property is' : 'properties are'} billing — a property with every module window closed counts as zero, not as missing.`}
+              width={280}
+            >
+              <strong style={{ color: 'var(--theme-accent-ink)' }}>NPR {platformMRR.toLocaleString('en-NP')}</strong> MRR
+            </Tip>
+            {' · '}{payingCount} paying
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <label htmlFor="clients-search" className="sr-only">Search clients</label>
@@ -466,8 +496,36 @@ export default function AdminClients() {
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 3 }}>
-                      {[c.location, c.contact_person, c.contact_phone].filter(Boolean).join(' · ') || '—'}
+                    <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 3, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                      <span>{[c.location, c.contact_person, c.contact_phone].filter(Boolean).join(' · ') || '—'}</span>
+                      {/* What this account is worth, on the row where its modules and dates are
+                          changed. Rendered on the existing meta line rather than a new one so no
+                          card grows a third row. The Tip carries the per-module breakdown, because
+                          "NPR 6,500" without it cannot be checked against the pills beside it. */}
+                      <span aria-hidden="true">·</span>
+                      {(() => {
+                        const { total, lines } = clientMrrBreakdown(c, planPrices)
+                        // Zero is a real state, not a missing figure, so it says WHY rather than
+                        // printing "NPR 0" — every module window is closed or switched off, which
+                        // is exactly what an expired card above already shows.
+                        if (total === 0) {
+                          return (
+                            <Tip text="Not billing — every module is switched off or its paid-through date has passed, so this property contributes nothing to MRR. It is excluded from the platform total above, the same way the Admin Dashboard excludes it." width={280}>
+                              <span style={{ color: 'var(--theme-text3)' }}>Not billing</span>
+                            </Tip>
+                          )
+                        }
+                        return (
+                          <Tip
+                            text={`${lines.map(l => `${l.label} NPR ${l.amount.toLocaleString('en-NP')}`).join('  ·  ')}${c.billing_cycle === 'annual' ? '  ·  billed annually, so each module is at the 25%-off rate' : ''}`}
+                            width={280}
+                          >
+                            <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>
+                              NPR {total.toLocaleString('en-NP')}/mo
+                            </span>
+                          </Tip>
+                        )
+                      })()}
                     </div>
                   </div>
 

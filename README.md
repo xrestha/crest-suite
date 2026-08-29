@@ -159,6 +159,75 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S643 — 2026-08-29 — Admin → Clients shows the money it changes
+
+Service worker `crest-v161`. No migration. New: `src/shared/clientMrr.js` + `clientMrr.test.js`
+(18 assertions).
+
+Observed directly: *this page has no money info, admin dashboard does.* Admin → Clients is where an
+operator activates modules, extends dates and toggles Suite — **every one of those moves MRR** — and
+it was the only admin screen that never said so, while the dashboard reported a platform figure
+nobody could attribute to a client.
+
+**`clientMRR()` lived inside `AdminDashboardOverview.jsx` and nowhere else**, so the two ways to fix
+this were to extract it or to write it again. There is no version of the second that stays correct,
+because every rule in it is one somebody got wrong once: a module counts only when it is ENABLED
+*and* paid through (the date alone billed clients whose HR had been switched off without
+`hr_ends_at` being cleared); Suite ADDS to the module sum rather than replacing it (it used to
+return early and ignore the modules); Suite resolves through `suite_ends_at` with the IMS window as
+a legacy fallback — the same resolution the ★ SUITE pill uses, so the pill and the money cannot
+disagree on one screen (S552/S574); and annual is 25% off, except Suite's annual, which is a
+published price rather than a derivation.
+
+Extracted to `src/shared/clientMrr.js` as a pure function of `(client, planPrices)`. The dashboard
+now imports it with **no behavioural change** — same figures, one definition.
+
+**`clientMrrBreakdown()` returns the per-module lines as well as the total**, so a caller can show
+either without recomputing. Each card carries `NPR 6,500/mo` on its existing meta line — not a new
+line, so no card grew a third row — with the breakdown in a `Tip`, because a total sitting beside
+the module pills that cannot be checked against them is just a number.
+
+**Zero says why.** A property with every window closed reads **Not billing**, not `NPR 0`: zero is a
+real state here and printing a price for it invites the reading that we charge them nothing. The
+platform total in the header sums ACTIVE properties only, matching the dashboard exactly — an
+inactive property is locked out of the app, so counting its modules would overstate the figure on
+the screen used to decide who to chase.
+
+**An absent line is not a zero line, with one exception.** A module that is not billed is omitted
+from the breakdown rather than listed at zero, because a list of zeros reads as "we charge for this
+and they pay nothing". A **live** module priced at zero (a Starter tier set to 0) keeps its line —
+dropping it would read as IMS being switched off. Both are asserted.
+
+### S642 — 2026-08-29 — the admin KPI strip fits one row
+
+Service worker `crest-v160`. No migration.
+
+Reported from a screenshot, and the first attempt fixed the wrong half. The complaint was that the
+properties table sat too far down the Admin Dashboard. The visible symptom was the Active Properties
+tile wrapping its fourth pill (`★ SUITE 2`) onto a second line, so that got shrunk first — which was
+worth doing but reclaimed only ~24px. **The actual cost was a whole second grid row**: six KPI tiles
+against a 190px floor fits five, so Trial Signups sat alone with empty space beside it.
+
+**The floor is the lever, never a pinned track count (S613).** 158px with a 10px gap gives six
+columns from ~1010px of content width and still degrades to five and fewer on smaller screens.
+
+**Narrowing a column without narrowing its contents only moves the wrapping somewhere else**, which
+is why four things had to come down together: `statCard` padding 16/18 → 12/14, the five headline
+counts 32px → 24px, and the adoption pills again — the denser tile leaves them ~144px where the
+first pass had sized them for ~161px. Pills are now 10px (`--font-size-micro`, the smallest real
+text step on the scale — 9px exists only as the chevron glyph) with `1px 4px` padding, a 3px gap,
+and no border on the three module pills; the tinted fill carries the colour identity and the Suite
+pill keeps its border as the one that is meant to look different.
+
+**The Suite label was dropped, not the axis.** The other three pills carry module names; the star
+keeps its accent fill, its heavier weight and a `Tip`, so S552's rule — a billed axis must be
+visible on the screens that bill it — still holds, and the full `★ SUITE` pill still renders per row
+in the table below where there is width for it.
+
+**Active Today's name list now truncates instead of wrapping.** Every tile in the strip shares the
+row's height, so one long property name at the narrower column would have made all six taller —
+exactly the cost this change exists to remove. `title` carries the full name.
+
 ### S641 — 2026-08-29 — the S633–S640 lessons written into the rule files
 
 No code change, no migration, no service-worker bump — none of these files ship in the bundle.
