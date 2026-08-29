@@ -169,7 +169,7 @@ export const HR_GUIDE_GROUPS = [
           'Publish when a stretch is ready — publishing is per DAY, and only scheduled staff on those days are notified (web push where enabled).',
           '"Suggest" ranks unscheduled employees by fewest hours already scheduled this period, within whatever the Department filter shows.',
           '"⧉ Copy to Next Week" (weekly view) stamps the whole visible week onto the following week, same weekday to same weekday, then lands on it so the exceptions get edited on a real board.',
-          'Approve or reject employee-initiated shift swaps from the swap panel once the target coworker has consented.',
+          'Approve or reject employee-initiated shift swaps from the Shift Swaps tab once the target coworker has consented; the tab button carries an amber count while any are waiting.',
         ],
         fields: [
           { label: 'OFF DAY vs Clear (Unassign)', desc: 'OFF DAY writes a real zero-hour row — the day shows on the board, in Generate-from-Roster, and in the employee\'s own Self-Service view. Clear deletes the row entirely (an unplanned blank). They are not the same thing.' },
@@ -183,6 +183,7 @@ export const HR_GUIDE_GROUPS = [
           'Off days are per employee, not a company-wide weekday — there is no global "Saturday off" switch anywhere in the module.',
           'Copy to Next Week MIRRORS: a cell that is empty this week is cleared next week, so the two weeks end up identical rather than merged. The confirm dialog counts what will be replaced and cleared first, and warns if the target week is already published (staff saw the old version — Re-Publish + Notify afterwards) or if anyone has approved leave on a day being filled.',
           'It copies only what the Department filter is showing. With a filter on, the other departments\' next week is left exactly as it was.',
+          'Swap History spans every month, not the week or month the board is showing — it is a permanent record, so it is on its own tab rather than under the board\'s period controls.',
         ],
         connections: 'Shift length feeds Attendance\'s OT auto-calculation and Generate-from-Roster. Published days feed Self-Service\'s Roster tab. The labor forecast reads Pay Setup rates; the demand overlay reads Holiday Calendar multipliers and the Suite Demand Forecast.',
       },

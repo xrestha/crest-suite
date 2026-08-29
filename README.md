@@ -159,6 +159,47 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S633 — 2026-08-29 — Swap History gets a tab of its own, and stops answering a question nobody asked
+
+Service worker `crest-v152`. No migration.
+
+Reported from a screenshot: the Roster Board was showing Bhadra 14–20, and directly above it sat a
+"Swap History" drop-down listing decisions from **Shrawan and Ashadh**. Nothing was wrong with the
+data — history has never been period-scoped and was never meant to be. The problem is that placing
+it inside the board's period controls makes it *read* as this week's news, and it is the first thing
+under a toolbar that says Bhadra 14–20.
+
+**Both halves of `SwapRequestsPanel.jsx` moved to a fourth Roster tab, "Shift Swaps"**, beside Labor
+Forecast. The two collapsible accordions are gone — a dedicated tab is already the disclosure, and
+an accordion inside one is a second click to see the only thing on the page. History is now a real
+`data-table` (Month / Requested by / Swapped with / Reason / Decided / Status) instead of a stack of
+run-on sentences; the pending queue keeps its inline shape, since a row you are about to Approve or
+Reject wants to read as a sentence, not a spreadsheet.
+
+**The pending count rides on the tab button.** Moving an action queue off the board is exactly how an
+approval waits a week, so an amber count sits on "Shift Swaps" while anything is at `pending_admin`
+(the same filter `useHrApprovalCounts.js` uses — a swap still awaiting the coworker's own accept
+isn't yet a manager action). `Roster.jsx` fetches that count itself with a `head: true` count query
+rather than lifting it out of the panel: the panel only mounts once the tab is opened, which is
+precisely when the badge has stopped being useful. The panel reports its own count back through
+`onPendingCount`, so approving one updates the badge without a second read.
+
+Three things fixed on the way, each visible in the same screenshot or one step behind it:
+
+- **A resigned employee rendered as a bare `—`.** `Roster.jsx` loads only `status IN
+  ('active','probation')` for the board, which is right for a board and wrong for a history that
+  outlives the people in it — the screenshot's two rows both showed "— ⇄ SARITA BISHWOKARMA". The
+  panel now fills in any id the board didn't load, once per unknown id (a `useRef` set, so an id
+  that resolves to nothing doesn't re-query forever).
+- **A failed read rendered as an empty queue.** Both loads were `const { data } = await …`, so a
+  dropped connection told a manager there was nothing to approve when there might be three. The
+  error is now captured and surfaced through `errorText(err, 'operator')` with a Try again button.
+- **"Declined by coworker" and "Cancelled" showed no name.** Neither reaches a manager, so
+  `admin_decided_by` is null on both — the Decided column now names the coworker who declined or the
+  requester who withdrew, instead of a dash.
+
+`Layout.js` needed nothing: this is a tab inside an existing route, not a new page.
+
 ### S632 — 2026-08-29 — Guest QR Ordering comes with the POS module, and S631 harmonised the wrong way
 
 Migration `20260829170000`. Service worker `crest-v151`. **This corrects a conclusion S631 reached

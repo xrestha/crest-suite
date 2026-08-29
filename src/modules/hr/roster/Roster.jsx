@@ -101,6 +101,20 @@ export default function Roster() {
   const [roster,     setRoster]     = useState({})
   const [loading,    setLoading]    = useState(true)
 
+  // Count for the Shift Swaps tab badge. Fetched here rather than lifted out of
+  // SwapRequestsPanel because that component only mounts once the tab is opened — which is
+  // exactly when the badge has stopped being useful. The panel reports its own count back
+  // through onPendingCount so approving one updates the badge without a second read.
+  // 'pending_admin' only: a swap still awaiting the coworker's own accept isn't yet a manager
+  // action, same filter the panel and useHrApprovalCounts.js use.
+  const [pendingSwaps, setPendingSwaps] = useState(0)
+  useEffect(() => {
+    if (!clientId) return
+    scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true })
+      .eq('status', 'pending_admin')
+      .then(({ count }) => setPendingSwaps(count || 0))
+  }, [clientId, scopedFrom])
+
   // Letterhead info for the print header + labor-scheduling target — fetched once per client
   const [bizInfo, setBizInfo] = useState({ name: '', address: '' })
   const [coversPerStaffTarget, setCoversPerStaffTarget] = useState(20)
@@ -757,6 +771,13 @@ export default function Roster() {
         <button className={`tab-btn${tab === 'board'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('board')}>Roster Board</button>
         <button className={`tab-btn${tab === 'shifts' ? ' tab-btn--active' : ''}`} onClick={() => setTab('shifts')}>Shift Types</button>
         <button className={`tab-btn${tab === 'labor'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('labor')}>Labor Forecast</button>
+        {/* The count rides on the button because this tab holds an action queue: pending swaps
+            used to sit on the board where they couldn't be missed, and a tab with nothing on its
+            face is exactly how an approval waits a week. */}
+        <button className={`tab-btn${tab === 'swaps'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('swaps')}>
+          Shift Swaps
+          {pendingSwaps > 0 && <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>{pendingSwaps}</span>}
+        </button>
       </div>
 
       {/* ── Shift Settings tab ── */}
@@ -897,8 +918,6 @@ export default function Roster() {
               </button>
             </div>
           </div>
-
-          <SwapRequestsPanel employees={employees} shiftMap={shiftMap} />
 
           <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 10px' }}>
             <button
@@ -1358,6 +1377,13 @@ export default function Roster() {
             </table>
           </div>
         </div>
+      )}
+
+      {/* ── Shift Swaps tab — the approval queue plus the permanent record of every decided
+          swap. Its history spans every month, so it never belonged under the board's own
+          week/month controls (it read as this week's news; it isn't) ── */}
+      {tab === 'swaps' && (
+        <SwapRequestsPanel employees={employees} shiftMap={shiftMap} onPendingCount={setPendingSwaps} />
       )}
     </div>
   )
