@@ -93,3 +93,24 @@ virtue of the page guard above.
 Both panels take their outlet list from the RPC's `rows`, **not** from AuthContext's `outlets` —
 the matrix must include outlets excluded from the figures for want of Suite Pro, since access and
 staffing are not what the group is billed for.
+
+### Daily Purchases vs Sales: three series per metric, and two of them mean opposite things (S634)
+
+The chart carries, per metric, an **actual** line, a **live projection** (`projectTrend()` refits on
+every load — "if today's pace continues, where do we land", with no memory of what it said
+yesterday) and a **frozen Target** (captured once, the first time that metric crosses the 5-point
+threshold in the open period, and never moved again). Confusing the last two is the easiest mistake
+to make here: the dotted line is a target precisely *because* it does not follow the data.
+
+The tooltip's arrow on the two actual rows is **shape = fact, colour = verdict**, with opposite
+polarity per metric — above target is green for Sales and red for Purchases. Full reasoning, and the
+general rule for any cost sitting beside a revenue, is in `.claude/rules/design-system.md` ("A signal
+colour is a verdict, so it inverts where down is the good direction"); don't restate it here, and
+don't re-derive it the next time a report needs the same treatment.
+
+Two smaller things that were wrong and are easy to get wrong again: the food-cost band on every
+dashboard tile comes from the **client's own** `fc_warning_pct`/`fc_critical_pct` (35/45 are only
+defaults) via `fcBand()`, and it carries a ✓/△/▲ marker so the verdict is not colour-only. And a
+figure containing the prorated labour estimate — Prime Cost %, True Net Margin % — must disclose
+that **inline under the number**, not in a hover: a print or a screenshot loses the hover, and both
+tiles carry a red/amber/green verdict.

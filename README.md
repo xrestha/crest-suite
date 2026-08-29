@@ -159,6 +159,40 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S641 — 2026-08-29 — the S633–S640 lessons written into the rule files
+
+No code change, no migration, no service-worker bump — none of these files ship in the bundle.
+
+Eight sessions' worth of findings had been recorded only in this log, which is the wrong place for
+anything a future session needs *before* it makes the same mistake. Placed by CLAUDE.md's own test —
+which file is the rule reachable from — rather than which file it is about:
+
+- **`CLAUDE.md`** — two root-level additions, both reachable from anywhere. The `SuiteGate`
+  paragraph now carries why "no featureKey" left Suite unsellable in the shell and how the CREST
+  SUITE group answers it (S638–S640). The S601 nav-guard rule gained `/pos` as its fifth offender
+  (S636) plus an audit recipe, and points at the structural fix rather than restating it.
+- **`.claude/rules/design-system.md`** — *A signal colour is a verdict, so it inverts where "down"
+  is the good direction* (S634), and *A nav item's visibility condition belongs on the ITEM, not at
+  each render site* (S638/S639), which is the general form of a bug now found three times.
+- **`.claude/rules/hr-payroll.md`** — the Holiday Calendar's three-kinds taxonomy, why extending it
+  is transcription and never calculation, the name-is-the-dedupe-key traps and the legacy-name rule
+  (S635); plus Roster's Shift Swaps tab and *a history outlives the people in it* (S633).
+- **`.claude/rules/dashboards.md`** — the three-series-per-metric structure of Daily Purchases vs
+  Sales, pointing at the design-system rule for the polarity rather than duplicating it.
+- **`DESIGN.md`** — **The Signal Polarity Rule** as a Named Rule under Colors, beside Signal
+  Separation. `.impeccable/design.json` needs no regeneration: it carries token values and
+  narrative, not the Named Rules prose.
+- **Memory** — a new `nepal-holiday-gazette` reference (which sources carry each BS year's list,
+  which of them are unfetchable, why classification matters as much as dates), and
+  `feedback-module-guides` extended with the fourth guide, S636's mechanical audit recipe, and the
+  trap that an eleventh key on a guide section renders nowhere.
+
+**The organising judgement:** a rule scoped to the module it was learned in is a rule the next
+module repeats — `frontend-performance.md` already says so about itself, having been re-found in
+IMS, HR and POS in turn. So the two rules with general form (colour polarity, nav visibility) went
+to `design-system.md`, which loads almost everywhere, and only the Nepal-specific and
+roster-specific detail stayed module-scoped.
+
 ### S640 — 2026-08-29 — Crest Suite renders last on the admin panel
 
 Service worker `crest-v159`. No migration.

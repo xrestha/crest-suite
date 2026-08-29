@@ -194,6 +194,51 @@ body no longer scrolls.
 `getBoundingClientRect().top` across real scroll positions catches it. A harness that reproduces the
 two structural facts (the index.css rule + a sticky child) is enough — it does not need the app.
 
+### A signal colour is a verdict, so it inverts where "down" is the good direction (S634)
+
+Green and red are never neutral in a product an owner reads between services — there is no reading
+of a red ▼ that isn't "something went wrong here". So a figure compared against a target has to
+decide **which direction is good for that metric**, not just which side of the line it landed on.
+
+The Daily Purchases vs Sales tooltip coloured both actual rows ▲ green / ▼ red literally, on the
+reasoning that a glyph "states where the line sits, not a verdict". That is right for a *shape* and
+wrong for a *colour*: reported live, `Purchases : NPR 2,295` against a NPR 3,112 target wore a red ▼
+for running under the spending pace you had locked in — the outcome you wanted.
+
+**Shape is the fact, colour is the verdict.** Keep ▲/▼ literal, because it has to agree with the
+line the reader can see; let the colour ask whether that direction is good for this metric. A
+`GOOD_DIRECTION` map keyed by series (`sales: +1`, `purchases: -1`) is the whole mechanism. Applies
+anywhere a cost sits beside a revenue: variance, budget-vs-actual, food-cost trend, wastage.
+
+**Two consequences worth pricing in.** Colour becomes the sole carrier of the verdict once shape
+stops being redundant with it (a green ▼ and a red ▼ now both exist), so give the reader the
+magnitude in text — the gap as a **percentage of target** rather than a second currency figure, so
+it reads the same on a quiet Sunday as on a delivery day. And say the polarity out loud wherever the
+legend explains the line, because the two series on one chart are now coloured by opposite
+conventions and nothing on screen would otherwise admit it.
+
+### A nav item's visibility condition belongs on the ITEM, not at each render site (S638/S639)
+
+The sidebar is not the only thing that reads the nav: the **command palette** flattens every
+destination into one searchable list, and `isItemVisible()` is the predicate both go through. A
+condition written *around* a render site is therefore applied to one consumer and not the other.
+
+This has now produced the same bug three times. S617 found the palette offering `/group-dashboard`
+on group membership alone while the sidebar required `isAdmin || isOwner` — and **fixed only that
+one row**: Owner Dashboard and Owner Report kept the mismatch until S638, so any staff account could
+search its way onto them. (`/pnl` was in neither list, so the Owner could not search for it at all.)
+
+The fix is structural, not vigilance: put the flag on the item (`ownerOnly: true` alongside the
+existing `featureKey`/`minPlan`/`minPosRole`/`minImsRole`/`minHrRole`), teach `isItemVisible()`
+about it once, and have every consumer build from the same array. `SUITE_NAV` is the worked example
+— the palette maps it through a `longLabel` swap (it is searched by typing a full name; the sidebar
+has 240px) and re-states **no** visibility condition of its own.
+
+Corollary: a group whose members have *different* gates must gate per item, never on the group.
+Gating the Crest Suite group owner-only would have revoked Demand Forecast and Fixed Assets from
+every IMS supervisor who has them; `renderGroup` already returns `null` when nothing inside is
+reachable, so per-item gating degrades correctly on its own.
+
 ### A nav icon is unique per route, because the command palette flattens the modules (S606)
 
 `CommandPalette.js:134` renders each nav item's `icon` and lists **every module's items in one

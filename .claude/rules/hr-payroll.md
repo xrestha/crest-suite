@@ -220,3 +220,79 @@ now `hasHrAccess('manager')`, matching the guard already on each page.
 alone: reopening a settlement un-blocks a departed employee's Crest Staff login and reverses their
 status stamp, which is a different order of consequence from re-running a month. Decide it on its own
 merits rather than sweeping it for consistency.
+
+## The Holiday Calendar is what pays the 2× rate, and it was empty (S635)
+
+`hr_holiday_calendar` is read by `Overtime.jsx` to decide the **holiday 2× rate** — and only on
+`holiday_type = 'public'`, never `'optional'`. So a row's type is money, not a label, and a missing
+holiday pays 1.5× on the biggest working days of the Nepali year.
+
+Reported live from an FY 2083/84 calendar showing **five** holidays and no Dashain. The page was
+working as built: only the seven whose BS date never moves were seedable, and the empty state told
+the owner to add Dashain, Tihar and Holi "manually". Nobody transcribes thirty gazette rows by hand,
+so in practice the calendar stayed empty of precisely the days it exists to flag.
+
+**Three kinds of holiday, and only the first is derivable in code.** `holidayData.js` is organised
+around this and `holidayData.test.js` pins it:
+
+- **FIXED** — same BS date every year (Republic Day is always Jestha 15). Seedable forever. The BS
+  *year* comes from `resolveYear(fyYear, bs_month)`, never a per-row field; the old list carried its
+  own `yearOffset` saying the same thing, which is one rule too many for a value both sides must
+  agree on.
+- **MOVABLE** — lunar, plus the AD-fixed ones (Christmas, Workers' Day, Women's Day) which move in
+  BS for the mirror-image reason. **Transcribed** from the Nepal Gazette once the Home Ministry
+  publishes the year — usually in Falgun of the preceding year. Keyed by REAL BS year, because a
+  Nepali FY spans two of them and the gazette is published per BS year.
+- **SIGHTED** — the two Eids, Mohammad Jayanti, Guru Nanak Jayanti, Bhoto Jatra. No gazetted date at
+  all. Named on screen so their absence reads as a known gap rather than an oversight.
+
+**Extending the table is a transcription job, never a calculation.** Verify each date in two
+independent places and against `bsCalendar.js`'s own month lengths — Fulpati on *Ashwin 31* exists
+only because Ashwin 2083 has 31 days; it has 30 in 2084. A wrong date here is a wrong figure on a
+real payslip.
+
+**Report coverage rather than seeding short.** A fiscal year runs into a BS year whose gazette may
+not exist yet, so the seed names the uncovered year instead of adding 39 rows and looking complete.
+An owner who reads "39 added" and then finds no Buddha Jayanti cannot otherwise tell a gap in our
+table from a gap in the gazette.
+
+**The NAME is the dedupe key, which makes two things load-bearing.** Three `Dashain holiday` rows
+and two `Tihar holiday` rows sharing a name meant only the first would ever insert — Kartik 5, 6 and
+26 silently dropped, inside the two festivals the whole feature is about. Days with no tithi name of
+their own are named by BS day. And renaming a FIXED holiday needs a `legacy` name list, or every
+client who pressed the old button gets a second row on the same day: `Prithvi Narayan Shah's
+Birthday` → `Prithvi Jayanti (National Unity Day)` would have done exactly that. Both are asserted
+by tests, and both were caught by those tests before shipping.
+
+**Seeding is additive and name-keyed** — a client's own entry or edit is never overruled, because
+the gazette is a starting point for a movable date, not an authority over a decision the owner made.
+The one exception is a FIXED holiday found on the wrong date: those are definitional, so **Martyrs'
+Day at Magh 5 is corrected to Magh 16** (Sahid Diwas, the day the four martyrs were executed in 1997
+BS) and the correction is named in the result rather than applied silently. That row had been wrong
+since the page shipped, in both directions at once: 2× offered on an ordinary day, weekday rate on
+the real holiday.
+
+**Region-split holidays are seeded twice, named, and the operator deletes one.** Holi is a real day
+off in both halves of the country and falls a day apart in each. Guessing the outlet's district from
+nothing is worse than asking.
+
+## Roster: Swap History is not scoped to the week on the board (S633)
+
+The pending-approval queue and the permanent swap record both moved out of two collapsible
+drop-downs above the Roster Board into a fourth tab, **Shift Swaps**. History has never been
+period-scoped and was never meant to be — but sitting inside the board's period controls made a log
+of Shrawan and Ashadh decisions read as news about the Bhadra week on screen.
+
+**Moving an action queue off a screen is how an approval waits a week**, so the pending count rides
+on the tab button (`pending_admin` only — a swap still awaiting the coworker's own accept is not yet
+a manager action, the same filter `useHrApprovalCounts.js` uses). `Roster.jsx` fetches that count
+itself with a `head: true` query rather than lifting it out of the panel, because the panel only
+mounts once the tab is opened — which is exactly when the badge has stopped being useful.
+
+**A history outlives the people in it.** `Roster.jsx` loads only `status IN ('active','probation')`
+for the board, which is right for a board and wrong for a record: a resigned employee rendered as a
+bare `—` beside a named coworker. Any page showing historical rows must resolve names its own list
+filtered out — fetch the unknown ids once, tracked in a ref so an id that resolves to nothing does
+not re-query forever. Related: `rejected_by_target` and `cancelled` never reach a manager, so
+`admin_decided_by` is null on both; name the coworker who declined or the requester who withdrew
+instead of printing a dash.

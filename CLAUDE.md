@@ -74,6 +74,8 @@ Plan ranks: `starter (0) < growth (1) < pro (2)`. Keys auto-unlocked by plan liv
 
 **`SuiteGate`** (`src/components/SuiteGate.js`, added S317 for Owner Dashboard) is a third gate type on a genuinely separate axis: `clients.suite_plan`. It differs from `ModuleGate`/`PremiumGate` in one important way: **it never redirects on failure** — an ineligible viewer sees an inline upsell/explanation rendered in place, since the feature's nav entry must stay visible regardless of eligibility. Used as an in-page wrapper inside the gated component, not at the route level; a nav item for a Suite feature therefore carries **no** `featureKey`/`minPlan`, or it would disappear instead of upselling.
 
+**That "no featureKey" rule left Suite unsellable in the shell, and the fix is a section rather than a flag (S638–S640).** With no `featureKey`, Suite rows rendered identically to included features — and neither upsell surface could reach them: `renderUpgradeTeaser()` filters on `featureKey && minPlan === nextTier` (which no Suite item has, by the rule above) and returns `null` once `plan === 'pro'`, and the footer chip is hidden at Pro too. So an IMS Pro client without Suite saw **no upsell anywhere**. All six Suite features now live in one `SUITE_NAV` list rendered as a labelled **CREST SUITE** group with a `PRO` chip in place of the item count when unentitled; the rows stay clickable so `SuiteGate` still does the selling. Two gates coexist inside that one list — `ownerOnly` on the four owner-altitude pages, `minImsRole` on Demand Forecast and Fixed Assets, which are Suite-billed but IMS-shaped — because gating the *group* owner-only would have revoked those two from every IMS supervisor who has them. The group renders on every panel, **last on the admin panel** (there it is a client-facing layer being inspected from outside, not the operator's own work) and under the Dashboard everywhere else.
+
 **A billed axis must be visible on the screens that bill it (S552).** `suite_plan` was selected by `AdminDashboardOverview.jsx` and priced into `clientMRR()` at NPR 2,000/outlet, and rendered **nowhere** — the client list showed IMS/HR/POS pills off the three `*_enabled` flags and nothing for Suite, so a Suite Pro client looked identical to one without it while its revenue sat in the MRR figure on the same page. The Sub Status column tracks IMS only (plus a bolted-on HR hint), so a lapsing Suite was silent too. Both admin surfaces now carry a `★ SUITE` pill and the dashboard warns on `Suite exp. Nd` / `Suite lapsed`, resolving through the same `suite_ends_at → IMS window` fallback `clientMRR()` uses so the pill and the money can never disagree. **Anything added to `clients` that changes what a client pays needs a place in the admin list in the same change** — a module flag gets one for free by joining the pill map; an axis like this one does not.
 
 **Suite has ONE tier** (S548): `suite_plan` is `NULL | 'pro'`. It was `starter|growth|pro`, but both call sites were `minTier="growth"` — so Suite Starter unlocked nothing at all and Suite Pro added nothing over Suite Growth on its own axis. It is also an **add-on priced per outlet on top of a client's modules**, not a bundle containing them: turning it on implies only that IMS is enabled (`requireModules`' floor) and says nothing about HR, POS, or which IMS tier the client is on. `requireModules` (array, default `['ims','hr']` — Owner Dashboard's original behavior) varies per feature; Monthly Owner Report, Demand Forecast and Fixed Assets pass `['ims']`. Don't assume every caller needs Owner Dashboard's set.
@@ -391,6 +393,17 @@ Profit = Revenue and **Net Profit = Revenue at a 100% margin, in green**. `Month
 third page behind the identical nav condition — has always carried
 `if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />`. Copy that line; place it
 after every hook, and rely on `ProtectedRoute` having already resolved `profile`.
+
+**This keeps recurring because the nav condition and the route guard are written in different files
+by different hands.** `/group-dashboard` was the fourth (S617) and `/pos` the fifth (S636) — POS
+Setup is tagged `minPosRole: 'manager'` in the nav and documented "Manager only", and had no route
+guard at all. That one leaked nothing (its single control is behind `canManage` and the device
+secret is rank-checked inside `get_pos_device_secret`, server-side, which is where it belongs), but
+"nothing leaked" is a property of that page, not of the pattern. **Audit by grepping `Layout.js` for
+`minPosRole`/`minImsRole`/`minHrRole` and the `isAdmin || isOwner` render conditions, then checking
+each named route has a matching early return in its own component.** The general form of the fix is
+in `.claude/rules/design-system.md` — put the condition on the nav ITEM, where every consumer reads
+it, rather than hand-writing it at each render site.
 
 ### A report page must not show a number it has not computed (S594)
 
