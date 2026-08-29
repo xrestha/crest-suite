@@ -5,15 +5,17 @@ paths:
   - "src/shared/hooks/useLatestRequest.js"
   - "src/modules/ims/**"
   - "src/modules/hr/**"
+  - "src/modules/pos/**"
+  - "src/shared/setIfChanged.js"
 ---
 
 # Round trips and keystrokes: the two shapes that make a page feel slow
 
-From the `/impeccable optimize` sweeps over IMS (S625/S626) and HR (S628). **The HR sweep found
-every one of these shapes again**, which is the argument for the rule rather than a note on it —
-`src/modules/hr/**` was not on the `paths:` list above until S628, so none of this loaded while
-anyone worked there. A rule scoped to the module it was learned in is a rule the next module
-repeats. Both shapes are invisible in review —
+From the `/impeccable optimize` sweeps over IMS (S625/S626), HR (S628) and POS (S629). **Each sweep
+found every one of these shapes again**, which is the argument for the rule rather than a note on it
+— `src/modules/hr/**` was not on the `paths:` list above until S628 and `src/modules/pos/**` not
+until S629, so none of this loaded while anyone worked there. A rule scoped to the module it was
+learned in is a rule the next module repeats. Both shapes are invisible in review —
 the code reads correctly, nothing errors, and the cost only appears on a real client's data volume
 at a real network latency (150–500 ms per round trip). Neither is caught by any detector in this
 project.
@@ -133,6 +135,84 @@ straight into `computePayslip` on a path that WRITES payslips. `payrollData.test
 handlers. On a page whose row handler is on a read–modify–write path (Stock Count's `saveRow`), a
 stale closure corrupts a saved figure rather than merely rendering an old number. Take the smallest
 safe cut — memoize the derived lists — and leave the row alone. Same reasoning as `PosOrders.jsx`.
+
+## A poll that always calls its setter re-renders the page forever (added S629, POS)
+
+A `setState(freshRows)` always re-renders, because the array is new even when every row in it is
+identical — normally harmless, but a **screen that polls** does it on a timer for as long as the
+screen is open, whether or not anything moved. POS Orders polls its KOT tickets and its pending
+guest requests every 5 s each and set both unconditionally, so the largest component in the product
+reconciled its whole tree roughly every 2.5 s for the length of a service; the Kitchen Display did
+the same on a wall-mounted screen that is never closed. The overwhelmingly common answer to all
+three polls is "nothing has changed".
+
+`setIfChanged(setState, next, signOf)` (`src/shared/setIfChanged.js`) returns `prev` unchanged when
+the signature matches, which is React's own documented render bail-out — one string comparison
+instead of a render. `rowsSignature(rows, fields)` and `mapSignature(obj, valueOf)` build the
+signature.
+
+Two things to keep right, and the first is the dangerous one:
+
+- **The signature must cover every field the screen draws.** One omitted field is a stale render
+  that never repaints, which is worse than the cost it saves. Adding a column to the *query* needs
+  no change here; starting to *display* one does.
+- **Immutability is what lets a field be left out, and it has to be true.** Both POS call sites omit
+  `pos_kot_log.items` because a ticket's lines never change after it is written — a later send
+  inserts a new row and a pulled line lands in `pos_kot_removals` — so any real change arrives as a
+  different set of ids. That is a fact about the table, stated at each call site; do not copy the
+  omission to a table where it does not hold.
+
+Distinct from memoizing a derivation: that makes a render cheaper, this removes the render.
+
+## An `.in(column, ids)` list is a URL, not just a row count (added S629)
+
+A `.in()` filter is spelled out in the request URL. A uuid costs ~37 characters, so a few hundred
+ids is already past what proxies accept — and that failure is a **414, i.e. loud**. The quiet half
+is that the 1000-row cap still applies underneath, and one parent can own many rows: a list of 200
+order ids matches thousands of `pos_order_items`.
+
+`fetchAllRowsChunked(ids, makeQuery)` splits the list, pages each chunk through `fetchAllRows` and
+runs the chunks together; `runChunkedByIds(ids, makeQuery)` is the write-side equivalent for an
+`UPDATE`/`DELETE` filtered the same way (sequential, first error wins, and **not** atomic — some
+chunks may already have landed).
+
+The POS→IMS backfill is the worked example and shows why both halves matter at once: its
+already-posted guard read `sales_entries` by `.in('pos_order_id', everyCandidate)`, so on a real
+month it was both too long for the URL and far past 1000 rows — and either failure makes posted
+bills look unposted, which re-posts their revenue. That is the exact bug the guard exists to
+prevent. It now aborts on a read error rather than treating an empty result as "none of these has
+posted".
+
+## The POS sweep, S629 — what was actually slow
+
+Measured before changing anything, because three of the candidates were not worth touching.
+
+- **The POS→IMS backfill was three sequential round trips per bill** (`sales_entries` insert,
+  `stock_movements` insert, `ims_posted_at` stamp) plus one per already-posted bill. At ~200 ms a
+  trip that is ~8 minutes for an 800-bill month, against a 120 s wall clock in `Periods.js` — so it
+  could not finish a busy month at all, and the operator saw a timeout. Now batched 40 orders at a
+  time (~64 trips for that month), with a per-bill retry when a batch is rejected so one bad bill
+  does not cost its 39 neighbours. `backfillPosToIms.test.js` asserts the trip counts, because a
+  regression to per-order writes is invisible otherwise.
+- **The Billing modal rebuilt the whole bill document per keystroke.** Assigning `srcDoc` replaces
+  the iframe's document, measured at **17 ms median / 22 ms p90** in Chromium on a desktop for a
+  22-line bill — paid per character typed into the buyer, discount and tender fields, on a till that
+  is usually a slower tablet. Now handed to the iframe on a 200 ms trailing delay
+  (`PREVIEW_DEBOUNCE_MS`), immediate on open/close/tab-change. Building the string itself is
+  0.4 ms and was never the cost.
+- **The Z-report ran four reads in a waterfall**, two of which needed nothing from the other.
+  `loadShiftReport` is rebuilt on page load and on every expanded history row.
+- **Not slow, left alone**: the till's menu filter (0.05 ms per render at 300 items — memoizing it
+  would be churn), the Guest Menu's category grouping, and `PosExceptionReport`'s render-body
+  rollups (no text input on the page; only date pickers and two selects).
+- **Deliberately not changed**: `closeOrder`'s ordering beyond two overlappable writes. Its steps
+  look independent and are not — `award_loyalty_points` resolves the customer from
+  `pos_customers` by phone and returns 0 if the row is absent, so the customer upsert **must**
+  land first or a first-time customer silently earns nothing. Only the customer upsert and the
+  table release were moved to run alongside the IMS post; both were verified to read nothing that
+  post produces. The offline queue's per-send KOT inserts were left sequential too: 1–3 trips on a
+  reconnect path, against changing failure granularity on the one path that only runs when the
+  network is already unreliable.
 
 ## Whether a page can adopt `sessionDataCache`
 

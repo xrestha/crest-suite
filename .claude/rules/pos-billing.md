@@ -26,6 +26,22 @@ post**, the POS floor shows a standing count of unposted bills, and Periods carr
 bills to Inventory** per period (`src/modules/pos/orders/backfillPosToIms.js`). The bill still
 closes either way — refusing a sale mid-service is not acceptable.
 
+**That backfill could not finish the months it exists for (fixed S629).** It wrote three sequential
+round trips per bill — `sales_entries` insert, `stock_movements` insert, `ims_posted_at` stamp —
+plus one update per already-posted bill, so an 800-bill month was ~2,400 requests against the 120 s
+wall clock `Periods.js` bounds it with. The operator saw a timeout, and the busier the month the
+more certainly it failed. It now prepares every bill's rows first and writes in batches of 40, with
+a per-bill retry when a batch is rejected so one bad bill cannot cost its 39 neighbours, and each
+bill stamped only after its own revenue lands so an abandoned run leaves the rest for the next one.
+
+**Its own double-post guard was the thing most likely to truncate.** The guard reads
+`sales_entries` by `.in('pos_order_id', everyCandidate)` — one row per sold *line*, so a few hundred
+bills is already thousands of rows, and the id list itself outran the request URL. Either failure
+makes posted bills look unposted, and the function then posts their revenue again: precisely the
+bug the guard exists to prevent. It is paged and chunked now, and a failed read **aborts** rather
+than being read as "none of these has posted". `backfillPosToIms.test.js` asserts the round-trip
+counts as exact numbers, because a regression to per-order writes is invisible otherwise.
+
 **`sales_entries` and `stock_movements` can diverge, so neither is evidence of the other.**
 `writeSalesEntries` writes revenue first and depletion second, inside a try/catch that swallows
 failures — by design, so a depletion problem never blocks a bill. The consequence is that a bill
@@ -56,6 +72,23 @@ already paged, with a comment explaining why, while the parent was not. Same asy
 Covers (truncation skews averages, not just totals), Exceptions, the KOT Register and Customers'
 unbounded outstanding-credit read.
 
+**That sweep stopped at the report pages, and S629 found the rest.** The reports were clean; the
+*operational* screens were not, and several of them read tables with nothing at all to bound them:
+`pos_customers` (a row per phone that has ever been on a bill, so past 1000 a regular cannot be
+found by the search box), `pos_parking_slips` (every slip ever), `pos_shifts` history (two or three
+a day crosses 1000 inside the first year), Credit Notes' candidate list (its range is whatever the
+two pickers are set to), the Z-report's own `pos_orders` read, and `pos_kot_log` on the **Kitchen
+Display** — that one sorted oldest-first, so truncation drops the *newest* tickets, the ones the
+kitchen is waiting on. The lesson repeats S613's: a sweep organised by table finishes the table it
+was named after and leaves its neighbours. Ask rows-per-what, and ask it of the screen as well as
+the report.
+
+**An `.in(column, ids)` list is a URL as well as a row count.** A uuid costs ~37 characters, so a
+few hundred ids is past what proxies accept — that failure is a loud 414, but the row cap still
+applies underneath and one order owns many rows. `fetchAllRowsChunked(ids, makeQuery)` and
+`runChunkedByIds(ids, makeQuery)` in `src/shared/fetchAllRows.js` handle both at once. The
+backfill's already-posted guard, above, is the case that needed them.
+
 ## Shifts
 
 **The Z-report must be captured at close, not at page load, and then frozen.** It used to be
@@ -76,6 +109,13 @@ no explanation. `pos_cash_movements` (pay_in / pay_out / credit_settlement) is t
 
 **`salesTotal` is "Total Sales", not "Total Collection"** — it includes Credit bills, which are
 billed but not collected. The screen had this right and the signed paper slip had it wrong.
+
+**`loadShiftReport` is rebuilt on every page load and every expanded history row, so its reads are
+worth keeping flat (S629).** It ran four in a waterfall: the cash-movements read needs nothing from
+the orders read, and the payments and items reads derive their `.in()` lists from `orders` but
+nothing from each other — two waves, not four. Its `pos_orders` read is also paged now, because
+every figure on the report is summed from it and a truncated one understates the drawer with no
+error anywhere; the two `.in()` reads are chunked.
 
 ## Order lines
 

@@ -159,6 +159,87 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S629 — 2026-08-29 — /impeccable optimize over the POS module: the backfill that could not finish, and a bill rebuilt per keystroke
+
+Third module through the same sweep (IMS S625/S626, HR S628), and the same shapes turned up again —
+`src/modules/pos/**` was not on `.claude/rules/frontend-performance.md`'s `paths:` list until now,
+which is the rule that file already states about itself. Everything below was measured before it
+was changed; three plausible-looking candidates were measured and left alone. Service worker bumped
+to `crest-v149`.
+
+**The POS→IMS backfill was three sequential round trips per bill, and could not finish a busy
+month.** `backfillPosOrdersToIms` inserted `sales_entries`, inserted `stock_movements` and stamped
+`ims_posted_at` one order at a time, plus one update per already-posted bill. At ~200 ms a trip
+that is ~2,400 requests and roughly eight minutes for an 800-bill month — against the 120 s wall
+clock `Periods.js` wraps it in, so past ~200 bills the operator got a timeout and no explanation.
+It now prepares every bill's rows up front and writes in batches of 40: ~64 trips for that same
+month. A rejected batch retries a bill at a time so one bad bill does not cost its 39 neighbours,
+and each bill is stamped only after its own revenue lands, so an abandoned run leaves the rest for
+the next one. `backfillPosToIms.test.js` (11 tests) asserts the trip counts as exact numbers — a
+regression to per-order writes is otherwise invisible.
+
+**Two of that function's reads were silently truncating, and one of them double-posts revenue.**
+The candidate read of `pos_orders` was bare, so a month over 1000 bills posted part of itself and
+reported success. Worse, the guard that asks *which bills already have revenue* read
+`sales_entries` with `.in('pos_order_id', everyCandidate)` — one row per sold **line**, so a few
+hundred bills is already thousands of rows, and the id list itself was long enough to outrun the
+request URL. Either failure makes posted bills look unposted, and the function then posts their
+revenue a second time: exactly the S573 bug this guard exists to prevent. Both reads are now paged
+and chunked, and a failed check **aborts** rather than reading an empty result as "none of these has
+posted". `fetchAllRowsChunked` / `runChunkedByIds` in `fetchAllRows.js` are the shared halves — an
+`.in()` list is a URL as well as a row count.
+
+**The Billing modal rebuilt the entire bill document on every character typed.** The live preview is
+an iframe whose `srcDoc` was assigned the freshly-built HTML each render, and assigning `srcDoc`
+replaces the document: the browser re-parses and re-lays-out the whole bill. Measured in Chromium on
+a desktop for a 22-line bill: **17 ms median, 22 ms p90** — paid per keystroke in the buyer name,
+discount, remarks and tender fields, on a till that is usually a much slower tablet. It now reaches
+the iframe on a 200 ms trailing delay (`PREVIEW_DEBOUNCE_MS`), immediate on open, close and tab
+change. Building the HTML string itself measured 0.4 ms and was never the cost. The block had to
+move above the component's access guard to do it, because the debounce is a hook.
+
+**Three polls re-rendered their screens on a timer whether or not anything had changed.** POS
+Orders polls its KOT tickets and pending guest requests every 5 s each and called both setters
+unconditionally, so the largest component in the product reconciled its whole tree roughly every
+2.5 s for the length of a service; the Kitchen Display did the same on a screen that is never
+closed. `setIfChanged` (`src/shared/setIfChanged.js`, with tests) compares a signature and returns
+the previous state, which is React's own render bail-out. Both POS call sites omit `pos_kot_log.items`
+from the signature and say why at the call site — a ticket's lines are immutable once written, so a
+real change always arrives as a different set of ids.
+
+**The Z-report ran four reads in a waterfall and had no paging at all.** `loadShiftReport` is the
+figure a drawer is counted against, and it is rebuilt on page load and again for every expanded
+history row. Its cash-movements read needed nothing from its orders read, and its payments and
+items reads needed nothing from each other — two waves now instead of four. The orders read is
+paged (a truncated one understates the drawer with no error anywhere) and the two `.in()` reads are
+chunked.
+
+**Five more unpaged reads, all on tables with nothing to bound them.** `pos_customers` — a row per
+phone that has ever been on a bill, so the book only grows, and past 1000 a regular simply cannot be
+found by the search box. `pos_kot_log` on the Kitchen Display, sorted oldest-first, so truncation
+drops the **newest** tickets: the ones the kitchen is waiting on. `pos_parking_slips`, every slip
+ever written. `pos_shifts` history, which crosses 1000 in the first year. And Credit Notes'
+candidate list, whose range is whatever the two pickers are set to — the truncation would hide the
+bill the customer is standing there holding.
+
+**Round trips off the close path and the counter.** `closeOrder`'s customer upsert and table release
+read nothing the IMS post produces, so both now travel alongside it rather than each taking its own
+turn — two fewer trips on every bill. The rest of that function was deliberately left alone: its
+steps look independent and are not, because `award_loyalty_points` resolves the customer from
+`pos_customers` by phone and returns 0 when the row is absent, so the upsert **must** land before it
+or a first-time customer silently earns nothing. Both reprint paths issued two serial reads that
+each filter on the same order id. POS Staff invoked the `admin-user-ops` Edge Function once per
+staff member in two sequential loops, one of them on every page load.
+
+**Measured and left alone, so the next sweep does not re-attempt them.** The till's menu filter and
+category list: 0.05 ms per render at 300 items — memoizing it would be churn. The Guest Menu's
+category grouping, same order of magnitude. `PosExceptionReport`'s render-body rollups: no text
+input on the page, only date pickers and two selects, so nothing re-renders it per keystroke. The
+offline queue's per-send KOT inserts: 1–3 trips on a reconnect path, not worth changing failure
+granularity on the one path that only runs when the network is already unreliable. `PosCustomers`'
+credit rollup *was* memoized — it walks every Credit bill ever and re-ran on every keystroke in a
+search box that has nothing to do with credit.
+
 ### S628 — 2026-08-29 — /impeccable optimize over the HR module: the same two shapes, plus four silent truncations
 
 The IMS sweep's two shapes (S625/S626) reappeared across HR, and the row-cap sweep that S620 ran

@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Fab from '../../../components/Fab'
 import Tip from '../../../components/Tip'
 import { printParkingSlip } from './parkingSlipHtml'
@@ -24,7 +25,10 @@ export default function PosParkingSlips() {
     if (!clientId) return
     setLoading(true)
     const [{ data: rows }, { data: profs }, { data: client }, { data: settings }] = await Promise.all([
-      scopedFrom('pos_parking_slips').order('created_at', { ascending: false }),
+      // Paged: nothing bounds this by date, so it is every slip the outlet has ever written and
+      // it only gets longer. A bare select stops at 1000 with no error, which here would also
+      // silently shrink the stale-slip sweep below to whatever happened to fit.
+      fetchAllRows(() => scopedFrom('pos_parking_slips').order('created_at', { ascending: false }).order('id')),
       // Raw `profiles` reads are RLS-limited to the caller's own row — resolving OTHER staff
       // members' names needs get_client_profile_names(), a SECURITY DEFINER RPC.
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),

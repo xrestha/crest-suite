@@ -600,4 +600,15 @@ and per-anything-per-month both cross 1000 inside one real client-year. And note
 happily over a short one. Details and the HR-specific consequences are in
 `.claude/rules/frontend-performance.md`.
 
+**An `.in(column, ids)` filter is a URL as well as a row count (S629).** PostgREST spells the id
+list out in the request URL, so at ~37 characters a uuid a few hundred ids is already past what
+proxies and CDNs accept — a loud 414 — while the 1000-row cap still applies underneath, and one
+parent can own many rows (a bill has a line per dish, so 200 order ids match thousands). Reach for
+`fetchAllRowsChunked(ids, makeQuery)` in `src/shared/fetchAllRows.js`, which splits the list, pages
+each chunk and runs them together; `runChunkedByIds(ids, makeQuery)` is the write-side equivalent
+for an `UPDATE`/`DELETE` filtered the same way (sequential, first error wins, and **not** atomic —
+some chunks may already have landed). The POS→IMS backfill's already-posted guard was the case that
+forced both: it was simultaneously too long for the URL and far past 1000 rows, and either failure
+makes an already-posted bill look unposted, which re-posts its revenue.
+
 **Two traps when doing a sweep like this**, both hit live: (1) if the original chain continued past the line you're editing, the closing paren lands too early and the trailing `.order(...)` gets applied to fetchAllRows' *result* — a plain `{data,error}`, not a builder — which is a runtime `TypeError`, not a build error, so only actually loading the page catches it (`Purchases.js`, found exactly this way). (2) A CRA dev server left running shares `node_modules/.cache` with `npm run build` and will keep rewriting stale ESLint entries underneath it, producing phantom `'fetchAllRows' is defined but never used` errors on files where the import and the usage are both plainly present. Stop the dev server before trusting a CI build.

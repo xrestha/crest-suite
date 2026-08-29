@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { setIfChanged, rowsSignature } from '../../../shared/setIfChanged'
 import Tip from '../../../components/Tip'
 import EstimateTimeModal from './EstimateTimeModal'
 
@@ -68,11 +70,15 @@ export default function KitchenDisplay() {
     // 'cancelled' (set by PosOrders.jsx's closeOrder when the parent order is voided) is excluded
     // entirely rather than shown as a 4th column — there's nothing left for kitchen/bar to do
     // with a ticket whose order no longer exists.
-    const { data } = await scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes')
+    // Paged. pos_kot_log is one row per send per station, so a long service at a busy outlet can
+    // cross the 1000-row cap inside a single day — and this query is sorted OLDEST first, so a
+    // truncated read drops the newest tickets: precisely the ones the kitchen is waiting on, with
+    // no error to say anything was dropped. `.order('id')` is the unique tiebreaker paging needs.
+    const { data } = await fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes')
       .eq('station', station)
       .neq('status', 'cancelled')
       .gte('sent_at', startOfDay.toISOString())
-      .order('sent_at', { ascending: true })
+      .order('sent_at', { ascending: true }).order('id'))
     const rows = data || []
     const newTickets = rows.filter(t => t.status === 'new')
     if (loadedOnce.current && newTickets.some(t => !seenTicketIds.current.has(t.id))) {
@@ -80,7 +86,12 @@ export default function KitchenDisplay() {
     }
     seenTicketIds.current = new Set(newTickets.map(t => t.id))
     loadedOnce.current = true
-    setTickets(rows)
+    // A wall-mounted board polls all day and the answer is usually unchanged; without the
+    // bail-out the whole board re-rendered on every tick. `items` is not in the signature because
+    // a pos_kot_log row's lines are immutable once written (see PosOrders' own ticket poll), so
+    // any real change to what a ticket holds arrives as a different id.
+    setIfChanged(setTickets, rows,
+      rs => rowsSignature(rs, ['id', 'status', 'started_at', 'ready_at', 'estimated_prep_minutes']))
     setLoading(false)
   }, [scopedFrom, station])
 

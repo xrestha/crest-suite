@@ -30,3 +30,39 @@ export async function fetchAllRows(makeQuery, { pageSize = 1000, maxRows = 10000
   }
   return { data: out, error: null }
 }
+
+// Same job for a read whose filter is `.in(column, ids)` with a long id list.
+//
+// A `.in()` filter is spelled out in the request URL, so once the list is long enough the read
+// stops being a row-count problem and becomes a URL-length one: a uuid costs ~37 characters, so
+// a few hundred ids already exceeds what proxies and CDNs accept and the request comes back 414
+// rather than short. That failure is at least loud — the quiet half is that the ROW cap still
+// applies underneath it, and one order can own many rows (a bill has a line per dish), so a
+// list of 200 order ids can easily match more than 1000 rows.
+//
+// `makeQuery` takes the id slice and returns a fresh builder for it, and must carry the same
+// unique tiebreaker fetchAllRows requires. Chunks are independent reads, so they run together.
+export async function fetchAllRowsChunked(ids, makeQuery, { chunkSize = 150, ...pageOpts } = {}) {
+  const unique = [...new Set((ids || []).filter(id => id != null))]
+  if (unique.length === 0) return { data: [], error: null }
+  const chunks = []
+  for (let i = 0; i < unique.length; i += chunkSize) chunks.push(unique.slice(i, i + chunkSize))
+  const results = await Promise.all(chunks.map(c => fetchAllRows(() => makeQuery(c), pageOpts)))
+  const failed = results.find(r => r.error)
+  if (failed) return { data: null, error: failed.error }
+  return { data: results.flatMap(r => r.data), error: null }
+}
+
+// The write-side counterpart: splits an id list the same way so an UPDATE/DELETE filtered by
+// `.in('id', ids)` cannot outgrow its own URL either. `makeQuery` returns the builder for a
+// slice; the first error wins and stops nothing that has already been applied, which is why
+// callers must treat this as "some chunks may have landed" rather than atomic.
+export async function runChunkedByIds(ids, makeQuery, { chunkSize = 150 } = {}) {
+  const unique = [...new Set((ids || []).filter(id => id != null))]
+  if (unique.length === 0) return { error: null }
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const { error } = await makeQuery(unique.slice(i, i + chunkSize))
+    if (error) return { error }
+  }
+  return { error: null }
+}

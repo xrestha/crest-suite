@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
@@ -41,13 +42,21 @@ export default function CreditNotes() {
     // nothing saying the date range was the reason.
     const searchNo = parseInt(invoiceSearch.trim(), 10)
     const byInvoiceNo = invoiceSearch.trim() !== '' && !isNaN(searchNo)
-    let q = scopedFrom('pos_orders', 'id, table_name, order_no, invoice_no, invoice_fy, close_type, paid_amount, closed_at, buyer_name, buyer_address, buyer_pan, buyer_phone, discount_amount, credit_note_id')
-      .eq('status', 'billed').eq('close_type', 'paid')
-      .is('credit_note_id', null)
-    q = byInvoiceNo
-      ? q.eq('invoice_no', searchNo)
-      : q.gte('closed_at', fromTs).lte('closed_at', toTs)
-    const { data } = await q.order('closed_at', { ascending: false })
+    // A FUNCTION returning a fresh builder, not one builder reused: a supabase-js builder is a
+    // one-shot thenable, so paging a shared one silently returns the first page every time.
+    const makeQuery = () => {
+      const q = scopedFrom('pos_orders', 'id, table_name, order_no, invoice_no, invoice_fy, close_type, paid_amount, closed_at, buyer_name, buyer_address, buyer_pan, buyer_phone, discount_amount, credit_note_id')
+        .eq('status', 'billed').eq('close_type', 'paid')
+        .is('credit_note_id', null)
+      return (byInvoiceNo
+        ? q.eq('invoice_no', searchNo)
+        : q.gte('closed_at', fromTs).lte('closed_at', toTs)
+      ).order('closed_at', { ascending: false }).order('id')
+    }
+    // Paged: the range is whatever the two pickers are set to, so a widened window at a busy
+    // outlet passes 1000 bills — and the truncation would drop the bill the customer is standing
+    // there holding, indistinguishably from it having already been credited.
+    const { data } = await fetchAllRows(makeQuery)
     setCandidates(data || [])
     setCandLoading(false)
   }, [clientId, fromIso, toIso, invoiceSearch, scopedFrom])

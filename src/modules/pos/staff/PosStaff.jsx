@@ -69,6 +69,13 @@ export default function PosStaff() {
   const effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
   const linkedEmployeeIds = new Set(staff.map(p => p.hr_employee_id).filter(Boolean))
   const unlinkedEmployees = employees.filter(e => !linkedEmployeeIds.has(e.id))
+  // One filter, not two. The table wrote the same chain twice — once for its empty check and
+  // once for its rows — and re-lowercased the search term inside each pass, per row, per
+  // keystroke.
+  const staffQuery = search.trim().toLowerCase()
+  const visibleStaff = staffQuery
+    ? staff.filter(p => (p.full_name || '').toLowerCase().includes(staffQuery))
+    : staff
 
   useEffect(() => { if (clientId) init() }, [clientId]) // eslint-disable-line
 
@@ -107,13 +114,17 @@ export default function PosStaff() {
       const expected = roles.find(r => r.label === p.pos_job_title)?.level
       return expected && expected !== p.pos_role
     })
-    for (const p of mismatched) {
+    // Independent per-row writes, so together rather than one after another — each is an Edge
+    // Function call, the most expensive round trip in the app, and this runs on every visit to
+    // the page. Sequencing them bought nothing: they touch different accounts and the loop never
+    // stopped on a failure anyway.
+    await Promise.all(mismatched.map(async p => {
       const level = roles.find(r => r.label === p.pos_job_title)?.level
       const { error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_pos_role', userId: p.id, pos_role: level, pos_job_title: p.pos_job_title },
       })
       if (!error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, pos_role: level } : s))
-    }
+    }))
   }
 
   async function load() {
@@ -147,12 +158,14 @@ export default function PosStaff() {
     if (!ok) return
     // Sync existing staff whose job title matches the changed role
     const affected = staff.filter(p => p.pos_job_title === changedLabel && p.pos_role !== level)
-    for (const p of affected) {
+    // Same shape as init()'s sync above — one Edge Function call per affected account, none of
+    // them dependent on any other, so the manager waits on the slowest rather than on the sum.
+    await Promise.all(affected.map(async p => {
       const { error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_pos_role', userId: p.id, pos_role: level, pos_job_title: changedLabel },
       })
       if (!error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, pos_role: level } : s))
-    }
+    }))
   }
 
   function addCustomRole() {
@@ -383,10 +396,10 @@ export default function PosStaff() {
               </tr>
             </thead>
             <tbody>
-              {staff.filter(p => !search.trim() || (p.full_name || '').toLowerCase().includes(search.trim().toLowerCase())).length === 0 && (
+              {visibleStaff.length === 0 && (
                 <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>No staff match "{search}".</td></tr>
               )}
-              {staff.filter(p => !search.trim() || (p.full_name || '').toLowerCase().includes(search.trim().toLowerCase())).map(p => {
+              {visibleStaff.map(p => {
                 const displayTitle = p.pos_job_title || effectiveRoles.find(r => r.level === p.pos_role)?.label || ''
                 return (
                   <tr key={p.id}>

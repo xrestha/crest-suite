@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { scopedFrom as scopedFromRaw } from '../../../shared/scopedDb'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -165,16 +166,25 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
 // Shared X/Z-report totals from a shift's closed orders — used for the live Current Shift view
 // and for expanding a past shift in History. Void/Comp valuation mirrors PosExceptionReport.jsx.
 async function loadShiftReport(clientId, shiftId) {
-  const { data: orders } = await scopedFromRaw('pos_orders', clientId, 'id, close_type, payment_method, paid_amount, discount_amount, closed_at')
-    .eq('shift_id', shiftId)
+  // Both reads are filtered on the shift alone — neither needs the other's result — so they go
+  // together. This is the report the drawer is counted against and it is rebuilt every time a
+  // history row is expanded, so a needless round trip here is paid over and over.
+  //
+  // The orders read is paged: every figure below is summed from it, and a bare select that
+  // stopped at 1000 would understate the drawer with no error anywhere — the silently-wrong-total
+  // shape, on the one screen whose entire job is reconciling against cash. `.order('id')` is both
+  // the tiebreaker paging needs and the deterministic order the query previously had none of.
+  const [{ data: orders }, { data: movements }] = await Promise.all([
+    fetchAllRows(() => scopedFromRaw('pos_orders', clientId, 'id, close_type, payment_method, paid_amount, discount_amount, closed_at')
+      .eq('shift_id', shiftId).order('id')),
+    // Cash that moved without being a sale: supplier payments, staff advances, float drops, and
+    // customers settling an older Credit bill in cash. Expected Cash used to be `opening + cash
+    // sales`, which meant a credit settlement put real money in the drawer that the reconciliation
+    // did not know about — the shift then reported an unexplainable "over" (S573).
+    scopedFromRaw('pos_cash_movements', clientId, 'id, direction, kind, amount, reason, created_at, created_by')
+      .eq('shift_id', shiftId).order('created_at'),
+  ])
   const list = orders || []
-
-  // Cash that moved without being a sale: supplier payments, staff advances, float drops, and
-  // customers settling an older Credit bill in cash. Expected Cash used to be `opening + cash
-  // sales`, which meant a credit settlement put real money in the drawer that the reconciliation
-  // did not know about — the shift then reported an unexplainable "over" (S573).
-  const { data: movements } = await scopedFromRaw('pos_cash_movements', clientId, 'id, direction, kind, amount, reason, created_at, created_by')
-    .eq('shift_id', shiftId).order('created_at')
   const moveList = movements || []
   const cashIn  = moveList.filter(m => m.direction === 'in').reduce((s, m) => s + (Number(m.amount) || 0), 0)
   const cashOut = moveList.filter(m => m.direction === 'out').reduce((s, m) => s + (Number(m.amount) || 0), 0)
@@ -186,24 +196,26 @@ async function loadShiftReport(clientId, shiftId) {
   // aggregation loop below can attribute each tender to its own method rather than lumping the
   // whole order under one bucket.
   const splitOrderIds = list.filter(o => o.close_type === 'paid' && o.payment_method === 'Split').map(o => o.id)
-  let paymentsByOrder = {}
-  if (splitOrderIds.length > 0) {
-    const { data: payments } = await scopedFromRaw('pos_order_payments', clientId, 'order_id, payment_method, amount')
-      .in('order_id', splitOrderIds)
-    paymentsByOrder = (payments || []).reduce((acc, p) => { (acc[p.order_id] = acc[p.order_id] || []).push(p); return acc }, {})
-  }
-
   const needItems = list.filter(o => o.close_type === 'void' || o.close_type === 'writeoff')
-  let itemsByOrder = {}, costMap = {}
-  if (needItems.length > 0) {
-    const { data: items } = await scopedFromRaw('pos_order_items', clientId, 'order_id, qty, unit_price, vat_rate, recipe_id')
-      .in('order_id', needItems.map(o => o.id))
-    itemsByOrder = (items || []).reduce((acc, i) => { (acc[i.order_id] = acc[i.order_id] || []).push(i); return acc }, {})
-    const compRecipeIds = [...new Set((items || [])
-      .filter(i => needItems.find(o => o.id === i.order_id)?.close_type === 'writeoff')
-      .map(i => i.recipe_id).filter(Boolean))]
-    if (compRecipeIds.length > 0) costMap = await computeRecipeCosts(supabase, compRecipeIds)
-  }
+
+  // Both derive their id list from `orders` above and neither reads the other, so they are one
+  // wave rather than two. Chunked because an `.in()` list is spelled out in the URL and both
+  // return several rows per order — a busy shift's split bills alone can outgrow either limit.
+  const [{ data: payments }, { data: items }] = await Promise.all([
+    fetchAllRowsChunked(splitOrderIds,
+      ids => scopedFromRaw('pos_order_payments', clientId, 'order_id, payment_method, amount').in('order_id', ids).order('id')),
+    fetchAllRowsChunked(needItems.map(o => o.id),
+      ids => scopedFromRaw('pos_order_items', clientId, 'order_id, qty, unit_price, vat_rate, recipe_id').in('order_id', ids).order('id')),
+  ])
+  const paymentsByOrder = (payments || []).reduce((acc, p) => { (acc[p.order_id] = acc[p.order_id] || []).push(p); return acc }, {})
+  const itemsByOrder = (items || []).reduce((acc, i) => { (acc[i.order_id] = acc[i.order_id] || []).push(i); return acc }, {})
+
+  // One lookup per order id instead of a .find() down `needItems` per item row.
+  const closeTypeById = new Map(needItems.map(o => [o.id, o.close_type]))
+  const compRecipeIds = [...new Set((items || [])
+    .filter(i => closeTypeById.get(i.order_id) === 'writeoff')
+    .map(i => i.recipe_id).filter(Boolean))]
+  const costMap = compRecipeIds.length > 0 ? await computeRecipeCosts(supabase, compRecipeIds) : {}
 
   const byMethod = Object.fromEntries(PAY_METHODS.map(m => [m, 0]))
   let discountTotal = 0, voidTotal = 0, compTotal = 0, salesTotal = 0, orderCount = 0
@@ -424,8 +436,11 @@ export default function PosShifts() {
 
   async function loadHistory() {
     setHistoryLoading(true)
-    const { data } = await scopedFrom('pos_shifts').eq('status', 'closed')
-      .order('closed_at', { ascending: false })
+    // Paged: two or three shifts a day with no date bound crosses 1000 rows inside the first
+    // year, and the truncation would take the OLDEST shifts off a screen whose whole purpose is
+    // looking back at them.
+    const { data } = await fetchAllRows(() => scopedFrom('pos_shifts').eq('status', 'closed')
+      .order('closed_at', { ascending: false }).order('id'))
     setHistory(data || [])
     setHistoryLoading(false)
     setHistoryLoaded(true)

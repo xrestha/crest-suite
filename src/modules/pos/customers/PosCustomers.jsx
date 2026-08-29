@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect } from 'react'
+import { Fragment, useState, useEffect, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -78,11 +78,68 @@ export default function PosCustomers() {
       })
   }, [clientId]) // eslint-disable-line
 
+  // Memoized as one pass over creditBills — every Credit bill ever, so this is the array that
+  // grows with the age of the account. Without it the whole rollup re-ran on every keystroke in
+  // the Customers tab's search box, which has nothing to do with credit at all, and on every
+  // field of the Settle panel. It sits above the access guard below because a hook must.
+  const { unsettled, settled, outstandingTotal, creditByCounterparty, counterpartyTotals } = useMemo(() => {
+    const unsettledBillsList = creditBills.filter(b => !b.credit_settled_at)
+    const settledBillsList   = creditBills.filter(b => b.credit_settled_at)
+
+    // Both halves of this tab grouped by who actually owes the money — the same per-partner view
+    // Sales Report → Delivery Partners now gives, mirrored here because this is the screen someone
+    // is on when they chase Foodmandu for a remittance. Before it existed, neither screen grouped
+    // by partner at all: the platform was a tag on a bill everywhere and never a subject with its
+    // own total, so "what does Pathao owe me" meant reading down a column and adding it up.
+    //
+    // Non-partner Credit is kept as its own row rather than filtered out, so the Outstanding column
+    // still ties to the KPI card directly above it — a rollup that doesn't reconcile with the total
+    // beside it is worse than no rollup (S567).
+    //
+    // Deliberately NOT the same figures as the report's: this page is every Credit bill ever, that
+    // one is a date range. The note under the table says so, because two screens showing the same
+    // words and different numbers is a support call.
+    const byCounterparty = Object.values(creditBills.reduce((acc, b) => {
+      const key = b.delivery_partner || '__DIRECT__'
+      const g = acc[key] = acc[key] || {
+        key, label: b.delivery_partner || 'Direct customers', isPartner: !!b.delivery_partner,
+        unsettledBills: 0, outstanding: 0, settledBills: 0, commission: 0, netReceived: 0,
+      }
+      const amt = b.paid_amount || 0
+      if (b.credit_settled_at) {
+        const comm = parseFloat(b.commission_amount) || 0
+        g.settledBills += 1
+        g.commission += comm
+        g.netReceived += amt - comm
+      } else {
+        g.unsettledBills += 1
+        g.outstanding += amt
+      }
+      return acc
+    }, {})).sort((a, b) => (b.outstanding - a.outstanding) || (b.netReceived - a.netReceived))
+
+    return {
+      unsettled: unsettledBillsList,
+      settled: settledBillsList,
+      outstandingTotal: unsettledBillsList.reduce((s, b) => s + (b.paid_amount || 0), 0),
+      creditByCounterparty: byCounterparty,
+      counterpartyTotals: byCounterparty.reduce((s, g) => ({
+        unsettledBills: s.unsettledBills + g.unsettledBills, outstanding: s.outstanding + g.outstanding,
+        settledBills: s.settledBills + g.settledBills, commission: s.commission + g.commission,
+        netReceived: s.netReceived + g.netReceived,
+      }), { unsettledBills: 0, outstanding: 0, settledBills: 0, commission: 0, netReceived: 0 }),
+    }
+  }, [creditBills])
+
   if (!hasPosAccess('supervisor')) return <Navigate to="/pos" replace />
 
   async function loadCustomers() {
     setCustLoading(true)
-    const { data } = await scopedFrom('pos_customers').order('name')
+    // Paged. The customer book grows forever — a row per unique phone that has ever been on a
+    // bill — so it is one of the few POS tables with no period to bound it, and a bare select
+    // would quietly stop at 1000 with no error: the missing regulars simply would not be found
+    // by the search box, and nothing on screen would say why.
+    const { data } = await fetchAllRows(() => scopedFrom('pos_customers').order('name').order('id'))
     setCustomers(data || [])
     setCustLoading(false)
   }
@@ -190,48 +247,6 @@ export default function PosCustomers() {
   const filteredCustomers = q
     ? customers.filter(c => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q))
     : customers
-
-  const unsettled = creditBills.filter(b => !b.credit_settled_at)
-  const settled   = creditBills.filter(b => b.credit_settled_at)
-  const outstandingTotal = unsettled.reduce((s, b) => s + (b.paid_amount || 0), 0)
-
-  // Both halves of this tab grouped by who actually owes the money — the same per-partner view
-  // Sales Report → Delivery Partners now gives, mirrored here because this is the screen someone
-  // is on when they chase Foodmandu for a remittance. Before it existed, neither screen grouped
-  // by partner at all: the platform was a tag on a bill everywhere and never a subject with its
-  // own total, so "what does Pathao owe me" meant reading down a column and adding it up.
-  //
-  // Non-partner Credit is kept as its own row rather than filtered out, so the Outstanding column
-  // still ties to the KPI card directly above it — a rollup that doesn't reconcile with the total
-  // beside it is worse than no rollup (S567).
-  //
-  // Deliberately NOT the same figures as the report's: this page is every Credit bill ever, that
-  // one is a date range. The note under the table says so, because two screens showing the same
-  // words and different numbers is a support call.
-  const creditByCounterparty = Object.values(creditBills.reduce((acc, b) => {
-    const key = b.delivery_partner || '__DIRECT__'
-    const g = acc[key] = acc[key] || {
-      key, label: b.delivery_partner || 'Direct customers', isPartner: !!b.delivery_partner,
-      unsettledBills: 0, outstanding: 0, settledBills: 0, commission: 0, netReceived: 0,
-    }
-    const amt = b.paid_amount || 0
-    if (b.credit_settled_at) {
-      const comm = parseFloat(b.commission_amount) || 0
-      g.settledBills += 1
-      g.commission += comm
-      g.netReceived += amt - comm
-    } else {
-      g.unsettledBills += 1
-      g.outstanding += amt
-    }
-    return acc
-  }, {})).sort((a, b) => (b.outstanding - a.outstanding) || (b.netReceived - a.netReceived))
-
-  const counterpartyTotals = creditByCounterparty.reduce((s, g) => ({
-    unsettledBills: s.unsettledBills + g.unsettledBills, outstanding: s.outstanding + g.outstanding,
-    settledBills: s.settledBills + g.settledBills, commission: s.commission + g.commission,
-    netReceived: s.netReceived + g.netReceived,
-  }), { unsettledBills: 0, outstanding: 0, settledBills: 0, commission: 0, netReceived: 0 })
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1100 }}>

@@ -360,7 +360,7 @@ export default function Periods() {
       })
     } catch (err) {
       console.error('POS backfill failed:', err)
-      window.alert(`Could not post POS bills for ${label}: ${err?.message || err}\n\nNothing was left half-written — each bill is posted and stamped one at a time, so re-running picks up wherever it stopped.`)
+      window.alert(`Could not post POS bills for ${label}: ${err?.message || err}\n\nNothing was left half-written — a bill is only stamped once its revenue has landed, so re-running picks up wherever it stopped.`)
     } finally {
       setBackfillBusy(null)
     }
@@ -381,7 +381,7 @@ export default function Periods() {
       )
     } catch (err) {
       console.error('POS backfill failed:', err)
-      window.alert(`Could not post POS bills for ${label}: ${err?.message || err}\n\nNothing was left half-written — each bill is posted and stamped one at a time, so re-running picks up wherever it stopped.`)
+      window.alert(`Could not post POS bills for ${label}: ${err?.message || err}\n\nNothing was left half-written — a bill is only stamped once its revenue has landed, so re-running picks up wherever it stopped.`)
     } finally {
       setBackfillBusy(null)
     }
