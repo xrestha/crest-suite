@@ -159,6 +159,95 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S639 — 2026-08-29 — every Suite feature actually inside the Crest Suite section
+
+Service worker `crest-v158`. No migration.
+
+S638 gave Crest Suite its own sidebar group and left two of its six features outside it — Demand
+Forecast and Fixed Assets stayed in the IMS lists with a small PRO marker in place. The reason was
+real: both are gated at **IMS supervisor** rank, and the group was gated owner-or-admin, so moving
+them would have REVOKED them from every supervisor using them today. The marker was a workaround
+for a gate in the wrong place.
+
+**The gate moved to the items.** `SUITE_NAV` is now one list of all six, carrying two different
+gates: `ownerOnly` on the four owner-altitude pages, `minImsRole` on the two IMS-shaped ones.
+`isItemVisible()` learned `ownerOnly`, `renderSuiteGroup()` dropped its owner-or-admin wrapper, and
+`renderGroup` already returns null when nothing in a group is reachable. So an Owner sees six rows,
+an **IMS supervisor sees a two-row Crest Suite group**, and a POS PIN account sees no group at all
+— with nobody losing anything they had.
+
+**The palette now builds from that same list**, mapping in `longLabel` where the sidebar's 240px
+forced a short one (Monthly Owner/Manager Report, Consolidated Profit & Loss). It re-states no
+visibility condition of its own. That is the actual fix for the S617 class: hand-duplicating the
+condition is what produced that bug, and S638 found S617 had only fixed a third of it — Group
+Console had the `isAdmin || isOwner` test while Owner Dashboard and Owner Report never did.
+
+Removing the two from `NAV`/`REPORTS` has three quiet consequences, all checked:
+
+- `IMS_GROUPS`' `NAV.slice(10)` still resolves to exactly Recipe Costing → Overheads, and its
+  comment saying so is now literally true rather than approximately.
+- Stock Reports drops to ten entries, Costing to four.
+- **Panel resolution changes on purpose.** Those two routes are no longer in the list that forces
+  the IMS panel, so they join the other four Suite routes in keeping whatever panel you were on —
+  correct for a group that renders on all of them, and it stops a POS user being yanked to IMS.
+
+The per-item PRO marker `renderNavItem` grew in S638 is deleted; the group header's chip is the one
+place entitlement is stated now.
+
+**One self-inflicted trap worth recording:** the first version of the doc update added a `navNote`
+key to the two IMS guide sections. `ModuleGuideTab` renders ten named keys and ignores everything
+else, so it would have been invisible — dead data that reads as documentation. The note is a
+`gotchas` entry instead. Any guide field that is not one of the ten named keys renders nowhere.
+
+### S638 — 2026-08-29 — Crest Suite reads as its own section in the sidebar
+
+Service worker `crest-v157`. No migration.
+
+Asked directly: *how will a client see the features of Crest Suite in the sidebar?* The honest
+answer was **they can't, until they click one and collide with the gate.**
+
+Owner Dashboard, Owner Report and Profit & Loss rendered as three unlabelled rows at the top of
+every module panel, visually identical to features included in the plan. That much was deliberate
+— a Suite nav item carries no `featureKey` on purpose, because one would make the row DISAPPEAR
+instead of upselling, and `SuiteGate`'s whole design is an inline upsell in place. But nothing on
+the sidebar said these were a separate, paid add-on.
+
+**The upgrade teaser could not fill the gap, and this is the part worth keeping.** It filters on
+`item.featureKey && item.minPlan === nextTier` — which no Suite item has, by the design decision
+above — and it returns `null` outright once `plan === 'pro'`. So an IMS Pro client without Suite
+saw **no upsell anywhere in the shell at all**: not the teaser, not the footer chip (also hidden at
+Pro), not a marker on the rows themselves. The most expensive SKU in the product was the least
+visible thing in the nav.
+
+**A labelled group is a better fix than extending the teaser would have been**: the section names
+the axis, a `PRO` chip names the entitlement, and the rows stay clickable so the existing in-place
+upsell still does the selling. `renderGroup` gained two optional keys — `badge` (replaces the item
+count, because "PRO" is what the reader needs from that header and "4" only counts what they cannot
+use) and `pinnable` (preserving these rows' pre-existing non-pinnable behaviour). Group key
+`suite`, so it is open by default and its state persists like every other group.
+
+**The panel's own Dashboard now renders ABOVE the group rather than inside the same flat run.** A
+group header sitting above an ungrouped row reads as though the row belongs to it, and collapsing
+the group would leave it visually orphaned.
+
+**Demand Forecast and Fixed Assets deliberately stay in the IMS lists.** Both are Suite Pro, but
+both are gated at IMS *supervisor* rank — moving them into an Owner-only group would REVOKE them
+from every supervisor using them today. They take a small `PRO` marker in place instead, shown only
+to a viewer who lacks the entitlement, so the new section is not the only truthful thing on the
+sidebar about what Suite contains.
+
+**A second S617-shaped bug fell out of the audit.** The command palette's `Suite` block carried the
+`isAdmin || isOwner` test on **Group Console only** — S617 fixed one third of it. Owner Dashboard
+and Monthly Owner/Manager Report never got it, so any staff account of any client could search its
+way onto them. Nothing leaked (both pages carry the S601 role redirect), but the product was
+advertising destinations the sidebar deliberately withholds, which is the half of that rule about
+trust rather than access. Fixed by gating the whole block. **Profit & Loss was missing from the
+palette entirely**, so the Owner could not search for the one Suite page that is a formal
+statement; added.
+
+Suite module guide updated with where a client finds all of this, including why the two stragglers
+are where they are.
+
 ### S637 — 2026-08-29 — a fourth admin guide: Crest Suite, the four pages that belonged to no module
 
 Service worker `crest-v156`. No migration. New: `src/pages/settings/suiteGuideData.js` (3 groups,

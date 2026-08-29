@@ -467,7 +467,7 @@ export const IMS_GUIDE_GROUPS = [
         id: 'fixed-assets',
         title: 'Fixed Assets',
         route: '/fixed-assets',
-        plan: 'Crest Suite Pro',
+        plan: 'Crest Suite Pro · IMS Supervisor+',
         summary:
           'Tracks equipment, furniture, vehicles, and kitchen machinery from purchase to disposal — book (straight-line) depreciation for internal accounts, plus a genuinely separate Nepal statutory pooled-WDV tax depreciation basis (Income Tax Act 2058) for annual IRD filing. Viewing is supervisor+, posting a depreciation/tax run is manager+ only.',
         workflow: [
@@ -489,6 +489,7 @@ export const IMS_GUIDE_GROUPS = [
           'Disposal gain/loss = Disposal Proceeds − NBV at Disposal (book side only — Nepal tax pooling just reduces the pool balance by the proceeds, with no separate per-asset gain/loss).',
         ],
         gotchas: [
+          'It lives under CREST SUITE in the sidebar, not under Costing — it is billed on the Suite axis, not an IMS tier. It is documented in this guide because everything it reads is IMS data.',
           'Book depreciation and Nepal tax depreciation are expected to disagree with each other — different methods (straight-line per-asset vs. declining-balance pooled), different starting rules. That is normal, not a bug; the Tax Depreciation tab carries its own on-screen disclaimer to verify current rates with an accountant before filing, since Nepal\'s Finance Act amends these periodically.',
           'Once a depreciation run or tax pool run is Posted, its schedule rows are immutable at the database level — there is no Reopen. Fixing a mistake means posting a new adjustment run for the same period, not editing the old one.',
           'Preview never writes anything — only Post does. Safe to Preview repeatedly while checking numbers.',
@@ -679,7 +680,7 @@ export const IMS_GUIDE_GROUPS = [
         id: 'demand-forecast',
         title: 'Demand Forecast',
         route: '/demand-forecast',
-        plan: 'Crest Suite Pro',
+        plan: 'Crest Suite Pro · IMS Supervisor+',
         summary:
           'Predicts covers, revenue, and per-dish quantity for the next 7 or 30 days for purchasing/prep planning, using a simple, auditable day-of-week moving average — explicitly not a trained AI model, by design, so results stay explainable.',
         workflow: [
@@ -694,6 +695,7 @@ export const IMS_GUIDE_GROUPS = [
           'If no POS revenue signal exists but a qty forecast does (from manual entries), revenue is instead estimated as Σ(forecastQty × recipe.selling_price) and shown with a "≈" prefix.',
         ],
         gotchas: [
+          'It lives under CREST SUITE in the sidebar, not under Stock Reports — it is billed on the Suite axis, not an IMS tier. It is documented in this guide because everything it reads is IMS data.',
           'Manual sales-entry history only kicks in as a fallback/supplement once POS history covers fewer than 42 days — and only for the qty signal, never covers/revenue.',
           'New forecast rows are inserted before the old run is deleted (not delete-then-insert) — a failed recompute can\'t wipe out the last good forecast.',
         ],

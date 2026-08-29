@@ -55,9 +55,6 @@ const NAV = [
   { to: '/menu-pricing',     label: 'Menu Pricing',      icon: Tag, featureKey: 'menu_pricing',    minPlan: 'starter', minImsRole: 'manager' },
   { to: '/menu-engineering', label: 'Menu Engineering',  icon: PieChart, featureKey: 'menu_engineering',minPlan: 'pro', minImsRole: 'manager' },
   { to: '/overheads',        label: 'Overheads',         icon: Receipt, featureKey: 'overheads',       minPlan: 'growth', minImsRole: 'manager' },
-  // Crest Suite Pro, not an IMS tier — no minPlan/featureKey, so the entry stays visible and the
-  // in-page SuiteGate renders the upsell (same treatment as Owner Dashboard / Monthly Report).
-  { to: '/fixed-assets',     label: 'Fixed Assets',      icon: Landmark, minImsRole: 'supervisor' },
 ]
 
 // cat: which characteristic report-group the item renders under in the sidebar
@@ -71,8 +68,6 @@ const REPORTS = [
   { to: '/stock-report',         label: 'Stock Report',         icon: Boxes, featureKey: 'stock_report',         cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/reorder',              label: 'Reorder Report',       icon: RefreshCw, featureKey: 'reorder_report',       cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/stock-movements',      label: 'Stock Movements',      icon: PackageOpen, featureKey: 'stock_movement_log',  cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
-  // Crest Suite Pro — see the Fixed Assets note above; gated in-page, not here.
-  { to: '/demand-forecast',      label: 'Demand Forecast',      icon: LineChart, cat: 'stock', minImsRole: 'supervisor' },
   { to: '/wastage-report',       label: 'Wastage Report',       icon: Trash2, featureKey: 'wastage_report',       cat: 'stock', minImsRole: 'supervisor' },
   { to: '/dead-stock',           label: 'Dead Stock',           icon: PackageX, featureKey: 'dead_stock',           cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/variance',             label: 'Variance Report',      icon: ArrowUpDown, featureKey: 'variance_report',      cat: 'stock', minPlan: 'growth', minImsRole: 'supervisor' },
@@ -100,6 +95,42 @@ const REPORTS = [
 ]
 
 // Collapsible nav groups for the IMS sidebar (Dashboard stays pinned above; Settings below).
+// ── Crest Suite Pro — every Suite feature, in one list ───────────────────────────────────────
+//
+// Suite is the owner layer sold ON TOP of the modules, so this renders as its own group on every
+// panel rather than living inside any one module's lists. S638 gave the three owner pages that
+// group; Demand Forecast and Fixed Assets stayed behind in NAV/REPORTS and were marked with a PRO
+// chip in place, which left the section telling only part of the truth about what Suite contains.
+// They are here now, and the reason they could not simply move before is solved by `ownerOnly`
+// below rather than by leaving them out.
+//
+// TWO different gates live in this one list, and that is the point:
+//   * `ownerOnly` — the four owner-altitude pages. Owner or Crest admin, nobody else.
+//   * `minImsRole` — Demand Forecast and Fixed Assets are Suite-billed but IMS-shaped, and an IMS
+//     supervisor uses them. Gating the GROUP on owner-or-admin would have revoked them from every
+//     supervisor who has them today, so the gate is per item and the group renders whatever the
+//     viewer can actually reach (renderGroup returns null when that is nothing).
+//
+// No featureKey on any of them, deliberately: one would make the row DISAPPEAR instead of
+// upselling, and SuiteGate's whole design is an inline upsell in place. Entitlement is carried by
+// the group header's PRO chip instead.
+//
+// `longLabel` is what the command palette shows — it is searched by typing a full name, while the
+// sidebar has 240px. The palette builds from THIS list, so the two can no longer disagree about
+// who may see a Suite destination (they did, and it was an S617-shaped bug found in S638).
+//
+// Note these routes are deliberately absent from the panel-resolution list further down: a Suite
+// page keeps whatever panel you were on, because the group is on all of them.
+const SUITE_NAV = [
+  { to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown,      ownerOnly: true },
+  { to: '/owner-report',    label: 'Owner Report',    icon: ScrollText, ownerOnly: true, longLabel: 'Monthly Owner/Manager Report' },
+  { to: '/pnl',             label: 'Profit & Loss',   icon: Scale,      ownerOnly: true, longLabel: 'Consolidated Profit & Loss' },
+  // Gated on having a group as well, not on Suite: a single-outlet client has nothing to roll up.
+  { to: '/group-dashboard', label: 'Group Console',   icon: Network,    ownerOnly: true, needsGroup: true },
+  { to: '/demand-forecast', label: 'Demand Forecast', icon: LineChart,  minImsRole: 'supervisor' },
+  { to: '/fixed-assets',    label: 'Fixed Assets',    icon: Landmark,   minImsRole: 'supervisor' },
+]
+
 // Reports are split by characteristic instead of one 20+-item list — open just the slice you need.
 const IMS_GROUPS = [
   { key: 'ops',             label: 'Operations',       items: NAV.slice(1, 10) }, // Periods … Requisitions
@@ -182,7 +213,8 @@ export default function Layout() {
           isTrial, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
           accessReason, graceDaysLeft, clientId,
           outlets, switchableOutlets, canSwitchOutlet, switchOutlet,
-          hasPosAccess, posRole, posTeam, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner } = useAuth()
+          hasPosAccess, posRole, posTeam, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner,
+          suitePlan } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom } = useScopedDb()
 
@@ -362,6 +394,11 @@ export default function Layout() {
   // the command palette's search index, and pinned favorites, so gating can never drift between
   // them as new items get added later.
   function isItemVisible(item) {
+    // Owner-altitude Suite pages. This lives here rather than as a wrapper at each render site so
+    // the sidebar and the command palette cannot disagree about it — the palette filters through
+    // this same predicate, and the one time that condition was duplicated by hand it was applied
+    // to Group Console and not to its two siblings (S617/S638).
+    if (item.ownerOnly && !isAdmin && !isOwner) return false
     if (item.featureKey && !hasFeature(item.featureKey)) return false
     if (item.minPosRole && !hasPosAccess(item.minPosRole)) return false
     // minPosRole is unique to POS nav items (IMS/HR use minImsRole/minHrRole), so this scopes
@@ -423,23 +460,52 @@ export default function Layout() {
   // on the assumption that a single word fits a third of a 240px sidebar. Measured, it does not:
   // each label box came out at 27px against 39/39/68px of text, so all three truncated to two
   // characters — "Ow… / Re… / Da…" — and these are the owner's own primary destinations, two of
-  // them the product's most expensive SKU. Full-width rows with their real names, matching Group
-  // Console below and every other nav item. Costs two rows of vertical space at the top of a panel
-  // whose report groups are collapsed by default; recall cost is worse than scroll cost here.
+  // them the product's most expensive SKU. Full-width rows with their real names, matching every
+  // other nav item.
+  //
+  // As of S638 only this panel's own Dashboard renders here; the four Suite destinations moved
+  // into their own labelled group below. See renderSuiteGroup for why.
   function renderDashboardRow() {
-    return (
-      <>
-        {(isAdmin || isOwner) &&
-          renderNavItem({ to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown }, { pinnable: false })}
-        {(isAdmin || isOwner) &&
-          renderNavItem({ to: '/owner-report', label: 'Owner Report', icon: ScrollText }, { pinnable: false })}
-        {(isAdmin || isOwner) &&
-          renderNavItem({ to: '/pnl', label: 'Profit & Loss', icon: Scale }, { pinnable: false })}
-        {renderNavItem(dashNavItem, { pinnable: false })}
-        {(isAdmin || isOwner) && outlets.length > 1 &&
-          renderNavItem({ to: '/group-dashboard', label: 'Group Console', icon: Network }, { pinnable: false })}
-      </>
-    )
+    return renderNavItem(dashNavItem, { pinnable: false })
+  }
+
+  // ── Crest Suite reads as its own section ─────────────────────────────────────────────────────
+  //
+  // These four rows used to sit unlabelled at the top of every panel, visually identical to the
+  // module features included in the plan. A Suite nav item deliberately carries no featureKey (one
+  // would make the row DISAPPEAR rather than upsell, and SuiteGate's whole design is an inline
+  // upsell in place) — but the consequence was that nothing on the sidebar ever said these are a
+  // separate, paid add-on. The client's only route to that fact was clicking one and colliding
+  // with the gate. The upgrade teaser could not fill the gap either: it filters on
+  // `featureKey && minPlan === nextTier`, which no Suite item has, and it returns null outright at
+  // IMS Pro — so an IMS Pro client without Suite saw no upsell anywhere in the shell at all.
+  //
+  // A labelled group with a PRO chip is the fix, and it is strictly better than the teaser would
+  // have been: the section names the axis, the chip names the entitlement, and the rows stay
+  // clickable so the existing in-place upsell still does the selling.
+  //
+  // Order note: the panel's own Dashboard renders ABOVE this group rather than inside it. A group
+  // header sitting above an ungrouped row reads as though the row belongs to the group, and
+  // collapsing the group would leave it visually orphaned.
+  function suiteGroup() {
+    return {
+      key: 'suite',
+      label: 'Crest Suite',
+      // The chip is the entitlement, so it shows only when the viewer does not have it. An admin
+      // is exempt from SuiteGate entirely, so an admin never sees it either.
+      badge: (isAdmin || suitePlan === 'pro') ? null : 'PRO',
+      // Not pinnable: this group renders on every panel already, so a pin would be a shortcut to
+      // something that is never more than one glance away. Preserves the pre-S638 behaviour.
+      pinnable: false,
+      items: suiteNavItems,
+    }
+  }
+
+  // No owner-or-admin wrapper here any more: the gate is per item now (ownerOnly / minImsRole),
+  // so an IMS supervisor correctly sees a two-item Crest Suite group while an Owner sees all six,
+  // and renderGroup returns null when the viewer can reach none of them.
+  function renderSuiteGroup() {
+    return renderGroup(suiteGroup())
   }
 
   // Collapsible group: header (label · count · chevron) + its items. The group containing
@@ -447,7 +513,12 @@ export default function Layout() {
   function renderGroup(group) {
     const items = unlockedItems(group.items)
     if (items.length === 0) return null
-    if (!group.label) return <div key={group.key}>{items.map(renderNavItem)}</div> // unlabeled groups render flat, no header
+    // Explicit arrow rather than `.map(renderNavItem)`: map passes the INDEX as the second
+    // argument, which lands in renderNavItem's options slot. It happened to be harmless (a number
+    // destructures to undefined, so every default applied), but it also meant a group could never
+    // pass options through — which `pinnable` now needs.
+    const renderItems = () => items.map(i => renderNavItem(i, { pinnable: group.pinnable !== false }))
+    if (!group.label) return <div key={group.key}>{renderItems()}</div> // unlabeled groups render flat, no header
     const hasActive = items.some(i => location.pathname === i.to || location.pathname.startsWith(i.to + '/'))
     const open = groupOpen(group.key) || hasActive
     return (
@@ -470,11 +541,17 @@ export default function Layout() {
         >
           <span>{group.label}</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ fontSize: 'var(--font-size-micro)', color: 'var(--theme-text3)', fontWeight: 600 }}>{items.length}</span>
+            {/* A badge REPLACES the count: "PRO" is what the reader needs from this header, and
+                "4" alongside it just says how many things they cannot use yet. badge-yellow is the
+                accent-tinted categorical tag (there is no badge-gold) — this is a tier label, not
+                a warning, so badge-amber would be the wrong signal. */}
+            {group.badge
+              ? <span className="badge-yellow" style={{ fontSize: 9, letterSpacing: '0.06em' }}>{group.badge}</span>
+              : <span style={{ fontSize: 'var(--font-size-micro)', color: 'var(--theme-text3)', fontWeight: 600 }}>{items.length}</span>}
             <span aria-hidden="true" style={{ fontSize: 'var(--font-size-chevron)', color: 'var(--theme-text3)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform var(--motion-fast) var(--ease-standard)' }}>▶</span>
           </span>
         </button>
-        <div id={`navgroup-${group.key}`}>{open && items.map(renderNavItem)}</div>
+        <div id={`navgroup-${group.key}`}>{open && renderItems()}</div>
       </div>
     )
   }
@@ -511,6 +588,11 @@ export default function Layout() {
     : 'Dashboard'
   const dashNavItem = { ...NAV[0], label: dashLabel }
 
+  // Group Console is the one Suite row whose visibility depends on session state rather than on a
+  // role, so it is dropped here rather than inside SUITE_NAV. Both the sidebar group and the
+  // command palette read this, so neither can offer a console for a group that doesn't exist.
+  const suiteNavItems = SUITE_NAV.filter(i => !i.needsGroup || outlets.length > 1)
+
   // ── Command palette — flat search across every destination, gated by the exact same
   // isItemVisible() predicate the rendered nav uses (defined below; hoisted, safe to reference
   // here). Rebuilds only when what this user can see changes, not on every render/keystroke —
@@ -526,16 +608,15 @@ export default function Layout() {
     const tag = (groupLabel, arr) => arr.map(i => ({ groupLabel, ...i }))
     const all = [
       dashNavItem,
-      ...tag('Suite', [
-        { to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown },
-        { to: '/owner-report', label: 'Monthly Owner/Manager Report', icon: ScrollText },
-        // Must match the sidebar's own condition above, which is `(isAdmin || isOwner) &&
-        // outlets.length > 1`. It didn't: the palette offered Group Console on group membership
-        // alone, so a POS or IMS staff account of a grouped client could search its way onto a
-        // page the sidebar deliberately withheld — the S601 rule, and worse than a bare URL
-        // because the product was advertising the page (S617).
-        ...((isAdmin || isOwner) && outlets.length > 1 ? [{ to: '/group-dashboard', label: 'Group Console', icon: Network }] : []),
-      ]),
+      // ONE source with the sidebar group, swapping in the longer search label where there is one.
+      // Visibility is not re-stated here at all — every item carries its own ownerOnly/minImsRole
+      // and isItemVisible below applies it, which is the whole reason those moved onto the items.
+      // Hand-duplicating the condition is what produced the S617 bug, and S617 only fixed a third
+      // of it: Group Console got the `isAdmin || isOwner` test while Owner Dashboard and Owner
+      // Report never did, so any staff account could search its way onto them (they redirect at
+      // the page per S601, so nothing leaked — but the product was advertising destinations the
+      // sidebar deliberately withholds). Profit & Loss was missing from the palette outright.
+      ...tag('Suite', suiteNavItems.map(i => (i.longLabel ? { ...i, label: i.longLabel } : i))),
       ...tag('IMS', NAV.slice(1)),
       ...tag('IMS', REPORTS),
       ...tag('IMS', IMS_GROUPS.find(g => g.key === 'ims-admin').items),
@@ -550,8 +631,10 @@ export default function Layout() {
     ]
     const seen = new Set()
     return all.filter(item => isItemVisible(item) && !seen.has(item.to) && seen.add(item.to))
+  // isOwner and outlets gate the Suite block above; suitePlan is deliberately absent, because the
+  // palette lists Suite destinations regardless of entitlement, exactly as the sidebar does.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hrVisible, posVisible, isAdmin, plan, dashLabel])
+  }, [hrVisible, posVisible, isAdmin, isOwner, outlets, plan, dashLabel])
 
   const [calcOpen, setCalcOpen] = useState(false)
 
@@ -937,6 +1020,7 @@ export default function Layout() {
           {panel === 'admin' && isAdmin && (
             <>
               {renderDashboardRow()}
+              {renderSuiteGroup()}
               {renderPinnedGroup()}
               <NavLink to="/admin/clients"
                 className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
@@ -975,6 +1059,7 @@ export default function Layout() {
           {panel === 'ims' && imsVisible && (
             <>
               {renderDashboardRow()}
+              {renderSuiteGroup()}
               {renderPinnedGroup()}
               {IMS_GROUPS.map(renderGroup)}
 
@@ -991,6 +1076,7 @@ export default function Layout() {
           {panel === 'hr' && hrVisible && (
             <>
               {renderDashboardRow()}
+              {renderSuiteGroup()}
               {renderPinnedGroup()}
               {isItemVisible(HR_DASHBOARD) && renderNavItem(HR_DASHBOARD)}
               {HR_GROUPS.map(renderGroup)}
@@ -1000,6 +1086,7 @@ export default function Layout() {
           {panel === 'pos' && posVisible && (
             <>
               {renderDashboardRow()}
+              {renderSuiteGroup()}
               {renderPinnedGroup()}
               {POS_GROUPS.map(group => renderGroup({ ...group, items: group.items.filter(isItemVisible) }))}
             </>
