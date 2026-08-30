@@ -149,7 +149,7 @@ export default function WastageReport() {
       {!loadError && <>
       {/* Stat cards — gated on !loading: a figure summed from rows that have not arrived is NPR 0 in confident type (S594) */}
       {!loading && (
-      <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
+      <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">Total Wastage Value</div>
           <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{fmt(totalValue)}</div>

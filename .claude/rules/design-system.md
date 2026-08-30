@@ -360,7 +360,9 @@ that arithmetic.** Eleven of thirteen POS pages opened
 sitting on the page title** at 390px, while the four that used `.page-header` got the 60px on top
 of their own 28px and indented the title 60px past their own table. Invisible above 768px, where
 the hamburger is `display: none`. Full rule and measurements in DESIGN.md → Layout. A `maxWidth` on
-a page root is a claim about a reading measure, which a working surface does not have.
+a page root is a claim about a reading measure, which a working surface does not have. S656 closed
+the last five (IMS); the reliable grep for stragglers is the CLUSTER, not the class —
+`padding: '24px 28px'` on a return-statement root travels with the cap and the hand-rolled `<h2>`.
 
 ### A card grid cannot always take the container role (S653)
 

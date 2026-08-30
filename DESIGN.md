@@ -495,7 +495,12 @@ variant. Eight more files had no `.page-header` at all — the hamburger-overlap
 of those (`PurchaseOrders`' Receive and PO-form sub-views) led with a **Back button** rather
 than a title, so a real control sat under the hamburger; both now fold the button and the title
 into one `.page-header` so both get the clearance, and both dropped the `padding: 32px 24px`
-they were re-adding to a root the shell already pads.
+they were re-adding to a root the shell already pads. *(S656 corrected "finished": five IMS
+surfaces had neither a `.page-header` nor a greppable hand-rolled row — `ComboBuilder`,
+`PurchaseOneLakhAboveReport`, `ImsStaff`, `DemandForecast` and `PurchaseOrders`' list view — each
+carrying the full S652 cluster of re-padded root + `maxWidth` cap + 18px `<h2>`. A sweep keyed on
+the class name cannot find the pages that never adopted any of it; the cluster itself is the
+better grep — `padding: '24px 28px'` on a return-statement root. All five closed S656.)*
 
 **A wrapping row whose children are themselves rows is only half-wrapped.** Verifying the sweep
 at 360px found a header with three controls still overflowing its own container by 15.7px: the

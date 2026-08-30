@@ -633,7 +633,7 @@ export default function PurchaseOrders() {
   }, {})
 
   return (
-    <div style={{ padding: '32px 24px', maxWidth: 1100, margin: '0 auto' }}>
+    <div>
 
       {/* ── PRINT-ONLY PO DOCUMENT ── */}
       {printPo && (() => {
@@ -735,12 +735,12 @@ export default function PurchaseOrders() {
           </div>
         )
       })()}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Purchase Orders</h1>
           <p className="page-subtitle">{pos.length} POs · {periodLabel}</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <select aria-label="Period"
             value={selectedPeriod?.id || ''}
             onChange={e => handlePeriodChange(e.target.value)}

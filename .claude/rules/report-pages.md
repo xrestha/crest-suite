@@ -65,7 +65,12 @@ Three rules came out of it:
   periods read must not wear `NoPeriodState` ("no periods yet" is a claim about the client), and
   on a data-entry page (Overheads) a failed read must block the form outright — saving over rows
   the page could not read is a data-loss shape, not a display bug. A new report page copies this
-  from any sibling; there is no unswept example left to copy.
+  from any sibling; there is no unswept example left to copy. (That claim needed one more
+  correction: S656 found the two IMS pages that are operational rather than report-shaped —
+  `Purchases.js`, which also CACHED the empty result via sessionDataCache so the lie outlived the
+  failed request, and `Requisitions.js`, whose `getOnHandMap` fed the over-issue guard from nine
+  unchecked reads. Both now follow the Overheads pattern. The S631 lesson stands: a sweep framed
+  as "report pages" keeps missing the CRUD/entry pages that read and render the same way.)
 - **Refusing to render the figure is half the job; the sentence you show instead is the other half
   (S619).** `firstError`/`ReportLoadError` decide *that* something failed. `errorText(err,
   'operator')` (`src/shared/errorText.js`) decides what the reader is told — one table, two

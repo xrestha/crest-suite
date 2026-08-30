@@ -184,7 +184,7 @@ export default function MenuRepricing() {
       {/* KPI strip waits for the load and never survives a failure: unloaded or failed,
           Underpriced Dishes / Monthly Opportunity read as confident green zeros (S594). */}
       {!loading && !loadError && (
-      <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
+      <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Number of priced dishes whose current food-cost % is above their target — i.e. priced too low to hit the margin you set." width={300}>Underpriced Dishes</Tip>

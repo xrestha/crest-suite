@@ -172,7 +172,7 @@ export default function RecipeMargin() {
       {/* KPI strip waits for the load and never survives a failure: unloaded or failed,
           Total Contribution reads as a confident green NPR 0 (S594). */}
       {!loading && !loadError && (
-      <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
+      <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Sum of (Selling Price − Food Cost) × Qty Sold across all recipes with sales this period." width={280}>Total Contribution</Tip>

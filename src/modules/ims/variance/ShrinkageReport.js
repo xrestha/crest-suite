@@ -258,7 +258,7 @@ export default function ShrinkageReport() {
 
       {/* KPI strip waits for the load — a stale run's figures under a new period-count label is the S594 trap */}
       {!loading && summary && (
-        <div className="stat-grid" style={{ marginBottom: 24 }}>
+        <div className="stat-grid">
           <div className="stat-card">
             <div className="stat-label">Periods Analysed</div>
             <div className="stat-value">{periodsUsed}</div>

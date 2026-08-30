@@ -70,13 +70,13 @@ export default function ComboBuilder() {
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1000 }}>
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 18 }}>
+    <div>
+      <div className="page-header">
+        <h1 className="page-title">
           Combo Builder{' '}
           <Tip text="Shows which items are actually ordered together most often at this table (from real POS bills, last N days) and suggests a discounted combo price. Insight-only — pick a pairing you like, then create the priced bundle yourself in Menu Pricing." width={320}>ⓘ</Tip>
-        </h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+        </h1>
+        <p className="page-subtitle">
           What actually sells together — and what to charge if you bundle it.
         </p>
       </div>

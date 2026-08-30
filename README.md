@@ -159,6 +159,74 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S656 — 2026-08-30 — IMS takes its turn: five escaped headers, one rhythm, and two pages that could lie
+
+Service worker `crest-v171`. No migration. `/impeccable layout ims module`, then `/impeccable
+polish ims module` — the IMS leg of the S652–S655 shell campaign. No feature changed; nothing new
+for Help or the module guides.
+
+#### Five pages had escaped the `.page-header` sweep, and they travel as a cluster
+
+S655 closed the sweep at "all 40 remaining sites" — measured over the sites that *had* a
+`.page-header` or a hand-rolled flex row that grep could see. Five IMS surfaces had neither shape:
+`ComboBuilder`, `PurchaseOneLakhAboveReport`, `ImsStaff`, `DemandForecast`, and `PurchaseOrders`'
+**list view** (its Receive and PO-form sub-views were fixed in S655; the list view was the one
+return statement that kept the old root). All five carried the full S652 cluster at once — a
+re-padded root (`padding: '24px 28px'` on top of the shell's 32px), a `maxWidth` cap nothing chose
+(940–1100, five different values), and a hand-rolled `<h2 fontSize: 18>` in place of the 22px
+`.page-title` `<h1>`. The cluster is the tell: a page that missed one convention missed them all,
+because it was written before any of them and never reopened.
+
+All five now open on a bare `<div>` with `.page-header` (`--split` on ImsStaff and the PO list,
+which carry actions; `ImsStaff` is now byte-consistent with its post-sweep siblings PosStaff and
+HrStaff). Measured against the real built `Layout.css` in headless Chromium at 360/390/768/1280 —
+title first character at `left: 76` against the hamburger's 56px right edge, zero horizontal
+overflow at 360px even for the three-control split header.
+
+#### Every stat-grid in IMS was overriding its own class
+
+`.stat-grid` owns `margin-bottom: 28px`. **All 26 page-level sites in IMS overrode it inline** —
+split between `marginBottom: 20` and `24` with no discernible rule for which. That is S655's "one
+value repeated is not a rhythm" finding at module scale: nothing chose either value, they
+propagated by copy. All 26 removed; the module now reads the same 28px section rhythm as HR, POS
+and the dashboards. The one survivor is `AssetCard.jsx`, whose grid sits inside a `Modal` — a
+dialog's tighter interval is a different role, not drift.
+
+#### Two operational pages could render a failed read as a quiet month
+
+The polish pass found the S612 silent-zero sweep had never reached the two IMS pages that are
+operational rather than report-shaped — the exact blind spot S631 named when `EmployeeList` was
+found the same way:
+
+- **Purchases** dropped every read error and — worse — **wrote the empty result into the session
+  cache**, so one network blip rendered "no purchases this month" on the page bills are reconciled
+  from, and the lie outlived the failed request. Now: `firstError` on the init batch, per-loader
+  error capture that keeps the last good rows on screen, `ReportLoadError` in place of the tab
+  bodies, **Delete All disabled while the page cannot read the period** (a whole-period wipe
+  decided blind is the Overheads save-over-unread-rows shape), the KPI strip gated on
+  `!loading && !loadError` (it was painting `Gross Purchases NPR 0` during load), and the
+  `NoPeriodState` guard taught that a failed periods read is not "this client has no periods".
+- **Requisitions** had the same dropped reads on its list, plus the sharper one: `getOnHandMap`
+  feeds the **over-issue warning** and dropped all nine of its read errors — and a failed
+  *deduction* read (sales, wastage, staff meals) INFLATES estimated on-hand, so the guard waved
+  through exactly when the network was the problem. A guard whose read failed has not passed
+  (S613). It now returns null on any failed read and the confirm says *"Could not check stock on
+  hand — a read failed (check your internet). Issue anyway without the check?"* — the
+  closing-count-preflight convention: inform, never silently pass. The guard stays advisory
+  because on-hand is an estimate in a periodic stock model, not a live ledger.
+
+#### Verification, and what was left alone
+
+`npm run build` passes (the definitive check while a stale dev-server cache is possible); ESLint
+clean; full-scope detector clean before and after. **Deliberately not changed:** IMS's module-wide
+`gap: 14` on filter rows and form grids (~20 sites) — off the 4/8/16/24 scale but uniform, and
+well clear of the 6px tab-bar gap that made HR's `gap: 8` a real defect; normalising it is churn
+for a future `/impeccable document` decision. The remaining 18px `<h2>`s are print-only sheet
+titles (Par Level Sheet, Stock Count Sheet, Requisition Slip) — a printed document's own
+letterhead, exempt by the same rule as the print color ramp. **Not verified live:** the new error
+branches were confirmed by build and by pattern-match against `Overheads.js` (the reference
+implementation), not by forcing a 500 in an authenticated session.
+
 ### S655 — 2026-08-30 — the page header becomes a class, and the KPI figure stops wrapping
 
 Service worker `crest-v170` (shared with S652–S654 — same undeployed tree). No migration.

@@ -112,12 +112,12 @@ export default function PurchaseOneLakhAboveReport() {
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
-      <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 18 }}>
+    <div>
+      <div className="page-header">
+        <h1 className="page-title">
           Purchase One Lakh Above Report <Tip text="Nepal VAT return Annexure 13 (अनुसूची १३): any single vendor whose cumulative purchases exceed NPR 1,00,000 in a fiscal year must be disclosed by name+PAN. This aggregates purchases by vendor across the selected fiscal year and flags who crosses that threshold." width={320}>ⓘ</Tip>
-        </h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+        </h1>
+        <p className="page-subtitle">
           Vendor-wise purchases for the fiscal year — flags vendors above NPR 1,00,000 for Annexure 13 disclosure.
         </p>
       </div>

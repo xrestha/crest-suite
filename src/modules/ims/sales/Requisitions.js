@@ -8,6 +8,8 @@ import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { BS_MONTHS, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
+import { firstError } from '../../../shared/queryError'
+import ReportLoadError from '../../../components/ReportLoadError'
 import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -46,6 +48,7 @@ export default function Requisitions() {
   const [items, setItems] = useState([])
   const [reqs, setReqs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
 
   const [mode, setMode] = useState('list') // 'list' | 'new' | 'view'
   const [selectedReq, setSelectedReq] = useState(null)
@@ -72,10 +75,15 @@ export default function Requisitions() {
 
   async function init() {
     setLoading(true)
-    const [{ data: p }, { data: i }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name')
     ])
+    // A failed read is not an empty period and must not render as one (S612 silent-zero rule).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setLoading(false); return }
+    const [{ data: p }, { data: i }] = results
     setPeriods(p || [])
     setItems(i || [])
     const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
@@ -87,16 +95,20 @@ export default function Requisitions() {
   }
 
   async function loadReqs(periodId) {
-    const { data } = await scopedFrom('requisitions', '*, requisition_lines(id, item_id, qty_requested, qty_issued, items(name, uom, per_uom_rate, categories(name)))')
+    const { data, error } = await scopedFrom('requisitions', '*, requisition_lines(id, item_id, qty_requested, qty_issued, items(name, uom, per_uom_rate, categories(name)))')
       .eq('period_id', periodId)
       .order('bs_day', { ascending: false })
       .order('created_at', { ascending: false })
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read must not render as "no requisitions" — keep the last good list and show
+    // the error card instead (S612/S631).
+    if (error) { setLoadError(error); return }
     setReqs(data || [])
   }
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    setLoadError(null)          // a new period is a new attempt — let it recover
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     backToList()
@@ -153,9 +165,7 @@ export default function Requisitions() {
   // silently issue more of an item than physically exists, corrupting the Requisitioned vs Used
   // reconciliation in Stock.js's Summary tab with no warning at all.
   async function getOnHandMap(periodId, excludeReqId) {
-    const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns },
-      { data: wastages }, { data: staffMealsData }, { data: sales }, { data: clientRecipes },
-      { data: reqLines }] = await Promise.all([
+    const results = await Promise.all([
       supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
       supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
@@ -167,6 +177,13 @@ export default function Requisitions() {
       supabase.from('requisition_lines').select('item_id, qty_issued, requisitions!inner(id, period_id, status)')
         .eq('requisitions.period_id', periodId).eq('requisitions.status', 'issued'),
     ])
+    // A guard whose read failed has not passed (S613): a dropped deduction read INFLATES
+    // estimated on-hand, waving the over-issue warning through exactly when the network is
+    // the problem. Signal the caller instead of computing from partial data.
+    if (firstError(results)) return null
+    const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns },
+      { data: wastages }, { data: staffMealsData }, { data: sales }, { data: clientRecipes },
+      { data: reqLines }] = results
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
@@ -207,6 +224,9 @@ export default function Requisitions() {
   // physical-count based (see CLAUDE.md), so "on hand" here is an estimate, not a live ledger.
   async function checkStockShortfall(periodId, lines, excludeReqId) {
     const onHand = await getOnHandMap(periodId, excludeReqId)
+    // The check could not run — say so rather than reporting "no shortfall" (the
+    // closing-count-preflight convention: inform, never silently pass).
+    if (!onHand) return 'Could not check stock on hand — a read failed (check your internet). Issue anyway without the check?'
     const shortfalls = lines
       .map(l => {
         const issuing = parseFloat(l.qty_issued) || 0
@@ -340,7 +360,8 @@ export default function Requisitions() {
   // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
   // the route was reachable by any account at an ims_enabled client regardless of ims_role.
   if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="requisitions" />
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="requisitions" />
 
   return (
     <div>
@@ -365,6 +386,8 @@ export default function Requisitions() {
 
       {loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : mode === 'new' ? (
         /* ── New Requisition Form ─────────────────────────────────────────── */
         <div>
@@ -705,7 +728,7 @@ export default function Requisitions() {
         /* ── Requisitions List ───────────────────────────────────────────── */
         <div>
           {/* Stat cards */}
-          <div className="stat-grid" style={{ marginBottom: 24 }}>
+          <div className="stat-grid">
             <div className="stat-card">
               <div className="stat-label">Total Requisitions</div>
               <div className="stat-value">{reqs.length}</div>

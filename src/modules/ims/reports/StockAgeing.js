@@ -296,7 +296,7 @@ export default function StockAgeing() {
   )
 
   const stats = (
-    <div className="stat-grid" style={{ marginBottom: 20 }}>
+    <div className="stat-grid">
       <div className="stat-card">
         <div className="stat-label">
           <Tip width={300} text="Value of stock still on hand as at the date this report is aged to, valued at what you actually paid for each batch — not the current master rate.">Stock On Hand</Tip>

@@ -71,7 +71,7 @@ export default function ValuationReportTab({ assets }) {
         <div className="card"><div className="empty-state"><p className="empty-state-text">No posted depreciation runs yet — post a run on the Depreciation Runs tab first.</p></div></div>
       ) : (
         <div id="valuation-print-area">
-          <div className="stat-grid" style={{ marginBottom: 20 }}>
+          <div className="stat-grid">
             <div className="stat-card">
               <div className="stat-label">Total Portfolio Cost</div>
               <div className="stat-value">NPR {fmt(valuation.totalCost)}</div>

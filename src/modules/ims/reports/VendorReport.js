@@ -399,7 +399,7 @@ export default function VendorReport() {
       {/* A failed read renders as a failure — never as a confident NPR-0 vendor ledger (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
-      <div className="stat-grid" style={{ marginBottom: 24 }}>
+      <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">Gross Purchases</div>
           <div className="stat-value gold" style={{ fontSize: 17 }}>NPR {grandGross.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>

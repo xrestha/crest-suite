@@ -287,7 +287,7 @@ export default function SupplierContribution() {
   )
 
   const stats = (
-    <div className="stat-grid" style={{ marginBottom: 24 }}>
+    <div className="stat-grid">
       <div className="stat-card">
         <div className="stat-label">
           <Tip width={320} text="What this period's sales consumed in ingredients, valued at each item's per-unit rate, then split across the suppliers that provided them — EXCLUDING the part that could not be traced to any supplier. The TOTAL row at the foot of the table is the whole consumed figure including that untraced part, so the two differ by exactly the Not Attributed card.">

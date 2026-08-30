@@ -15,6 +15,8 @@ import ReturnsTab from './ReturnsTab'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { firstError } from '../../../shared/queryError'
+import ReportLoadError from '../../../components/ReportLoadError'
 
 // A bill row's payment method as every screen displays it. NULL means Cash — the form's default,
 // and what pre-column bills hold — so the filter, the option list and the row badge all resolve it
@@ -49,6 +51,7 @@ export default function Purchases() {
   const [items, setItems]                   = useState(() => readPageCache('purchases', 'items', effectiveClientId) ?? [])
   const [vendors, setVendors]               = useState(() => readPageCache('purchases', 'vendors', effectiveClientId) ?? [])
   const [loading, setLoading]               = useState(!cachedPeriods)
+  const [loadError, setLoadError]           = useState(null)
   const [activeTab, setActiveTab]           = useState('purchases')
 
   // Wraps a normal setState call to also persist the same value to the shared session cache —
@@ -85,11 +88,16 @@ export default function Purchases() {
     // Only show "Loading…" when there's nothing cached to display yet — a revisit within the
     // cache window keeps showing last-known data while this reloads quietly underneath.
     if (periods.length === 0) setLoading(true)
-    const [{ data: p }, { data: i }, { data: v }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       scopedFrom('vendors').eq('is_active', true).order('name')
     ])
+    // A failed read is not an empty month, and must never be cached as one (S612/S631).
+    const failed = firstError(results)
+    if (failed) { setLoadError(failed); setLoading(false); return }
+    const [{ data: p }, { data: i }, { data: v }] = results
     setAndCache(setPeriods, 'periods', p || [])
     setAndCache(setItems, 'items', i || [])
     setAndCache(setVendors, 'vendors', v || [])
@@ -105,7 +113,7 @@ export default function Purchases() {
 
   async function loadPurchases(periodId) {
     // Paged — the purchases table itself, one row per bill line for the period (S529).
-    const { data } = await fetchAllRows(() => supabase
+    const { data, error } = await fetchAllRows(() => supabase
       .from('purchase_entries')
       .select('*, items(name, uom, purchase_unit, conversion_factor, categories(name)), vendors(name)')
       .eq('period_id', periodId)
@@ -113,19 +121,24 @@ export default function Purchases() {
       .order('created_at')
       .order('id'))
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read must not render — or be CACHED — as an empty month (S612/S631). Keep the
+    // last good rows on screen; the error card replaces the tab bodies below.
+    if (error) { setLoadError(error); return }
     setAndCache(setPurchases, `purchases_${periodId}`, data || [])
   }
 
   async function loadReturns(periodId) {
-    const { data } = await scopedFrom('vendor_returns', '*, items(name, uom, purchase_unit, conversion_factor), vendors(name), purchase_entries(bs_day, qty, rate)')
+    const { data, error } = await scopedFrom('vendor_returns', '*, items(name, uom, purchase_unit, conversion_factor), vendors(name), purchase_entries(bs_day, qty, rate)')
       .eq('period_id', periodId)
       .order('created_at')
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    if (error) { setLoadError(error); return }
     setAndCache(setReturns, `returns_${periodId}`, data || [])
   }
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    setLoadError(null)          // a new period is a new attempt — let it recover
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     // Keep the URL saying which month is on screen, so a refresh or a bookmark comes back to it
@@ -297,7 +310,8 @@ export default function Purchases() {
   // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
   // the route was reachable by any account at an ims_enabled client regardless of ims_role.
   if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="purchase entry" />
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="purchase entry" />
 
   return (
     <div>
@@ -386,8 +400,10 @@ export default function Purchases() {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
+      {/* Stats — not while loading or after a failed read: a figure the page has not computed
+          is not a figure (S594), and stale totals above the error card would contradict it. */}
+      {!loading && !loadError && (
+      <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">Total Entries</div>
           <div className="stat-value">{purchases.length}</div>
@@ -414,6 +430,7 @@ export default function Purchases() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Tabs */}
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--theme-border)', marginBottom: 24 }}>
@@ -431,7 +448,7 @@ export default function Purchases() {
               }}>{tab.label}</button>
           ))}
         </div>
-        {!isLocked && activeTab !== 'register' && (
+        {!isLocked && !loadError && activeTab !== 'register' && (
           <button
             className="btn btn-ghost"
             style={{ fontSize: 12, padding: '5px 12px', marginBottom: 4, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}
@@ -444,7 +461,9 @@ export default function Purchases() {
       </div>
 
       {/* ── PURCHASES TAB ── */}
-      {activeTab === 'purchases' && (
+      {loadError && <ReportLoadError error={loadError} />}
+
+      {!loadError && activeTab === 'purchases' && (
         <>
           {/* Filters */}
           <div className="no-print" style={{ marginBottom: 16 }}>
@@ -740,7 +759,7 @@ export default function Purchases() {
       )}
 
       {/* ── RETURNS TAB ── */}
-      {activeTab === 'returns' && (
+      {!loadError && activeTab === 'returns' && (
         <ReturnsTab
           period={selectedPeriod}
           purchases={purchases}
@@ -752,7 +771,7 @@ export default function Purchases() {
       )}
 
       {/* ── DAILY REGISTER TAB ── */}
-      {activeTab === 'register' && (() => {
+      {!loadError && activeTab === 'register' && (() => {
         if (!selectedPeriod) return null
         const numDays = daysInBsMonth(selectedPeriod.bs_year, selectedPeriod.bs_month)
         const days = Array.from({ length: numDays }, (_, i) => i + 1)

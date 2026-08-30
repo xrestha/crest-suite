@@ -105,7 +105,7 @@ export default function DemandForecast() {
   }
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
+    <div>
       <SuiteGate featureKey="demand_forecast" featureLabel="Demand Forecast" requireModules={['ims']}>
       <style>{`
         @media print {
@@ -121,11 +121,11 @@ export default function DemandForecast() {
         <div style={{ fontSize: 11 }}>Generated: {new Date().toLocaleString()}</div>
       </div>
 
-      <div className="no-print" style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 18 }}>
+      <div className="page-header no-print">
+        <h1 className="page-title">
           Demand Forecast <Tip text="Predicts covers, revenue, and per-dish quantity for upcoming days using a day-of-week moving average over your last ~12 weeks of POS sales (or manual Sales entries if POS history is thin). A simple, auditable model — not a trained AI — so you can see exactly why a number was predicted." width={320}>ⓘ</Tip>
-        </h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+        </h1>
+        <p className="page-subtitle">
           What to expect tomorrow, next week, and the rest of the month — for purchasing and prep planning.
         </p>
       </div>

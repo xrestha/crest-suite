@@ -212,7 +212,7 @@ export default function MonthlySummary() {
       ) : (
         <>
           {/* KPI row */}
-          <div className="stat-grid" style={{ marginBottom: 24 }}>
+          <div className="stat-grid">
             {[
               { label: 'Opening Stock',    value: fmt(report.totalOpening),     color: 'var(--theme-text1)' },
               { label: 'Gross Purchases',  value: fmt(report.totalPurchase),    color: 'var(--theme-accent-ink)' },

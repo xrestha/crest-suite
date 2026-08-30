@@ -293,13 +293,13 @@ export default function ImsStaff() {
   const labelStyle = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block' }
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 940 }}>
+    <div>
 
       {/* Header */}
-      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+      <div className="page-header page-header--split">
         <div>
-          <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 18 }}>IMS Staff</h2>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+          <h1 className="page-title">IMS Staff</h1>
+          <p className="page-subtitle">
             Assign roles to your team. Staff log in with their email and password, same as you do.
           </p>
         </div>

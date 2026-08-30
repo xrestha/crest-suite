@@ -195,7 +195,7 @@ export default function DeadStock() {
       {/* KPI strip waits for the load and never survives a failure: unloaded or failed,
           Dead Stock Items / Value at Risk read as a confident 0 (S594). */}
       {!loading && !loadError && (
-      <div className="stat-grid no-print" style={{ marginBottom: 20 }}>
+      <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">Dead Stock Items</div>
           <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{deadCount}</div>
