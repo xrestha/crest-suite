@@ -35,6 +35,15 @@ duplicate.
 branches.** Grep the fallback expression, not the column name — the column name appears in the
 predicate that is wrong.
 
+**A second instance landed one session later, on a different column (S650).** `payment_method` is
+NULL on bills written before the column existed, and every screen renders `|| 'Cash'` — so the new
+Payment filter, written against the raw column, would have hidden rows the page itself labels Cash
+while the entry count and both footer totals silently agreed with the filter rather than the
+screen. `methodOf(p)` now resolves it once for the filter, the option list and the row badge. Note
+the pattern's reach: `purchase_group_id || id` is an *identity*, `payment_method || 'Cash'` is a
+*display default*, and both break the same way. **If a value is displayed through a fallback it
+must also be filtered, grouped and counted through it.**
+
 ### `billKeyOf`/`aging` are centralized in `purchasesHelpers.js` — but not everywhere
 
 Added S501 for **Vendor Balance Confirmation** (`/vendor-balance-confirmation`, Pro, Reports → Menu & Vendors — a printable per-vendor/per-BS-fiscal-year balance letter + running-balance schedule for Nepal IRD Annexure 13 reconciliation). `billKeyOf(e, period)` (bill grouping key, `purchase_group_id`-first with a vendor+invoice+date fallback) and `aging(days)` used to be duplicated across `VendorReport.js` and `OutstandingPayables.js` with two genuinely different shapes — `OutstandingPayables.js` now imports the centralized version from `purchasesHelpers.js` (safe, its old shape was byte-compatible once made `purchase_group_id`-aware). **`VendorReport.js` and the owner-report's `computeVendorPurchasingSection.js` were deliberately left on their own local copies** — theirs are single-period-scoped by construction (no year/month in the fallback key), and reusing the centralized cross-period-safe version there would silently misgroup bills across period boundaries, not simplify anything. Don't "finish the cleanup" by pointing those two at the shared helper without re-deriving their period-scoping first.

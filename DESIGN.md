@@ -547,6 +547,26 @@ Shadow was already in real use before this change beyond the two cases previousl
 
 **Any tab row needs real tablist semantics**, not just buttons that look selected: `role="tablist"` on the row, `role="tab"` + `aria-selected` + `aria-controls` per tab, `role="tabpanel"` + `aria-labelledby` on the body, and a **roving `tabIndex`** so the whole row is one stop in the page's tab order with the arrow keys (plus Home/End) moving inside it. Without the roving index, reaching the eighth tab by keyboard costs eight Tab presses — and the eighth tab is where the destructive actions live.
 
+**A filter row's options come from the DATA, not from the enum** (added 2026-08-30/S650). Purchases
+carries five filters on one row — day pills, Item, Vendor, a Bill no. search and Payment — and the
+day pills had always been built from the days that have bills, never 1..32. The Payment select now
+follows: it lists the methods the selected period actually used, in the source enum's order, with
+any unrecognised value **appended rather than dropped**, and it hides entirely when a period used
+only one method. The two failures it avoids are not symmetric — an option that returns nothing is
+noise, but a value present in the data with no option is a row nothing can reach.
+
+**And a column with a display fallback must have that fallback applied in every predicate that
+filters on it.** `payment_method` is NULL on bills written before the column existed; every screen
+renders `|| 'Cash'`, so filtering the raw column would have hidden rows the page itself labels
+Cash. One helper (`methodOf`) now resolves it for the filter, the option list and the row badge
+alike. Generally: **if a value is displayed through a fallback, it must be filtered, grouped and
+counted through the same fallback** — the same shape as the `.neq drops NULL rows` trap, and as
+S648's `purchase_group_id || id`.
+
+**Every filter must reach the totals.** Purchases' entry count and *both* footer figures (goods
+value ex-VAT, payable incl. VAT) derive from the one filtered set, so a filter can never leave a
+total describing rows that are no longer on screen. Changing period clears all five.
+
 ### Navigation
 **Rewritten 2026-07-12** — the sidebar was restructured from a 56px icon rail + separate 220px flyout panel into one unified column.
 - **Structure:** `.sidebar-shell`, one column, 240px expanded / 56px collapsed (`--main-content` margin-left tracks the same two values). Top to bottom: brand (logo + wordmark, Georgia serif per the One Serif Rule + Ctrl-K search trigger) → module switcher (see below) → scrollable nav content (client badge, nav groups, footer) → a fixed bottom row (Help / collapse toggle / Sign out), always visible regardless of collapsed state.

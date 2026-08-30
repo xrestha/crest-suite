@@ -99,6 +99,22 @@ the cursor*. Sort by the **saved** figures (`sales`), so the order refreshes on 
 than mid-keystroke; that is also what makes the memo possible, since the draft is no longer a
 dependency.
 
+### Adding a text input to an old page is a performance change (added S650)
+
+Everything above is written as *finding* pages that are already slow. The cheaper moment to act is
+the one where a page **acquires** its first controlled text input, because that is when every
+render-body derivation on it retroactively becomes a per-keystroke cost — including the ones
+written years earlier by someone who could reasonably assume the page only re-rendered on a load.
+
+Purchases is the worked example: adding a Bill no. search box put `filtered` (a scan of the
+period's rows), `byDay` (a regroup of them) and `filteredPayable` (which walks every bill group
+through `calcBillTotals`) on the keystroke path in one edit. All three were memoized in the same
+change, values unchanged.
+
+**So: before adding a search or filter box to an existing page, read its render body and memoize
+what is already there.** Doing it in the same commit is the difference between a fix and a
+regression — and unlike the audits above, this one has a trigger you can actually notice.
+
 ### The trigger is not always a keystroke
 
 A controlled input is the most common cause, not the only one. Any state a *pointer gesture* writes
