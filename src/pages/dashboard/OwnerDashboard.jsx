@@ -378,8 +378,10 @@ export default function OwnerDashboard() {
   })
   const hasTrendData = trendChartData.some(d => d.prime != null || d.margin != null)
 
-  // Shared mini card style — matches ClientDashboard.jsx's kpiCard() convention exactly (this
-  // page does not use stat-grid/badge-* despite those classes existing, same as ClientDashboard).
+  // Shared mini card style — matches ClientDashboard.jsx's kpiCard() convention. The CARD is
+  // hand-rolled (ClientDashboard's denser padding tier, not .stat-card's 20px); the GRID it sits
+  // in is .stat-grid, which is where the 200px auto-fit floor, the 16px peer gap and the 28px
+  // group break come from. Those two decisions are separable and only the second was ever drift.
   // Returns a spreadable props object (style + role/tabIndex/onKeyDown when clickable) so every
   // KPI card gets keyboard support and a visible focus ring, matching ClientDashboard.jsx's fix.
   const kpiCard = (onClick) => ({
@@ -396,6 +398,21 @@ export default function OwnerDashboard() {
       onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }
     } : {})
   })
+
+  // The label / value / subtext styles were typed out inline on all nine cards, and had already
+  // drifted: the Profitability row used marginBottom 6 / marginTop 5 and the Operations row 4 / 4,
+  // with nothing choosing either. Three helpers, same shape as ClientDashboard.jsx's, so the two
+  // rows can only differ where a difference is meant. Sizes are the DESIGN.md ramp: 24 is the
+  // `stat-value` step the Group Console and Consolidated P&L already render their headline
+  // figures at, 22 is `numeral`, 18 is `section-heading`. The old 28px/weight-800 was on neither
+  // the size ramp nor the weight set, and made Food Cost % outrank Revenue in a row of peers.
+  const kpiLabelStyle = { fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }
+  const kpiSubtextStyle = { fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }
+  // tabular-nums, because these cards are hand-rolled and so miss the `table.data-table td,
+  // .stat-value` rule that gives every other figure in the product aligned digits. Five
+  // percentages sit in one row here to be compared against each other, and proportional numerals
+  // make 11.1% and 88.8% different widths.
+  const kpiValueStyle = (size, weight = 700) => ({ fontSize: size, fontWeight: weight, lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' })
 
   // Owner-or-admin only, matching this page's nav entry in Layout.js. The route sat inside
   // ProtectedRoute + SuiteGate alone, and neither of those checks a ROLE — so any staff account of
@@ -435,7 +452,7 @@ export default function OwnerDashboard() {
             whose whole purpose is trustworthy figures. */}
         {Object.entries(loadErrors).filter(([, msg]) => msg).map(([section, msg]) => (
           <div key={section} className="card" style={{
-            marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+            marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
             borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
             background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
           }}>
@@ -458,7 +475,7 @@ export default function OwnerDashboard() {
             "—" plus the "No open period" banner below, which was simply wrong: the real cause is
             the missing module, not a missing period. */}
         {!(clientModules.ims && clientModules.hr) && !loading && (
-          <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
+          <div className="card" style={{ marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
             <p style={{ color: 'var(--theme-amber-text)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
               <TriangleAlert size={15} aria-hidden="true" /> Owner Dashboard needs both Crest IMS and Crest HR enabled — this property has {clientModules.ims ? 'only IMS' : clientModules.hr ? 'only HR' : 'neither'}.
             </p>
@@ -466,7 +483,7 @@ export default function OwnerDashboard() {
         )}
         {clientModules.ims && clientModules.hr && !activePeriod && !loading && (
           <div
-            className="card interactive-card" style={{ marginBottom: 20, cursor: 'pointer', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
+            className="card interactive-card" style={{ marginBottom: 16, cursor: 'pointer', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
             onClick={() => navigate('/periods')} role="button" tabIndex={0}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/periods') } }}
           >
@@ -478,39 +495,39 @@ export default function OwnerDashboard() {
             heading gives screen-reader users a landmark to navigate by without changing the
             visual layout. */}
         <h2 className="sr-only">Profitability (month-to-date)</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 14 }}>
+        <div className="stat-grid">
 
           <div {...kpiCard(() => navigate('/sales'))}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Revenue (MTD)</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-green-text)', lineHeight: 1.1 }}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fmt(revenueTotal)}</div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>From sales entries →</div>
+            <div style={kpiLabelStyle}>Revenue (MTD)</div>
+            <div style={{ ...kpiValueStyle(24), color: 'var(--theme-green-text)' }}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fmt(revenueTotal)}</div>
+            <div style={kpiSubtextStyle}>From sales entries →</div>
           </div>
 
           <div {...kpiCard(() => navigate('/variance'))}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+            <div style={kpiLabelStyle}>
               <Tip text={`Net purchases ÷ revenue × 100. Coloured against your own Settings thresholds — watch above ${fcBand(fcPct, settings).warn}%, too high above ${fcBand(fcPct, settings).critical}% — the same scale Variance and Recipes use. Nepal F&B benchmark: 28–35%.`} width={260}>Food Cost % (MTD)</Tip>
             </div>
-            <div title={fcPct != null ? fcBand(fcPct, settings).label : undefined} style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: fcBand(fcPct, settings).color }}>
+            <div title={fcPct != null ? fcBand(fcPct, settings).label : undefined} style={{ ...kpiValueStyle(24), color: fcBand(fcPct, settings).color }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}% ${fcBand(fcPct, settings).mark}` : '—'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Your target ≤{fcBand(fcPct, settings).warn}% →</div>
+            <div style={kpiSubtextStyle}>Your target ≤{fcBand(fcPct, settings).warn}% →</div>
           </div>
 
           <div {...kpiCard(() => navigate('/hr/payroll'))}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+            <div style={kpiLabelStyle}>
               <Tip text="Prorated estimate: gross + overtime + employer SSF, scaled to days elapsed this month. Refines to the exact figure once Payroll Run is finalized. Healthy range for Nepal F&B: 25-30% of revenue." width={280}>Labor Cost % (MTD)</Tip>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: laborPct == null ? 'var(--theme-text2)' : laborPct <= 30 ? 'var(--theme-green-text)' : laborPct <= 37 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
+            <div style={{ ...kpiValueStyle(24), color: laborPct == null ? 'var(--theme-text2)' : laborPct <= 30 ? 'var(--theme-green-text)' : laborPct <= 37 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : laborPct != null ? `${laborPct.toFixed(1)}%` : '—'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Target 25-30% · estimate →</div>
+            <div style={kpiSubtextStyle}>Target 25-30% · estimate →</div>
           </div>
 
           <div {...kpiCard()}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+            <div style={kpiLabelStyle}>
               <Tip text="Food Cost % + Labor Cost % — the two controllable costs combined, the number operators actually benchmark against. Industry standard: 60-65% of revenue." width={280}>Prime Cost % (MTD)</Tip>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: primeCostPct == null ? 'var(--theme-text2)' : primeCostPct <= 60 ? 'var(--theme-green-text)' : primeCostPct <= 65 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
+            <div style={{ ...kpiValueStyle(24), color: primeCostPct == null ? 'var(--theme-text2)' : primeCostPct <= 60 ? 'var(--theme-green-text)' : primeCostPct <= 65 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : primeCostPct != null ? `${primeCostPct.toFixed(1)}%` : '—'}
             </div>
             {/* Prime and True Net Margin both CONTAIN the prorated labour estimate, and both used
@@ -519,73 +536,83 @@ export default function OwnerDashboard() {
                 green verdict has to disclose its basis where it is read, not on hover. Matches how
                 the Monthly Owner Report prints "· estimated — no payroll finalized for this
                 period" inline. */}
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Target ≤60-65% · includes labour estimate</div>
+            <div style={kpiSubtextStyle}>Target ≤60-65% · includes labour estimate</div>
           </div>
 
           {/* The ternary was inverted: a client who HAS Overheads got the non-clickable card (the
               most important number on the page, and the only unclickable one in this row), while a
               client who does NOT got a card that navigated to a page they cannot open. */}
           <div {...kpiCard(canOverheads ? () => navigate('/overheads') : null)}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+            <div style={kpiLabelStyle}>
               <Tip text="Revenue minus food cost, labor cost, and overheads, as a % of revenue. This is what the business actually keeps." width={260}>True Net Margin % (MTD)</Tip>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, color: !canOverheads || netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green-text)' : netMarginPct >= 10 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
+            <div style={{ ...kpiValueStyle(24), color: !canOverheads || netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green-text)' : netMarginPct >= 10 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : !canOverheads ? '—' : netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>
+            <div style={kpiSubtextStyle}>
               {!canOverheads ? 'Requires Overheads (Pro) →' : !loading && overheadTotal === 0 ? 'Excludes overhead — not entered' : 'After food, labour & overhead · includes labour estimate'}
             </div>
           </div>
         </div>
 
         <h2 className="sr-only">Operations</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 20 }}>
+        <div className="stat-grid">
 
           <div {...kpiCard(() => navigate('/wastage-report'))}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Wastage Value (MTD)</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: stats?.wastageValueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
+            <div style={kpiLabelStyle}>Wastage Value (MTD)</div>
+            <div style={{ ...kpiValueStyle(22), color: stats?.wastageValueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fmt(stats?.wastageValueTotal)}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>This period →</div>
+            <div style={kpiSubtextStyle}>This period →</div>
           </div>
 
           <div {...kpiCard(() => navigate('/reorder'))}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
+            <div style={kpiLabelStyle}>
               <Tip text="Items whose current stock is at or below par level — a live inventory position, not a monthly total." width={260}>Items Below Par</Tip>
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: reorderStats?.count > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
+            <div style={{ ...kpiValueStyle(22), color: reorderStats?.count > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : (reorderStats?.count ?? 0)}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
+            <div style={kpiSubtextStyle}>
               {!loading && reorderStats?.estValueTotal > 0 ? `${fmt(reorderStats.estValueTotal)} to restock →` : 'Full Report →'}
             </div>
           </div>
 
           <div {...kpiCard(() => navigate('/payables'))}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
+            <div style={kpiLabelStyle}>
               <Tip text="Credit purchases unpaid for more than 60 days." width={220}>Overdue Payables</Tip>
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: payablesStats?.overdueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
+            <div style={{ ...kpiValueStyle(22), color: payablesStats?.overdueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fmt(payablesStats?.overdueTotal)}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
+            <div style={kpiSubtextStyle}>
               {!loading && payablesStats?.overdueCount > 0 ? `${payablesStats.overdueCount} bill${payablesStats.overdueCount === 1 ? '' : 's'} →` : 'Full Report →'}
             </div>
           </div>
 
           <div {...kpiCard(() => navigate('/payments'))}>
-            <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
+            <div style={kpiLabelStyle}>
               <Tip text="Net purchases (this period) split by payment method — not a revenue split." width={260}>Purchases · Cash / Credit</Tip>
             </div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${fmt(stats?.cashNet)} / ${fmt(stats?.creditNet)}`}
+            <div style={{ ...kpiValueStyle(18), color: 'var(--theme-text1)' }}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : (
+                /* Two figures, so this is the one KPI value on the page that can legitimately take
+                   two lines — but it was breaking INSIDE the second amount ("… / NPR" then
+                   "1,204,000"). Each amount is the unbreakable atom; the slash is where a break
+                   belongs. */
+                <>
+                  <span style={{ whiteSpace: 'nowrap' }}>{fmt(stats?.cashNet)}</span>
+                  {' / '}
+                  <span style={{ whiteSpace: 'nowrap' }}>{fmt(stats?.creditNet)}</span>
+                </>
+              )}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Cash / Credit →</div>
+            <div style={kpiSubtextStyle}>Cash / Credit →</div>
           </div>
         </div>
 
         {trendLoading ? (
-          <div className="card" style={{ padding: '14px 16px', marginBottom: 20 }}>
+          <div className="card" style={{ padding: '14px 16px' }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Cost &amp; Margin — Trend</div>
             <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
           </div>
@@ -593,7 +620,7 @@ export default function OwnerDashboard() {
           /* This used to render `false` — no card, no heading, nothing, just a gap where a chart
              belongs. A Suite Pro client paying for the trend view deserves to be told it fills in
              rather than left to assume the page is broken. */
-          <div className="card" style={{ padding: '20px 16px', marginBottom: 20 }}>
+          <div className="card" style={{ padding: '20px 16px' }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Cost &amp; Margin — Trend</div>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
               Your cost and margin history appears here once your first period closes. Each closed
@@ -603,7 +630,6 @@ export default function OwnerDashboard() {
         ) : (
           <ChartCard
             title="Cost & Margin — Trend"
-            cardStyle={{ marginBottom: 20 }}
             legend={<>
               <span style={{ color: TREND_COLORS.fc }}>● Food Cost %</span>
               <span style={{ color: TREND_COLORS.labor }}>● Labor Cost %</span>

@@ -374,10 +374,13 @@ whatever was clicked last**. On Consolidated P&L that label drives the subtitle,
 Excel `scopeLine` AND the downloaded filename, so one month's figures could leave the building inside
 another month's workbook.
 
-`src/shared/hooks/useLatestRequest.js` is the one guard, now on **21 pages (measured by grep,
-2026-08-26)** — the S601 sweep claimed 19 while never wiring `ConsolidatedPnl.jsx` or
+`src/shared/hooks/useLatestRequest.js` is the one guard, now on **22 pages (measured by grep,
+2026-08-30)** — the S601 sweep claimed 19 while never wiring `ConsolidatedPnl.jsx` or
 `StockAgeing.js`, the two pages this rule's own text is about; both were caught by the S612
-critique re-run and wired then. Call `periodReq.begin(id)`
+critique re-run and wired then. `GroupDashboard.jsx` was the 22nd (S657): it appeared in neither
+the swept list nor the not-swept one, and its loader is a `useCallback` keyed on `(bsYear,
+bsMonth)`, so arrowing either `<select>` starts one `get_group_summary` per keypress on the page
+that compares outlets' money across months. Call `periodReq.begin(id)`
 synchronously in `handlePeriodChange` before any await, and
 `if (!periodReq.isCurrent(periodId)) return` after the last await and before the first setter.
 
@@ -390,9 +393,11 @@ rendering permanently blank. Of the two possible mistakes only one is recoverabl
 is also why a page's own `init()` needs no `begin()`: once the handler claims, init's stale load is
 correctly rejected on its own.
 
-**Not swept:** `AttendanceSheet.jsx` and `Overtime.jsx` (their loaders are `useCallback` with a
-different signature — `loadEntries(bsYear, bsMonth)` would need a composite key), and
+**Not swept:** `AttendanceSheet.jsx` and `Overtime.jsx`, and
 `SupplierPriceTracker.js`/`MonthlyOwnerReport.jsx`, which select an id and derive rather than load.
+The first two were skipped because their loaders take `(bsYear, bsMonth)` rather than one id and
+"would need a composite key" — S657 built exactly that on `GroupDashboard` (a `bsYear-bsMonth` key),
+so the stated reason no longer holds and the pair is simply unswept.
 
 ### A page reachable by URL needs the guard its nav item implies (S601)
 

@@ -2221,6 +2221,14 @@ textarea:focus-visible {
   font-size: 24px;
   font-weight: 600;
   color: var(--theme-text1);
+  /* Without this the figure inherits body's 1.5, so a 24px numeral sits in a 36px line box and
+     carries 6px of half-leading above and below. Measured: .stat-label sets an 8px bottom margin
+     and .stat-sub a 4px top margin, but what RENDERS between the label and the figure is 14px and
+     between the figure and its sub-line 10px — the class's own intervals were never the ones on
+     screen, on all 323 sites that use it. 1.15 matches the 1.1 the dashboards' hand-rolled KPI
+     values already set, and it halves the cost of the two-line wrap a seven-figure NPR amount
+     takes at the grid's narrowest three-column band. */
+  line-height: 1.15;
 }
 
 .stat-value.gold {

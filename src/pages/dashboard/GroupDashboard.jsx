@@ -4,6 +4,9 @@ import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
 import SuiteGate from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
+import ReportLoadError from '../../components/ReportLoadError'
+import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
+import { errorText } from '../../shared/errorText'
 import OutletAccessPanel from './OutletAccessPanel'
 import MasterPushPanel from './MasterPushPanel'
 import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
@@ -23,6 +26,12 @@ import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth, formatAd } from '../../ut
 //   - Outlets are matched on (bs_year, bs_month), never period_id — monthly_periods is
 //     UNIQUE(client_id, bs_year, bs_month) with one open period each, so two outlets genuinely
 //     sit in different months. has_period = false is surfaced rather than shown as zero.
+
+// While a month is loading, `rows` still holds the PREVIOUS month's outlets — the four totals
+// below are derived from it, so they rendered last month's group revenue under this month's
+// label until the table beneath them caught up. A figure the page has not computed for the
+// period it names is the failure ReportPage's own contract exists to prevent.
+const StatSkeleton = () => <span className="skeleton" style={{ display: 'inline-block', width: '3.5em', height: '0.8em', verticalAlign: 'middle' }} />
 
 const fmtNpr = n => n == null ? '—' : `NPR ${Math.round(n).toLocaleString('en-NP')}`
 const fmtPct = n => n == null || !isFinite(n) ? '—' : `${n.toFixed(1)}%`
@@ -46,8 +55,17 @@ export default function GroupDashboard() {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  // Changing the month re-runs `load` through its own useCallback dep, so arrowing the closed
+  // <select> starts one get_group_summary per keypress and the last to LAND wins the figures —
+  // while the two <select>s show whatever was picked last. S601's shape exactly, on a page that
+  // compares outlets' money across months. The key is composite because the selection is
+  // (year, month), not one id; it still fails open, so a missed begin() only degrades to the old
+  // behaviour rather than blanking the page.
+  const monthReq = useLatestRequest()
 
   const load = useCallback(async () => {
+    const key = `${bsYear}-${bsMonth}`
+    monthReq.begin(key)
     setLoading(true)
     setError('')
     // pos_orders has no period_id or BS columns — only AD closed_at — so the BS month is
@@ -68,10 +86,13 @@ export default function GroupDashboard() {
       p_ad_start: iso(start),
       p_ad_end: iso(end),
     })
-    if (err) { setError(err.message); setRows([]) }
+    if (!monthReq.isCurrent(key)) return
+    // errorText, not err.message: this reader is the Owner, and supabase-js hands back a bare
+    // `TypeError: Failed to fetch` for any dead connection.
+    if (err) { setError(errorText(err, 'operator')); setRows([]) }
     else setRows(data || [])
     setLoading(false)
-  }, [bsYear, bsMonth])
+  }, [bsYear, bsMonth]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (groupId) load() }, [groupId, load])
 
@@ -90,7 +111,7 @@ export default function GroupDashboard() {
     setSwitching(null)
     // switchOutlet refuses while the offline queue is non-empty, so this is a real message the
     // reader needs, not a generic failure.
-    if (err) setError(err.message || 'Could not switch outlet.')
+    if (err) setError(err.message || 'Could not switch outlet.') // a switchOutlet refusal is already a written sentence
   }
 
   const included = rows.filter(r => r.is_included)
@@ -130,7 +151,7 @@ export default function GroupDashboard() {
           <>
             {/* flex-end, not center: the two labelled fields are taller than the button, and
                 centring would float the button halfway up their labels. */}
-            <div className="card no-print" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div className="card no-print" style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div className="form-field" style={{ margin: 0 }}>
                 <label htmlFor="group-bs-month">Month</label>
                 <select id="group-bs-month" className="form-select" style={{ maxWidth: 140 }} value={bsMonth} onChange={e => setBsMonth(Number(e.target.value))}>
@@ -146,12 +167,12 @@ export default function GroupDashboard() {
               <button className="btn btn-ghost" onClick={load} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
             </div>
 
-            {error && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13 }}>{error}</p>}
+            {error && <div style={{ marginBottom: 16 }}><ReportLoadError error={error} /></div>}
 
             {/* Coverage first, not as a footnote. A group total that silently omits an outlet is
                 worse than no total, so the reader is told what this figure covers before they
                 read it. */}
-            {(excluded.length > 0 || noPeriod.length > 0) && (
+            {!loading && !error && (excluded.length > 0 || noPeriod.length > 0) && (
               <div className="card" style={{ marginBottom: 16, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)' }}>
                 <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
                   Showing {included.length} of {rows.length} outlets
@@ -171,24 +192,24 @@ export default function GroupDashboard() {
               </div>
             )}
 
-            <div className="stat-grid" style={{ marginBottom: 20 }}>
+            {!error && <div className="stat-grid">
               <div className="card">
-                <p className="stat-label"><Tip text="Sum of every included outlet's revenue for this BS month. For a POS-enabled outlet this already includes POS revenue, since PosOrders stamps a sales_entries row per closed bill.">Group Revenue</Tip></p>
-                <p className="stat-value">{fmtNpr(groupRevenue)}</p>
+                <div className="stat-label"><Tip text="Sum of every included outlet's revenue for this BS month. For a POS-enabled outlet this already includes POS revenue, since PosOrders stamps a sales_entries row per closed bill.">Group Revenue</Tip></div>
+                <div className="stat-value">{loading ? <StatSkeleton /> : fmtNpr(groupRevenue)}</div>
               </div>
               <div className="card">
-                <p className="stat-label"><Tip text="Group net purchases ÷ group revenue. Computed on the group totals, not as an average of each outlet's percentage — a small outlet must not swing the group figure as hard as a large one.">Group Food Cost %</Tip></p>
-                <p className="stat-value" style={{ color: pctColor(groupFc, 35, 45) }}>{fmtPct(groupFc)}</p>
+                <div className="stat-label"><Tip text="Group net purchases ÷ group revenue. Computed on the group totals, not as an average of each outlet's percentage — a small outlet must not swing the group figure as hard as a large one.">Group Food Cost %</Tip></div>
+                <div className="stat-value" style={{ color: loading ? undefined : pctColor(groupFc, 35, 45) }}>{loading ? <StatSkeleton /> : fmtPct(groupFc)}</div>
               </div>
               <div className="card">
-                <p className="stat-label"><Tip text="Finalized payroll (gross + employer SSF) ÷ revenue, across included outlets. Only payroll runs marked finalized count — an unfinalized month reads as zero rather than as an estimate.">Group Labour %</Tip></p>
-                <p className="stat-value" style={{ color: pctColor(groupLabour, 25, 35) }}>{fmtPct(groupLabour)}</p>
+                <div className="stat-label"><Tip text="Finalized payroll (gross + employer SSF) ÷ revenue, across included outlets. Only payroll runs marked finalized count — an unfinalized month reads as zero rather than as an estimate.">Group Labour %</Tip></div>
+                <div className="stat-value" style={{ color: loading ? undefined : pctColor(groupLabour, 25, 35) }}>{loading ? <StatSkeleton /> : fmtPct(groupLabour)}</div>
               </div>
               <div className="card">
-                <p className="stat-label"><Tip text="Covers across included outlets, from paid POS bills closed within this BS month's AD date range. Outlets without POS contribute zero.">Group Covers</Tip></p>
-                <p className="stat-value">{groupCovers ? groupCovers.toLocaleString('en-NP') : '—'}</p>
+                <div className="stat-label"><Tip text="Covers across included outlets, from paid POS bills closed within this BS month's AD date range. Outlets without POS contribute zero.">Group Covers</Tip></div>
+                <div className="stat-value">{loading ? <StatSkeleton /> : groupCovers ? groupCovers.toLocaleString('en-NP') : '—'}</div>
               </div>
-            </div>
+            </div>}
 
             <div className="table-wrap">
               <table className="data-table">

@@ -385,6 +385,9 @@ export default function ConsolidatedPnl() {
   // Revenue at a 100% margin. ProtectedRoute has already resolved `profile` by the time this runs.
   if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />
 
+  // The `micro` step from DESIGN.md's ramp — 10px is only ever legal as micro-caps.
+  const colMarkerStyle = { display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }
+
   const warnStyle = {
     background: 'color-mix(in srgb, var(--theme-amber) 13%, transparent)',
     border: '1px solid var(--theme-amber)', borderRadius: 'var(--radius-md)',
@@ -424,17 +427,17 @@ export default function ConsolidatedPnl() {
   // owner opens the page at all, rendered as the ninth row of a 13px table with no more weight
   // than Staff Meals. The statement below is still the document; this is the answer.
   const headline = stmt ? (
-    <div className="stat-grid" style={{ marginBottom: 20 }}>
+    <div className="stat-grid">
       <div className="stat-card">
         <div className="stat-label">Revenue</div>
-        <div className="stat-value gold" style={{ fontSize: 18 }}>{npr(stmt.revenue)}</div>
+        <div className="stat-value gold">{npr(stmt.revenue)}</div>
         <div className="stat-sub">{grouped ? `${cols.length} outlet${cols.length === 1 ? '' : 's'}` : periodLabel}</div>
       </div>
       <div className="stat-card">
         <div className="stat-label">
           <Tip width={280} text="Revenue less cost of goods sold, before wastage, staff meals, labour, overheads and tax.">Gross Profit</Tip>
         </div>
-        <div className="stat-value" style={{ fontSize: 18, color: stmt.grossProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+        <div className="stat-value" style={{ color: stmt.grossProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
           {npr(stmt.grossProfit)}
         </div>
         <div className="stat-sub">{pctOf(stmt.grossProfit, stmt.revenue)} of revenue</div>
@@ -443,7 +446,7 @@ export default function ConsolidatedPnl() {
         <div className="stat-label">
           <Tip width={300} text="What is left after every cost on the statement below. This is the bottom line of the same table, not a second calculation.">Net Profit</Tip>
         </div>
-        <div className="stat-value" style={{ fontSize: 18, color: stmt.netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+        <div className="stat-value" style={{ color: stmt.netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
           {npr(stmt.netProfit)}
         </div>
         <div className="stat-sub">{pctOf(stmt.netProfit, stmt.revenue)} net margin</div>
@@ -532,8 +535,13 @@ export default function ConsolidatedPnl() {
                   {cols.map((c, ci) => (
                     <th key={ci} style={{ textAlign: 'right' }}>
                       {c.name}
-                      {!c.hasPeriod ? <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--theme-text3)' }}>no period</span>
-                        : c.status === 'open' ? <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--theme-amber-text)' }}>open</span> : null}
+                      {/* On its own line, at the `micro` step. Trailing the name inline, these two
+                          markers pushed each column's name left by their own width, so no two
+                          outlet names started at the same place; and at 10px plain-case lowercase
+                          they were the quietest text on the page while saying the single most
+                          load-bearing thing about a column — that its money is provisional. */}
+                      {!c.hasPeriod ? <span style={{ ...colMarkerStyle, color: 'var(--theme-text3)' }}>no period</span>
+                        : c.status === 'open' ? <span style={{ ...colMarkerStyle, color: 'var(--theme-amber-text)' }}>open</span> : null}
                     </th>
                   ))}
                   <th style={{ textAlign: 'right' }}>Consolidated</th>

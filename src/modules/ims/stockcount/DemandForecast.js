@@ -130,12 +130,12 @@ export default function DemandForecast() {
         </p>
       </div>
 
-      <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', marginBottom: 20 }}>
+      <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', marginBottom: 28 }}>
         <div className="tab-bar">
           <button className={`tab-btn${horizon === 7 ? ' tab-btn--active' : ''}`} onClick={() => setHorizon(7)}>Next 7 Days</button>
           <button className={`tab-btn${horizon === 30 ? ' tab-btn--active' : ''}`} onClick={() => setHorizon(30)}>Next 30 Days</button>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <Tip text="Rebuilds the forecast from your latest sales data. Run this whenever you want an up-to-date prediction — it does not run automatically.">
             <button className="btn btn-primary" onClick={handleRecompute} disabled={recomputing}>
               {recomputing ? 'Recomputing…' : '↻ Recompute Forecast'}
@@ -154,7 +154,7 @@ export default function DemandForecast() {
       {msg && <p className="no-print" style={{ color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)', fontSize: 13, marginBottom: 12 }}>{msg.replace(/^(error|ok):/, '')}</p>}
 
       {loading ? (
-        <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+        <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading…</p></div>
       ) : loadError ? (
         <ReportLoadError error={loadError} />
       ) : forecast.length === 0 ? (
@@ -203,7 +203,7 @@ export default function DemandForecast() {
                     {allItems.length > 0 && (
                       <tr>
                         <td colSpan={5} style={{ padding: '2px 12px 10px', borderTop: 'none' }}>
-                          <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, color: 'var(--theme-text3)' }}>
+                          <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 11, color: 'var(--theme-text3)' }}>
                             {visibleItems.map(([recipeId, qty]) => (
                               <span key={recipeId}>{recipeNames[recipeId] || recipeId}: <strong style={{ color: 'var(--theme-text2)' }}>{qty.toFixed(1)}</strong></span>
                             ))}

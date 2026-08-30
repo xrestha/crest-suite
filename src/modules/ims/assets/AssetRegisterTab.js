@@ -5,6 +5,8 @@ import { supabase } from '../../../supabaseClient'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
+import ConfirmModal from '../../../components/ConfirmModal'
+import { errorText } from '../../../shared/errorText'
 import AssetFormModal from './AssetFormModal'
 import AssetCategoryModal from './AssetCategoryModal'
 import AssetCard from './AssetCard'
@@ -24,6 +26,12 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   const [editingAsset, setEditingAsset] = useState(null)
   const [viewingAsset, setViewingAsset] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
+  // window.confirm for a delete that also destroys posted depreciation history — the one action on
+  // this page that cannot be undone, announced in the browser's own chrome with no danger styling
+  // and no way to state the consequence in the product's voice. ConfirmModal is what the rest of
+  // the product uses for exactly this. The failure was a bare alert() for the same reason.
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => { loadNbv() }, [assets]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -60,13 +68,17 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   // so this routes through admin-user-ops' service-role client (same mechanism Danger Zone uses)
   // rather than a plain scopedDelete, which would just fail with the trigger's exception.
   async function handleDelete(asset) {
-    if (!window.confirm(`Permanently delete ${asset.asset_code} — ${asset.name}? This also deletes its posted depreciation history and cannot be undone.`)) return
     setDeletingId(asset.id)
+    setDeleteError('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: { action: 'deleteAsset', clientId, assetId: asset.id },
     })
     setDeletingId(null)
-    if (error || data?.error) { alert('Delete failed: ' + (data?.error || error.message)); return }
+    if (error || data?.error) {
+      setDeleteError(data?.error || errorText(error, 'operator'))
+      return
+    }
+    setConfirmDelete(null)
     onReload()
   }
 
@@ -131,10 +143,10 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
                     <span className={`badge ${a.status === 'active' ? 'badge-green' : 'badge-red'}`}>{a.status}</span>
                   </td>
                   <td onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 6 }}>
-                    <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setEditingAsset(a)}>Edit</button>
+                    <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setEditingAsset(a)}>Edit</button>
                     {isAdmin && (
                       <Tip text="Admin only — permanently deletes the asset and its posted depreciation history. Never available to a client login." width={260}>
-                        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={() => handleDelete(a)} disabled={deletingId === a.id}>
+                        <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)' }} onClick={() => { setDeleteError(''); setConfirmDelete(a) }} disabled={deletingId === a.id}>
                           {deletingId === a.id ? 'Deleting…' : 'Delete'}
                         </button>
                       </Tip>
@@ -160,6 +172,27 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
       )}
       {viewingAsset && (
         <AssetCard asset={viewingAsset} onClose={() => setViewingAsset(null)} onChanged={() => { setViewingAsset(null); onReload() }} />
+      )}
+      {confirmDelete && (
+        <ConfirmModal
+          title="Delete this asset?"
+          danger
+          confirmLabel="Delete permanently"
+          busy={deletingId === confirmDelete.id}
+          busyLabel="Deleting…"
+          onCancel={() => { setConfirmDelete(null); setDeleteError('') }}
+          onConfirm={() => handleDelete(confirmDelete)}
+        >
+          <p style={{ margin: '0 0 10px' }}>
+            <strong>{confirmDelete.asset_code} — {confirmDelete.name}</strong> is removed from the
+            register, along with every depreciation entry already posted against it. Both the book
+            and the tax-pool figures for the periods it appeared in change as a result.
+          </p>
+          <p style={{ margin: 0 }}>This cannot be undone.</p>
+          {deleteError && (
+            <p role="alert" style={{ margin: '12px 0 0', color: 'var(--theme-red-text)' }}>{deleteError}</p>
+          )}
+        </ConfirmModal>
       )}
     </div>
   )

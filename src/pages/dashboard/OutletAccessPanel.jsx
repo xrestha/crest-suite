@@ -82,7 +82,7 @@ export default function OutletAccessPanel({ outlets }) {
   }
 
   return (
-    <div className="card" style={{ marginTop: 20 }}>
+    <div className="card" style={{ marginTop: 28 }}>
       <div style={{ marginBottom: 12 }}>
         <h2 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 4px', color: 'var(--theme-text1)' }}>
           Outlet Access

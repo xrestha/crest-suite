@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
-import { TriangleAlert } from 'lucide-react'
+import { TriangleAlert, Check } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
@@ -11,6 +11,7 @@ import SuiteGate from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
 import ConfirmModal from '../../components/ConfirmModal'
 import { printWithTitle } from '../../utils/printTitle'
+import { errorText } from '../../shared/errorText'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
 import './MonthlyOwnerReport.css'
@@ -119,6 +120,10 @@ export default function MonthlyOwnerReport() {
   const [confirmRegenerate, setConfirmRegenerate] = useState(false)
   const [generatorName, setGeneratorName] = useState('')
   const [genError, setGenError] = useState('')
+  // Regeneration reports through the page's own error card, not window.alert — this is the only
+  // native dialog left on a screen that already confirms this action through ConfirmModal, and
+  // the one place the outcome of overwriting frozen figures gets announced.
+  const [regenNotice, setRegenNotice] = useState(null)
   const [bizInfo, setBizInfo] = useState({ name: '', vat: '', address: '', vatReg: true })
 
   useEffect(() => {
@@ -200,15 +205,24 @@ export default function MonthlyOwnerReport() {
     if (!period) return
     setConfirmRegenerate(false)
     setRegenerating(true)
+    setRegenNotice(null)
     try {
       const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId, period })
       await regenerateReport({ clientId, periodId: period.id, snapshot, modulesIncluded, actorId: profile?.id })
+      // Past this line the overwrite HAS landed. A failure reading the row back therefore must
+      // not say "Regeneration failed" — the frozen figures really were replaced, and telling the
+      // owner otherwise invites a second regeneration against figures that already moved. What is
+      // wrong at that point is only what is on screen.
       const { data: fresh, error: freshErr } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
-      if (freshErr) throw new Error(freshErr.message)
+      if (freshErr) {
+        setRegenNotice({ tone: 'warn', text: `The report was regenerated, but it could not be re-read to show you. Reload the page to see the new figures. (${errorText(freshErr, 'operator')})` })
+        return
+      }
       setReport(fresh)
       setGeneratorName(profile?.full_name || '—')
+      setRegenNotice({ tone: 'ok', text: `Regenerated from today's data — ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}.` })
     } catch (e) {
-      window.alert('Regeneration failed: ' + e.message)
+      setRegenNotice({ tone: 'error', text: errorText(e, 'operator') })
     } finally {
       setRegenerating(false)
     }
@@ -275,7 +289,7 @@ export default function MonthlyOwnerReport() {
       </div>
 
       <SuiteGate featureKey="monthly_owner_report" featureLabel="Monthly Owner/Manager Report" requireModules={['ims']}>
-        <div className="no-print card" style={{ marginBottom: 16, display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="no-print card" style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <select aria-label="Period"
             className="form-select" style={{ maxWidth: 220 }}
             value={selectedPeriodId || ''} onChange={e => setSelectedPeriodId(e.target.value)}
@@ -307,6 +321,28 @@ export default function MonthlyOwnerReport() {
             </div>
           )}
         </div>
+
+        {regenNotice && (
+          <div
+            className="card" role={regenNotice.tone === 'ok' ? 'status' : 'alert'}
+            style={{
+              marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12,
+              borderColor: `color-mix(in srgb, var(--theme-${regenNotice.tone === 'ok' ? 'green' : regenNotice.tone === 'warn' ? 'amber' : 'red'}) 25%, transparent)`,
+              background: `color-mix(in srgb, var(--theme-${regenNotice.tone === 'ok' ? 'green' : regenNotice.tone === 'warn' ? 'amber' : 'red'}) 8%, transparent)`,
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, display: 'flex', alignItems: 'flex-start', gap: 6, color: `var(--theme-${regenNotice.tone === 'ok' ? 'green' : regenNotice.tone === 'warn' ? 'amber' : 'red'}-text)` }}>
+              {regenNotice.tone === 'ok'
+                ? <Check size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                : <TriangleAlert size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />}
+              {regenNotice.text}
+            </p>
+            <button
+              className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px', flexShrink: 0 }}
+              onClick={() => setRegenNotice(null)} aria-label="Dismiss"
+            >&times;</button>
+          </div>
+        )}
 
         {(loading || generating) && (
           <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>

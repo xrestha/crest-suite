@@ -64,7 +64,7 @@ export default function FixedAssets() {
       </div>
 
       <SuiteGate featureKey="fixed_asset_register" featureLabel="Fixed Assets" requireModules={['ims']}>
-      <div className="tab-bar no-print" style={{ marginBottom: 20 }}>
+      <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
         {TABS.map(t => (
           <button
             key={t.key}
@@ -77,7 +77,7 @@ export default function FixedAssets() {
       </div>
 
       {loading ? (
-        <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+        <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading…</p></div>
       ) : (
         <>
           {activeTab === 'register' && (

@@ -159,6 +159,126 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S657 — 2026-08-30 — the Suite closes the shell campaign, and the Group Console stops reporting last month
+
+Service worker `crest-v172`. No migration. `/impeccable layout crest suite module`, then
+`/impeccable polish crest suite module` — the sixth and last leg of the S652–S656 campaign, over
+the six Suite-billed surfaces (Owner Dashboard, Group Console, Consolidated P&L, Monthly Owner
+Report, Demand Forecast, Fixed Assets). No feature changed; nothing new for Help or the module
+guides.
+
+#### The verdict tier had three identities inside one module
+
+The same rank of figure rendered at **18px on Consolidated P&L, 24px on the Group Console and 28px
+at weight 800 on the Owner Dashboard**. 28 is on neither the size ramp nor the weight set. Two
+consequences, both visible: **Net Profit — the reason an owner opens the P&L — was the smallest
+headline in the module**, and on the Owner Dashboard Food Cost % outranked Revenue in a row of five
+peers. Normalised onto the ramp: 24 (`stat-value`) for a verdict figure, 22 (`numeral`) for the
+operations row, 18 (`section-heading`) for the one card holding two amounts.
+
+The Owner Dashboard was also re-typing its label / value / subtext style objects inline on all nine
+cards — 27 objects that had already drifted apart (`marginBottom: 6` / `marginTop: 5` in the
+Profitability row against `4` / `4` in the Operations row, with nothing choosing either). Three
+helpers now, the same shape `ClientDashboard.jsx` has carried since S569.
+
+#### `<p>` instead of `<div>` cost the Group Console 51px per card
+
+`.stat-label` / `.stat-value` are used at **331 sites; 323 are `<div>` and all 8 `<p>` are
+GroupDashboard's four stat cards**. There is no global `p { margin: 0 }`, so those eight carried UA
+paragraph margins. Measured in headless Chromium against the real built `Layout.css`:
+
+| | as `<p>` | as `<div>` |
+| --- | --- | --- |
+| card height | 153.6px | **102.6px** |
+| label to value | 24px | **8px** |
+| dead space under the value | 49px | **25px** |
+
+`.stat-label`'s own 8px bottom margin was being collapsed away by `.stat-value`'s inherited 1em
+(=24px) top margin, so the label had stopped reading as belonging to its figure.
+
+Chasing it exposed a product-wide one: **`.stat-value` had never set a `line-height`**, so a 24px
+numeral sat in a 36px line box carrying 6px of half-leading on each side. What actually rendered
+between label and figure was 14px, and between figure and sub-line 10px — **the class's own 8/4
+intervals were never the ones on screen, at all 323 sites**. Now `1.15`, matching the 1.1 the
+dashboards' hand-rolled values already set; re-measured back at exactly 8 and 4.
+
+#### One value repeated is not a rhythm — the Suite edition
+
+The whole module's vertical rhythm was **20px between everything** (Group Console 16/20/20/20/20,
+Owner Dashboard 12/20/20/14/20/20). Nothing chose 20; it propagated, the same shape S655 found in
+HR and S656 in IMS. The sharpest case: the Owner Dashboard's nine KPI cards used `gap: 14` *inside*
+each row and `marginBottom: 14` *between* the two rows, so the only thing dividing Profitability
+from Operations was an `sr-only` `<h2>` — under a squint, one undifferentiated field of nine. Both
+rows now use `.stat-grid` (16px peer gap, 28px group break, the documented 200px auto-fit floor in
+place of a fourth floor value of 160). Control rows and section breaks across the other four
+surfaces went to 16 / 28.
+
+#### Three places the Suite asserted a figure it had not computed
+
+- **The Group Console showed last month's totals under this month's label.** `load()` set
+  `loading = true` but never cleared `rows`, and the four KPI cards derive from it with no loading
+  gate — so changing the month left the previous month's group revenue on screen while the table
+  beneath said "Loading…". On a failed read it was worse: `setRows([])` meant a dead connection
+  rendered as a confident `NPR 0` group. The strip now skeletons while loading and does not render
+  at all after an error, with `ReportLoadError` in its place; the coverage banner
+  ("Showing 3 of 5 outlets") is gated the same way, being derived from the same read.
+- **The Group Console had no `useLatestRequest` guard.** `load` is a `useCallback` keyed on
+  `(bsYear, bsMonth)`, so arrowing the closed `<select>` starts one `get_group_summary` per
+  keypress and **the last to land wins the figures while the two selects show whatever was picked
+  last** — S601's shape exactly, on the page that compares outlets' money across months. It appears
+  in neither S601's swept list nor its not-swept list. Guarded on a composite `bsYear-bsMonth` key,
+  which also settles the reason S601 gave for skipping `AttendanceSheet`/`Overtime`: a composite key
+  works fine. Importers 21 → 22.
+- **Monthly Owner Report reported success as failure.**
+  `window.alert('Regeneration failed: ' + e.message)` fired for any throw — **including a failed
+  read-back after `regenerateReport` had already overwritten the frozen snapshot**. The owner was
+  told the regeneration failed when it had landed, inviting a second one against figures that had
+  already moved. Now split at the write: past it, a read-back failure says the report *was*
+  regenerated and the page needs a reload. It was also the only native dialog on a screen that
+  already confirms this action through `ConfirmModal`, and raw `e.message` is
+  `TypeError: Failed to fetch` for any dead connection (S619) — routed through
+  `errorText(e, 'operator')` into the page's own notice card, with a `Check` icon on the success
+  tone and `TriangleAlert` on the other two.
+
+#### A cascading delete was still in browser chrome
+
+`AssetRegisterTab`'s asset delete used `window.confirm` — the one irreversible action in Fixed
+Assets, and it cascades to posted depreciation history, so book *and* tax-pool figures for past
+periods change with it. Native confirm carries no danger styling and no way to say that; its
+failure path was a bare `alert()`. Now a danger `ConfirmModal` naming the consequence, with the
+error surfacing inside the dialog rather than replacing it.
+
+#### Smaller
+
+- **The Owner Dashboard's figures were the only ones in the module with proportional numerals** —
+  its cards are hand-rolled, so they miss the `table.data-table td, .stat-value` tabular-nums rule
+  (S594), on a row of five percentages built to be compared against each other.
+- **Consolidated P&L's `no period` / `open` column markers** were 10px lowercase trailing the
+  outlet name inline, so each name was pushed left by the marker's own width and no two column
+  headings started at the same place. Now on their own line at the `micro` step. "Open" means that
+  column's money is provisional — it was the quietest text on the page.
+- The Owner Dashboard's Cash / Credit card was breaking **inside** the second amount
+  (`… / NPR` then `1,204,000`); each amount is now the unbreakable atom and the break lands on the
+  slash. Three table buttons at 11px → 12 (the floor for an interactive control). The two page-root
+  `<p>Loading…</p>` dialects in Fixed Assets and Demand Forecast now match the module's card.
+
+#### Verification, and what was left alone
+
+`npm run build` passes; ESLint clean; full-scope detector clean before and after. Because every
+Suite route is auth-gated (and the Group Console additionally needs a `group_id`, which no client
+has ever had), the geometry was measured in headless Chromium against the **real built
+`Layout.css`** at 1440/1280/1024/768/390 rather than in the app: zero horizontal overflow, no
+wrapped figures, and a 16px peer gap against a 28px group break at every width. The new error and
+loading branches were rendered and inspected the same way, not forced from a live 500.
+
+**Deliberately not changed:** `🖨 Print` / `↓ Export Excel` / `×` glyph controls are a 28-site
+product-wide convention, not local drift — converging them is an `/impeccable extract` decision,
+not a polish edit on six pages. `ClientDashboard.jsx`'s `kpiValueStyle` has the same missing
+`tabular-nums` but sits outside this module. The Owner Dashboard's two `sr-only` section headings
+are still invisible to a sighted reader; spacing now separates the groups, but *naming* them is an
+information-design change (`/impeccable clarify`), and the existing comment says the absence was
+intentional.
+
 ### S656 — 2026-08-30 — IMS takes its turn: five escaped headers, one rhythm, and two pages that could lie
 
 Service worker `crest-v171`. No migration. `/impeccable layout ims module`, then `/impeccable

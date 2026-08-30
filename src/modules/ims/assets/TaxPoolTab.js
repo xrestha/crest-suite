@@ -224,7 +224,7 @@ export default function TaxPoolTab({ assets }) {
                     <td>{e.pool}</td><td>{e.expense_date}</td>
                     <td style={{ textAlign: 'right' }}>{fmt(e.amount)}</td>
                     <td>{e.description || '—'}</td>
-                    <td><button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => deleteExpense(e.id)}>Delete</button></td>
+                    <td><button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => deleteExpense(e.id)}>Delete</button></td>
                   </tr>
                 ))}
               </tbody>

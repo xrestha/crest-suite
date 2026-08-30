@@ -520,6 +520,24 @@ adjacent controls rather than one control with four states. Three HR rows sat at
 Advances had additionally patched the feeling with a `marginLeft: 8` on the second group — the
 gap and the margin paying for the same separation, the same shape as the `48%` rule above. 16px.
 
+**A hand-rolled copy of a shared component keeps only the rules the class had on the day it was
+copied** (added 2026-08-30/S657, from the Suite). The three dashboards build their KPI tiles from
+an inline `kpiCard()` instead of `.stat-card`, for a real reason — a denser padding tier the class
+does not offer. But the *grid* around them was hand-rolled too, and there was no reason for that:
+the Owner Dashboard declared `repeat(auto-fit, minmax(160px, 1fr))` with `gap: 14`, a fourth floor
+value beside `.stat-grid`'s 200 and `.stat-grid--compact`'s 140, and a group break identical to its
+own peer gap. Meanwhile the class had gained `tabular-nums` (S594) and `line-height` (S657) that the
+copy could not receive. **Separate the two decisions before copying anything**: take the class for
+everything it still describes correctly, and hand-roll only the one property that genuinely differs.
+The tell that a copy has gone stale is a value on it that exists nowhere else in the product.
+
+**Nine equal cards in two groups read as one field of nine.** The Owner Dashboard split
+Profitability from Operations with `sr-only` headings and nothing else — the grouping was real, was
+announced to a screen reader, and was invisible to everyone else, because the interval between the
+two rows was the same 14px as the interval between two cards inside either one. Proximity is the
+only grouping signal a card row has; an accessible-name-only group is not grouped. 16px inside,
+28px between.
+
 ## Elevation & Depth
 
 **History note (2026-07-12):** this section previously documented a strict "Flat-By-Default Rule" — no card shadows anywhere, depth from background-lightness and borders only. That rule is retired as of the Bright theme + sidebar redesign session: every preset now gets a real `box-shadow` on cards via a per-preset `--theme-card-shadow` token, at the user's explicit request. What's below is the model that replaced it — read this section as current, not the old rule plus an exception list.
@@ -592,6 +610,8 @@ Shadow was already in real use before this change beyond the two cases previousl
 - **Background:** one step lighter than the page background; no gradient, no tint toward the accent. A 2026-08-05 audit found `AdminClients.js`'s Trial Accounts panel header using a `linear-gradient()` — the one confirmed instance of this rule being broken found so far. Fixed to a flat `rgba(248,113,113,0.10)` wash (the same literal `.badge-red` background tint, scaled up for a section header rather than an inline chip).
 - **Shadow strategy:** `var(--theme-card-shadow)` (added 2026-07-12 - see Elevation). Depth is background-shift + border + a per-preset-tuned shadow, no longer border-only.
 - **Border:** 1px, structural border color.
+- **Internal intervals in a stat tile are 8px label→value and 4px value→sub — and until 2026-08-30 (S657) those were never the numbers on screen.** `.stat-value` set a size and a weight but no `line-height`, so a 24px numeral inherited body's 1.5 and sat in a 36px line box carrying 6px of half-leading on each side; what actually rendered was 14px and 10px, at all 323 sites that use the class. It now carries `line-height: 1.15`, matching the 1.1 the dashboards' hand-rolled KPI values had independently arrived at. **Corollary worth stating once: a class that sets font-size on a large numeral must set its line-height too**, or the class's own margins are advisory.
+- **Build a stat tile out of `<div>`s, never `<p>`s.** There is no global `p { margin: 0 }` in this project, so a `<p class="stat-label">` carries a UA `1em` top margin and a `<p class="stat-value">` carries `1em` (=24px) top and bottom. Measured on the Group Console, which was the only place in the product doing it (8 sites against 323): the card stood **153.6px instead of 102.6px**, the label sat **24px from its figure instead of 8** — `.stat-label`'s own bottom margin collapsed away by the value's inherited top margin — and 49px of dead space sat under the value. Nothing about it looks wrong in the source; it is only visible in a computed box.
 - **Internal padding:** 24px on `.card`; 20px on `.stat-card`. Corrected 2026-08-12 — this line previously read "24px, consistent regardless of card content density," which was never true of the stat tile. The tighter step is deliberate and worth keeping: a stat card is a label-plus-numeral pair with no internal composition to breathe around, and a row of them reads better slightly denser. Anything with real content inside it takes 24px.
 
 ### Inputs / Fields
@@ -732,7 +752,7 @@ Dense, functional, and the component most of the product's screens are actually 
 
 **Row actions belong on the row.** A table whose rows can be acted on carries a right-aligned, `white-space: nowrap` Actions column of `.btn-ghost` buttons at 11px, tinted with the semantic color of what they do (green approve, red reject/delete) rather than filled. `LeaveManagement.jsx` is the reference implementation. The failure mode this prevents is real and shipped twice: putting the only actions inside a detail panel rendered *below* the table means the distance between "the row I decided about" and "the button that acts on it" grows with the list, so a 20-row approval queue becomes 20 round trips to the bottom of the page.
 
-**The totals row and lining figures are the table's own, not the call site's** (added 2026-08-19/S594). `.data-table tfoot td` carries a 2px top rule, 700 weight and no bottom border, and suppresses the row-hover tint — a totals row is not a data row. Until S594 `tfoot` had **no rule at all**, so every totals row in the product was hand-styled where it was written, and three report pages built in the same week produced three different treatments. `font-variant-numeric: tabular-nums` now sits on every `.data-table td` and on `.stat-value` for the same reason: Poppins' default figures are **proportional**, so a right-aligned currency column does not line up digit-for-digit, and one page had independently discovered the fix inline while every other currency column in the product stayed ragged. Only digits are affected; text cells are unchanged.
+**The totals row and lining figures are the table's own, not the call site's** (added 2026-08-19/S594). `.data-table tfoot td` carries a 2px top rule, 700 weight and no bottom border, and suppresses the row-hover tint — a totals row is not a data row. Until S594 `tfoot` had **no rule at all**, so every totals row in the product was hand-styled where it was written, and three report pages built in the same week produced three different treatments. `font-variant-numeric: tabular-nums` now sits on every `.data-table td` and on `.stat-value` for the same reason: Poppins' default figures are **proportional**, so a right-aligned currency column does not line up digit-for-digit, and one page had independently discovered the fix inline while every other currency column in the product stayed ragged. Only digits are affected; text cells are unchanged. **The rule reaches a card only through the class, though** (added 2026-08-30/S657): the three dashboards build their KPI tiles from an inline `kpiCard()` rather than `.stat-card`, so their figures had proportional numerals while every other figure in the product was lining — on the Owner Dashboard, a row of five percentages built to be compared against each other. Its `kpiValueStyle` now sets `fontVariantNumeric` itself; `ClientDashboard.jsx`'s copy still does not.
 
 **`.data-table--sticky-first` is opt-in, for a matrix whose first column is the row label.** Consolidated P&L with one column per outlet is the case it was built for: inside `.table-wrap`, scrolling right to reach the last column scrolls the labels away, leaving the reader matching numbers to remembered row order. A sticky cell needs an opaque background (`var(--theme-card)`) or the scrolling columns show through underneath it — the same requirement `Stock.js`'s Summary tab already documents.
 
