@@ -58,11 +58,13 @@ export default function Pos() {
   if (!canManage) return <Navigate to="/dashboard" replace />
 
   return (
-    <div style={{ padding: '40px 28px', maxWidth: 520 }}>
-      <h2 style={{ color: 'var(--theme-text1)', margin: '0 0 8px' }}>Crest POS</h2>
-      <p style={{ color: 'var(--theme-text3)', fontSize: 13, marginBottom: 32 }}>
-        Point of Sale — set up this device so your staff can log in with a PIN.
-      </p>
+    <div style={{ maxWidth: 520 }}>
+      <div className="page-header">
+        <h1 className="page-title">Crest POS</h1>
+        <p className="page-subtitle">
+          Point of Sale — set up this device so your staff can log in with a PIN.
+        </p>
+      </div>
 
       {canManage && (
         activated ? (

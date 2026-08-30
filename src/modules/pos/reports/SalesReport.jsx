@@ -793,7 +793,7 @@ export default function SalesReport() {
     (tab === 'onelakh' && parties.length === 0)
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1150 }}>
+    <div>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="page-title">
@@ -990,7 +990,14 @@ export default function SalesReport() {
                 return (
                   <tr key={v.id} onClick={() => viewPosBill(clientId, { id: v.id })} style={{ cursor: 'pointer' }}>
                     <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{v.orderNo}</td>
+                    {/* The row keeps its onClick as the mouse convenience; this button is the
+                        keyboard/SR path. Never role="button" on the tr — that overrides the
+                        implicit row role and unhooks every currency cell from its header. */}
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                      <button className="btn-linklike" onClick={e => { e.stopPropagation(); viewPosBill(clientId, { id: v.id }) }}>
+                        #{v.orderNo}
+                      </button>
+                    </td>
                     <td>{v.invoiceNo || '—'}</td>
                     <td>
                       {v.customer}
@@ -1062,7 +1069,12 @@ export default function SalesReport() {
                 return (
                   <tr key={c.key} onClick={() => viewPosBill(clientId, { isItemComp: true, parentOrderId: c.orderId, compNo: c.compNo })} style={{ cursor: 'pointer' }}>
                     <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{c.invoiceNo != null ? `#${c.invoiceNo}` : `Order #${c.orderNo}`}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                      <button className="btn-linklike"
+                        onClick={e => { e.stopPropagation(); viewPosBill(clientId, { isItemComp: true, parentOrderId: c.orderId, compNo: c.compNo }) }}>
+                        {c.invoiceNo != null ? `#${c.invoiceNo}` : `Order #${c.orderNo}`}
+                      </button>
+                    </td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-amber-text)' }}>NC-{String(c.compNo).padStart(2, '0')}</td>
                     <td>{c.tableName || 'Takeaway'}</td>
                     <td>{c.itemNames}</td>
@@ -1107,7 +1119,12 @@ export default function SalesReport() {
             <tbody>
               {paymentRows.map(p => (
                 <tr key={p.method} onClick={() => { setPaymentFilter(p.method); setTab('voucher') }} style={{ cursor: 'pointer' }}>
-                  <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{p.method}</td>
+                  <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                    <button className="btn-linklike"
+                      onClick={e => { e.stopPropagation(); setPaymentFilter(p.method); setTab('voucher') }}>
+                      {p.method}
+                    </button>
+                  </td>
                   <td style={{ textAlign: 'right' }}>{p.bills}</td>
                   <td style={{ textAlign: 'right' }}>{fmtNpr(p.gross)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtNpr(p.discount)}</td>
@@ -1199,7 +1216,17 @@ export default function SalesReport() {
                 return (
                   <tr key={g.partner} onClick={() => setPartnerFilter(active ? 'all' : g.partner)}
                     style={{ cursor: 'pointer', background: active ? 'var(--theme-focus-ring)' : undefined }}>
-                    <td><span className="badge-amber" style={{ fontSize: 10 }}>{g.partner}</span></td>
+                    <td>
+                      {/* aria-pressed, not a link: this filters the table below in place rather
+                          than going anywhere. The underline is suppressed because the content is
+                          a badge — btn-linklike's underline lands INSIDE the pill and no chip in
+                          the product is underlined; the pill plus the row tint carry the
+                          affordance, and :focus-visible still supplies the keyboard ring. */}
+                      <button className="btn-linklike" aria-pressed={active} style={{ textDecoration: 'none' }}
+                        onClick={e => { e.stopPropagation(); setPartnerFilter(active ? 'all' : g.partner) }}>
+                        <span className="badge-amber" style={{ fontSize: 10 }}>{g.partner}</span>
+                      </button>
+                    </td>
                     <td style={{ textAlign: 'right' }}>{g.bills}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(g.amount)}</td>
                     <td style={{ textAlign: 'right', fontWeight: g.outstanding > 0 ? 700 : 400, color: g.outstanding > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text3)' }}>
@@ -1269,7 +1296,11 @@ export default function SalesReport() {
                 return (
                   <tr key={r.id} onClick={() => viewPosBill(clientId, { id: r.id })} style={{ cursor: 'pointer' }}>
                     <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.invoiceNo != null ? `#${r.invoiceNo}` : `Order #${r.orderNo}`}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                      <button className="btn-linklike" onClick={e => { e.stopPropagation(); viewPosBill(clientId, { id: r.id }) }}>
+                        {r.invoiceNo != null ? `#${r.invoiceNo}` : `Order #${r.orderNo}`}
+                      </button>
+                    </td>
                     <td><span className="badge-amber" style={{ fontSize: 10 }}>{r.deliveryPartner}</span></td>
                     <td>{r.tableName || 'Takeaway'}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(r.amount)}</td>

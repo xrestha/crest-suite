@@ -495,12 +495,11 @@ export default function PosTableManagement() {
   // ────────────────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
+    <div>
 
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>Table Management</h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+      <div className="page-header">
+        <h1 className="page-title">Table Management</h1>
+        <p className="page-subtitle">
           Set up your floor plan and configure ticket routing for the kitchen and bar.
         </p>
       </div>
@@ -1000,7 +999,10 @@ export default function PosTableManagement() {
               No tables in this section.
             </div>
           ) : tables.length > 0 ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14 }}>
+            // 88px of bottom clearance for the <Fab> below, which is position: fixed and reserves
+            // nothing. Same rule as .table-wrap--fab-clear, applied by hand because this is a card
+            // GRID rather than a .table-wrap — without it the Fab covers the last row's QR buttons.
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14, marginBottom: 88 }}>
               {visible.map(t => (
                 <div
                   key={t.id}
@@ -1010,15 +1012,38 @@ export default function PosTableManagement() {
                 >
                   <div style={{ margin: '-16px -18px 2px', height: 6, background: STATUS_COLOR[t.status] || 'var(--theme-border)', flexShrink: 0 }} />
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
-                    <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)', lineHeight: 1.2 }}>{t.name}</span>
+                    {/* The card keeps its onClick as the mouse convenience, but the keyboard
+                        path is these two real controls rather than role="button" on the card:
+                        this card holds three interactive children (name, status, QR), and
+                        nesting buttons inside a button role is invalid and unfocusable. That
+                        is why this grid is treated differently from the visually identical one
+                        on Order Taking, whose cards have no interactive children. */}
+                    {/* btn-linklike for the semantics and the focus ring, with its colour and
+                        underline overridden back to the card title's own treatment: a floor can
+                        run to 40 tables, and gold-underlining every name would spend the
+                        rationed accent 40 times on one screen. The card's own cursor:pointer is
+                        the mouse affordance; this button exists for the keyboard. */}
+                    <button
+                      className="btn-linklike"
+                      style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.2,
+                               color: 'var(--theme-text1)', textDecoration: 'none' }}
+                      onClick={e => { e.stopPropagation(); openEdit(t) }}
+                    >{t.name}</button>
                     <Tip text="Click to cycle: Available → Reserved → Occupied → Inactive.">
-                      <span
+                      {/* A real button wearing the badge class. The inline reset is the badge
+                          styles' one gap — they set background/padding/radius/size but assume a
+                          span, so a button arrives with its own border and system font. One
+                          site, so it stays inline rather than earning a .badge-btn class. */}
+                      <button
+                        type="button"
                         className={STATUS_BADGE[t.status] || 'badge-gray'}
-                        style={{ fontSize: 10, flexShrink: 0, cursor: 'pointer', borderBottom: 'none' }}
+                        aria-label={`Status: ${STATUS_LABEL[t.status] || t.status}. Change to the next status.`}
+                        style={{ fontSize: 10, flexShrink: 0, cursor: 'pointer', borderBottom: 'none',
+                                 border: 'none', fontFamily: 'inherit' }}
                         onClick={e => cycleStatus(t, e)}
                       >
                         {STATUS_LABEL[t.status] || t.status}
-                      </span>
+                      </button>
                     </Tip>
                   </div>
                   {t.section && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{t.section}</div>}

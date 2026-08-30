@@ -331,13 +331,12 @@ export default function PosStaff() {
   const labelStyle = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block' }
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1350 }}>
+    <div>
 
-      {/* Header */}
-      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
         <div>
-          <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>POS Staff</h2>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+          <h1 className="page-title">POS Staff</h1>
+          <p className="page-subtitle">
             Assign roles to your team. Staff log in with their name and PIN.
           </p>
         </div>

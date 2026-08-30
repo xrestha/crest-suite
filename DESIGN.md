@@ -431,6 +431,44 @@ make it silently while fixing something else.**
 
 **No interactive control below 12px.** The same bar's buttons were 10px with 2px vertical padding — legible in a mockup, a squint in use, and a poor hit target. Chips and buttons in dense list rows sit at 12–12.5px with roughly 5–7px vertical padding; 10px is for genuinely non-interactive micro-labels only.
 
+**The page root takes no padding of its own, and the header is `.page-header`** (added 2026-08-30,
+from the POS module). `.main-content` already pads every page — 32px, dropping to `16px !important`
+under 768px — and the mobile rule that clears the fixed hamburger is written against that: the
+hamburger is `position: fixed` at `12px/12px`, 44px square, z-index 150, and `.page-header` earns
+`padding-left: 60px` at the breakpoint to sit clear of it. **A page that re-pads its own root
+silently moves out from under that arithmetic.** Eleven of thirteen POS pages opened
+`<div style={{ padding: '24px 28px', maxWidth: … }}>`, and both branches broke, in opposite
+directions. The eight that also hand-rolled `<h2 style={{ fontSize: 20 }}>` instead of
+`.page-title` inherited no clearance at all: measured at 390px, the title box landed at
+`left: 44, top: 40` against a hamburger occupying `12–56 × 12–56` — **12×16px of overlap, the
+first character of every POS page title under an opaque button**. The four report pages that did
+use `.page-header` got the 60px on top of their own 28px, indenting the title to `left: 104` while
+the table beneath it started at `44`. Neither is visible above 768px, where the hamburger is
+`display: none`, which is why both survived every desktop review.
+
+Three things follow. **Let the shell pad the page** — the root is a bare `<div>`, as it is on the
+67 pages that already do this. **Use `.page-header` / `.page-title` / `.page-subtitle`**, which also
+makes the page title an `<h1>` rather than an `<h2>` with no `<h1>` above it. And **a `maxWidth` on
+a page root is a claim about a reading measure**, which a working surface does not have: POS carried
+six different caps (520 / 1000 / 1100 / 1150 / 1350, plus a `40px 28px` variant) with nothing in the
+content to explain any of them. They are gone; the one that stayed is `Pos.js`'s 520, which is a
+genuine single-column form. Full-screen surfaces that deliberately escape the shell — the order
+screen and the KDS, both `position: fixed; inset: 0` — own their padding and are not covered by
+this. *(Noted while measuring, not repaired: this file's frontmatter carries `page-title: 20px/700`
+while `.page-title` ships 22px/600. 22px is on the ramp — it is the `numeral` step — so this is a
+mislabelled entry rather than an off-ramp size. It wants a `/impeccable document` pass, not an edit
+here.)*
+
+**A fractional width is a claim that a sibling exists.** The order screen's cart action bar was a
+`display: flex; gap: 8` holding buttons hard-coded to `width: '48%'` — which is already wrong when
+both render (48 + 48 + 8px leaves a ragged ≈3.7px gutter on a 292px panel, since `gap` and the
+percentages are both paying for the same separation), and badly wrong when one does not. The
+Payment button is `hasPosAccess('supervisor')`, so on a **staff-rank** account — the ordinary
+waiter's login, and the most-pressed button in the product — `Send Order` rendered at 48% with 52%
+of the bar empty beside it. `flex: 1` states the relationship instead of guessing at it, and holds
+however many siblings survive their permission checks. Same family as the `space-between` rule
+above: both are a fixed answer standing in for a relationship the container already knows.
+
 ## Elevation & Depth
 
 **History note (2026-07-12):** this section previously documented a strict "Flat-By-Default Rule" — no card shadows anywhere, depth from background-lightness and borders only. That rule is retired as of the Bright theme + sidebar redesign session: every preset now gets a real `box-shadow` on cards via a per-preset `--theme-card-shadow` token, at the user's explicit request. What's below is the model that replaced it — read this section as current, not the old rule plus an exception list.
@@ -626,6 +664,10 @@ Dense, functional, and the component most of the product's screens are actually 
 **Never put `role="button"` on a `<tr>`.** The role *overrides* the row's implicit `row` role, which takes it out of the table's structure: a screen reader stops associating that row's cells with their column headers, so every figure in it loses the label that gave it meaning. On a table of currency columns that is the entire content.
 
 The control belongs **in a cell**, as a real `<button>` — the row keeps its header associations, the button is natively focusable and operable, and no `onKeyDown` has to re-implement Enter/Space. `RowDisclosure` (`src/components/RowDisclosure.jsx`, added 2026-08-19/S595) is that button: it takes `expanded`/`onToggle`/`label` and an optional `controls`, sets `aria-expanded`, and `stopPropagation()`s so the row's own `onClick` — which every one of these tables already had, and which still works — cannot double-fire against it. `controls` is deliberately optional: `aria-controls` needs exactly one element id, and Supplier Price Tracker's detail is *many* sibling `<tr>`s, so pointing it at the first would assert something untrue about the rest.
+
+**A row that ACTS is the same rule with a different control** (added 2026-08-30, from POS). `RowDisclosure` answers the row that *expands*; six POS rows instead *open a bill* or *apply a filter*, and those had no keyboard path at all — the whole affordance was `cursor: 'pointer'` on the `<tr>`, which is also why a sighted mouse user could not tell the rows were clickable either. The control is **`.btn-linklike` on the cell that carries the row's identity** — the invoice number, the order number, the payment method — which is what that class was written for ("a table cell that navigates… the affordance has to sit on the name itself rather than in a trailing Actions column"). It `stopPropagation()`s, exactly as `RowDisclosure` does, and the row's `onClick` stays as the mouse convenience. A row that toggles a filter rather than navigating takes `aria-pressed` instead, and suppresses the underline when its content is a badge: `btn-linklike`'s underline lands *inside* the pill, and no chip in this product is underlined.
+
+**A CARD grid cannot always take the container role, and the tell is whether the card holds controls** (added 2026-08-30, from POS). Order Taking's floor grid puts `role="button" + tabIndex + onKeyDown` on the card, which is correct — its cards hold no interactive children. Table Management's grid *looks identical* and had none of it, so the entire floor plan was mouse-only: a keyboard user could neither open a table nor cycle its status. It cannot be fixed by copying the sibling, because these cards hold three controls (name, status badge, QR), and interactive content inside a `button` role is invalid and unfocusable. The affordance goes on the children instead — the same "a real control inside, never a role on the container" move as the `<tr>` rule above. Two things fall out of it. A badge that is a control becomes a real `<button>` wearing the badge class, which needs `border: none` and `fontFamily: 'inherit'` because the badge styles assume a `<span>`. And the identity control keeps `btn-linklike`'s **semantics and focus ring** while overriding its colour and underline back to the card title's own treatment: a floor runs to 40 tables, and gold-underlining all 40 names would spend the rationed accent forty times on one screen. **The visible result of that fix is nothing at all**, which is the correct outcome for a keyboard repair on a screen whose visual design was already right.
 
 **The history is the reason this paragraph exists at all.** The rule was carried in `.impeccable/design.json`'s don't-list and **only** there — it had never been written into this file. So nothing a human or an agent actually reads said it, and it was copied forward into four tables: `SupplierPriceTracker.js`, `OutstandingPayables.js`, `VendorReport.js`, and then `SupplierContribution.js` on 2026-08-19/S594, by an accessibility fix reaching for the incumbent shape in good faith — trading a mouse-only row for one that no longer announced its own columns. All four moved to `RowDisclosure` in S595. **A rule that lives only in the machine-readable sidecar is a rule nobody reads**; if it belongs to the system, it belongs in this file's prose.
 

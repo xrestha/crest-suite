@@ -74,10 +74,10 @@ export default function PosParkingSlips() {
   const visible = filter === 'open' ? slips.filter(s => s.status === 'open') : slips
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1000 }}>
-      <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>Parking Slips</h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+    <div>
+      <div className="page-header">
+        <h1 className="page-title">Parking Slips</h1>
+        <p className="page-subtitle">
           Issue a parking token for a customer's vehicle — no order required. Printing a new slip needs Supervisor access.
         </p>
       </div>

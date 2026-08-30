@@ -602,6 +602,35 @@ revenue on real data (S573). Whenever a best-effort second write follows a prima
 one's absence proves nothing — give each table its own link back to the source row and ask the
 table you actually mean.
 
+### A `try/catch` around a supabase call catches nothing
+
+supabase-js **resolves** with `{ data, error }`; it does not throw on a database error. An RLS
+refusal, a constraint violation, a `42703` — all arrive as a returned value. So
+`try { await scopedUpdate(...) } catch (e) { … }` is inert: the catch can only fire on a bug in the
+arguments, and every real failure passes through it untouched. Three blocks in `PosOrders.jsx` were
+written that way, each with a `console.error` in the catch that had never once run (S654).
+
+The same fact makes the bare form worse than it looks. `await scopedUpdate(...)` with nothing
+destructured, or `const { data } = await …` without `error`, **discards the only evidence the call
+failed** — and the code below then proceeds as though it succeeded. Two shapes are worth naming
+because both shipped:
+
+- **A guard that drops its read error passes vacuously.** The POS offline-sync replay checked
+  `pos_orders.status` before overwriting an order another device might have billed — but on a
+  failed read `data` is null, the `if` is false, and the replay proceeds. The check that exists to
+  prevent the overwrite is precisely what stops working when the network does.
+- **A failed poll that writes its empty result BLANKS live state.** `setKotStatusByTable({})` on a
+  dropped read wipes every table's kitchen badge, which a waiter reads as "nothing has been
+  started", not as a failed read. On a poll, return early and keep the last good value.
+
+The decision each site needs is **fail loudly, retry, or genuinely swallow** — and it is per-site,
+not per-file. Making all of them loud is its own bug: a till that throws red at a cashier holding up
+a queue is worse than a stale reprint counter. The test for whether a failure belongs in front of a
+user is whether there is an action they can take; if there is not, `console.error` is the honest
+floor. Where a write fails *after* the thing it belongs to is already committed — a bill is closed
+and numbered, so refusing it is not available — surface it non-blockingly and name the downstream
+consequence, not the error (`PosOrders.jsx`'s `warnWrite` + floor banner is the reference).
+
 ### A bare `.select()` silently truncates at 1000 rows
 
 Supabase sets PostgREST's `db-max-rows` to 1000. A `.select()` with no `.range()` that matches more rows than that returns the first 1000 with **no error and nothing in the data to say so** — the only marker is the `content-range: 0-999/*` response header, which supabase-js does not surface. Every total summed from that array is then wrong, and wrong quietly, which is the dangerous part: it reads as a real figure until someone compares it against another source.

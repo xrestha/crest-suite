@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
+import RowDisclosure from '../../../components/RowDisclosure'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import LoyaltyTab from './LoyaltyTab'
 
@@ -249,11 +250,11 @@ export default function PosCustomers() {
     : customers
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
+    <div>
 
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>Customers</h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+      <div className="page-header">
+        <h1 className="page-title">Customers</h1>
+        <p className="page-subtitle">
           Customer book built automatically from billed orders, and outstanding Credit bills awaiting collection.
         </p>
       </div>
@@ -337,12 +338,23 @@ export default function PosCustomers() {
                   {filteredCustomers.map(c => (
                     <Fragment key={c.id}>
                       <tr onClick={() => toggleHistory(c)} style={{ cursor: 'pointer' }}>
-                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{c.name}</td>
+                        {/* RowDisclosure is the keyboard/SR path to the expansion — the row
+                            onClick stays as the mouse convenience, never role="button" on the
+                            tr, which would strip the row out of the table's structure. */}
+                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                          <RowDisclosure
+                            expanded={expandedId === c.id}
+                            onToggle={() => toggleHistory(c)}
+                            label={`Order history for ${c.name}`}
+                          /> {c.name}
+                        </td>
                         <td>{c.phone}</td>
                         <td>{c.address || '—'}</td>
                         <td>{c.pan || '—'}</td>
                         <td>{c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
+                        {/* Mouse affordance only — the RowDisclosure carries aria-expanded, so
+                            this duplicate hint stays out of the accessibility tree. */}
+                        <td aria-hidden="true" style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
                           {expandedId === c.id ? '▲ hide orders' : '▼ orders'}
                         </td>
                       </tr>

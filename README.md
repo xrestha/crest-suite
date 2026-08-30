@@ -159,6 +159,190 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S654 — 2026-08-30 — POS stops swallowing its own write failures
+
+Service worker `crest-v169` (shared with S652/S653 — same undeployed tree). No migration.
+
+Follow-up to the standing critique item *"[P2] the error-swallow class is open on WRITE and guard
+paths… PosOrders.jsx carries 19."* Verified rather than taken on trust: the real count is **32
+sites** — 12 reads taking `data` without `error`, 20 writes destructuring nothing at all. All 32 are
+now handled; 47 error checks and 12 warning sentences where there were none.
+
+**The mechanism, which is the part worth keeping.** supabase-js *resolves* with `{ data, error }`;
+it does not throw on a database error. So `await scopedUpdate(...)` with nothing destructured
+discards the only evidence the write failed — and, worse, **three `try/catch` blocks in this file
+were inert**: their `console.error` had never run once, because nothing was ever thrown into them.
+They read as handled in review. That fact is now a rule in CLAUDE.md.
+
+Fixed, in the order that matters:
+
+- **KOT/BOT sending is now gated on the flag write.** `sent_to_kot` is what makes "already sent"
+  true for every other device and for this one after a reload. It was written, dropped on failure,
+  and then `setOrderItems(sent)` + `printTicket()` ran unconditionally — so a refused write put food
+  in front of the kitchen that the system still counted as unsent, the KOT badge came back, and the
+  next press **cooked the same dish twice**. Both send paths (first-save auto-send and `sendTicket`)
+  now print only if the flag landed, and say so if it didn't. The order stays saved; only the send
+  is unwound.
+- **The offline-sync guard failed OPEN.** The replay reads `pos_orders.status` to avoid overwriting
+  an order another device billed while this one was offline. On a dropped read error `current` is
+  null, the guard is false, and the replay proceeds — the check stops working exactly when the
+  network does. Now throws to stay queued, with `PGRST116` (row gone) routed to the existing
+  conflict list instead of retrying against a dead id forever.
+- **Failed polls no longer blank live state.** `loadKotStatus` wrote `{}` on a failed read, wiping
+  every table's kitchen badge — indistinguishable from "nothing has been started". Same for the
+  per-item prep timers, the guest-order banner (which also cleared `seenGuestRequestIds`, so the
+  next good poll re-chimed for requests already seen), and `loadOpenShift`, whose null would have
+  silently unlinked every later bill from the open shift and left the Z-report short. All four keep
+  their last good value and log.
+- **Post-commit failures surface instead of vanishing.** A new dismissible amber floor banner
+  (`warnWrite`) carries the ones that cannot be undone by refusing the action, because the bill is
+  already closed and numbered: the split-tender breakdown (without it the Z-report reconciles
+  against a payment mix missing that bill's legs), the table-occupied write (a table shown free with
+  a live order is how it gets seated twice), the `ims_posted_at` stamp, HSC codes missing from a Tax
+  Invoice, and reprint counters. **Each sentence names the downstream consequence and what to do, not
+  the error** — a warning a cashier cannot act on is noise.
+- **A blank NC document is worse than none.** If the comped lines cannot be read back after
+  `apply_pos_item_comps`, the Complimentary Slip is no longer printed empty; the number is already
+  assigned, so the banner points at Recent Bills to reprint.
+- **The admin Clear Occupied had the hole its own comment warned about, one layer down.** The read
+  was guarded; the deletes below it were not — so a failed delete followed by a successful table
+  release freed the whole floor with every open order still underneath it.
+- **Both legacy pre-migration fallbacks** (`performSave`, offline replay) now check their DELETE as
+  well as their INSERT: unchecked, a refused delete plus a successful insert leaves the order
+  carrying every line twice.
+
+**Corrected from what I said when explaining this.** I described a failed `ims_posted_at` stamp as
+the S573 double-post. It is not, for any bill closed after migration `20260818170000`: the Periods
+backfill re-checks `sales_entries.pos_order_id` before posting and re-stamps what it finds. The real
+consequence is a false "not posted" alarm on the floor, which the new banner now names accurately
+rather than letting the existing banner blame a missing period.
+
+Not every site was made loud, deliberately. A till that throws red at a cashier holding up a queue
+is worse than a stale reprint counter, so the QR-confirmation poll, the `order_no` backfill, the
+co-occurrence suggestions and the Recent Bills comp lookup log and move on — the test being whether
+there is an action the user could take.
+
+`CI=true npm run build` clean; full suite 476 tests / 39 suites green. Banner checked rendered.
+
+### S653 — 2026-08-30 — POS gets a keyboard: nine mouse-only paths, and a floor plan that had none
+
+Service worker `crest-v169` (shared with S652 — same undeployed tree). No migration.
+
+`/impeccable polish` on POS, taking the standing critique finding as one input: *"[P2] POS reports
+are a different dialect… mouse-only `<tr onClick>` drill-downs (the RowDisclosure sweep never
+reached POS), inline h2-first heading outlines, hand-rolled KPI tiles, a third tab family → polish."*
+
+Three of those four had already closed and were re-verified rather than re-fixed: the KPI tiles
+converged at S613 (`SalesReport`, `CoversReport`, `PosExceptionReport` all on `.stat-grid`), the
+h2-first outlines went with the page shell in S652, and the "third tab family" is not POS — POS is
+16/16 on the shared `.tab-bar`; `panel-tab-bar` and `ss-tabbar` live elsewhere. **What was still
+fully open was the drill-downs, and the class turned out to be wider than the critique named.**
+
+- **Two expand-rows** — Customers (order history) and Shifts (Z-report) — were the exact shape
+  `RowDisclosure` exists for and had never been swept. Both now carry it, with the trailing
+  `▼ orders` / `▼ Z-report` hint marked `aria-hidden`, mirroring KotLog's treatment line for line.
+- **Six action-rows** had no keyboard path at all: three open a bill (`SalesReport`'s voucher
+  register, comped bills and delivery list), one opens a bill or complimentary slip (Sales
+  Exceptions), one drills into the voucher register filtered to a payment method, one toggles a
+  delivery-partner filter. The whole affordance was `cursor: 'pointer'` on the `<tr>` — which is
+  also why a sighted **mouse** user could not tell the rows were clickable. Each identity cell
+  (invoice no., order no., payment method) is now a `.btn-linklike` button that `stopPropagation()`s,
+  the row `onClick` staying as the mouse convenience. The partner toggle takes `aria-pressed`
+  instead, with the underline suppressed — `btn-linklike`'s underline lands *inside* the amber pill,
+  and no chip in this product is underlined. Measured 7.45:1 for the linklike gold on the card.
+- **Table Management's floor grid was mouse-only in its entirety** — the find of the pass. It is
+  visually identical to Order Taking's grid, which has `role="button" + tabIndex + onKeyDown` on
+  every card; this one had a bare `<div onClick>`, so a keyboard user could neither open a table nor
+  cycle its status. It cannot be fixed by copying the sibling: these cards hold **three** interactive
+  children (name, status badge, QR), and interactive content inside a `button` role is invalid and
+  unfocusable. The affordance moved to the children — the table name is a button, and the status
+  badge is now a real `<button>` wearing the badge class (which needs `border: none` and
+  `fontFamily: 'inherit'`, since the badge styles assume a `<span>`). Verified tab order
+  name → status → QR, all three with accessible names, 2px gold focus ring, card carrying no role.
+- **Eight glyph-only controls in PosOrders** had no accessible name: the covers stepper, the
+  per-line qty stepper, the item-comp stepper, and the covers numpad's `CLR` (read letter by letter)
+  and `⌫` (read as nothing). The two per-line pairs name their dish — there is one pair per row, so
+  a generic label would make every stepper on the cart announce identically.
+
+One layout item rode along: **`DenomGrid`'s `repeat(3, 1fr)`**, the cash-drawer denomination pad.
+Nine denominations are a flat list, so a fixed count is a media query nobody wrote — at 390px it
+left each note ~98px wide with the ₨-label and its running subtotal squeezed onto one 82px line.
+`repeat(auto-fit, minmax(104px, 1fr))` gives a measured 2 comfortable columns there and 3 on the till.
+
+**The visible result of most of this is nothing at all**, which is the right outcome: the table card
+renders byte-identically to before. The one place accent spend was tempting — gold-underlining every
+table name — was caught on the rendered card and reverted, since a floor runs to 40 tables and that
+would spend the rationed accent forty times on one screen; the button keeps `btn-linklike`'s
+semantics and focus ring with its colour and underline overridden back to the card title's own.
+
+Verified against the real `Layout.css` in a browser (tab order, accessible names, computed focus
+ring, contrast ratios, denomination column count at 390px), plus `CI=true npm run build` clean.
+DESIGN.md's Data Tables section gains the two rules this produced — *a row that ACTS is the same
+rule with a different control*, and *a card grid cannot always take the container role*.
+
+**Not done, deliberately:** PosOrders' 19 error-dropping destructures. That is the critique's
+separate `[P2] error-swallow on write paths` item and it routes to `/impeccable harden`, not here —
+a dropped write error is silent data loss and deserves its own pass rather than a ride-along.
+
+### S652 — 2026-08-30 — POS rejoins the app shell: the hamburger stops sitting on the page title
+
+Service worker `crest-v169`. No migration.
+
+`/impeccable layout pos module`. The mechanical scan came back clean, so this is entirely a
+structural finding: **the POS module was built against its own spatial contract, and the shell's
+mobile arithmetic is written against the shell's.** `.main-content` pads every page (32px, forced to
+`16px !important` under 768px) and `.page-header` earns `padding-left: 60px` at that breakpoint to
+clear the fixed 44px hamburger at `12px/12px`. Eleven of thirteen POS pages opened
+`<div style={{ padding: '24px 28px', maxWidth: … }}>`, which steps out from under that.
+
+Both halves broke, in opposite directions, and neither is visible on a desktop — above 768px the
+hamburger is `display: none`, which is why this survived every review the module has had.
+
+- **Eight pages hand-rolled `<h2 style={{ fontSize: 20 }}>`** instead of `.page-title`, so they
+  inherited no clearance at all. Measured at 390px against the real `Layout.css`: title box at
+  `left: 44, top: 40`, hamburger occupying `12–56 × 12–56` — **12×16px of overlap**, the first
+  character of every POS page title painted over by an opaque button. Order Taking, Table
+  Management, Shifts, POS Staff, Customers, Credit Notes, Parking Slips, Crest POS.
+- **The four report pages did use `.page-header`**, so they got the 60px *on top of* their own 28px:
+  title at `left: 104` while the table beneath it started at `44`.
+
+Fixed by deleting the redundant root padding on all eleven and moving the eight hand-rolled headers
+onto `.page-header` / `.page-title` / `.page-subtitle`. Three things came with it: the page title is
+now an `<h1>` rather than an `<h2>` with no `<h1>` above it; POS content aligns with IMS/HR on the
+desktop too (title `left: 300 → 272`, the 28px POS-only inset is gone); and the header gap is a
+uniform 28px instead of 16/20/24 chosen per page.
+
+**Six `maxWidth` caps went with it** (520 / 1000 / 1100 / 1150 / 1350, plus a `40px 28px` variant),
+because nothing in the content explained any of them — POS Staff was capped 200px wider than the
+Sales Report for no reason either page could state. A cap is a claim about a reading measure, which
+a working surface does not have; `Pos.js`'s 520 stayed, being a genuine single-column form. The
+order screen and the KDS are untouched: both are `position: fixed; inset: 0` and deliberately own
+their own padding.
+
+Two more found in the same pass:
+
+- **The cart action bar's buttons were `width: '48%'` inside a `display: flex; gap: 8`.** Wrong even
+  when both render — the gap and the percentages both pay for the same separation, leaving a ragged
+  ≈3.7px gutter — and badly wrong when one does not: Payment is `hasPosAccess('supervisor')`, so on
+  a **staff-rank** account, the ordinary waiter's login, `Send Order` rendered at 48% with 52% of
+  the bar empty beside it. That is the most-pressed button in the product. Now `flex: 1`, on all
+  four (Send Order / Payment / KOT / BOT).
+- **Table Management's floor grid had no `Fab` clearance.** `.table-wrap--fab-clear`'s 88px only
+  reaches a `.table-wrap`; this is a card grid, so the fixed Fab covered the last row's `▦ QR`
+  buttons — the exact failure that rule was written for, one container type over. 88px added by hand
+  with the reasoning in place.
+
+Verified by measuring the built `Layout.css` in a browser at 390px and 1440px (before/after
+`getBoundingClientRect()`, screenshot at 390px), not by reading the CSS; `CI=true npm run build`
+clean. DESIGN.md's Layout section gains two Named Rules — *the page root takes no padding of its
+own*, and *a fractional width is a claim that a sibling exists*.
+
+**Not changed, and worth knowing:** the order screen has no breakpoint. It is a two-panel flex with
+a fixed 320px cart, so below ~600px the menu side collapses to almost nothing. Restructuring the
+live billing screen is not a layout-pass change — flagged, not attempted. Five IMS pages
+(`ComboBuilder`, `MenuPricing`, `PurchaseOneLakhAboveReport`, `ImsStaff`, `DemandForecast`) carry
+the same double-pad shape and were left alone as out of scope.
+
 ### S651 — 2026-08-30 — a closed month gets a way in, so a missed purchase bill can still be filed
 
 Service worker `crest-v168`. No migration.

@@ -340,7 +340,7 @@ export default function KotLog() {
   const isEmpty = tab === 'register' ? logRows.length === 0 : tab === 'reconciliation' ? discrepancies.length === 0 : tab === 'pulled' ? pulledRows.length === 0 : billTrailRows.length === 0
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1150 }}>
+    <div>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="page-title">

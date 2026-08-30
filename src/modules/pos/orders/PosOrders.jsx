@@ -219,6 +219,14 @@ export default function PosOrders() {
   // Bumped so the floor banner appears immediately after the close that caused it, rather than
   // only after the next full refresh of unpostedCount below.
   const [imsPostWarning,  setImsPostWarning]  = useState(0)
+  // Secondary writes that failed AFTER the thing they belong to was already committed —
+  // a split-tender breakdown, a table release, a posted-stamp. None of these can be undone
+  // by refusing the action (the bill is closed and has an invoice number), and none of them
+  // should stop a cashier mid-service, so they surface here instead of being swallowed.
+  // supabase-js RETURNS errors rather than throwing, so every one of these was previously
+  // invisible: a try/catch around them catches nothing, and dropping the destructured
+  // `error` discards the only evidence the write did not land.
+  const [writeWarnings,   setWriteWarnings]   = useState([])
   // What the last closed bill earned, or why it didn't. Shown on the FLOOR view, not in the
   // billing modal — the modal closes the instant the bill does, so a message left there is
   // one nobody ever reads.
@@ -445,9 +453,13 @@ export default function PosOrders() {
     if (!billingOpen || splitMode || !orderId || !QR_PAY_METHODS.includes(payMethod) || !billQrUrl) return
     let cancelled = false
     const poll = setInterval(async () => {
-      const { data } = await scopedFrom('pos_payment_confirmations', 'id, provider, amount')
+      const { data, error: confErr } = await scopedFrom('pos_payment_confirmations', 'id, provider, amount')
         .eq('matched_order_id', orderId).is('consumed_at', null)
         .order('received_at', { ascending: false }).limit(1)
+      // A failed tick is indistinguishable from "the customer has not paid yet", which is the
+      // safe reading — the cashier can still close the bill by hand. Logged, not surfaced: this
+      // fires every 4s and a banner per tick would bury the screen.
+      if (confErr) { console.error('payment confirmation poll failed:', confErr); return }
       const hit = data?.[0]
       if (!hit || cancelled) return
       if (hit.provider !== payMethod || Math.abs(hit.amount - payTotalRef.current) > 1) return
@@ -457,7 +469,12 @@ export default function PosOrders() {
       // unconsumed confirmation left for the next poll tick to retry against.
       const ok = await closeOrderRef.current('paid')
       if (ok && !cancelled) {
-        await scopedUpdate('pos_payment_confirmations', { consumed_at: new Date().toISOString() }).eq('id', hit.id)
+        // Logged rather than surfaced: the row is bound to this order by matched_order_id and
+        // the order is now billed, so an unconsumed row cannot be picked up against anything
+        // else. There is no action for a cashier to take, which is the test for whether a
+        // failure belongs on the floor banner.
+        const { error: consErr } = await scopedUpdate('pos_payment_confirmations', { consumed_at: new Date().toISOString() }).eq('id', hit.id)
+        if (consErr) console.error('pos_payment_confirmations consume failed:', consErr)
       }
     }, 4000)
     return () => { cancelled = true; clearInterval(poll) }
@@ -572,6 +589,15 @@ export default function PosOrders() {
   // Turns a queued (not-yet-synced) offline order into the same shape as a live floor overlay
   // entry, so the floor grid renders identically whether the count comes from the server or the
   // local queue. Flagged `offlinePending` so the tile can show the "unsynced" dot.
+  // Records a non-blocking write failure for the floor banner. Deduped, because a poll or a
+  // retry can produce the same sentence repeatedly and a stack of identical warnings reads
+  // as several separate problems. Each sentence names what did not save AND what is wrong
+  // downstream because of it — a warning a cashier cannot act on is just noise.
+  function warnWrite(sentence, err) {
+    if (err) console.error('POS non-fatal write failed:', sentence, err)
+    setWriteWarnings(w => (w.includes(sentence) ? w : [...w, sentence]))
+  }
+
   function queuedOrderToOverlay(q) {
     return {
       orderId:   q.order_id,
@@ -640,8 +666,11 @@ export default function PosOrders() {
   // Guest ordering only ever happens online, so (like loadKotStatus) this is skipped offline.
   async function loadPendingGuestOrders() {
     if (!navigator.onLine) return
-    const { data } = await scopedFrom('pos_guest_order_requests', 'id, table_id, items, guest_notes, covers, created_at')
+    const { data, error } = await scopedFrom('pos_guest_order_requests', 'id, table_id, items, guest_notes, covers, created_at')
       .eq('status', 'pending')
+    // A failed read here would empty the floor's guest-order banner AND clear seenGuestRequestIds,
+    // so the next successful poll re-chimes for requests already seen. Keep both as they were.
+    if (error) { console.error('loadPendingGuestOrders failed, keeping last known requests:', error); return }
     const rows = data || []
 
     // Chime once per genuinely new request — skipped on the very first load (that's just
@@ -742,9 +771,12 @@ export default function PosOrders() {
           return next
         })
       } else {
-        await scopedUpdate('pos_guest_order_requests', {
+        const { error: decErr } = await scopedUpdate('pos_guest_order_requests', {
           status: decision, decided_at: new Date().toISOString(), decided_by: profile?.id || null,
         }).eq('id', request.id)
+        // loadPendingGuestOrders() below puts the request straight back on screen if this failed,
+        // which looks like the button did nothing. Name it instead.
+        if (decErr) setMsg('error:Could not dismiss that guest order — try again.')
         loadPendingGuestOrders()
       }
     } finally {
@@ -764,7 +796,11 @@ export default function PosOrders() {
     }
     const orderIds = Object.keys(orderIdToTable)
     if (orderIds.length === 0) { setKotStatusByTable({}); return }
-    const { data } = await scopedFrom('pos_kot_log', 'order_id, status').in('order_id', orderIds)
+    const { data, error } = await scopedFrom('pos_kot_log', 'order_id, status').in('order_id', orderIds)
+    // Polled every few seconds. Returning here keeps the last known badges on screen; falling
+    // through with a null `data` computes an EMPTY map and blanks every table's kitchen status,
+    // which a waiter reads as "nothing has been started" rather than as a failed read.
+    if (error) { console.error('loadKotStatus failed, keeping last known statuses:', error); return }
     const worstRank = {}
     for (const row of (data || [])) {
       const rank = KOT_STATUS_RANK[row.status] ?? 0
@@ -783,10 +819,14 @@ export default function PosOrders() {
   // table-wide summary loadKotStatus computes for the floor view.
   async function loadOrderKotTickets(oid) {
     if (!oid || !navigator.onLine) { setOrderKotTickets([]); return }
-    const { data } = await scopedFrom('pos_kot_log', 'id, items, status, sent_at, started_at, ready_at, estimated_prep_minutes')
+    const { data, error } = await scopedFrom('pos_kot_log', 'id, items, status, sent_at, started_at, ready_at, estimated_prep_minutes')
       .eq('order_id', oid)
       .neq('status', 'cancelled')
       .order('sent_at', { ascending: false })
+    // Same rule as loadKotStatus: an empty result on a failed read would drop every per-item
+    // Sent/Started/Ready timer off the cart, which is indistinguishable from the kitchen not
+    // having touched the order.
+    if (error) { console.error('loadOrderKotTickets failed, keeping last known tickets:', error); return }
     // Polled every 5 s while an order is open. `items` is deliberately not in the signature: a
     // pos_kot_log row's lines never change after it is written (a later send inserts a new row,
     // and a pulled line is recorded in pos_kot_removals), so a change to what a ticket contains
@@ -824,16 +864,33 @@ export default function PosOrders() {
             status: 'open', covers: q.covers, opened_by: q.opened_by,
           }, { onConflict: 'id' })
           if (error) throw error
-          if (q.table_id) await scopedUpdate('pos_tables', { status: 'occupied' }).eq('id', q.table_id)
+          if (q.table_id) {
+            const { error: tErr } = await scopedUpdate('pos_tables', { status: 'occupied' }).eq('id', q.table_id)
+            if (tErr) console.error('offline sync: table occupy failed', tErr)
+          }
         } else {
           // Safety check: don't blindly overwrite an order another device already closed while
           // this one was offline — a queued item replace on a billed/voided order would be wrong.
-          const { data: current } = await scopedFrom('pos_orders', 'status').eq('id', oid).single()
+          const { data: current, error: curErr } = await scopedFrom('pos_orders', 'status').eq('id', oid).single()
+          // This read IS the safety check, so dropping its error made the check pass vacuously:
+          // a failed read left `current` null, the guard below false, and the queued replay went
+          // straight over an order another device may have already billed or voided — the exact
+          // outcome the guard exists to prevent. PGRST116 is the one error that is an answer
+          // rather than a failure (the row is gone), and it is a conflict too: retrying it
+          // forever would just replay against an id that no longer exists.
+          if (curErr) {
+            if (curErr.code === 'PGRST116') {
+              setConflictOrders(prev => prev.some(c => c.order_id === oid) ? prev : [...prev, q])
+              continue
+            }
+            throw curErr // left queued, retried on the next flush
+          }
           if (current && current.status !== 'open') {
             setConflictOrders(prev => prev.some(c => c.order_id === oid) ? prev : [...prev, q])
             continue // stays queued — surfaced for manual review, not auto-discarded
           }
-          await scopedUpdate('pos_orders', { covers: q.covers }).eq('id', oid)
+          const { error: cvErr } = await scopedUpdate('pos_orders', { covers: q.covers }).eq('id', oid)
+          if (cvErr) console.error('offline sync: covers update failed', cvErr)
         }
 
         // Through the RPC, not delete-then-insert: this replay carries exactly the same two risks
@@ -850,8 +907,14 @@ export default function PosOrders() {
         })
         if (syncErr) {
           if (!isMissingPosSaveFn(syncErr)) throw syncErr
-          await scopedDelete('pos_order_items').eq('order_id', oid)
-          await scopedInsert('pos_order_items', q.items.map(i => ({ order_id: oid, ...i })))
+          // Non-atomic by nature, which is exactly why the RPC replaced it — so at minimum the
+          // two halves must not fail silently. A dropped delete error followed by a successful
+          // insert doubles every line on the order; the reverse leaves it with none. Throwing
+          // keeps the item queued for the next flush rather than half-applying it.
+          const { error: dErr } = await scopedDelete('pos_order_items').eq('order_id', oid)
+          if (dErr) throw dErr
+          const { error: iErr } = await scopedInsert('pos_order_items', q.items.map(i => ({ order_id: oid, ...i })))
+          if (iErr) throw iErr
         }
 
         for (const send of q.kot_sends || []) {
@@ -863,8 +926,10 @@ export default function PosOrders() {
 
         // If the order currently open on screen just got synced, backfill its real order number.
         if (orderId === oid) {
-          const { data: synced } = await scopedFrom('pos_orders', 'order_no').eq('id', oid).single()
-          if (synced) setOrderNo(synced.order_no)
+          const { data: synced, error: syncedErr } = await scopedFrom('pos_orders', 'order_no').eq('id', oid).single()
+          // Cosmetic only — the header keeps showing "#— (pending)" until the next refresh.
+          if (syncedErr) console.error('order_no backfill read failed:', syncedErr)
+          else if (synced) setOrderNo(synced.order_no)
         }
       } catch (err) {
         console.error('POS offline order sync failed, will retry:', err) // left queued, retried next flush
@@ -886,8 +951,12 @@ export default function PosOrders() {
   // shift opens/closes elsewhere; a brief staleness window is fine since shift linkage is
   // informational only, never a gate on billing.
   async function loadOpenShift() {
-    const { data } = await scopedFrom('pos_shifts', 'id')
+    const { data, error } = await scopedFrom('pos_shifts', 'id')
       .eq('status', 'open').maybeSingle()
+    // Keep the cached id rather than nulling it: this runs after every close, and writing null
+    // on a failed read silently unlinks every subsequent bill from the open shift, so the
+    // Z-report ends the night short with nothing anywhere saying why.
+    if (error) { console.error('loadOpenShift failed, keeping cached shift id:', error); return }
     setOpenShiftId(data?.id || null)
   }
 
@@ -1132,9 +1201,12 @@ export default function PosOrders() {
 
     // Co-occurrence (async — re-ranks on arrival)
     if (!allowCoOccurrence || !clientId) return
-    const { data: coData } = await supabase.rpc('get_cooccurrence', {
+    // Suggestions only — an empty list is a legitimate result, so a failed read degrades to
+    // "no suggestions" rather than anything the cashier must act on.
+    const { data: coData, error: coErr } = await supabase.rpc('get_cooccurrence', {
       p_client_id: clientId, p_recipe_id: recipe.id, p_days: 90,
     })
+    if (coErr) console.error('get_cooccurrence failed, falling back to category nudges:', coErr)
     if (!coData?.length) {
       // No pairing history yet (a new client, or a dish never sold alongside anything). The
       // initial rank() above deliberately didn't fall back because co-occurrence was still
@@ -1250,11 +1322,19 @@ export default function PosOrders() {
       setOrderId(oid)
       setOrderNo(oNo)
       if (activeTable?.id) {
-        await scopedUpdate('pos_tables', { status: 'occupied' }).eq('id', activeTable.id)
-        setTables(prev => prev.map(t => t.id === activeTable.id ? { ...t, status: 'occupied' } : t))
+        // A silent failure here is how a table gets seated twice: the order exists, but the
+        // floor keeps showing the tile as free. The optimistic repaint is deliberately inside
+        // the success branch — loadFloor() re-reads from the server moments later, so painting
+        // it occupied on a failed write would only lie until the next refresh.
+        const { error: occErr } = await scopedUpdate('pos_tables', { status: 'occupied' }).eq('id', activeTable.id)
+        if (occErr) warnWrite(`${activeTable.name} still shows as free on the floor, though its order was saved — set its status by hand so it is not seated twice.`, occErr)
+        else setTables(prev => prev.map(t => t.id === activeTable.id ? { ...t, status: 'occupied' } : t))
       }
     } else {
-      await scopedUpdate('pos_orders', { covers }).eq('id', oid)
+      // Covers is the Covers Report's whole input, so a dropped update quietly understates
+      // guest counts for the day rather than failing anything visible.
+      const { error: covErr } = await scopedUpdate('pos_orders', { covers }).eq('id', oid)
+      if (covErr) warnWrite('The cover count for this order did not save — the Covers Report will be short for it.', covErr)
     }
 
     // Replace this order's lines atomically. This used to be a DELETE followed by a separate
@@ -1280,7 +1360,10 @@ export default function PosOrders() {
       // Pre-migration fallback only. Note it cannot record a removal — that is the whole reason
       // the diff lives in the RPC — so it is one more thing that disappears once the migration
       // is applied everywhere and this branch is deleted.
-      await scopedDelete('pos_order_items').eq('order_id', oid)
+      // The insert below was already checked; the delete was not. Unchecked, a refused delete
+      // followed by a successful insert leaves the order carrying every line twice.
+      const { error: dErr } = await scopedDelete('pos_order_items').eq('order_id', oid)
+      if (dErr) return null
       const { error: iErr } = await scopedInsert('pos_order_items',
         itemsPayload.map(i => ({ order_id: oid, ...i }))
       )
@@ -1298,11 +1381,13 @@ export default function PosOrders() {
     if (pendingAcceptedGuestReqIds.size > 0) {
       const ids = Array.from(pendingAcceptedGuestReqIds)
       setPendingAcceptedGuestReqIds(new Set())
-      try {
-        await scopedUpdate('pos_guest_order_requests', {
-          status: 'accepted', decided_at: new Date().toISOString(), decided_by: profile?.id || null,
-        }).in('id', ids)
-      } catch (_) { /* non-fatal — see comment above */ }
+      const { error: gErr } = await scopedUpdate('pos_guest_order_requests', {
+        status: 'accepted', decided_at: new Date().toISOString(), decided_by: profile?.id || null,
+      }).in('id', ids)
+      // Non-fatal as described above — the request simply stays 'pending' and can be Accepted
+      // again on the next save. Same correction as the two blocks above: the try/catch it
+      // replaces never fired, so this failure had no trace at all.
+      if (gErr) console.error('guest request accept failed (non-fatal):', gErr)
       loadPendingGuestOrders()
     }
 
@@ -1327,17 +1412,28 @@ export default function PosOrders() {
       const kotItems = orderItems.filter(i => !botCategories.has(i.category || 'Other'))
       const botItems = orderItems.filter(i =>  botCategories.has(i.category || 'Other'))
       const sentItems = orderItems.map(i => ({ ...i, sent_to_kot: true, sent_qty: i.qty }))
+      // sent_to_kot is what makes "already sent" true for every other device, and for this one
+      // after a reload. If it does not land, printing anyway puts food in front of the kitchen
+      // that the system still counts as unsent — the KOT badge comes back and the next press
+      // cooks the same dish a second time. So the print is gated on the flag, not the other way
+      // round: the order stays saved, only the send is unwound, and the waiter is told to retry.
+      let flagged = true
       if (navigator.onLine) {
-        await scopedUpdate('pos_order_items', { sent_to_kot: true }).eq('order_id', oid)
+        const { error: flagErr } = await scopedUpdate('pos_order_items', { sent_to_kot: true }).eq('order_id', oid)
+        if (flagErr) { flagged = false; console.error('sent_to_kot flag failed:', flagErr) }
       } else {
         await enqueuePosOrder(oid, { items: sentItems.map(toItemPayload) })
       }
-      setOrderItems(sentItems)
-      if (kotItems.length > 0) printTicket('KOT', kotItems, oNo)
-      if (botItems.length > 0) printTicket('BOT', botItems, oNo)
-      logKotSend('KOT', kotItems, oid, oNo)
-      logKotSend('BOT', botItems, oid, oNo)
-      setMsg('ok:Order sent!')
+      if (!flagged) {
+        setMsg('error:Order saved, but the kitchen/bar ticket was NOT sent — press KOT or BOT to send it.')
+      } else {
+        setOrderItems(sentItems)
+        if (kotItems.length > 0) printTicket('KOT', kotItems, oNo)
+        if (botItems.length > 0) printTicket('BOT', botItems, oNo)
+        logKotSend('KOT', kotItems, oid, oNo)
+        logKotSend('BOT', botItems, oid, oNo)
+        setMsg('ok:Order sent!')
+      }
     } else {
       setMsg('ok:Saved.')
     }
@@ -1377,11 +1473,20 @@ export default function PosOrders() {
       sentSet.has(i.recipe_id) ? { ...i, sent_to_kot: true, sent_qty: i.qty } : i
     )
 
+    // Gated exactly as the first-save auto-send above is, and for the same reason: a printed
+    // ticket the server does not consider sent is the shape that gets a dish cooked twice.
     if (recipeIds.length > 0) {
       if (navigator.onLine) {
-        await scopedUpdate('pos_order_items', { sent_to_kot: true })
+        const { error: flagErr } = await scopedUpdate('pos_order_items', { sent_to_kot: true })
           .eq('order_id', oid)
           .in('recipe_id', recipeIds)
+        if (flagErr) {
+          console.error('sent_to_kot flag failed:', flagErr)
+          savingRef.current = false
+          setSaving(false)
+          setMsg(`error:${station} was NOT sent — nothing printed. Try again.`)
+          return
+        }
       } else {
         await enqueuePosOrder(oid, { items: updatedItems.map(toItemPayload) })
       }
@@ -1424,11 +1529,14 @@ export default function PosOrders() {
       await enqueuePosOrder(oid, { kot_sends: [payload] })
       return
     }
-    try {
-      await scopedInsert('pos_kot_log', payload)
-    } catch (err) {
-      console.error('pos_kot_log insert failed:', err)
-    }
+    // Deliberately best-effort — a ticket-log problem must never block a waiter mid-service —
+    // but written as a returned-error check rather than a try/catch, because supabase-js
+    // RESOLVES with { error } instead of throwing. The catch this replaces could only ever
+    // have fired on a bug in the argument-building above, so every real failure of the insert
+    // reached neither the log nor anywhere else. Consequence when it does fail: KOT Register
+    // and KOT Reconciliation are missing this send, and the KDS never shows the ticket.
+    const { error: logErr } = await scopedInsert('pos_kot_log', payload)
+    if (logErr) console.error('pos_kot_log insert failed:', logErr)
   }
 
   function printTicket(station, items, ticketNo) {
@@ -1486,7 +1594,11 @@ export default function PosOrders() {
     setBillingOpen(true)
     const recipeIds = orderItems.map(i => i.recipe_id).filter(Boolean)
     if (recipeIds.length > 0) {
-      const { data } = await scopedFrom('recipes', 'id, hsc_code').in('id', recipeIds)
+      const { data, error: hscErr } = await scopedFrom('recipes', 'id, hsc_code').in('id', recipeIds)
+      // Not a blocker on opening the till drawer, but HSC codes print on the Tax Invoice, and an
+      // empty map is indistinguishable from "no item has one" — so the bill goes out short with
+      // nothing saying so.
+      if (hscErr) warnWrite('HSC codes could not be loaded, so the next bill will print without them.', hscErr)
       setHscMap(Object.fromEntries((data || []).map(r => [r.id, r.hsc_code])))
       // Food-cost map, needed up front for item-level comp in the Pay tab (not just the
       // Complimentary tab, which used to be the only consumer — see openCompTab).
@@ -1529,8 +1641,15 @@ export default function PosOrders() {
   // mid-service is not acceptable — but the caller now stamps ims_posted_at only on success, and
   // the floor view surfaces whatever didn't post so it can be backfilled from Periods.
   async function writeSalesEntries(closeType, compQtyMap = compQtyByRecipe) {
-    const { data: periods } = await scopedFrom('monthly_periods')
+    const { data: periods, error: perErr } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+    // Returning false is correct either way — the bill still closes and gets chased by the
+    // unposted banner. But the banner's sentence blames a missing open period, so say when the
+    // real cause was a failed read instead: the period may be open and fine.
+    if (perErr) {
+      warnWrite('Could not check which Inventory period is open, so the bill just closed was not posted to Inventory. Backfill it from Periods once the connection is back.', perErr)
+      return false
+    }
     const open = (periods || []).find(p => p.status === 'open')
     if (!open) return false
     const today = getBsToday()
@@ -1695,8 +1814,14 @@ export default function PosOrders() {
           return false
         }
         compNo = newCompNo
-        const { data } = await scopedFrom('pos_order_items', '*').eq('order_id', orderId).eq('comp_no', compNo)
-        compedItemRows = data || []
+        const { data, error: compRowsErr } = await scopedFrom('pos_order_items', '*').eq('order_id', orderId).eq('comp_no', compNo)
+        // The comps are already applied by the RPC above, so this cannot abort the close. But an
+        // empty read prints a Complimentary Slip with no lines on it, and a blank NC document is
+        // worse than none — the number is assigned, so it can be reprinted from Recent Bills.
+        if (compRowsErr) {
+          warnWrite(`Complimentary slip NC-${compNo} was not printed — its items could not be read back. Reprint it from Recent Bills.`, compRowsErr)
+          compedItemRows = null
+        } else compedItemRows = data || []
       }
 
       // Loyalty redemption, applied BEFORE the order is marked billed — the same ordering the
@@ -1765,7 +1890,11 @@ export default function PosOrders() {
         // than sit accumulating "late" alerts forever with no signal the order no longer exists.
         // Comps (writeoff) don't cancel here: the food was actually prepared/served, so its
         // ticket keeps its normal lifecycle.
-        try { await scopedUpdate('pos_kot_log', { status: 'cancelled' }).eq('order_id', orderId) } catch (_) { /* non-fatal */ }
+        // Best-effort by design; the try/catch this replaces caught nothing, since the call
+        // resolves with { error } rather than throwing. Failure leaves a cancelled order's
+        // ticket on the kitchen board accruing "late" alerts, which is worth a console line.
+        const { error: kotCancelErr } = await scopedUpdate('pos_kot_log', { status: 'cancelled' }).eq('order_id', orderId)
+        if (kotCancelErr) console.error('KDS ticket cancel failed (non-fatal):', kotCancelErr)
       }
 
       if (isSplit) {
@@ -1774,11 +1903,16 @@ export default function PosOrders() {
         // collecting the redemption twice.
         const cashTenders = tenders.filter(t => t.method !== 'Loyalty')
         if (cashTenders.length > 0) {
-          await scopedInsert('pos_order_payments', cashTenders.map(t => ({
+          // The bill is already billed and numbered by this point, so this cannot be undone by
+          // refusing the close. But these rows ARE the record of how the bill was paid: without
+          // them the shift's Z-report reconciles a drawer against a payment mix missing this
+          // bill's legs, which reads as a cash variance nobody can explain.
+          const { error: payErr } = await scopedInsert('pos_order_payments', cashTenders.map(t => ({
             order_id: orderId,
             payment_method: t.method, amount: t.amount, tendered_amount: t.tenderedAmount,
             recorded_by: profile?.id || null,
           })))
+          if (payErr) warnWrite('The split-payment breakdown for the bill just closed did not save — the shift Z-report will not balance against it. Re-enter it from Shifts before closing the drawer.', payErr)
         }
       }
 
@@ -1811,10 +1945,18 @@ export default function PosOrders() {
       // than left looking like a failure the floor banner should chase.
       if (closeType !== 'void') {
         const posted = await writeSalesEntries(closeType)
-        if (posted) await scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', orderId)
-        else setImsPostWarning(w => w + 1)
+        if (posted) {
+          // The stamp is the only thing separating "posted" from "needs backfilling". If it
+          // fails the revenue IS in IMS, so the floor banner will chase a bill that is fine.
+          // Not a double-post risk: the Periods backfill re-checks sales_entries.pos_order_id
+          // before posting anything and re-stamps what it finds — but say so rather than let
+          // someone hunt a phantom.
+          const { error: stampErr } = await scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', orderId)
+          if (stampErr) warnWrite('The bill just closed did reach Inventory, but saving its "posted" mark failed — it will keep showing as not posted until a backfill from Periods clears it.', stampErr)
+        } else setImsPostWarning(w => w + 1)
       } else {
-        await scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', orderId)
+        const { error: stampErr } = await scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', orderId)
+        if (stampErr) warnWrite('The voided bill could not be marked as settled with Inventory — it will show as not posted until a backfill from Periods clears it.', stampErr)
       }
 
       // Settled before the loyalty award below, and that ordering is load-bearing rather than
@@ -1847,7 +1989,9 @@ export default function PosOrders() {
 
       if (closeType === 'paid') await printBill(updated, payableOrderItems)
       if (closeType === 'writeoff') await printCompSlip(updated, orderItems)
-      if (closeType === 'paid' && compNo != null) await printItemCompSlip(updated, compedItemRows)
+      // compedItemRows is null only when the read above failed — skip rather than print a slip
+      // with no lines; the operator has already been told to reprint it.
+      if (closeType === 'paid' && compNo != null && compedItemRows) await printItemCompSlip(updated, compedItemRows)
 
       setBillingOpen(false)
       await loadFloor()
@@ -1887,7 +2031,12 @@ export default function PosOrders() {
       payments = (data || []).map(p => ({ method: p.payment_method, amount: p.amount }))
     }
     const newCount = (order.print_count || 0) + 1
-    await scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id)
+    // Not blocking: withholding a customer's bill because a counter did not move is worse than
+    // the counter being stale. But the label printed on this copy comes from `newCount` while
+    // the stored one does not move, so the NEXT reprint repeats this same copy number — which
+    // is exactly what the ORIGINAL/COPY sequence exists to make distinguishable.
+    const { error: pcErr } = await scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id)
+    if (pcErr) warnWrite('A reprint count did not save — the next reprint of that bill will carry the same copy number as this one.', pcErr)
     const qrUrl = QR_PAY_METHODS.includes(order.payment_method)
       ? await makeBillQr(order.paid_amount, order.order_no ? `CR${order.order_no}` : null) : ''
     printHtml(buildBillHtml({
@@ -1904,7 +2053,12 @@ export default function PosOrders() {
   // retail pricing. Standard practice per restaurant accounting for comps.
   async function printCompSlip(order, items) {
     const newCount = (order.print_count || 0) + 1
-    await scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id)
+    // Not blocking: withholding a customer's bill because a counter did not move is worse than
+    // the counter being stale. But the label printed on this copy comes from `newCount` while
+    // the stored one does not move, so the NEXT reprint repeats this same copy number — which
+    // is exactly what the ORIGINAL/COPY sequence exists to make distinguishable.
+    const { error: pcErr } = await scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id)
+    if (pcErr) warnWrite('A reprint count did not save — the next reprint of that bill will carry the same copy number as this one.', pcErr)
     const recipeIds = items.map(i => i.recipe_id).filter(Boolean)
     const costMap = await computeRecipeCosts(supabase, recipeIds)
     printHtml(buildCompSlipHtml({
@@ -1923,7 +2077,8 @@ export default function PosOrders() {
   // one document never mislabels the other's copy number — see reprintItemCompSlip.
   async function printItemCompSlip(order, compedItems) {
     const newCount = (order.comp_print_count || 0) + 1
-    await scopedUpdate('pos_orders', { comp_print_count: newCount }).eq('id', order.id)
+    const { error: pcErr } = await scopedUpdate('pos_orders', { comp_print_count: newCount }).eq('id', order.id)
+    if (pcErr) warnWrite('A complimentary-slip reprint count did not save — the next reprint will carry the same copy number as this one.', pcErr)
     const recipeIds = compedItems.map(i => i.recipe_id).filter(Boolean)
     const costMap = await computeRecipeCosts(supabase, recipeIds)
     printHtml(buildCompSlipHtml({
@@ -1973,9 +2128,12 @@ export default function PosOrders() {
     // Which of today's paid bills have any item-level comp — most don't, so the "Comp Slip"
     // reprint action only shows up where there's actually something to reprint.
     const paidIds = todays.filter(o => o.close_type === 'paid').map(o => o.id)
-    const { data: compedRows } = paidIds.length > 0
+    const { data: compedRows, error: compedErr } = paidIds.length > 0
       ? await scopedFrom('pos_order_items', 'order_id').eq('comped', true).in('order_id', paidIds)
-      : { data: [] }
+      : { data: [], error: null }
+    // Failure hides the "Comp Slip" reprint button on bills that have one — the bill itself
+    // still reprints, so this is a missing shortcut rather than missing money.
+    if (compedErr) console.error('item-comp lookup for Recent Bills failed:', compedErr)
     setOrdersWithItemComp(new Set((compedRows || []).map(r => r.order_id)))
 
     setRecentBillsLoad(false)
@@ -2019,10 +2177,23 @@ export default function PosOrders() {
     }
     const ids = (openOrders || []).map(o => o.id)
     if (ids.length > 0) {
-      await scopedDelete('pos_order_items').in('order_id', ids)
-      await scopedDelete('pos_orders').in('id', ids)
+      // The guard above protects the READ; these are the writes it was protecting, and they had
+      // the identical hole one layer down — a failed delete followed by a successful table
+      // release frees the whole floor with every open order still sitting underneath it.
+      const { error: delItemsErr } = await scopedDelete('pos_order_items').in('order_id', ids)
+      const { error: delOrdersErr } = delItemsErr ? { error: null }
+        : await scopedDelete('pos_orders').in('id', ids)
+      if (delItemsErr || delOrdersErr) {
+        window.alert(`Couldn't delete the open orders: ${(delItemsErr || delOrdersErr).message}
+
+The tables were left occupied rather than freed with their orders still open.`)
+        setFloorLoad(false)
+        await loadFloor()
+        return
+      }
     }
-    await scopedUpdate('pos_tables', { status: 'available' }).eq('status', 'occupied')
+    const { error: freeErr } = await scopedUpdate('pos_tables', { status: 'available' }).eq('status', 'occupied')
+    if (freeErr) window.alert(`The orders were deleted, but the tables could not be freed: ${freeErr.message}`)
     await loadFloor()
   }
 
@@ -2116,9 +2287,9 @@ export default function PosOrders() {
           <Tip text="Number of guests at this table — used for cover count reporting">
             <span style={{ fontSize: 12, color: 'var(--theme-text3)', cursor: 'default' }}>Covers</span>
           </Tip>
-          <button onClick={() => setCovers(c => Math.max(1, c - 1))} style={btnSm}>−</button>
+          <button onClick={() => setCovers(c => Math.max(1, c - 1))} style={btnSm} aria-label="One fewer cover">−</button>
           <span style={{ fontWeight: 700, color: 'var(--theme-text1)', minWidth: 22, textAlign: 'center', fontSize: 14 }}>{covers}</span>
-          <button onClick={() => setCovers(c => c + 1)} style={btnSm}>+</button>
+          <button onClick={() => setCovers(c => c + 1)} style={btnSm} aria-label="One more cover">+</button>
         </div>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -2306,11 +2477,11 @@ export default function PosOrders() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-                    <button onClick={() => setQty(idx, item.qty - 1)} style={btnSm}>−</button>
+                    <button onClick={() => setQty(idx, item.qty - 1)} style={btnSm} aria-label={`One fewer ${item.name}`}>−</button>
                     <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 13 }}>
                       {item.qty}
                     </span>
-                    <button onClick={() => setQty(idx, item.qty + 1)} style={btnSm}>+</button>
+                    <button onClick={() => setQty(idx, item.qty + 1)} style={btnSm} aria-label={`One more ${item.name}`}>+</button>
                   </div>
                   <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600, minWidth: 68, textAlign: 'right', flexShrink: 0 }}>
                     NPR {Math.round(lineTotal)}
@@ -2419,7 +2590,7 @@ export default function PosOrders() {
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <button
                 className="btn btn-primary"
-                style={{ width: '48%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex' }}
+                style={{ flex: 1, minWidth: 0, padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex' }}
                 onClick={saveOrder}
                 disabled={saving || orderItems.length === 0}
               >
@@ -2429,7 +2600,7 @@ export default function PosOrders() {
               {hasPosAccess('supervisor') && (() => {
                 const payDisabled = saving || !orderId || !isOnline
                 return (
-                <div style={{ width: '48%' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <Tip text={!isOnline
                       ? 'Reconnect to close this bill — billing needs a live connection for the sequential invoice number and stock/sales posting.'
                       : 'Close this table — collect payment, or void/write-off if unpaid. Order must be saved first. Supervisor role or above.'}
@@ -2455,7 +2626,7 @@ export default function PosOrders() {
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              <div style={{ width: '48%' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <Tip text="Kitchen Order Ticket — sends unsent food items to the kitchen printer. Bold + badge show how many items are waiting."
                   style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
                   <button
@@ -2476,7 +2647,7 @@ export default function PosOrders() {
                   </button>
                 </Tip>
               </div>
-              <div style={{ width: '48%' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <Tip text="Bar Order Ticket — sends unsent bar/beverage items to the bar printer. Bold + badge show how many items are waiting."
                   style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
                   <button
@@ -2700,9 +2871,11 @@ export default function PosOrders() {
                         <span>{fmtNpr(i.qty * i.unit_price)}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <button type="button" onClick={() => setQty(compQty - 1)} disabled={compQty <= 0}
+                            aria-label={`Comp one fewer ${i.name}`}
                             style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 4, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty <= 0 ? 'default' : 'pointer', opacity: compQty <= 0 ? 0.4 : 1 }}>−</button>
                           <span style={{ minWidth: 14, textAlign: 'center' }}>{compQty}</span>
                           <button type="button" onClick={() => setQty(compQty + 1)} disabled={compQty >= i.qty}
+                            aria-label={`Comp one more ${i.name}`}
                             style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 4, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty >= i.qty ? 'default' : 'pointer', opacity: compQty >= i.qty ? 0.4 : 1 }}>+</button>
                           <span style={{ fontSize: 10, minWidth: 44 }}>{comped ? `/${i.qty} comped` : 'comped'}</span>
                         </div>
@@ -3069,9 +3242,9 @@ export default function PosOrders() {
                 {[1,2,3,4,5,6,7,8,9].map(d => (
                   <button key={d} onClick={() => numpadPress(String(d))} style={pad}>{d}</button>
                 ))}
-                <button onClick={numpadClear} style={{ ...pad, color: 'var(--theme-red-text)', fontSize: 14, fontWeight: 700 }}>CLR</button>
+                <button onClick={numpadClear} aria-label="Clear" style={{ ...pad, color: 'var(--theme-red-text)', fontSize: 14, fontWeight: 700 }}>CLR</button>
                 <button onClick={() => numpadPress('0')} style={pad}>0</button>
-                <button onClick={numpadBackspace} style={{ ...pad, fontSize: 18 }}>⌫</button>
+                <button onClick={numpadBackspace} aria-label="Backspace" style={{ ...pad, fontSize: 18 }}>⌫</button>
               </div>
             )
           })()}
@@ -3094,12 +3267,12 @@ export default function PosOrders() {
       </Modal>
     )}
 
-    <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
+    <div>
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
         <div>
-          <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>Order Taking</h2>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+          <h1 className="page-title">Order Taking</h1>
+          <p className="page-subtitle">
             Tap a table to open or view its order. Occupied tables show the running total.
           </p>
         </div>
@@ -3185,6 +3358,25 @@ export default function PosOrders() {
           color: floorMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
         }}>
           {floorMsg.replace(/^(error|ok):/, '')}
+        </div>
+      )}
+      {writeWarnings.length > 0 && (
+        <div role="alert" style={{
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--theme-amber) 28%, transparent)',
+          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,
+          color: 'var(--theme-text2)', display: 'flex', alignItems: 'flex-start', gap: 12,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <strong style={{ color: 'var(--theme-amber-text)' }}>
+              ⚠ {writeWarnings.length === 1 ? 'Something did not save' : `${writeWarnings.length} things did not save`}
+            </strong>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              {writeWarnings.map(w => <li key={w} style={{ marginTop: 2 }}>{w}</li>)}
+            </ul>
+          </div>
+          <button className="btn btn-ghost" style={{ fontSize: 12, flexShrink: 0 }}
+            onClick={() => setWriteWarnings([])}>Dismiss</button>
         </div>
       )}
       {/* Bills whose revenue and stock never reached Inventory, because no BS period was open

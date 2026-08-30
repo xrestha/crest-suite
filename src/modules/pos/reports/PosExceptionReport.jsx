@@ -223,7 +223,7 @@ export default function PosExceptionReport() {
   }
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
+    <div>
 
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
@@ -390,8 +390,12 @@ export default function PosExceptionReport() {
                             {r.closed_at ? new Date(r.closed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''}
                           </span>
                         </td>
+                        {/* The row keeps its onClick as the mouse convenience; this button is
+                            the keyboard/SR path. Never role="button" on the tr. */}
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
-                          {invoiceLabel(r, vatReg, prefix)}
+                          <button className="btn-linklike" onClick={e => { e.stopPropagation(); viewPosBill(clientId, r) }}>
+                            {invoiceLabel(r, vatReg, prefix)}
+                          </button>
                           {r.isItemComp && r.parentInvoiceNo != null && (
                             <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--theme-text3)' }}>
                               on {invoiceLabel({ invoice_no: r.parentInvoiceNo, invoice_fy: r.parentInvoiceFy, close_type: 'paid', order_no: r.order_no }, vatReg, prefix)}

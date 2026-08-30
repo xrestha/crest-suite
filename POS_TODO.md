@@ -4,7 +4,7 @@ Living checklist compiled from: the competitor "IMS" ERP report-menu audit, the 
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-08-27 (S618)
+Last updated: 2026-08-30 (S654)
 
 ---
 
@@ -50,6 +50,29 @@ by design, so an admin session proves nothing about them.
   Exception Report ranks staff by. Now `guard_pos_item_comp()` fences the six columns while
   `apply_pos_item_comps` (SECURITY DEFINER, so `current_user` is the owner) remains the only write
   path, checks Supervisor rank, and derives `comped_by` from `auth.uid()`.
+
+## B3. Quality passes on POS itself (added S652–S654, 2026-08-30)
+
+Not competitor-derived — like B2, these came out of critiques of our own code. Recorded here so the
+same ground is not re-walked; full detail in README S652/S653/S654.
+
+- [x] ~~POS used its own page shell~~ — **fixed S652.** Eleven of thirteen pages re-padded inside
+  `.main-content` and capped the measure at one of six arbitrary widths, which also stepped them out
+  from under the shell's mobile hamburger-clearance rule: **the hamburger sat on the page title on
+  eight POS pages at ≤768px**, iPad portrait included. Invisible on desktop, which is why it
+  survived every review.
+- [x] ~~POS drill-downs were mouse-only~~ — **fixed S653.** Nine rows across four files plus the
+  whole Table Management floor grid had no keyboard path; eight glyph-only controls in `PosOrders`
+  had no accessible name. This closes the standing critique item "POS reports are a different
+  dialect" — its other three limbs (KPI tiles, h2-first outlines, a third tab family) were already
+  closed or were never POS.
+- [x] ~~PosOrders swallowed its own write failures~~ — **fixed S654.** 32 sites, and three
+  `try/catch` blocks that had never once fired because supabase-js resolves with `{ error }` rather
+  than throwing. The one that mattered: a dropped `sent_to_kot` write printed a ticket the server
+  still considered unsent, so the next KOT press **cooked the dish twice**.
+- [ ] 🟡 `PosOrders.jsx` has no breakpoint — a two-panel flex with a fixed 320px cart, so below
+  ~600px the menu side collapses to almost nothing. Deferred rather than missed: restructuring the
+  live billing screen is not a layout-pass change, and the till is a tablet/desktop device today.
 
 ## C. Reports — analytics / competitor parity (confirmed non-mandatory, pure business intelligence)
 

@@ -6,6 +6,7 @@ import { scopedFrom as scopedFromRaw } from '../../../shared/scopedDb'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
+import RowDisclosure from '../../../components/RowDisclosure'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
@@ -53,7 +54,10 @@ function fmtSpan(from, to) {
 function DenomGrid({ counts, onChange }) {
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+      {/* Auto-fit, not repeat(3, 1fr): nine denominations are a flat list, so a fixed count is
+          just a media query nobody wrote — at 390px it left each note ~98px wide, with the
+          ₨-label and its running subtotal squeezed onto one 82px line. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(104px, 1fr))', gap: 8 }}>
         {DENOMINATIONS.map(d => (
           <div key={d} style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: '6px 8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
@@ -602,11 +606,11 @@ export default function PosShifts() {
   const expectedCash = expectedCashOf(openShift, currentReport)
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
+    <div>
 
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>Shifts</h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+      <div className="page-header">
+        <h1 className="page-title">Shifts</h1>
+        <p className="page-subtitle">
           Open a shift with a starting cash count, watch live totals as the shift runs, and reconcile the drawer with a Z-report when it ends.
         </p>
       </div>
@@ -733,7 +737,16 @@ export default function PosShifts() {
                     return (
                       <Fragment key={s.id}>
                         <tr onClick={() => toggleExpand(s)} style={{ cursor: 'pointer' }}>
-                          <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{s.label || 'Shift'}</td>
+                          {/* RowDisclosure is the keyboard/SR path to the Z-report — the row
+                              onClick stays as the mouse convenience, never role="button" on
+                              the tr (it would strip the row out of the table's structure). */}
+                          <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                            <RowDisclosure
+                              expanded={expandedId === s.id}
+                              onToggle={() => toggleExpand(s)}
+                              label={`Z-report for ${s.label || 'shift'} on ${fmtSpan(s.opened_at, s.closed_at)}`}
+                            /> {s.label || 'Shift'}
+                          </td>
                           <td>{fmtSpan(s.opened_at, s.closed_at)}</td>
                           <td style={{ fontSize: 12 }}>{staffNames[s.opened_by] || '—'} / {staffNames[s.closed_by] || '—'}</td>
                           <td style={{ textAlign: 'right' }}>
@@ -743,7 +756,8 @@ export default function PosShifts() {
                               </span>
                             ) : '—'}
                           </td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>{expandedId === s.id ? '▲ hide' : '▼ Z-report'}</td>
+                          {/* Mouse affordance only — the RowDisclosure carries aria-expanded. */}
+                          <td aria-hidden="true" style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>{expandedId === s.id ? '▲ hide' : '▼ Z-report'}</td>
                         </tr>
                         {expandedId === s.id && (
                           <tr>

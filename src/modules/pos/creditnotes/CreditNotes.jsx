@@ -134,12 +134,12 @@ export default function CreditNotes() {
   const totals = notes.reduce((s, n) => ({ gross: s.gross + n.gross_amount, vat: s.vat + n.vat_amount, net: s.net + n.net_amount }), { gross: 0, vat: 0, net: 0 })
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1100 }}>
-      <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 20 }}>
+    <div>
+      <div className="page-header">
+        <h1 className="page-title">
           Credit Notes <Tip text="Formal Credit Notes for correcting an already-billed order — required by Nepal VAT Rules 2053, Rule 20, whenever the value of billed goods/services changes.">ⓘ</Tip>
-        </h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--theme-text3)' }}>
+        </h1>
+        <p className="page-subtitle">
           Issue a Credit Note against a past bill, or review the monthly Credit Note register.
         </p>
       </div>

@@ -318,6 +318,30 @@ thumb mid-service, which is a real difference in kind (it is also why those nine
 `Modal`'s `zIndex` prop in S578). **A new POS page is a report unless it is operated during
 service** — and if it is a report, it gets the shell, not a hand-rolled header.
 
+### The page root takes no padding, and the header is `.page-header` (S652)
+
+`.main-content` already pads every page (32px, forced to `16px !important` under 768px), and the
+mobile rule that clears the fixed 44px hamburger is written against that — `.page-header` earns
+`padding-left: 60px` at the breakpoint. **A page that re-pads its own root steps out from under
+that arithmetic.** Eleven of thirteen POS pages opened
+`<div style={{ padding: '24px 28px', maxWidth: … }}>`; the eight that also hand-rolled
+`<h2 style={{ fontSize: 20 }}>` inherited no clearance at all and had **12×16px of the hamburger
+sitting on the page title** at 390px, while the four that used `.page-header` got the 60px on top
+of their own 28px and indented the title 60px past their own table. Invisible above 768px, where
+the hamburger is `display: none`. Full rule and measurements in DESIGN.md → Layout. A `maxWidth` on
+a page root is a claim about a reading measure, which a working surface does not have.
+
+### A card grid cannot always take the container role (S653)
+
+Order Taking's floor grid puts `role="button" + tabIndex + onKeyDown` on the card, which is right —
+its cards hold no interactive children. Table Management's grid *looks identical*, had a bare
+`<div onClick>`, and was entirely mouse-only. It could not be fixed by copying the sibling: those
+cards hold three controls (name, status badge, QR), and interactive content inside a `button` role
+is invalid and unfocusable. **The tell is whether the card holds controls**; if it does, the
+affordance goes on the children — the same "a real control inside, never a role on the container"
+move as the `<tr>` rule. A badge that is a control becomes a `<button>` wearing the badge class,
+which needs `border: none` and `fontFamily: 'inherit'` because the badge styles assume a `<span>`.
+
 ### A table column collapses where you didn't choose it to (S614)
 
 `table-layout` is `auto` everywhere, so a column's width is **bid for against its neighbours** and a

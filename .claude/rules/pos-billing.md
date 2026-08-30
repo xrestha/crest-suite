@@ -406,13 +406,58 @@ Two POS-specific details from that convergence:
 
 - **A `<tr onClick>` is mouse-only.** The RowDisclosure sweep never reached POS, so every
   drill-down here was unreachable by keyboard. An inline detail expansion takes `RowDisclosure` in
-  the first cell; a drill-down that *opens* something (`viewPosBill`) takes a real `<button>` in a
-  `no-print` action column, with `stopPropagation()` so the row's own handler cannot double-fire.
-  Adding that column means adding a `<th>` **and** a `<td>` to the tfoot, or the totals row shifts
-  one column left of its headers.
+  the first cell.
+
+  **Corrected 2026-08-30/S653: the second half of this bullet described a fix that was never
+  applied, and prescribed the wrong one.** It said an *opening* drill-down takes a button in a
+  trailing `no-print` action column. Nine rows across four POS files were still bare `<tr onClick>`
+  when S653 measured them, and a trailing action column contradicts `.btn-linklike`'s own reason for
+  existing ("the affordance has to sit on the name itself rather than in a trailing Actions
+  column"). What shipped: `.btn-linklike` on the cell carrying the row's **identity** — invoice no.,
+  order no., payment method — `stopPropagation()`ing so the row handler cannot double-fire, and
+  `aria-pressed` instead of link semantics where the row toggles a filter rather than opening
+  something. No column was added, so the tfoot alignment warning no longer applies.
 - **KOT vs BOT is a category, not a status.** The KOT chip used `badge-green`; success-green for a
   categorical distinction is the one thing the badge set is not for. KOT is `badge-purple`, BOT
   stays `badge-yellow` (the accent-tinted categorical tag).
+
+## A dropped write error in this file is how a dish gets cooked twice (S654)
+
+supabase-js **resolves** with `{ data, error }` — it does not throw on a database error. The general
+rule is in root CLAUDE.md; what follows is what that cost specifically here, because `PosOrders.jsx`
+carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destructuring nothing) and
+**three `try/catch` blocks whose `console.error` had never once run.**
+
+- **Printing a ticket is gated on the `sent_to_kot` write, never the other way round.** That flag is
+  what makes "already sent" true for every other device and for this one after a reload. It was
+  dropped on failure while `setOrderItems(sent)` and `printTicket()` ran unconditionally — so a
+  refused write put food in front of the kitchen that the system still counted as unsent, the KOT
+  badge returned, and the next press cooked the same dish again. Both send paths now print only if
+  the flag landed; the order stays saved and only the send is unwound. **Do not reorder these.**
+- **The offline-replay status check is a guard, so it fails CLOSED.** It reads `pos_orders.status`
+  to avoid overwriting an order another device billed while this one was offline; on a dropped read
+  error `current` was null, the `if` false, and the replay proceeded — the check stopped working
+  exactly when the network did. It now throws to stay queued, with `PGRST116` (row gone) routed to
+  the existing conflict list rather than retrying against a dead id forever.
+- **A failed poll must not write its empty result.** `loadKotStatus` wrote `{}` and blanked every
+  table's kitchen badge, which a waiter reads as "nothing has been started". Same shape in
+  `loadOrderKotTickets`, `loadPendingGuestOrders` (which also cleared `seenGuestRequestIds`, so the
+  next good poll re-chimed for requests already seen) and `loadOpenShift`, whose null would silently
+  unlink every later bill from the open shift and leave the Z-report short. All four keep last-good.
+- **After the bill is committed, warn — do not block, and do not swallow.** Once `pos_orders` is
+  updated the invoice number is minted and the close cannot be refused, so `warnWrite()` + the floor
+  banner carries what failed afterwards: the split-tender breakdown (the Z-report reconciles against
+  a payment mix missing that bill's legs), the table-occupied write (a table shown free with a live
+  order gets seated twice), the `ims_posted_at` stamp, missing HSC codes, reprint counters. **Each
+  sentence names the downstream consequence and the recovery, never the error.**
+- **`ims_posted_at` failing is NOT a double-post** for anything closed after migration
+  `20260818170000` — the Periods backfill re-checks `sales_entries.pos_order_id` before posting and
+  re-stamps what it finds. It is a false "not posted" alarm, and the banner says so rather than
+  letting the existing banner blame a missing period.
+- **Not everything was made loud, deliberately.** A till that throws red at a cashier holding up a
+  queue is worse than a stale reprint counter. The QR-confirmation poll, the `order_no` backfill,
+  the co-occurrence suggestions and the Recent Bills comp lookup log and move on. The test is
+  whether there is an action the user could take.
 
 ## Anything that takes money off a bill is a TENDER or a DISCOUNT, and the choice is not cosmetic (S618)
 
