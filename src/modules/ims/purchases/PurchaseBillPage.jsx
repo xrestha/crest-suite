@@ -119,6 +119,10 @@ export default function PurchaseBillPage() {
 
   const periodLabel = period ? `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : ''
   const isLocked = !isAdmin && period?.status === 'closed'
+  // Back to the list ON THIS BILL'S OWN MONTH. A bare /purchases selects the OPEN period, so an
+  // admin who has just filed a missed bill into a closed month would land on the current one and
+  // not see what they entered — the single most confusing possible outcome of that workflow.
+  const listUrl = period ? `/purchases?period=${period.id}` : '/purchases'
 
   // ─── AFTER THE SAVE ──────────────────────────────────────
 
@@ -180,7 +184,7 @@ export default function PurchaseBillPage() {
         setRateUpdateItems(changed)
         setRateUpdateSelected(new Set(changed.map(i => i.itemId)))
       } else {
-        navigate('/purchases')
+        navigate(listUrl)
       }
     }
     if (wasNew) printPurchaseBill(header, validLines, () => { printDone = true; exitWhenReady() })
@@ -206,7 +210,7 @@ export default function PurchaseBillPage() {
     writePageCache('purchases', 'items', effectiveClientId, next)
     setRateUpdateItems([])
     setRateUpdateSelected(new Set())
-    navigate('/purchases')
+    navigate(listUrl)
   }
 
   // ─── RENDER ──────────────────────────────────────────────
@@ -217,7 +221,7 @@ export default function PurchaseBillPage() {
   // nav item implies").
   if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
 
-  const backToList = () => navigate('/purchases')
+  const backToList = () => navigate(listUrl)
 
   return (
     <>
@@ -231,6 +235,18 @@ export default function PurchaseBillPage() {
         </div>
         <button className="btn btn-ghost" onClick={backToList}>← Purchases</button>
       </div>
+
+      {/* Admin counterpart of the isLocked read-only state below. `isLocked` carves admin out of
+          the closed-period lock — which is what allows a missed bill to be filed into the month it
+          actually belongs to — but without this the form looks identical to one against the open
+          month, and a bill dated to a closed month is exactly the mistake worth being loud about.
+          Mirrors the same banner on the list page. */}
+      {isAdmin && !loading && !loadError && period?.status === 'closed' && (
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          ✎ <strong>{periodLabel} is closed — this bill saves into a closed month.</strong> That is deliberate for a bill that was
+          missed at the time. Regenerate that month's Monthly Report afterwards so its figures include it.
+        </div>
+      )}
 
       <div className="card">
         {loading ? (
@@ -321,7 +337,7 @@ export default function PurchaseBillPage() {
                 Update {rateUpdateSelected.size} item{rateUpdateSelected.size !== 1 ? 's' : ''}
               </button>
               <button className="btn btn-ghost" style={{ fontSize: 12, padding: '7px 16px' }}
-                onClick={() => { setRateUpdateItems([]); setRateUpdateSelected(new Set()); navigate('/purchases') }}>
+                onClick={() => { setRateUpdateItems([]); setRateUpdateSelected(new Set()); navigate(listUrl) }}>
                 Skip all
               </button>
             </div>

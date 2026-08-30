@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -26,16 +26,26 @@ export default function Purchases() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedDelete } = useScopedDb()
   const navigate = useNavigate()
+  // `?period=<id>` selects a specific month instead of the open one. It is what makes the closed-
+  // month correction path hold together: Periods links here to enter a bill that was missed, and
+  // PurchaseBillPage returns here after a save carrying the bill's OWN period — without it the
+  // admin saves into Shrawan and lands back on the open month, unable to see what they just
+  // entered. An id that isn't in this client's period list is ignored, so a stale or foreign
+  // link degrades to the open period rather than showing nothing.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedPeriodId = searchParams.get('period')
 
   // Shared — seeded from a short-lived per-tab cache (sessionDataCache.js) so revisiting this
   // page shows the last-known data instantly instead of a blank "Loading…" while it re-fetches.
   // setAndCache below (defined after effectiveClientId) writes to the same cache alongside every
   // existing setter, at the same call sites, with no change to any value being computed.
   const [cachedPeriods] = useState(() => readPageCache('purchases', 'periods', effectiveClientId))
-  const cachedOpenPeriod = (cachedPeriods || []).find(x => x.status === 'open') || null
+  const cachedInitialPeriod =
+    (requestedPeriodId && (cachedPeriods || []).find(x => x.id === requestedPeriodId)) ||
+    (cachedPeriods || []).find(x => x.status === 'open') || null
   const [periods, setPeriods]               = useState(cachedPeriods ?? [])
   const periodReq = useLatestRequest()
-  const [selectedPeriod, setSelectedPeriod] = useState(cachedOpenPeriod)
+  const [selectedPeriod, setSelectedPeriod] = useState(cachedInitialPeriod)
   const [items, setItems]                   = useState(() => readPageCache('purchases', 'items', effectiveClientId) ?? [])
   const [vendors, setVendors]               = useState(() => readPageCache('purchases', 'vendors', effectiveClientId) ?? [])
   const [loading, setLoading]               = useState(!cachedPeriods)
@@ -51,7 +61,7 @@ export default function Purchases() {
 
   // Purchases tab
   const [purchases, setPurchases]           = useState(() =>
-    (cachedOpenPeriod ? readPageCache('purchases', `purchases_${cachedOpenPeriod.id}`, effectiveClientId) : null) ?? [])
+    (cachedInitialPeriod ? readPageCache('purchases', `purchases_${cachedInitialPeriod.id}`, effectiveClientId) : null) ?? [])
   const [filterDay, setFilterDay]           = useState('all')
   const [filterItem, setFilterItem]         = useState('all')
   const [filterVendor, setFilterVendor]     = useState('all')
@@ -59,7 +69,7 @@ export default function Purchases() {
   const [filterRef, setFilterRef]           = useState('')
   // Returns tab
   const [returns, setReturns]               = useState(() =>
-    (cachedOpenPeriod ? readPageCache('purchases', `returns_${cachedOpenPeriod.id}`, effectiveClientId) : null) ?? [])
+    (cachedInitialPeriod ? readPageCache('purchases', `returns_${cachedInitialPeriod.id}`, effectiveClientId) : null) ?? [])
 
   // Daily Register tab
   const [collapsedRegisterCats, setCollapsedRegisterCats] = useState(new Set())
@@ -83,10 +93,12 @@ export default function Purchases() {
     setAndCache(setPeriods, 'periods', p || [])
     setAndCache(setItems, 'items', i || [])
     setAndCache(setVendors, 'vendors', v || [])
-    const open = (p || []).find(x => x.status === 'open')
-    if (open) {
-      setSelectedPeriod(open)
-      await Promise.all([loadPurchases(open.id), loadReturns(open.id)])
+    const target =
+      (requestedPeriodId && (p || []).find(x => x.id === requestedPeriodId)) ||
+      (p || []).find(x => x.status === 'open')
+    if (target) {
+      setSelectedPeriod(target)
+      await Promise.all([loadPurchases(target.id), loadReturns(target.id)])
     }
     setLoading(false)
   }
@@ -116,6 +128,10 @@ export default function Purchases() {
     periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
+    // Keep the URL saying which month is on screen, so a refresh or a bookmark comes back to it
+    // rather than snapping to the open period. `replace` — arrowing the period list must not
+    // fill the back button with a dozen entries.
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.set('period', periodId); return next }, { replace: true })
     setFilterDay('all')
     setFilterItem('all')
     setFilterVendor('all')
@@ -325,6 +341,22 @@ export default function Purchases() {
       {isLocked && (
         <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
+        </div>
+      )}
+
+      {/* The admin counterpart of the banner above. `isLocked` carves admin out of the read-only
+          lock, which is exactly what makes entering a missed bill into a closed month possible —
+          but it also meant an admin got NO signal at all that the month on screen was closed, and
+          every control looked like the open period's. Say it, and say what the entry does not do
+          on its own: the Monthly Report was frozen at close and no longer matches once a bill
+          lands here. */}
+      {isAdmin && selectedPeriod?.status === 'closed' && (
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          ✎ <strong>{periodLabel} is closed — you are editing it as admin.</strong> Bills added here still save, which is how a
+          missed bill gets into the month it belongs to. Afterwards, open{' '}
+          <Link to="/owner-report" style={{ color: 'inherit', textDecoration: 'underline' }}>Monthly Report</Link>{' '}
+          for this month and use <strong>Regenerate Snapshot</strong> — the report was frozen when the month closed and will not
+          include what you add here until it is regenerated.
         </div>
       )}
 

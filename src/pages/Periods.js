@@ -323,7 +323,7 @@ export default function Periods() {
     if (error) {
       window.alert(
         error.code === '23505' || error.message?.includes('one_open_per_client')
-          ? 'Can\'t reopen — a more recent period is already open for this client (only one period can be open at a time). To correct a closed period\'s numbers instead, edit it directly as admin (Stock Count already allows this on a closed period) and use "Resync Opening Stock" to push the correction into whatever period comes next.'
+          ? 'Can\'t reopen — a more recent period is already open for this client (only one period can be open at a time). You do not need to: as admin, a closed period is still editable. Use "Add missing bills" on this row for a purchase bill that was missed, edit Stock Count or Sales for this month directly, and use "Resync Opening Stock" to push a corrected closing count into whatever period comes next. Reopening is only needed to hand entry back to the client\'s own logins.'
           : `Failed to reopen: ${error.message}`
       )
       return
@@ -867,7 +867,7 @@ export default function Periods() {
                             {new Date(p.created_at).toLocaleDateString()}
                           </td>
                           <td style={{ textAlign: 'right' }}>
-                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
                               {/* Edit pencil — open periods, admin only */}
                               {canEdit && isAdmin && (
                                 <button
@@ -906,6 +906,25 @@ export default function Periods() {
                                 </button>
                               ) : (
                                 <>
+                                  {/* The answer to "reopen this month so I can enter a bill I
+                                      missed". Reopening is blocked by
+                                      monthly_periods_one_open_per_client whenever a later month is
+                                      already open — which is exactly when a missing bill gets
+                                      discovered — but admin never needed it: every IMS entry page
+                                      locks on `!isAdmin && closed`, so a closed month is already
+                                      writable for admin. All that was missing was a way in, since
+                                      Purchases opens on the OPEN period by default. */}
+                                  {clientModules?.ims && (
+                                    <Tip text="Opens Purchases on this month so a bill that was missed at the time can still be entered. Closed months stay editable for admin, so this needs no reopening — and it works even when a later month is already open, which Reopen cannot." width={300}>
+                                      <button
+                                        className="btn btn-ghost"
+                                        style={{ fontSize: 12, padding: '5px 12px' }}
+                                        onClick={() => navigate(`/purchases?period=${p.id}`)}
+                                      >
+                                        Add missing bills →
+                                      </button>
+                                    </Tip>
+                                  )}
                                   <Tip text="Fix a mistake in this closed period directly (Stock Count already lets admin edit a closed period), then use this to push the correction into the next period's opening stock — no reopening needed.">
                                     <button
                                       className="btn btn-ghost"
@@ -915,7 +934,7 @@ export default function Periods() {
                                       Resync Opening Stock →
                                     </button>
                                   </Tip>
-                                  <Tip text="Resumes full data entry for this month — blocked whenever a later period is already open (only one period can be open per client). Use Resync Opening Stock above for a one-off correction instead.">
+                                  <Tip text="Hands data entry for this month back to the CLIENT'S own logins — blocked whenever a later period is already open (only one period can be open per client). Admin does not need it: use Add missing bills for a purchase that was missed, or Resync Opening Stock for a corrected count." width={300}>
                                     <button
                                       className="btn btn-ghost"
                                       style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-green-text)', borderColor: 'rgba(52,211,153,0.35)', background: 'rgba(52,211,153,0.07)' }}

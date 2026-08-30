@@ -52,3 +52,17 @@ Three properties worth not re-deriving:
 - **It counts rows with a real `physical_qty`**, the same test `carryForwardOpeningStock` uses to
   decide what carries into next month — so the sentence and the carry-forward can never disagree
   about what "counted" means.
+
+### What happens AFTER the close (S651)
+
+Closing does not put the month beyond reach. Admin is exempt from every entry page's read-only lock
+(`isLocked = !isAdmin && status === 'closed'`), which is the supported way a bill or a count that
+was missed at the time still gets filed against the month it belongs to — reopening is blocked
+while a later month is open and, in any case, only ever means "hand entry back to the client's own
+logins". `.claude/rules/closed-periods.md` holds that rule and the route into a closed month.
+
+**The snapshot does not follow those writes**, by design: it is captured at close and the only
+overwrite path is the admin "Regenerate Snapshot" button, which confirms first. So a correction
+made after a close leaves the frozen report disagreeing with the live data until someone
+regenerates it deliberately — the Purchases banner names the button for exactly this reason. Do not
+make it automatic; a frozen artifact that silently rewrites itself is not frozen.

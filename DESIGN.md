@@ -594,6 +594,14 @@ Every IMS/Suite report renders inside one component that owns the **six states a
 
 **What "every report renders inside it" actually means, measured (2026-08-26/S613).** Three pages render the full `ReportPage` shell; ~30 report pages render its *grammar* by hand — the shared `ReportLoadError` card (extracted from this component in S612 precisely so a pre-shell page could adopt the failed≠empty rule without a structural rewrite), `firstError`, `NoPeriodState`, and the strip/note/filter gating. **That is the supported state, not a migration debt**: the doctrine is mandatory, the wrapper is optional. A page that renders the grammar by hand must gate its own `stats`/`note`/`filters` on `!loading && !error` — a rule the wrapper enforces for free and a hand-rolled page can forget, which is why a new report page should still start from `ReportPage` unless it has a shape the shell cannot express.
 
+### Page-state banners: red says you cannot, amber says you can but this is not the usual case (added 2026-08-30/S651)
+
+An entry page's full-width banner is a **statement about who the reader is**, not decoration, and the two colours are not interchangeable. Red (`--theme-red-text` on an 8% fill) means *this screen will not accept your writes* — a client on a closed period. Amber (`--theme-amber-text`, same 8%/25% fill-and-border recipe as `StockMovements.js`) means *your writes will land, and you should know why this is unusual* — an admin on that same closed period, editing history deliberately.
+
+The pair exists because they are the same fact rendered for two audiences, and for a year only one of them was drawn. `isLocked = !isAdmin && status === 'closed'` suppressed the red banner for admin along with the lock, so the one person who *could* rewrite a closed month saw a screen identical to the open one. A permission that changes what a control does must change what the page says, or the two most consequential states in the product are pixel-identical.
+
+An amber banner earns its space by naming the follow-up the action does not perform on its own — here, that the month's Monthly Report was frozen at close and needs **Regenerate Snapshot**. A banner that only restates what the reader can already see from the period dropdown is noise.
+
 ### Report pages are one dialect, till screens are another (settled 2026-08-26/S613)
 
 POS's four **report** pages (`SalesReport`, `CoversReport`, `KotLog`, `PosExceptionReport`) had grown their own grammar — an inline-styled `h2` where every other page opens with `page-title`, hand-rolled KPI tiles instead of `stat-grid`, a third tab family, and mouse-only `<tr onClick>` drill-downs. That was drift, not a decision, and it is now converged: a report is a report whichever module it belongs to, because the person reading it is the same owner or accountant, arriving with the same expectations, often on the same afternoon.

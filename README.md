@@ -159,6 +159,57 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S651 — 2026-08-30 — a closed month gets a way in, so a missed purchase bill can still be filed
+
+Service worker `crest-v168`. No migration.
+
+Reported from Periods: *"allow the admin to reopen closed periods to enter missing purchase bills."*
+Admin could already do it — every period-scoped IMS entry page locks on `!isAdmin && closed`, so a
+closed month has always been writable for admin. What was missing was a **way in**: Purchases opens
+on the OPEN period, and nothing on the closed row pointed anywhere. Reopen was the only visible
+affordance and it is the one thing that cannot work here — `monthly_periods_one_open_per_client`
+blocks it whenever a later month is open, which is precisely the moment a missing bill turns up.
+
+So the fix is a route, not a second open period. Widening that index would have to be paid for by
+every page that reads `.eq('status','open').single()`.
+
+- **Periods → "Add missing bills →"** on every closed row (IMS clients), linking to
+  `/purchases?period=<id>`. Reopen stays, unchanged, and its tooltip now says what it is actually
+  for — handing entry back to the *client's own* logins — instead of describing itself as the way
+  to resume editing.
+- **`/purchases?period=<id>`** — the list page now honours a period in the query string on first
+  load (and keeps the URL in sync on every change, `replace` so arrowing the dropdown doesn't fill
+  the back button). An id not in this client's own period list is ignored, so a stale or foreign
+  link degrades to the open period rather than rendering nothing.
+- **The bill form returns to the bill's own month.** All four `navigate('/purchases')` sites now
+  carry `?period=`. Without it, an admin who filed a bill into Shrawan landed back on Bhadra and
+  could not see what they had just entered — the worst possible ending for this exact workflow.
+- **An amber banner on both screens** whenever admin has a closed month selected. `isLocked`'s
+  `!isAdmin` carve-out is what makes the entry possible, and it also meant admin got *no* signal
+  the month was closed — every control looked like the open period's. It names the month, says the
+  entry is deliberate, and says the part the entry does not do on its own: the Monthly Report was
+  frozen at close and does not include the new bill until **Regenerate Snapshot** is run.
+
+The reopen-blocked alert now names all three working paths rather than only Resync Opening Stock.
+
+Also updated: the Periods entry in Help (tips + the "what happens when I close a period" FAQ) and in
+the IMS module guide, where "Add missing bills" is now a documented field and the reachability
+problem is written down as a gotcha.
+
+**Written down as rules**, since the shape is more general than this one screen:
+
+- **`.claude/rules/closed-periods.md`** (new) — the `isLocked = !isAdmin && closed` line and its five
+  copies, why Reopen can never be the admin path, the `?period=` route contract, and the two
+  follow-ups a closed-month write does not perform on its own. Loads on Periods and the IMS entry
+  modules. `CLAUDE.md`'s existing one-open-period bullet now points at it rather than growing again.
+- **`.claude/rules/owner-report.md`** — a "what happens AFTER the close" section: the snapshot does
+  not follow a post-close correction, and must not start doing so automatically.
+- **`DESIGN.md`** — the red/amber page-state banner pair. Red says *you cannot write here*, amber
+  says *you can, and here is why this is unusual*. They are the same fact drawn for two audiences,
+  and for a year only one of them existed: the `!isAdmin` carve-out suppressed the closed-period
+  notice along with the lock, so the one person who could rewrite a closed month saw the open
+  month's screen.
+
 ### S650 — 2026-08-30 — Purchases gains a Bill no. search and a Payment filter
 
 Service worker `crest-v167`. No migration.
