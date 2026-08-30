@@ -108,6 +108,18 @@
         "value": "#bbb",
         "createdAt": "2026-08-26T14:04:34.366Z",
         "reason": "Print-only CSS (@media print black-on-white forcing in Roster + the printed HR joining form) - print templates are the documented allowed class"
+      },
+      {
+        "rule": "layout-transition",
+        "value": "transition: width",
+        "createdAt": "2026-08-30T08:33:40.633Z",
+        "reason": "codebase decision, not user: .sidebar-wrap is position:fixed, so .sidebar-shell's width is what actually reserves the layout column - a transform animates pixels but reserves no space. Documented at Layout.css:320-324 and DESIGN.md Navigation; zeroed under prefers-reduced-motion at Layout.css:280-287."
+      },
+      {
+        "rule": "layout-transition",
+        "value": "transition: margin-left",
+        "createdAt": "2026-08-30T08:33:46.324Z",
+        "reason": "codebase decision, not user: paired half of .sidebar-shell's width transition - .main-content must resize in lockstep or it ends the animation at the wrong width, which is what every table's available width is measured against. Documented at Layout.css:320-324; zeroed under prefers-reduced-motion at Layout.css:280-287."
       }
     ]
   }
