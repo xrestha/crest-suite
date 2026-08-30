@@ -5,6 +5,14 @@ import { adToBs } from '../../../utils/bsCalendar'
 // Nepal Labour Act 2074 default leave types. Seeded once per client (when they
 // have none). annual_quota 0 = uncapped (e.g. unpaid). Maternity/paternity are
 // per-event statutory entitlements, not annually recurring — shown for tracking.
+//
+// `color` is a CATEGORICAL hue per leave type, seeded into `hr_leave_types` and editable per
+// client — the same class of value as a shift colour, and exempt from the design system's token
+// rule for the same reason: these have to stay distinguishable from one another, which is a job
+// a four-token semantic palette cannot do. detect.mjs flags #60a5fa / #f472b6 / #22d3ee here as
+// undocumented colours; that is expected and should stay. What matters is that no consumer
+// renders one of them as raw text — LeaveManagement passes every one through typeTint() for a
+// fill and typeText() for a label, which is what keeps them legible on the light presets.
 export const DEFAULT_LEAVE_TYPES = [
   { code: 'home',        name: 'Home / Annual Leave',  paid: true,  annual_quota: 18, carry_forward: true,  color: 'var(--theme-green)', sort_order: 1 },
   { code: 'sick',        name: 'Sick Leave',           paid: true,  annual_quota: 12, carry_forward: true,  color: '#60a5fa', sort_order: 2 },

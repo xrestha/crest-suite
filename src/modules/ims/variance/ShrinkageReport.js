@@ -235,7 +235,7 @@ export default function ShrinkageReport() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Shrinkage Report</h1>
           <p className="page-subtitle">Consistent unexplained stock loss across periods — {periodsUsed} closed periods analysed</p>

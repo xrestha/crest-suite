@@ -169,7 +169,7 @@ export default function VendorBalanceConfirmation() {
 
   return (
     <div>
-      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Vendor Balance Confirmation</h1>
           <p className="page-subtitle">Printable yearly balance letter for IRD Annexure 13 reconciliation with a vendor</p>

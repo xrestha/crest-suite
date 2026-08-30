@@ -363,10 +363,9 @@ export default function PurchaseOrders() {
   // ── RECEIVE VIEW ──────────────────────────────────────────
   if (view === 'receive' && receivingPo) {
     return (
-      <div style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
-        <button className="btn btn-ghost" onClick={() => setView('list')} style={{ marginBottom: 20, fontSize: 12 }}>← Back to POs</button>
-
-        <div style={{ marginBottom: 24 }}>
+      <div style={{ maxWidth: 800, margin: '0 auto' }}>
+        <div className="page-header">
+          <button className="btn btn-ghost" onClick={() => setView('list')} style={{ marginBottom: 16, fontSize: 12 }}>← Back to POs</button>
           <h1 className="page-title" style={{ marginBottom: 4 }}>Receive Goods — {receivingPo.po_number}</h1>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
             Vendor: <strong style={{ color: 'var(--theme-text1)' }}>{receivingPo.vendors?.name || '—'}</strong>
@@ -494,9 +493,11 @@ export default function PurchaseOrders() {
       s + (parseFloat(x.qty_ordered) || 0) * (parseFloat(x.unit_price) || 0), 0)
 
     return (
-      <div style={{ maxWidth: 900, margin: '0 auto', padding: '32px 24px' }}>
-        <button className="btn btn-ghost" onClick={() => setView('list')} style={{ marginBottom: 20, fontSize: 12 }}>← Back to POs</button>
-        <h1 className="page-title">{editingPo ? `Edit ${editingPo.po_number}` : 'New Purchase Order'}</h1>
+      <div style={{ maxWidth: 900, margin: '0 auto' }}>
+        <div className="page-header">
+          <button className="btn btn-ghost" onClick={() => setView('list')} style={{ marginBottom: 16, fontSize: 12 }}>← Back to POs</button>
+          <h1 className="page-title">{editingPo ? `Edit ${editingPo.po_number}` : 'New Purchase Order'}</h1>
+        </div>
 
         <div className="card" style={{ marginBottom: 20 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 20 }}>

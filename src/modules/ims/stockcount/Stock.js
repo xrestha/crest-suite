@@ -674,7 +674,7 @@ export default function Stock() {
 
   return (
     <div>
-      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Stock Count</h1>
           <p className="page-subtitle">Opening stock, physical closing count & wastage — {periodLabel}</p>

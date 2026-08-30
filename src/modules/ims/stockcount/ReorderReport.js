@@ -352,7 +352,7 @@ export default function ReorderReport() {
 
   return (
     <div>
-      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Reorder Report</h1>
           <p className="page-subtitle">Items below par level — auto purchase list — {periodLabel}</p>

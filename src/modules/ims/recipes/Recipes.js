@@ -853,7 +853,7 @@ export default function Recipes() {
   return (
     <div>
       {/* Header */}
-      <div className={`page-header${(view === 'detail' || printRecipe) ? ' no-print' : ''}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className={`page-header page-header--split${(view === 'detail' || printRecipe) ? ' no-print' : ''}`}>
         <div>
           <h1 className="page-title">Recipe Costing</h1>
           <p className="page-subtitle">

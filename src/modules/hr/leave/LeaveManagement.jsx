@@ -255,13 +255,13 @@ export default function LeaveManagement() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Leave</h1>
           <p className="page-subtitle">Leave entitlements, requests, and balances — BS {bsYear}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', maxWidth: 360 }}>{msg.split(':').slice(1).join(':')}</span>}
+          {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', maxWidth: 360 }}>{msg.split(':').slice(1).join(':')}</span>}
           <select className="form-select" aria-label="BS year" value={bsYear} onChange={e => setBsYear(parseInt(e.target.value, 10))}>
             {years.map(y => <option key={y} value={y}>BS {y}</option>)}
           </select>

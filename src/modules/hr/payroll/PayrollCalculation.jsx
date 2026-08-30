@@ -383,7 +383,7 @@ export default function PayrollCalculation() {
   return (
     <div>
       <div className={printRow ? 'no-print' : ''}>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Payroll Calculation</h1>
           <p className="page-subtitle">Verify the numbers behind Payroll, one employee at a time — {periodLabel}</p>

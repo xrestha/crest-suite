@@ -223,7 +223,7 @@ export default function VatReport() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">VAT Report</h1>
           <p className="page-subtitle">Input VAT summary on purchases — {periodLabel(selectedPeriod)}</p>

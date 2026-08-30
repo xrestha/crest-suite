@@ -155,7 +155,7 @@ export default function Vendors() {
         <h2 style={{ margin: 0 }}>Vendors</h2>
       </div>
 
-      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Vendors</h1>
           <p className="page-subtitle">Manage your supplier list — linked to daily purchase entries</p>

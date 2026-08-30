@@ -516,7 +516,7 @@ export default function PayrollRun() {
   return (
     <div>
       <div className={printSlip ? 'no-print' : ''}>
-        <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div className="page-header page-header--split">
           <div>
             <h1 className="page-title">Payroll</h1>
             <p className="page-subtitle">

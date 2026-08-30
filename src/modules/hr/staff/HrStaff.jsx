@@ -326,7 +326,7 @@ export default function HrStaff() {
     <div>
 
       {/* Header */}
-      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">HR Staff</h1>
           <p className="page-subtitle">

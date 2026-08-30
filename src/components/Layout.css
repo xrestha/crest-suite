@@ -187,6 +187,42 @@
   background: var(--theme-text2);
 }
 
+/* Text selection and the caret. Both shipped as browser defaults until now - a blue highlight
+   and a black bar belonging to no design system, on a product whose whole surface is themed.
+   The pair is deliberately `--theme-accent` / `--theme-accent-text` rather than a hand-mixed
+   tint: accent-text is DEFINED as the foreground that sits on an accent fill and is resolved
+   per preset, so this contrast is correct on all ten by construction rather than by a
+   measurement that would have to be redone for every new preset. Selecting a figure to copy it
+   into a challan or a bank sheet is a real, frequent action here, so the highlight is a solid
+   fill and not a wash - a tint over the ten different text colours in a payslip has ten
+   different contrast outcomes; a fill has one. */
+::selection {
+  background: var(--theme-accent);
+  color: var(--theme-accent-text);
+}
+
+/* The caret takes accent-INK, not the accent: this one sits on the input ground, not on a fill,
+   which is the exact distinction those two tokens exist to draw. */
+input,
+textarea,
+[contenteditable] {
+  caret-color: var(--theme-accent-ink);
+}
+
+/* The guest menu is the one surface a paying customer sees, and its palette is deliberately
+   theme-INDEPENDENT (see DESIGN.md) - a guest must not get whichever preset the scanning
+   phone had saved. The rules above resolve `--theme-*` everywhere in the app including that
+   route, so both are re-stated here in its own tokens. Pine on paper, the same pair the menu
+   already uses for an active chip. */
+.guest-menu ::selection {
+  background: var(--gm-pine);
+  color: var(--gm-paper);
+}
+.guest-menu input,
+.guest-menu textarea {
+  caret-color: var(--gm-pine);
+}
+
 /* ── THEME VARIABLES ─────────────────────────────────────────────────────────
    Default: dark theme. ThemeContext overrides via style.setProperty()
 
@@ -834,6 +870,41 @@
 /* ── SHARED PAGE COMPONENTS ─────────────── */
 .page-header {
   margin-bottom: 28px;
+}
+
+/* Title block on the left, page actions on the right - the shape that ~50 of the 78
+   .page-header sites were hand-rolling inline. Two halves of the header had drifted apart and
+   neither shape was complete: pages that wrote the inline flex object got the mobile hamburger
+   clearance below but no wrap, and pages that hand-rolled the whole row got the wrap but not
+   the clearance, so their <h1> sat under the fixed hamburger. Measured at 768 and 390px, an
+   unclassed header put 40x33px of the hamburger over the title - elementFromPoint at the
+   title's first character returned the button, not the text - while a no-wrap header squeezed
+   that same title from 298px down to 154px, and one carrying a period <select> overflowed its
+   own container by 29.7px, into the clip from html { overflow-x: hidden }. Both properties
+   belong to the class so that no page has to remember either. Same reasoning as .panel-tab-bar
+   and .stat-grid--compact.
+   The gap is 12px row / 16px column: the row gap separates the actions once they wrap under
+   the title, the column gap is the floor between the two groups before they do. */
+.page-header--split {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+/* The class wraps the title block against the action group; each page still hand-rolls the
+   action group itself, and those are `display: flex` rows with a gap and no wrap of their own.
+   So a header with three controls (a period select plus two buttons) still overflowed — measured
+   at 15.7px past its own container at 360px, clipped rather than scrollable because of
+   html { overflow-x: hidden }. Both properties are needed and neither is enough alone:
+   `flex-wrap` lets the controls fall onto a second line (inert on the title block, which is not
+   a flex container), and `min-width: 0` undoes the `min-width: auto` a flex item defaults to,
+   which is what was holding the group wider than its share in the first place. Fixing it here
+   rather than at the 78 call sites is the same reasoning that put the row in the class. */
+.page-header--split > * {
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .page-title {
@@ -2059,9 +2130,25 @@ textarea:focus-visible {
   border-color: var(--theme-text2);
 }
 
+/* The 200px floor is set by what a card HOLDS, not by taste. `.stat-value` is 24px/700 and the
+   figures in it are Nepali-grouped rupee amounts — `NPR 12,48,650` is 13 characters — so a card
+   narrower than ~200px wraps the headline number onto a second line. The floor was 180px, which
+   is a promise the grid could not keep: measured on the built CSS, the figure wrapped at 1280px
+   (5 columns of ~176px), at 900px (3 of ~188px), and at 414 and 430px, i.e. on an ordinary
+   laptop, a tablet and the two commonest large phones — not an edge case, and never on a width
+   anyone would think to check. 200px eliminates it at every width from 480 to 1440 and costs one
+   column at exactly the two widths where the card was too narrow for its own contents anyway
+   (1280 goes 5->4, 900 goes 3->2); 1440 still fits 5.
+
+   Shrinking `.stat-value` instead was measured and rejected: 20px also fixes it everywhere, but
+   it de-emphasises the headline figure on every KPI in the product to solve a grid problem, and
+   a number reading as exact is the thing this product sells. Raising the floor changes how many
+   cards sit in a row; lowering the type changes what the number looks like everywhere. Prefer
+   the former. If a future card needs a longer figure than this, raise the floor again — do not
+   let the value wrap. */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
   margin-bottom: 28px;
 }

@@ -26,6 +26,17 @@ const modalStack = []
 // sheet. `title` is then the accessible name rather than a rendered heading, so a dialog can never
 // go unnamed either way. Reach for it only when the standard card shape would have to be undone.
 //
+// `printable` drops the overlay's `no-print`. The overlay carries that class because a dialog
+// is normally chrome sitting on top of the thing being printed — but the employee Joining Form
+// IS the print target: it is a blank A4 document whose only purpose is to be printed and filled
+// in by hand. `no-print` is `display: none !important`, which removes the overlay from the print
+// box tree entirely, and a descendant's `visibility: visible` cannot bring back a subtree whose
+// ancestor is not generating boxes — so that one class was the whole reason that form could not
+// use this component and hand-rolled an overlay with no Escape, no focus trap and no
+// `role="dialog"` instead. Prefer PayrollRun's PayslipModal shape where it fits (dialog here,
+// a separate `.print-only` render there, overlay stays no-print); reach for this only when the
+// panel content and the printed document are literally the same markup.
+//
 // `variant="sheet"` docks the panel to the bottom edge of the screen instead of centring it — the
 // phone form for a long form, used by the Crest Staff employee portal. It is three style
 // expressions and a class, NOT a second component, because the focus trap, the Escape stack,
@@ -35,7 +46,7 @@ const modalStack = []
 // inline style, or `prefers-reduced-motion` could never switch it off.
 export default function Modal({
   onClose, title, headerExtra, children, maxWidth = 960,
-  zIndex = 100, unstyled = false, panelStyle, variant,
+  zIndex = 100, unstyled = false, panelStyle, variant, printable = false,
 }) {
   const sheet = variant === 'sheet'
   // A sheet renders its OWN header — a 44px close target and usually a subtitle, neither of which
@@ -104,7 +115,7 @@ export default function Modal({
   return (
     <div
       onClick={onBackdrop}
-      className="no-print"
+      className={printable ? undefined : 'no-print'}
       style={{
         position: 'fixed', inset: 0, zIndex, background: 'rgba(0,0,0,0.6)',
         // A sheet scrolls inside its own panel, so the overlay must not scroll too — two nested

@@ -193,7 +193,7 @@ export default function Advances() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Advances &amp; Loans</h1>
           <p className="page-subtitle">Track salary advances and employee loans</p>
@@ -204,7 +204,7 @@ export default function Advances() {
       </div>
 
       {/* Summary cards */}
-      <div className="stat-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid">
         {[
           { label: 'Total Outstanding', value: `NPR ${fmt(totalOutstanding)}`, tip: 'Sum of unpaid balances across all active advances and loans.' },
           { label: 'Employees Affected', value: employeesWithActive, tip: 'Number of employees with at least one active advance or loan.' },
@@ -221,13 +221,13 @@ export default function Advances() {
       </div>
 
       {/* Filters */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
         <div className="tab-bar">
           {tabBtn('all',     filterType,   setFilterType,   'All')}
           {tabBtn('advance', filterType,   setFilterType,   'Advances')}
           {tabBtn('loan',    filterType,   setFilterType,   'Loans')}
         </div>
-        <div className="tab-bar" style={{ marginLeft: 8 }}>
+        <div className="tab-bar">
           {tabBtn('active',  filterStatus, setFilterStatus, 'Active')}
           {tabBtn('settled', filterStatus, setFilterStatus, 'Settled')}
           {tabBtn('all',     filterStatus, setFilterStatus, 'All')}

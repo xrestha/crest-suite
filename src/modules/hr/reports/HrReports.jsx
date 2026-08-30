@@ -260,7 +260,7 @@ export default function HrReports() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">HR Reports</h1>
           <p className="page-subtitle">
@@ -400,7 +400,7 @@ export default function HrReports() {
           {/* ── SUMMARY ── */}
           {tab === 'summary' && (
             <div>
-              <div className="stat-grid stat-grid--compact" style={{ marginBottom: 20 }}>
+              <div className="stat-grid stat-grid--compact" style={{ marginBottom: 28 }}>
                 {[
                   { label: 'Total Gross',    value: tot.gross,   color: 'var(--theme-accent-ink)', tip: 'Gross earnings + overtime across all payslips.' },
                   { label: 'Total Deductions', value: tot.ded,   color: 'var(--theme-red-text)', tip: 'Absence + SSF employee + other deductions + TDS.' },
@@ -601,7 +601,7 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
   const card = { background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)', padding: '14px 16px' }
 
   return (
-    <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12, padding: 32 }}>
+    <div className="card">
 
       {/* Title */}
       <div style={{ textAlign: 'center', marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--theme-border)' }}>
@@ -610,7 +610,7 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
       </div>
 
       {/* Employer / Employee */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
         <div style={card}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Employer</div>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 6 }}>{clientName || '—'}</div>
@@ -671,7 +671,7 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
       </div>
 
       {/* Taxable computation + TDS summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 32 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, marginBottom: 32 }}>
         <div style={card}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Taxable Income Computation</div>
           {[
@@ -719,7 +719,7 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
       </div>
 
       {/* Signature block */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 60, paddingTop: 20, borderTop: '1px solid var(--theme-border)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '28px 60px', paddingTop: 20, borderTop: '1px solid var(--theme-border)' }}>
         <div>
           <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 40 }}>Issued on: {issuedDate}</div>
           <div style={{ borderTop: '1px solid var(--theme-text2)', paddingTop: 8 }}>

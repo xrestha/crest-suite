@@ -589,7 +589,7 @@ export default function AttendanceSheet() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Attendance</h1>
           <p className="page-subtitle">Daily attendance, hours, and overtime — {periodLabel}</p>

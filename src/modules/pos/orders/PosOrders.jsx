@@ -3269,7 +3269,7 @@ The tables were left occupied rather than freed with their orders still open.`)
 
     <div>
 
-      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Order Taking</h1>
           <p className="page-subtitle">

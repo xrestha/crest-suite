@@ -341,7 +341,7 @@ export default function KotLog() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">
             KOT Log <Tip text="Register is a queryable log of every kitchen/bar ticket ever sent. Reconciliation compares what was sent to the kitchen against what's currently on each order, flagging food that was cooked but then reduced, removed, or the order was voided entirely — the anti-fraud check. Bill Trail shows every paid/voided bill with its complete KOT/BOT history, including bills that never sent anything to the kitchen at all. Pulled Items is the named record: who took an already-cooked line off a bill, when, and why — Reconciliation can only infer that it happened." width={360}>ⓘ</Tip>

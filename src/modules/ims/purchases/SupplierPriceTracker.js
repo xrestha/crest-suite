@@ -299,7 +299,7 @@ export default function SupplierPriceTracker() {
   return (
     <div>
       {/* Page header */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Price Tracker</h1>
           <p className="page-subtitle">Purchase price history by vendor</p>

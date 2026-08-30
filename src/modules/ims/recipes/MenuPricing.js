@@ -247,7 +247,7 @@ export default function MenuPricing() {
   /* ── POS-only view (no IMS) ─────────────────────────────────────────────── */
   if (!clientModules?.ims) return (
     <div className="page-container">
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Menu Pricing</h1>
           <p className="page-subtitle">Set menu prices and toggle <strong>On POS</strong> to control which items appear on the order screen.</p>
@@ -512,7 +512,7 @@ export default function MenuPricing() {
   /* ── IMS view (full food-cost table) ─────────────────────────────────────── */
   return (
     <div className="page-container">
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Menu Pricing</h1>
           <p className="page-subtitle">

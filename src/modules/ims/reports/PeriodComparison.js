@@ -310,7 +310,7 @@ export default function PeriodComparison() {
         <h2 style={{ margin: 0 }}>Period-over-Period Comparison</h2>
       </div>
 
-      <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Period-over-Period Comparison</h1>
           <p className="page-subtitle">Net Purchases, Wastage, COGS, Revenue and FC% across all BS periods</p>

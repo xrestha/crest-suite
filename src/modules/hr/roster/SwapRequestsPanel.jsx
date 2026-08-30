@@ -222,7 +222,7 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount 
           </Tip>
         </div>
 
-        {msg && <div style={{ fontSize: 12, color: 'var(--theme-red-text)', marginBottom: 10 }}>{msg}</div>}
+        {msg && <div role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginBottom: 10 }}>{msg}</div>}
 
         {requests.length === 0 ? (
           <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>

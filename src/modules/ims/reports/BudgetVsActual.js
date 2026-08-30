@@ -128,7 +128,7 @@ export default function BudgetVsActual() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Budget vs Actual</h1>
           <p className="page-subtitle">Compare planned spend against actual net purchases — {periodLabel}</p>

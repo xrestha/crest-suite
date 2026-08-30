@@ -540,7 +540,7 @@ export default function Sales() {
   return (
     <div>
       {/* Header */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Sales Entry</h1>
           <p className="page-subtitle">Period total sales per menu item — {periodLabel}</p>

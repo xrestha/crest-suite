@@ -87,10 +87,41 @@ Use these global classes from `Layout.css` — don't repeat inline styles:
 - `tab-btn` / `tab-btn--active` / `tab-bar` — pill filter/sort buttons
 - `form-select` — styled `<select>`. **Not for a text input** — it carries `cursor: pointer`, so a field wearing it reads as a menu
 - `form-input` — styled standalone `<input>` (S593). An input inside a `.form-field` wrapper is styled by that wrapper's descendant rule and needs no class; an input **outside** one had nothing to reach for until this existed, so it rendered as the browser's native white box — obvious on the dark presets, near-invisible on the light ones. Shares one declaration block with `.form-field input` so the two cannot drift
-- `stat-grid` — horizontal KPI card row
+- `page-header` — the block every page opens with (28px bottom margin, and under 768px the 60px left padding that clears the fixed hamburger). **Add `page-header--split` whenever the header has actions on the right** — it owns the flex row, `space-between`, `flex-wrap` and the gap, so no page hand-rolls them. A title-only header takes `page-header` alone; the base is deliberately not `display: flex`, or the 29 title-only headers would put their `<h1>` and `<p>` side by side
+- `stat-grid` — horizontal KPI card row. **Its `minmax()` floor is 200px because of what a card HOLDS** — `.stat-value` is 24px/700 and a Nepali-grouped rupee figure needs ~200px. It was 180px, and the headline number wrapped at 1280px, 900px, 414px and 430px. If a new card needs a longer figure, raise the floor; do not let the value wrap
 - `btn`, `btn-ghost`, `btn-primary`, `btn-danger`, `btn-danger--strong` — button variants. `btn-danger` is a tinted red button, **not** a solid `--theme-red` fill: red has no paired foreground token (it ranges from light `#f87171` to dark `#dc2626` across the ten presets, so no single foreground contrasts on all of them), which is why the destructive variant is a tint plus full-opacity red text
 - `badge-green`, `badge-red`, `badge-amber`, `badge-yellow`, `badge-purple`, `badge-gray` — status chips. **That is the complete set — there is no `badge-gold`.** This list named one for a long time and 7 real call sites (HR/IMS/POS Staff rank pills, Advances' loan tag, KOT Log's BOT chip, POS Exception Report's discount row) used it, so all seven rendered as bare unstyled `<span>`s — no tint, no padding, no radius, no 11px size, just inherited text — with nothing to signal the class was missing. Fixed 2026-08-12 by repointing all seven to `badge-yellow`, which is what they meant: every one is a *categorical* distinction, and `badge-yellow` is the accent-tinted categorical-tag badge (see DESIGN.md), not a warning. `badge-amber` is the real warning color; don't reach for `badge-yellow` for a caution state. A class name that doesn't exist fails silently in CSS, so verify a badge class against `Layout.css` before using it rather than copying a nearby line.
 - `no-print` / `print-only` — print visibility. `print-blank-input` (S582) blanks an input's value AND placeholder in print while its border still prints — a fill-in-by-hand box for sheets meant to be priced with a pen (Chrome prints placeholder text as if it were a value, which is why hiding the value alone is not enough)
+
+### Half a class is worse than no class, because it looks adopted (S655)
+
+`.page-header` carried a bottom margin and the mobile hamburger clearance — but **not the row**,
+so all 78 sites in the product hand-rolled the row, and the hand-rolls split into two shapes each
+holding exactly the half the other was missing. Pages that wrote the inline flex object on the
+class got the clearance and no wrap; pages that hand-rolled the whole `<div>` got the wrap and no
+clearance. Measured on the built CSS: an unclassed header put **40×33px of the hamburger over the
+`<h1>`** (`elementFromPoint` at the title's first character returned the button, not the text),
+while a no-wrap header squeezed that title from 298px to **154px**, and one carrying a period
+`<select>` overflowed its own container by **29.7px** — clipped rather than scrollable, because of
+`html { overflow-x: hidden }`. Neither is visible above 768px, which is why both survived every
+desktop review; S652 fixed POS by hand without the shape being named.
+
+**The tell is an identical inline style object appearing on the class itself at more than a couple
+of sites.** `.panel-tab-bar` (S551) and `.stat-grid--compact` (S569) were both found exactly this
+way. When you see it, move the properties into the class rather than fixing the call sites.
+
+**And a wrapping row whose children are themselves rows is only half-wrapped.** Verifying the
+sweep at 360px found a three-control header still overflowing by 15.7px: the class wraps the title
+block against the action group, but each page hand-rolls the action group as its own
+`display: flex`. `.page-header--split > *` sets `flex-wrap: wrap` (inert on the title block, which
+is not a flex container) **and** `min-width: 0`, which undoes the `min-width: auto` a flex item
+defaults to and is what actually held the group wider than its share. Neither alone is enough.
+
+**Related, from the same pass: a sub-route has no nav item and inherits no page chrome.**
+`PurchaseOrders`' Receive and PO-form views re-padded their own root (`padding: 32px 24px` on top
+of the shell's own) and led with a **Back button** rather than a title — so a real control, not
+just text, sat under the hamburger. Both now fold the button and the title into one
+`.page-header`. Full measurements and the rationale live in DESIGN.md's Layout section.
 
 ### A disabled field had no treatment at all, and inline styles were why (S603)
 

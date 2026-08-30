@@ -256,7 +256,7 @@ export default function MenuEngineering() {
   return (
     <div>
       {/* Header */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Menu Engineering</h1>
           <p className="page-subtitle">

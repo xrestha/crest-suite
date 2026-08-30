@@ -1,4 +1,5 @@
 import { useAuth } from '../../../context/AuthContext'
+import Modal from '../../../components/Modal'
 import { printWithTitle } from '../../../utils/printTitle'
 
 // ── Auth hook helper ──────────────────────────────────────────────────────────
@@ -82,7 +83,20 @@ export default function EmployeeJoiningForm({ onClose }) {
   const clientName = useClientName()
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 400, background: 'rgba(0,0,0,0.7)', overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px 0' }}>
+    // The shared Modal rather than the hand-rolled overlay this used to be: it is a dialog, so
+    // it needs Escape, the Tab trap and focus restoration, and it had none of the three.
+    // `unstyled` because an A4 sheet is not a card, `printable` because this document is the
+    // print target (see Modal.js), and alignSelf clears the overlay's cross-axis centring —
+    // a full page is always taller than the viewport, and a centred flex item that overflows
+    // is clipped at its TOP edge with no way to scroll back up to it.
+    <Modal
+      onClose={onClose}
+      title="Employee joining form"
+      unstyled
+      printable
+      zIndex={400}
+      panelStyle={{ alignSelf: 'flex-start', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}
+    >
 
       <style>{`
         @media print {
@@ -347,6 +361,6 @@ export default function EmployeeJoiningForm({ onClose }) {
           <div style={{ fontSize: 9, color: '#aaa' }}>For official use only — keep on file</div>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }

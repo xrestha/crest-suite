@@ -223,7 +223,7 @@ export default function AdminClients() {
       {/* flexWrap: at 390px the search + "+ New Client" cluster used to overflow past the
           viewport and get clipped by .main-content's overflow-x:hidden — the button rendered
           as "N Cli" with no way to scroll to the rest (phase 7 measured finding, S574). */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Clients</h1>
           {/* The money belongs on the screen where the money is CHANGED. This page activates

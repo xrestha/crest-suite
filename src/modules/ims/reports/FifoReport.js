@@ -203,7 +203,7 @@ export default function FifoReport() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title"><Tip text="First In, First Out — tracks which stock batches expire soonest so you use older stock before newer stock." width={240}>FIFO</Tip> / Expiry Report</h1>
           <p className="page-subtitle">Stock expiry tracking — net of returns, sales usage, wastage and staff meals (allocated oldest-batch-first) — {periodLabel}</p>

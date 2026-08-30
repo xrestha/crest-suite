@@ -478,7 +478,7 @@ export default function Items() {
         <h2 style={{ margin: 0 }}>Item Master</h2>
       </div>
 
-      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Item Master</h1>
           <p className="page-subtitle">{items.length} ingredients across {categories.length} categories</p>

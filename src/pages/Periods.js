@@ -658,7 +658,7 @@ export default function Periods() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Periods</h1>
           <p className="page-subtitle">One period per BS month — all inventory entries are linked to a period</p>

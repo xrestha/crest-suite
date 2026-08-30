@@ -112,7 +112,7 @@ export default function GratuityTracker() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Gratuity Accrual</h1>
           <p className="page-subtitle">
@@ -134,7 +134,7 @@ export default function GratuityTracker() {
       ) : (
         <>
           {/* Stat cards */}
-          <div className="stat-grid" style={{ marginBottom: 20 }}>
+          <div className="stat-grid">
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 <Tip text="Total gratuity liability accrued under the Nepal Labour Act for all active monthly-paid employees. Formula: basic ÷ 12 × months of service." width={280}>Total Liability</Tip>
@@ -182,7 +182,7 @@ export default function GratuityTracker() {
           )}
 
           {/* Filters */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap' }} className="no-print">
+          <div style={{ display: 'flex', gap: 16, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }} className="no-print">
             <div className="tab-bar">
               {[
                 { key: 'all',     label: `All (${allRows.length})` },

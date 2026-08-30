@@ -284,7 +284,7 @@ export default function EmployeeList() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Employees</h1>
           <p className="page-subtitle">Employee master — personal info, employment details, salary and banking</p>
@@ -320,7 +320,7 @@ export default function EmployeeList() {
       )}
 
       {/* Stat cards */}
-      <div className="stat-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">Total Employees</div>
           <div className="stat-value">{total}</div>
@@ -353,13 +353,11 @@ export default function EmployeeList() {
       </div>
 
       {/* Filters */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           aria-label="Search employees by name, code, department or designation"
-          style={{
-            background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 6,
-            padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260
-          }}
+          className="form-input form-input--auto"
+          style={{ width: 260, maxWidth: '100%' }}
           placeholder="Search name, code, department…"
           value={search}
           onChange={e => setSearch(e.target.value)}

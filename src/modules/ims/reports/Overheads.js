@@ -356,7 +356,7 @@ export default function Overheads() {
   return (
     <div>
       {/* Header */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Overheads & Cost Breakdown</h1>
           <p className="page-subtitle">Fixed costs · Labor · Tax & Fees · True P&L — {period?.label || '—'}</p>

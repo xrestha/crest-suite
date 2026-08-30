@@ -153,7 +153,7 @@ export default function RecipeMargin() {
         <h2 style={{ margin: 0 }}>Recipe Contribution Margin — {periodLabel}</h2>
       </div>
 
-      <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Recipe Contribution Margin</h1>
           <p className="page-subtitle">(Selling Price − Food Cost) × Qty Sold — total NPR profit contribution per recipe</p>

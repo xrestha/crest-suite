@@ -159,6 +159,161 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S655 — 2026-08-30 — the page header becomes a class, and the KPI figure stops wrapping
+
+Service worker `crest-v170` (shared with S652–S654 — same undeployed tree). No migration.
+
+`/impeccable layout hr module`, then `/impeccable polish hr module`, then finishing the two items
+each had deliberately left. No feature changed; nothing new to document in Help or the module
+guides.
+
+#### `.page-header` was half a class, and half a class looks adopted
+
+S652 fixed POS by hand — the hamburger sitting on the page title — without the shape being named.
+It was everywhere. `.page-header` carried a 28px bottom margin and, under 768px, the 60px left
+padding that clears the fixed hamburger. It did **not** carry the row. So all 78 sites in the
+product hand-rolled the row, and the hand-rolls had split into two shapes, each holding exactly
+the half the other was missing:
+
+| shape | HR pages | hamburger clearance | wraps |
+| --- | --- | --- | --- |
+| `.page-header` + inline flex object | 10 | yes | no |
+| hand-rolled `<div>` + flex + wrap + gap | 8 | no | yes |
+
+Measured on the built CSS at 768 and 390px, not reasoned about:
+
+- an unclassed header put **40×33px of the hamburger over the `<h1>`** — `elementFromPoint` at the
+  title's first character returned the button, not the text. Worse than POS's 12×16px, because
+  these pages had no padding of their own to push the title clear;
+- a no-wrap header squeezed the same title from **298px to 154px** while its action group grew a
+  ragged internal stack beside it;
+- one carrying a period `<select>` **overflowed its own container by 29.7px** — clipped, not
+  scrollable, because of `html { overflow-x: hidden }`.
+
+None of it is visible above 768px, which is why every desktop review passed.
+
+**`.page-header--split`** now owns `display: flex` + `space-between` + `flex-wrap` +
+`gap: 12px 16px`. All 19 HR headers took it first; the sweep then finished the other 40, including
+`ReportPage.jsx`, which covers every report page through one component. 24 of those 40 had the
+no-wrap variant. Eight more files had no `.page-header` at all, and two of those
+(`PurchaseOrders`' Receive and PO-form sub-views) led with a **Back button** rather than a title —
+so a real control sat under the hamburger; both now fold button and title into one `.page-header`,
+and both dropped the `padding: 32px 24px` they were re-adding to a root the shell already pads.
+Final census: 95 sites, none carrying an inline style, none with a `.page-title` outside a header.
+
+**The split modifier stays separate from the base on purpose** — 29 sites are a title block with no
+actions, and making the base `display: flex` would put their `<h1>` and `<p>` side by side.
+
+**A wrapping row whose children are themselves rows is only half-wrapped.** Verifying the sweep at
+360px found a three-control header still overflowing by 15.7px: the class wraps the title block
+against the action group, but each page hand-rolls that group as its own `display: flex`.
+`.page-header--split > *` sets `flex-wrap: wrap` (inert on the title block, which is not a flex
+container) **and** `min-width: 0` — the latter undoes the `min-width: auto` a flex item defaults to
+and is what actually held the group oversized. Neither property is sufficient alone.
+
+#### The KPI figure was wrapping at 1280px, and the floor was why
+
+The layout pass flagged four stat cards in one column on a phone as a density question. Measuring
+found the real defect, which was not a mobile one: at `minmax(180px, 1fr)`, `NPR 12,48,650` at
+24px/700 **already wrapped at 1280px** (5 columns of ~176px), at 900px, and at 414 and 430px — an
+ordinary laptop, a tablet, and the two commonest large phones. The grid promised cards as narrow
+as 180px; the figure inside needs ~200px. The floor and the type size had never agreed.
+
+Both fixes were measured. Dropping `.stat-value` to 20px also clears it everywhere — and was
+rejected: it de-emphasises the headline figure on every KPI in the product to solve a grid
+problem, and a number reading as exact is what this product sells. **The floor is now 200px**,
+which eliminates every wrap from 480 to 1440 and costs one column at exactly the two widths where
+the card was too narrow for its own contents (1280: 5→4, 900: 3→2). 1440 still fits five.
+`.stat-grid--compact` is untouched — it already uses its own 18px value for its narrower cards.
+
+#### Rhythm, and the HR dashboard
+
+Thirteen HR pages overrode `.stat-grid`'s own 28px bottom margin with an inline `marginBottom: 20`,
+and the HR Dashboard then nudged the block after them with a `marginTop: 4` to compensate. Nothing
+chose 20; it propagated. Removed, the page reads 8px from a section label to the group it names
+and 28px from one group to the next — a 3.5× contrast, which is what makes the groups separate
+under a squint. The dashboard's seven copies of one six-property eyebrow style are now a
+`SectionLabel` component, which also fixed four `<h3>`s that had no `<h2>` above them to hang off.
+
+Three filter rows sat at `gap: 8` against `.tab-bar`'s own 6px internal gap, so a group of pills
+read as four adjacent controls rather than one control with four states; Advances had additionally
+patched the feeling with a `marginLeft: 8` on the second group, so the gap and the margin were both
+paying for the same separation. All three are 16px.
+
+#### Polish: what the stored critique got right, and what it no longer did
+
+The S612 critique snapshot (26/40, five P1s) was read as one input and then **checked line by line
+against current code**. Most of it had already been fixed by intervening sessions: 139 signal-colour
+text sites → 0 (262 `*-text`, 67 `accent-ink`); 11 hand-rolled modals → 1; roster contrast fixed by
+`rosterHelpers`' derived label colour; `.tab-btn` and checkboxes already in the coarse-pointer
+block. Its "44 unlabeled controls" was a grep artifact — the 9 remaining `<label>`s are **wrapping**
+labels, which need no `htmlFor`. Genuinely open, and fixed:
+
+- **Four status messages announced to nobody.** Leave, Overtime (×2) and Swap Requests rendered the
+  only confirmation that an approve or reject landed as a bare coloured `<span>` in no live region.
+  Each now picks its role from the message's own severity — `status` for success, `alert` for
+  failure — matching what `FinalSettlement.jsx` already did.
+- **The one HR overlay that never adopted `Modal`.** The Employee Joining Form hand-rolled a
+  `position: fixed` dialog with no Escape, no focus trap and no `role="dialog"`. The reason it
+  could not adopt the shared component was a single hard-coded `className="no-print"` — and this
+  dialog **is** the print target, a blank A4 form to print and fill in by hand. `no-print` is
+  `display: none !important`, which removes the overlay from the print box tree entirely, and a
+  descendant's `visibility: visible` cannot resurrect a subtree whose ancestor generates no boxes.
+  `Modal` gained a `printable` flag: narrowing a baked-in assumption where the cause lives, rather
+  than hand-rolling a partial focus trap next to a real one.
+  **Measured before trusting it** — with `Modal`'s default `unstyled` centring the form's first
+  line sat at **y = −201** on desktop and **−261** on a phone with `scrollTop` already 0 (a flex
+  item taller than its scrollport is clipped at its top edge, unreachable), and the sheet rendered
+  at **x = −202** on mobile because a panel with no width could not honour the paper's
+  `max-width: 100%`. `panelStyle` with `alignSelf: flex-start` fixes both.
+- **Shift Types was the one HR table with no empty state**, so deleting the last shift left a bare
+  header rule and nothing under it.
+- **Text selection and the caret shipped as browser defaults** — stock blue and a black bar, on a
+  product where the scrollbar, focus ring, underline offset and tabular numerals are all themed,
+  and on the two gestures an accountant performs most. `::selection` is now `--theme-accent` on
+  `--theme-accent-text`: that pair is *defined* as the foreground that sits on an accent fill and
+  resolves per preset, so contrast holds on all ten by construction rather than by a measurement a
+  new preset would invalidate. A solid fill, not a tint — a wash has as many contrast outcomes as
+  there are text colours under it, and a payslip has about ten. The caret takes `--theme-accent-ink`
+  (measured `#c9a84c` Dark, `#8a6d1f` Light) because it sits on the input ground, not on a fill.
+  The guest menu re-states both in pine: `--theme-*` still resolves on that route, so without a
+  `.guest-menu` override a guest would have been handed whichever preset the scanning phone had
+  saved.
+
+#### Three things reported as open that were not
+
+The polish write-up listed Payroll Run's stale-finalize gate, the SSF enrolment/number mismatch and
+Final Settlement persisting nothing as still outstanding. All three were already fixed — S570, S600
+and S613 — and were reported off the stale snapshot without being checked, in the same message that
+checked everything else. Verified now: `ssf_enrolled && String(ssf_no).trim()` at all four
+computation sites and identical to `HrReports`' challan filter, so a deduction and the filing sheet
+cannot diverge; `payslipDrift` compares inputs rather than `net_pay` and `finalize()` refuses
+outright; settlements write draft-first then flip to `finalized`. **A stored critique is evidence
+about the day it was written.** Verify every finding before repeating it, including the ones that
+sound too specific to be stale.
+
+#### Verification
+
+Seven viewports (360 / 390 / 430 / 768 / 900 / 1280 / 1440) measured on the **built** CSS in
+headless Chromium: no hamburger overlap, no header overflow, no KPI wrap, no horizontal overflow.
+Detector down to 6 across `src/modules`, `src/pages` and `src/components`, all sanctioned — the
+sidebar collapse pair DESIGN.md already accepts, and `leaveConstants.js`'s categorical leave hues,
+which are correct behaviour flagged as drift and are now documented in place so the next sweep does
+not "fix" a categorical palette into semantic tokens.
+
+**Not verified, and worth stating:** console errors and real interaction latency need an
+authenticated session, and the dev server was in use, so everything above is measured against the
+built stylesheet rather than the live app.
+
+**Flagged, not fixed:** `fontSize: 26` appears in 8 places (Pricing ×3, PosLogin, KitchenDisplay,
+GuestMenu, Settings, ClientDrawer) and 26px is not on the type ramp. That is an `/impeccable
+typeset` job across six unrelated surfaces; `parkingSlipHtml.js`'s instance is a standalone print
+builder with a documented exemption.
+
+**Written down:** `DESIGN.md` gains a **Browser surfaces** section and two Layout named rules;
+`.claude/rules/design-system.md` gains the half-a-class rule plus `page-header` /
+`page-header--split` and the `stat-grid` floor in its class list; `.claude/rules/component-library.md`
+records `Modal`'s `printable` and the tall-`unstyled`-panel `alignSelf` requirement.
 ### S654 — 2026-08-30 — POS stops swallowing its own write failures
 
 Service worker `crest-v169` (shared with S652/S653 — same undeployed tree). No migration.

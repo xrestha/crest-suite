@@ -333,7 +333,7 @@ export default function PosStaff() {
   return (
     <div>
 
-      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">POS Staff</h1>
           <p className="page-subtitle">

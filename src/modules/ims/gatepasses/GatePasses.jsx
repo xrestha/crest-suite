@@ -100,7 +100,7 @@ export default function GatePasses() {
   return (
     <>
     <div className={printPass ? 'no-print' : ''}>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Gate Passes</h1>
           <p className="page-subtitle">Issue a printable gate pass for a vendor or delivery vehicle</p>

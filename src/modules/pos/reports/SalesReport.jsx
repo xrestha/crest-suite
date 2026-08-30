@@ -794,7 +794,7 @@ export default function SalesReport() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">
           Sales Report <Tip text="Ten views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Delivery Partners tracks Foodmandu/Pathao bills from Credit through settlement and checks what each platform withheld against the rate you agreed with it, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>

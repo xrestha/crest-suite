@@ -196,7 +196,7 @@ export default function StockReport() {
 
   return (
     <div>
-      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Stock Report</h1>
           <p className="page-subtitle">Current inventory on hand & valuation — {periodLabel}</p>

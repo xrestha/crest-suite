@@ -189,6 +189,15 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
               )
             })}
 
+            {shiftTypes.length === 0 && !adding && (
+              <tr>
+                <td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
+                  No shift types yet. The roster board has nothing to assign until you add one —
+                  click <strong style={{ color: 'var(--theme-text2)' }}>+ Add Shift</strong> to start.
+                </td>
+              </tr>
+            )}
+
             {adding && (
               <tr>
                 <td>

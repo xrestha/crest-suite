@@ -759,7 +759,7 @@ export default function Roster() {
         }
       `}</style>
 
-      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Staff Roster</h1>
           <p className="page-subtitle">Plan weekly and monthly shift schedules for all staff</p>

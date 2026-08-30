@@ -176,7 +176,7 @@ export default function DeadStock() {
       </div>
 
       {/* Screen header */}
-      <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Dead Stock / Slow Movers</h1>
           <p className="page-subtitle">Items with zero or low consumption — capital tied up in stock</p>

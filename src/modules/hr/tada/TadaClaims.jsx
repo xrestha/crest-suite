@@ -320,7 +320,7 @@ export default function TadaClaims() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">TADA Claims</h1>
           <p className="page-subtitle">Travel &amp; Daily Allowance expense reimbursement</p>
@@ -338,7 +338,7 @@ export default function TadaClaims() {
       </div>
 
       {/* Summary cards */}
-      <div className="stat-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid">
         {[
           { label: 'Pending Review', value: `NPR ${fmt(pendingTotal)}`, tip: `${pendingCount} claim(s) awaiting approval, for the month selected below.` },
           { label: 'Approved, Unpaid', value: `NPR ${fmt(approvedTotal)}`, tip: 'Approved claims not yet marked paid, for the month selected below.' },

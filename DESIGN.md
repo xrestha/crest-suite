@@ -411,7 +411,7 @@ make it silently while fixing something else.**
 
 **Spacing rhythm is a 4/8/16/24 scale**, applied by convention rather than by token — there are no `--spacing-*` custom properties, so the scale lives in the frontmatter and in usage, not in CSS. 16px is the default gap between peers (grid gaps, button rows, form field stacks); 24px is `.card`'s internal padding and the gap between major sections; 8px and 4px are for chip-level and intra-control spacing. A value off this scale in new work is drift, the same way an off-ramp font size is.
 
-**KPI rows are auto-fitting grids, not fixed columns.** `.stat-grid` is `repeat(auto-fit, minmax(180px, 1fr))` with a 16px gap and 28px bottom margin, so a row of 4 stat cards reflows to 2×2 and then to a single column without a media query. Prefer this over hand-declared column counts — the dashboards that do declare columns (`.dash-3col-*`, for the IMS/HR/POS split) do it because the *content grouping* is meaningful, not because the widths needed pinning, and each of those collapses to `1fr` at the breakpoint.
+**KPI rows are auto-fitting grids, not fixed columns.** `.stat-grid` is `repeat(auto-fit, minmax(200px, 1fr))` with a 16px gap and 28px bottom margin, so a row of 4 stat cards reflows to 2×2 and then to a single column without a media query. Prefer this over hand-declared column counts — the dashboards that do declare columns (`.dash-3col-*`, for the IMS/HR/POS split) do it because the *content grouping* is meaningful, not because the widths needed pinning, and each of those collapses to `1fr` at the breakpoint.
 
 **One breakpoint: 768px.** There is no tablet tier and no desktop max-width. Below 768px the sidebar leaves the flow entirely (`transform: translateX(-100%)` plus a hamburger and a 55%-black overlay), `.main-content` drops its reserved margin, and the multi-column dashboard grids go single-column. Touch sizing is handled separately and deliberately by `@media (pointer: coarse)` rather than by width — see Inputs / Fields for why that distinction matters.
 
@@ -468,6 +468,52 @@ waiter's login, and the most-pressed button in the product — `Send Order` rend
 of the bar empty beside it. `flex: 1` states the relationship instead of guessing at it, and holds
 however many siblings survive their permission checks. Same family as the `space-between` rule
 above: both are a fixed answer standing in for a relationship the container already knows.
+
+**Half a class is worse than no class, because it looks adopted** (added 2026-08-30, from the HR
+module). `.page-header` carried one property — a 28px bottom margin — plus, under 768px, the 60px
+left padding that clears the fixed hamburger. It did not carry the row. So all 78 sites in the
+product hand-rolled the row, and the hand-rolls split into two shapes that each held exactly the
+half the other was missing. HR had ten pages writing
+`className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems:
+'flex-start' }}` — clearance, no wrap — and eight writing the same flex object with `flexWrap` and
+a `gap` on a bare `<div>` — wrap, no clearance. Measured on the built CSS at 768 and 390px, an
+unclassed header put **40×33px of the hamburger over the `<h1>`**, with `elementFromPoint` at the
+title's first character returning the button rather than the text; a no-wrap header squeezed that
+same title from 298px to **154px** while its action group grew a ragged internal stack beside it,
+and one carrying a period `<select>` **overflowed its own container by 29.7px** — clipped, not
+scrollable, because `html { overflow-x: hidden }`. `.page-header--split` now owns
+`display: flex` + `space-between` + `flex-wrap` + `gap: 12px 16px`, and all 19 HR pages use it.
+
+Two things generalise. **A class that half a page still has to hand-roll will be hand-rolled
+inconsistently** — the giveaway is an identical inline style object appearing on the class itself
+at more than a couple of sites (`.panel-tab-bar` and `.stat-grid--compact` were both found this
+exact way). And **the split modifier stays separate from the base**: 28 of the 78 sites are a
+title block with no actions, and making the base `display: flex` would put their `<h1>` and `<p>`
+side by side. The sweep finished 2026-08-30: **all 40 remaining sites now use it**, `ReportPage.jsx` included,
+which covers every report page through one component. Twenty-four of the forty had the no-wrap
+variant. Eight more files had no `.page-header` at all — the hamburger-overlap shape — and two
+of those (`PurchaseOrders`' Receive and PO-form sub-views) led with a **Back button** rather
+than a title, so a real control sat under the hamburger; both now fold the button and the title
+into one `.page-header` so both get the clearance, and both dropped the `padding: 32px 24px`
+they were re-adding to a root the shell already pads.
+
+**A wrapping row whose children are themselves rows is only half-wrapped.** Verifying the sweep
+at 360px found a header with three controls still overflowing its own container by 15.7px: the
+class wraps the title block against the action group, but each page hand-rolls the action group
+as its own `display: flex` with a gap and no wrap. `.page-header--split > *` now sets
+`flex-wrap: wrap` (inert on the title block, which is not a flex container) **and**
+`min-width: 0`, which undoes the `min-width: auto` a flex item defaults to and is what actually
+held the group wider than its share. Neither property is sufficient alone.
+
+**One value repeated is not a rhythm.** Thirteen HR pages overrode `.stat-grid`'s own 28px bottom
+margin with an inline `marginBottom: 20`, and the HR Dashboard then nudged the block after them
+with a `marginTop: 4` to compensate. Nothing chose 20; it propagated. Removed, the page reads
+8px from a section label to the group it names and 28px from one group to the next — a 3.5×
+contrast, which is the thing that actually makes the groups separate under a squint. Related: a
+filter row's own `gap` must clear `.tab-bar`'s internal 6px, or a group of pills reads as four
+adjacent controls rather than one control with four states. Three HR rows sat at `gap: 8`, and
+Advances had additionally patched the feeling with a `marginLeft: 8` on the second group — the
+gap and the margin paying for the same separation, the same shape as the `48%` rule above. 16px.
 
 ## Elevation & Depth
 
@@ -573,6 +619,30 @@ Shadow was already in real use before this change beyond the two cases previousl
   **That rule uses `!important`, and it is load-bearing rather than defensive** — the same justification the reduced-motion block in the same file already carries. 370 form controls across ~46 files set their font-size in an inline `style` object, and no selector beats an inline style; without it the floor would reach the controls that least needed it and skip every one that did. The 44px button rule is scoped to `:not([class])` instead, because every classed button already has a tuned value here (`.btn` 44, `.btn-sm`/`.tab-btn` 32, `.sidebar-link` 40) and a bare `button` selector would quietly re-decide the ones that merely have no rule yet; `min-height` only, since `min-width` on a narrow icon button squeezes its neighbours while extra height just makes the row taller, which on a tablet is the point.
 
   **This does not retire "reach for a class."** A control on a class also gets the `[aria-invalid]` hook, the `:disabled` treatment and the shape scale — none of which an `!important` floor can supply, and none of which an inline style can receive. The floor exists so the zoom trap does not wait on a 370-site sweep.
+
+### Browser surfaces (added 2026-08-30)
+
+The parts of the page nobody drew still ship with the design. The scrollbar has been themed
+since the beginning; **text selection and the caret had not been**, so on a product where every
+other pixel is tokenised, dragging across a figure produced the browser's stock blue and typing
+into a field produced a black bar — two colours belonging to no design system, on the two
+gestures an accountant performs most.
+
+- **`::selection` is `--theme-accent` on `--theme-accent-text`.** That pair is *defined* as "the
+  foreground that sits on an accent fill", resolved per preset, so the contrast is correct on all
+  ten by construction rather than by a measurement that a new preset would invalidate.
+- **It is a solid fill, not a tint.** A wash at some alpha has as many contrast outcomes as there
+  are text colours underneath it, and a payslip has about ten; a fill has one.
+- **The caret takes `--theme-accent-ink`, not `--theme-accent`** — it sits on the input ground
+  rather than on a fill, which is exactly the distinction those two tokens exist to draw.
+  Measured: `#c9a84c` on Dark, `#8a6d1f` on Light.
+- **The guest menu re-states both in its own tokens.** Its palette is deliberately
+  theme-independent, but `--theme-*` still resolves on that route, so without a `.guest-menu`
+  override a guest would have been handed whichever preset the scanning phone had saved — the
+  same leak the Colors section documents for the rest of that surface. Pine on paper there.
+
+Anything else in this family — the focus ring, `text-underline-offset`, tabular numerals in data
+cells — is already themed. If a new one appears, it belongs here rather than at a call site.
 
 ### Tabs (pill filters)
 - **Style:** 12px radius (`--radius-md`; bumped from 5px 2026-07-12 - see the pill-shape note below), 1px border, 4px 12px padding, 12px label, secondary text color at rest.

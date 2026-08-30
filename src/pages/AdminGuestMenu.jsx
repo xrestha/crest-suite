@@ -113,7 +113,7 @@ export default function AdminGuestMenu() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Guest Menu Preview — {clientName}</h1>
           <p className="page-subtitle">The exact live page a guest sees after scanning this table's QR code.</p>

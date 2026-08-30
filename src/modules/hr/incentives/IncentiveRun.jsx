@@ -206,7 +206,7 @@ export default function IncentiveRun() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Incentives / Bonus</h1>
           <p className="page-subtitle">
@@ -259,7 +259,7 @@ export default function IncentiveRun() {
         </div>
       ) : (
         <>
-          <div className="stat-grid stat-grid--compact" style={{ marginBottom: 20 }}>
+          <div className="stat-grid stat-grid--compact" style={{ marginBottom: 28 }}>
             {[
               { label: 'Gross Payout', value: fmt(total), color: 'var(--theme-accent-ink)', tip: 'Total gross incentive before TDS withholding.' },
               { label: 'TDS Withheld', value: fmt(totalTds), color: 'var(--theme-red-text)', tip: 'Income tax withheld from this incentive, at each employee\'s marginal rate.' },

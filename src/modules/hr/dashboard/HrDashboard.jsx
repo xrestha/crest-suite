@@ -42,6 +42,21 @@ function ssfDeadlineState(bs_year, bs_month) {
 // failed. Every pending-approval card passes it, and a queue waiting on a manager is not an error
 // state; painting them red alongside genuinely-late things trains the reader to discount red.
 // `overdue` is the escalation for something that has actually passed its date.
+// Every group on this page is announced by one of these, so the label and the 8px it holds above
+// the group it names are a single decision rather than seven copies of a six-property style
+// object. The page's cadence is 8px from a label to its own content, 28px from one group to the
+// next (.stat-grid's own margin) - a 3.5x contrast, which is what makes the groups separate when
+// the page is squinted at. All seven are h2: they are peer sections of the page, not subsections
+// of one another, and the four queue panels were h3 with no h2 anywhere above them to hang off.
+function SectionLabel({ children }) {
+  return (
+    <h2 style={{
+      fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)',
+      letterSpacing: '0.08em', textTransform: 'uppercase',
+    }}>{children}</h2>
+  )
+}
+
 function KCard({ label, value, sub, color = 'var(--theme-text1)', tip, onClick, alert, overdue }) {
   return (
     <div
@@ -224,12 +239,12 @@ export default function HrDashboard() {
       {/* Screen-reader-only announcement — the visible loading state is a shimmering skeleton,
           which on its own gives no indication to a screen reader that the page is still loading. */}
       <div role="status" aria-live="polite" className="sr-only">Loading dashboard data…</div>
-      <div style={{ marginBottom: 20 }}>
+      <div className="page-header">
         <h1 className="page-title">HR Dashboard</h1>
         <p className="page-subtitle">Headcount · Payroll · Approval queues · SSF · Advances at a glance</p>
       </div>
       {[0, 1, 2].map(row => (
-        <div key={row} className="stat-grid" style={{ marginBottom: 20 }}>
+        <div key={row} className="stat-grid">
           {[0, 1, 2, 3].map(card => (
             <div key={card} className="stat-card">
               <span className="skeleton" style={{ display: 'block', width: '60%', height: 11, marginBottom: 10 }} />
@@ -250,7 +265,7 @@ export default function HrDashboard() {
   return (
     <div>
       <div role="status" aria-live="polite" className="sr-only">Dashboard data loaded</div>
-      <div style={{ marginBottom: 20 }}>
+      <div className="page-header">
         <h1 className="page-title">HR Dashboard</h1>
         <p className="page-subtitle">Headcount · Payroll · Approval queues · SSF · Advances at a glance</p>
       </div>
@@ -259,7 +274,7 @@ export default function HrDashboard() {
           every query above silently discarded Supabase's error field. */}
       {loadError && (
         <div className="card" style={{
-          marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+          marginBottom: 28, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
           borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
           background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
         }}>
@@ -277,10 +292,10 @@ export default function HrDashboard() {
       )}
 
       {/* ── KPI Row 1 — Approvals (everything a staff submission needs a manager to act on) ── */}
-      <h2 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+      <SectionLabel>
         Approvals {pendingTotal > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingTotal} pending)</span>}
-      </h2>
-      <div className="stat-grid" style={{ marginBottom: 20 }}>
+      </SectionLabel>
+      <div className="stat-grid">
         <KCard
           label="Leave Pending"
           value={pendingLeave}
@@ -320,8 +335,8 @@ export default function HrDashboard() {
       </div>
 
       {/* ── KPI Row 2 — Headcount ───────────────────────────────────────────── */}
-      <h2 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Headcount</h2>
-      <div className="stat-grid" style={{ marginBottom: 20 }}>
+      <SectionLabel>Headcount</SectionLabel>
+      <div className="stat-grid">
         <KCard
           label="Active Staff"
           value={empStats?.active ?? '—'}
@@ -359,10 +374,10 @@ export default function HrDashboard() {
       {/* ── Payroll + SSF ───────────────────────────────────────────────────── */}
       {payInfo && (
         <>
-          <h2 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          <SectionLabel>
             Last Finalized Payroll — {payInfo.periodLabel} ({payInfo.count} employees)
-          </h2>
-          <div className="stat-grid" style={{ marginBottom: 20 }}>
+          </SectionLabel>
+          <div className="stat-grid">
             <KCard
               label="Net Payable"
               value={`NPR ${fmt(payInfo.netPay)}`}
@@ -409,19 +424,19 @@ export default function HrDashboard() {
       )}
 
       {!payInfo && (
-        <div className="card" style={{ padding: '14px 18px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
+        <div className="card" style={{ padding: '14px 18px', marginBottom: 28, fontSize: 13, color: 'var(--theme-text2)' }}>
           No finalized payroll yet. Generate and finalize a payroll run to see net pay and SSF summary here.
         </div>
       )}
 
       {/* ── Pending queues ───────────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16, marginTop: 4 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16 }}>
 
         {/* Leave queue */}
         <div>
-          <h3 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          <SectionLabel>
             Pending Leave Requests {pendingLeave > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingLeave})</span>}
-          </h3>
+          </SectionLabel>
           <div className="card" style={{ padding: 0 }}>
             {leaveList.length === 0 ? (
               <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending leave requests ✓</div>
@@ -459,9 +474,9 @@ export default function HrDashboard() {
 
         {/* OT queue */}
         <div>
-          <h3 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          <SectionLabel>
             Pending OT Entries {pendingOt > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingOt})</span>}
-          </h3>
+          </SectionLabel>
           <div className="card" style={{ padding: 0 }}>
             {otList.length === 0 ? (
               <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending OT entries ✓</div>
@@ -505,9 +520,9 @@ export default function HrDashboard() {
 
         {/* TADA queue */}
         <div>
-          <h3 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          <SectionLabel>
             Pending TADA Claims {pendingTada > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingTada})</span>}
-          </h3>
+          </SectionLabel>
           <div className="card" style={{ padding: 0 }}>
             {tadaList.length === 0 ? (
               <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending TADA claims ✓</div>
@@ -543,9 +558,9 @@ export default function HrDashboard() {
 
         {/* Shift swap queue */}
         <div>
-          <h3 style={{ fontSize: 11, fontWeight: 700, margin: '0 0 8px', color: 'var(--theme-text3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          <SectionLabel>
             Pending Shift Swaps {pendingSwap > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingSwap})</span>}
-          </h3>
+          </SectionLabel>
           <div className="card" style={{ padding: 0 }}>
             {swapList.length === 0 ? (
               <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending shift swaps ✓</div>

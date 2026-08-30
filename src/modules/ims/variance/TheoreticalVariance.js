@@ -265,7 +265,7 @@ export default function TheoreticalVariance() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Theoretical vs Actual</h1>
           <p className="page-subtitle">

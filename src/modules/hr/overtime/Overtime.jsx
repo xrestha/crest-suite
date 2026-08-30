@@ -214,13 +214,13 @@ export default function Overtime() {
   return (
     <div>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Overtime</h1>
           <p className="page-subtitle">Log, approve, and track employee OT — feeds into payroll at 1.5× weekday / 2× public holiday</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
+          {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
           <select className="form-select" aria-label="Period" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
@@ -228,7 +228,7 @@ export default function Overtime() {
       </div>
 
       {/* Stat cards */}
-      <div className="stat-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid">
         <div className="stat-card" style={pendingCount > 0 ? { cursor: 'pointer' } : undefined} onClick={() => pendingCount > 0 && setStatusTab('pending')}>
           <div className="stat-label">
             <Tip text="OT entries logged but not yet approved or rejected. Click to filter." width={240}>
@@ -472,7 +472,7 @@ export default function Overtime() {
             placeholder="e.g. Event setup, Kitchen cover, Inventory count…"
           />
 
-          {msg && <div style={{ marginBottom: 12, fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</div>}
+          {msg && <div role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ marginBottom: 12, fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</div>}
 
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn btn-ghost" onClick={closeDrawer}>Cancel</button>

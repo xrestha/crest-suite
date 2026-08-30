@@ -266,7 +266,7 @@ export default function Settings() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Settings</h1>
           <p className="page-subtitle">Configure branding, property details and operational thresholds</p>

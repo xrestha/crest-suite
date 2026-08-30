@@ -182,7 +182,7 @@ export default function HolidayCalendar() {
   return (
     <div>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Holiday Calendar</h1>
           <p className="page-subtitle">Nepal public and optional holidays per fiscal year — used for OT rate and attendance reference</p>
@@ -243,7 +243,7 @@ export default function HolidayCalendar() {
       )}
 
       {/* Stat cards */}
-      <div className="stat-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Gazetted public holidays — staff are entitled to the day off. Working on a public holiday attracts 2× overtime under the Nepal Labour Act." width={280}>

@@ -120,7 +120,7 @@ export default function PaySetup() {
       </div>
 
       {/* Stat cards */}
-      <div className="stat-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid">
         {[
           { label: 'Total Gross Payroll', value: fmt(totals.gross),        color: 'var(--theme-accent-ink)', tip: 'Sum of gross earnings (basic + allowances) across all monthly employees. Daily/hourly workers are excluded — their pay is computed at payroll.' },
           { label: 'SSF — Employee',       value: fmt(totals.ssf_emp),      color: 'var(--theme-red-text)', tip: 'Total 11% SSF deducted from employees this month, computed on basic salary (capped at NPR 100,000 each).' },

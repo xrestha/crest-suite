@@ -165,7 +165,7 @@ export default function MenuRepricing() {
         <h2 style={{ margin: 0 }}>Menu Repricing — {periodLabel}</h2>
       </div>
 
-      <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Menu Repricing</h1>
           <p className="page-subtitle">Dishes priced below their target food-cost % — and the price to charge to fix it</p>

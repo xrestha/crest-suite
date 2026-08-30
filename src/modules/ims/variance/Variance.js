@@ -248,7 +248,7 @@ export default function Variance() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Variance Report</h1>
           <p className="page-subtitle">Theoretical vs actual usage — the money report — {periodLabel}</p>

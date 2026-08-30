@@ -128,7 +128,7 @@ export default function WastageReport() {
       </div>
 
       {/* Screen header */}
-      <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Wastage Report</h1>
           <p className="page-subtitle">Items logged as waste this period — quantity and NPR cost</p>

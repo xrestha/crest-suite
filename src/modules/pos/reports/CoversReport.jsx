@@ -291,7 +291,7 @@ export default function CoversReport() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">
             Covers Report <Tip text="How guest traffic (not just revenue) moves through the floor — average party size, revenue per guest, how long tables turn, and when covers actually peak." width={320}>ⓘ</Tip>

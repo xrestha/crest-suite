@@ -647,7 +647,7 @@ export default function FinalSettlement() {
 
   return (
     <div>
-      <div className="page-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Final Settlement</h1>
           <p className="page-subtitle">Resignation / termination payout calculator</p>
