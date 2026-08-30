@@ -105,7 +105,7 @@ export default function SupplierPriceTracker() {
       const item = itemMap[pe.item_id]
       if (!item) return
       // purchase_entries.rate is stored ex-VAT and ALREADY converted to base-unit terms at entry
-      // time (rate = entered_rate / conversion_factor — see PurchaseBillModal.jsx's saveBill).
+      // time (rate = entered_rate / conversion_factor — see PurchaseBillForm.jsx's saveBill).
       // This used to divide it AGAIN, by items.purchase_qty — an unrelated legacy field (paired
       // with items.rate for that table's own generated per_uom_rate column, nothing to do with
       // purchase-unit-to-base-unit conversion) — corrupting every converted item's tracked rate.

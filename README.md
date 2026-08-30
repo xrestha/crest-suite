@@ -159,6 +159,58 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S647 — 2026-08-30 — Add/Edit Purchase Bill is a page, not a modal
+
+Service worker `crest-v164`. No migration. New: `PurchaseBillPage.jsx`; `PurchaseBillModal.jsx` →
+`PurchaseBillForm.jsx`; routes `/purchases/new?period=<id>` and `/purchases/:groupId/edit`.
+
+Asked directly — "can the page exist without the modal?" — while looking at S646's remaining
+overflow. The modal was **not** what cut the table (both modals on the page are conditionally
+mounted, and `Modal` is `position: fixed; inset: 0`, which contributes nothing to document width;
+the visible Fab proved it was closed). But the bill form is the widest surface in the product — its
+line table declares `minWidth: 956` inside a `maxWidth: 1160` dialog — so on any laptop it was a
+wide form scrolling inside an overlay that was itself scrolling, over a list it hid while open.
+
+**The split is form / page, not one big component.** `PurchaseBillForm` keeps exactly what it always
+was — header + line state, validation, the insert-before-delete save — and lost only its `<Modal>`
+wrapper. `PurchaseBillPage` owns what the form never should have: routing, its own loading, and the
+two things that happen AFTER a save. Those two had lived on `Purchases.js` purely because that is
+where the modal was mounted:
+
+- **the auto-printed voucher**, which now has to finish before the route changes — navigating away
+  mid-dialog unmounts the node being printed, so `printPurchaseBill` takes an `after` callback;
+- **the "Rate changes detected" prompt**, which is about what you just typed.
+
+Leaving is therefore a two-sided barrier (`printDone` && `changed !== null`), because either half is
+optional and neither can decide alone. Apply and Skip both return to the list.
+
+**The period rides in the query string.** The list lets an admin select a *closed* month and edit it
+in place, so defaulting a new bill to the open period would have filed it against the wrong month.
+Edit needs no parameter — the period is read off the bill's own rows.
+
+**Two things a modal had been giving away for free.** A sub-route has no nav item, so the S601 audit
+grep cannot see it — `/purchases/new` and `/purchases/:groupId/edit` carry `hasImsAccess('staff')`
+themselves, since `ModuleGate` checks the module and never the role. And a record id that was an
+in-memory array filter is now a **URL parameter**: `purchases_select` scopes a client login through
+`monthly_periods.client_id`, but it passes `is_admin()`, so an admin viewing client A could have
+opened client B's bill by id. The page requires the bill's `period_id` to be in its own scoped
+period list. Both are written into `CLAUDE.md`'s S601 rule as the sub-route case.
+
+The form also **lost its private Quick Calculator and the ⌗ button** that opened it. Those existed
+only because the dialog ran a document keydown listener that ate Escape before the calculator saw
+it; on a route, `Layout.js`'s global Alt+C calculator — always mounted underneath — simply works,
+and a second instance would now be two calculators on one screen. Help and the IMS module guide both
+described that button, and both are corrected.
+
+Bill entry seeds its reference lists from the list page's own `sessionDataCache` sections, so
+arriving from Purchases paints the form immediately instead of blanking on three reads.
+
+**Not changed, and worth knowing:** a legacy bill whose `purchase_group_id` is NULL is keyed by its
+own row id (`p.purchase_group_id || p.id`). Editing one inserts the new lines under that id as a
+group and then deletes `WHERE purchase_group_id = <id> AND id NOT IN (new)` — which does not match
+the original NULL-group row, so it would survive as a duplicate. That behaviour is byte-identical to
+what the modal did; this session moved it, and did not fix it.
+
 ### S646 — 2026-08-30 — the Purchases bill table stopped running off the right edge
 
 Service worker `crest-v163`. No migration.

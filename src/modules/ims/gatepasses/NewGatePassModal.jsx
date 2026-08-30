@@ -12,7 +12,7 @@ const PURPOSES = [
 ]
 
 // Reports back via onSaved(payload) — GatePasses.jsx owns the actual insert+print, same
-// "form reports back, parent commits" split as Purchases.js/PurchaseBillModal.jsx.
+// "form reports back, parent commits" split as Purchases.js/PurchaseBillForm.jsx.
 export default function NewGatePassModal({ vendors, onClose, onSaved }) {
   const [useExisting, setUseExisting] = useState(true)
   const [vendorId, setVendorId]       = useState('')

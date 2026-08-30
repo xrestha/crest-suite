@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -10,9 +10,7 @@ import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
-import { getCf, calcBillTotals, fmtRate } from './purchasesHelpers'
-import PurchaseBillModal from './PurchaseBillModal'
-import PurchaseBillPrint from './PurchaseBillPrint'
+import { getCf, calcBillTotals } from './purchasesHelpers'
 import ReturnsTab from './ReturnsTab'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
@@ -22,6 +20,7 @@ export default function Purchases() {
   const { clientId, profile, loading: authLoading, isAdmin, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedDelete } = useScopedDb()
+  const navigate = useNavigate()
 
   // Shared — seeded from a short-lived per-tab cache (sessionDataCache.js) so revisiting this
   // page shows the last-known data instantly instead of a blank "Loading…" while it re-fetches.
@@ -48,18 +47,9 @@ export default function Purchases() {
   // Purchases tab
   const [purchases, setPurchases]           = useState(() =>
     (cachedOpenPeriod ? readPageCache('purchases', `purchases_${cachedOpenPeriod.id}`, effectiveClientId) : null) ?? [])
-  const [showForm, setShowForm]             = useState(false)
   const [filterDay, setFilterDay]           = useState('all')
   const [filterItem, setFilterItem]         = useState('all')
   const [filterVendor, setFilterVendor]     = useState('all')
-  const [editingGroupId, setEditingGroupId] = useState(null)
-  const [rateUpdateItems, setRateUpdateItems]       = useState([])
-  const [rateUpdateSelected, setRateUpdateSelected] = useState(new Set())
-  const [printBill, setPrintBill]           = useState(null)
-  // Company letterhead for the auto-printed purchase voucher — same source fields the payslip
-  // print uses (settings.vat_number is Nepal's PAN, reused as-is — not a new ID).
-  const [bizInfo, setBizInfo]               = useState({ name: '', address: '', vatNumber: '' })
-
   // Returns tab
   const [returns, setReturns]               = useState(() =>
     (cachedOpenPeriod ? readPageCache('purchases', `returns_${cachedOpenPeriod.id}`, effectiveClientId) : null) ?? [])
@@ -73,16 +63,6 @@ export default function Purchases() {
   const [deleteAllTyped, setDeleteAllTyped]   = useState('')
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!effectiveClientId) return
-    Promise.all([
-      supabase.from('clients').select('name').eq('id', effectiveClientId).single(),
-      supabase.from('settings').select('property_address, vat_number').eq('client_id', effectiveClientId).maybeSingle(),
-    ]).then(([{ data: client }, { data: settings }]) => {
-      setBizInfo({ name: client?.name || '', address: settings?.property_address || '', vatNumber: settings?.vat_number || '' })
-    })
-  }, [effectiveClientId])
 
   async function init() {
     // Only show "Loading…" when there's nothing cached to display yet — a revisit within the
@@ -137,90 +117,19 @@ export default function Purchases() {
 
   // ─── PURCHASES ───────────────────────────────────────────
 
+  // Bill entry is a route now, not a modal on this page (S647). This page owns the LIST; what
+  // follows a save — the printed voucher, the Item Master rate-sync prompt — went with the form
+  // to PurchaseBillPage, because it belongs to the save that triggers it.
+  //
+  // The period rides in the query string: the list lets an admin select a CLOSED month and edit
+  // it in place, so defaulting the form to the open period would silently file the bill against
+  // the wrong month.
   function openNew() {
-    setEditingGroupId(null)
-    setShowForm(true)
+    navigate(`/purchases/new?period=${selectedPeriod.id}`)
   }
 
   function openEditGroup(groupId) {
-    setEditingGroupId(groupId)
-    setShowForm(true)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  // Auto-print a new bill's voucher right after save (not on edits — see feedback captured
-  // during S404+1 design discussion) so it can be stapled to the vendor's physical bill for
-  // record-keeping/approval.
-  function printPurchaseBill(header, validLines) {
-    const vendor = vendors.find(v => v.id === header.vendor_id)
-    setPrintBill({ header, lines: validLines, vendorName: vendor?.name || '' })
-    setTimeout(() => {
-      printWithTitle(`Purchase Voucher - ${vendor?.name || 'No Vendor'} - ${formatBsDay(header.bs_day, selectedPeriod?.bs_month) || periodLabel} ${selectedPeriod?.bs_year || ''}`.trim())
-      setPrintBill(null)
-    }, 60)
-  }
-
-  // Called by PurchaseBillModal after it successfully saves — reloads the list and checks
-  // whether any entered rate differs from Item Master, offering to sync it (previously the tail
-  // end of this component's own saveBill()).
-  async function handleBillSaved(header, validLines) {
-    const wasNew = !editingGroupId
-    setShowForm(false)
-    setEditingGroupId(null)
-    loadPurchases(selectedPeriod.id)
-    if (wasNew) printPurchaseBill(header, validLines)
-
-    // Compare both sides in the SAME unit the bill's rate box uses — per base unit, or per purchase
-    // unit where the item has a conversion. Comparing against items.rate only worked while that
-    // column happened to hold a per-unit figure; it is now always per BASE unit (items are stored in
-    // their smallest unit), which a conversion item's rate box is not. An exact !== on floats also
-    // re-fired this prompt on rates that had not moved.
-    // One .in() read for every line's item, not one .single() per line — a 20-line bill was
-    // paying 20 serial round trips here, after the save had already visibly completed.
-    const { data: freshItems } = await supabase.from('items')
-      .select('id, name, uom, per_uom_rate, purchase_unit, conversion_factor')
-      .in('id', [...new Set(validLines.map(l => l.item_id))])
-    const freshById = new Map((freshItems || []).map(i => [i.id, i]))
-    const changed = []
-    for (const l of validLines) {
-      const capturedRate = parseFloat(l.rate)
-      const fi = freshById.get(l.item_id)
-      if (!fi) continue
-      const cf = getCf(fi)
-      const masterRate = (parseFloat(fi.per_uom_rate) || 0) * cf
-      if (Math.abs(capturedRate - masterRate) > 0.000001) {
-        changed.push({
-          itemId: fi.id, itemName: fi.name, cf,
-          unit: cf > 1 ? (fi.purchase_unit || fi.uom) : fi.uom,
-          baseUom: fi.uom,
-          oldRate: masterRate, newRate: capturedRate,
-        })
-      }
-    }
-    if (changed.length > 0) {
-      setRateUpdateItems(changed)
-      setRateUpdateSelected(new Set(changed.map(i => i.itemId)))
-    }
-  }
-
-  // items.rate is the price of ONE base unit (purchase_qty is always 1), so a rate typed against a
-  // purchase unit has to come back down by the conversion factor before it lands. Writing the
-  // entered figure raw put a per-CTN price in the column every valuation reads as per-BTL.
-  const toPerBase = r => parseFloat((r.newRate / (r.cf || 1)).toFixed(6))
-
-  async function applyRateUpdates() {
-    const toUpdate = rateUpdateItems.filter(i => rateUpdateSelected.has(i.itemId))
-    await Promise.all(toUpdate.map(i => supabase.from('items').update({ rate: toPerBase(i) }).eq('id', i.itemId)))
-    setItems(prev => {
-      const next = prev.map(i => {
-        const upd = toUpdate.find(r => r.itemId === i.id)
-        return upd ? { ...i, rate: toPerBase(upd), per_uom_rate: toPerBase(upd) } : i
-      })
-      writePageCache('purchases', 'items', effectiveClientId, next)
-      return next
-    })
-    setRateUpdateItems([])
-    setRateUpdateSelected(new Set())
+    navigate(`/purchases/${groupId}/edit`)
   }
 
   async function deleteGroup(groupId) {
@@ -341,65 +250,7 @@ export default function Purchases() {
   if (!loading && periods.length === 0) return <NoPeriodState what="purchase entry" />
 
   return (
-    <>
-    <div className={printBill ? 'no-print' : ''}>
-
-      {/* Rate update modal */}
-      {rateUpdateItems.length > 0 && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid rgba(201,168,76,0.3)', borderRadius: 'var(--radius-md)', padding: '24px 28px', maxWidth: 520, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 4 }}>📦 Rate changes detected</div>
-            <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 16 }}>Select items to update in the Item Master. This affects recipe costing going forward.</div>
-
-            {/* Select all */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--theme-text3)', marginBottom: 10, cursor: 'pointer', userSelect: 'none' }}>
-              <input type="checkbox"
-                checked={rateUpdateSelected.size === rateUpdateItems.length}
-                onChange={e => setRateUpdateSelected(e.target.checked ? new Set(rateUpdateItems.map(i => i.itemId)) : new Set())} />
-              Select all ({rateUpdateItems.length} item{rateUpdateItems.length !== 1 ? 's' : ''})
-            </label>
-
-            {/* Item rows */}
-            <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
-              {rateUpdateItems.map(item => (
-                <label key={item.itemId} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--theme-bg)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', cursor: 'pointer', userSelect: 'none' }}>
-                  <input type="checkbox"
-                    checked={rateUpdateSelected.has(item.itemId)}
-                    onChange={e => {
-                      const next = new Set(rateUpdateSelected)
-                      e.target.checked ? next.add(item.itemId) : next.delete(item.itemId)
-                      setRateUpdateSelected(next)
-                    }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.itemName}</div>
-                    <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
-                      Item Master will hold NPR {fmtRate(toPerBase(item))} per {item.baseUom}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0, fontSize: 13 }}>
-                    <span style={{ color: 'var(--theme-red-text)', fontWeight: 600 }}>NPR {fmtRate(item.oldRate)}</span>
-                    <span style={{ color: 'var(--theme-text2)' }}> → </span>
-                    <span style={{ color: 'var(--theme-green-text)', fontWeight: 600 }}>NPR {fmtRate(item.newRate)}</span>
-                    <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 1 }}>per {item.unit}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-primary" style={{ fontSize: 12, padding: '7px 16px' }}
-                onClick={applyRateUpdates} disabled={rateUpdateSelected.size === 0}>
-                Update {rateUpdateSelected.size} item{rateUpdateSelected.size !== 1 ? 's' : ''}
-              </button>
-              <button className="btn btn-ghost" style={{ fontSize: 12, padding: '7px 16px' }}
-                onClick={() => { setRateUpdateItems([]); setRateUpdateSelected(new Set()) }}>
-                Skip all
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+    <div>
       {/* Delete All confirmation — a whole-period wipe needs more friction than a routine
           single-bill delete, so it requires typing the period label rather than one confirm(). */}
       {deleteAllTarget && (() => {
@@ -510,7 +361,7 @@ export default function Purchases() {
               className={`panel-tab${activeTab === tab.id ? ' panel-tab--active' : ''}`}
               onClick={() => {
                 // Switching tabs unmounts ReturnsTab, which resets its own form state naturally.
-                setActiveTab(tab.id); setShowForm(false)
+                setActiveTab(tab.id)
               }}>{tab.label}</button>
           ))}
         </div>
@@ -529,20 +380,6 @@ export default function Purchases() {
       {/* ── PURCHASES TAB ── */}
       {activeTab === 'purchases' && (
         <>
-          {/* ── BILL FORM (new or edit) ── */}
-          {showForm && (
-            <PurchaseBillModal
-              period={selectedPeriod}
-              items={items}
-              itemOptions={itemOptions}
-              vendors={vendors}
-              editingGroupId={editingGroupId}
-              editingEntries={editingGroupId ? purchases.filter(p => (p.purchase_group_id || p.id) === editingGroupId) : null}
-              onClose={() => { setShowForm(false); setEditingGroupId(null) }}
-              onSaved={handleBillSaved}
-            />
-          )}
-
           {/* Filters */}
           <div className="no-print" style={{ marginBottom: 16 }}>
             {/* Day pill strip — wraps to additional rows instead of scrolling off-screen */}
@@ -813,7 +650,7 @@ export default function Purchases() {
             )}
           </div>
 
-          <Fab onClick={openNew} label="+ Add Purchase" show={!isLocked && !showForm && !!selectedPeriod} />
+          <Fab onClick={openNew} label="+ Add Purchase" show={!isLocked && !!selectedPeriod} />
         </>
       )}
 
@@ -969,22 +806,5 @@ export default function Purchases() {
       })()}
 
     </div>
-
-      {/* Print-only purchase voucher — see printPurchaseBill(); mounted only for the brief
-          setTimeout window it takes to fire the browser print dialog, then unmounted. */}
-      {printBill && (
-        <div className="print-only">
-          <PurchaseBillPrint
-            header={printBill.header}
-            lines={printBill.lines}
-            items={items}
-            vendorName={printBill.vendorName}
-            period={selectedPeriod}
-            bizInfo={bizInfo}
-            enteredBy={profile?.full_name || profile?.email || ''}
-          />
-        </div>
-      )}
-    </>
   )
 }

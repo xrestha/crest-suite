@@ -35,7 +35,7 @@ function formFromAsset(asset) {
 
 // Add/Edit a fixed asset. Category picker seeds useful_life_years/tax_pool from the category's
 // own defaults on select, then leaves both freely editable — never re-locked — exact shape of
-// PurchaseBillModal.jsx's item_id handler (seed once, no further coupling to the source field).
+// PurchaseBillForm.jsx's item_id handler (seed once, no further coupling to the source field).
 export default function AssetFormModal({ categories, asset, onClose, onSaved }) {
   const { scopedInsert, scopedUpdate } = useScopedDb()
   const [form, setForm] = useState(() => asset ? formFromAsset(asset) : emptyForm())

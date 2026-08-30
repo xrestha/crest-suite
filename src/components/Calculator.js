@@ -36,7 +36,7 @@ export default function Calculator({ open, onClose }) {
   }, [open])
 
   // Document-level, not just the input's onKeyDown: this can be nested inside a Modal (see
-  // PurchaseBillModal), which has its own document keydown listener that closes IT on Escape.
+  // PurchaseBillForm), which has its own document keydown listener that closes IT on Escape.
   // MUST be capture-phase (the `true` third arg), not bubble — this is not optional. Modal's
   // listener attaches unconditionally the moment the modal itself mounts, before the calculator
   // is ever opened; this one only attaches later, when `open` flips true. Same-phase (bubble)

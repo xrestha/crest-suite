@@ -49,12 +49,13 @@ Four consequences fell out of that, all now fixed and all worth not re-deriving:
   means cartons or bottles. Mirroring it put a per-CTN price in the column every valuation reads as
   per-BTL. The Conversion tab's preview now shows cost **per purchase unit** (`rate × cf`), since
   `rate` is already the per-base-unit figure.
-- **The bill prefills `per_uom_rate × cf`, never `items.rate`** (`PurchaseBillModal.jsx`) — the rate
+- **The bill prefills `per_uom_rate × cf`, never `items.rate`** (`PurchaseBillForm.jsx`) — the rate
   that matches whichever unit the Qty box is counting, in both cases. Purchase Orders had always
   done this (`PurchaseOrders.js:155`); the bill modal was the only holdout. Each row now also prints
   the master rate for that same unit beneath the box, ambered past 5×/⅕, so a unit mix-up is visible
   on the row rather than only in a grand total where a 500× error still reads as a plausible number.
-- **The "Rate changes detected" sync compares and writes in the box's unit** (`Purchases.js`): it
+- **The "Rate changes detected" sync compares and writes in the box's unit** (`PurchaseBillPage.jsx`
+  since S647; it was `Purchases.js` while the form was a modal mounted there): it
   matched the entered per-unit rate against `items.rate` and wrote it back raw, so correcting a
   conversion item's rate by hand would have stored a per-CTN price as per-BTL. It divides by `cf`
   going in, and its epsilon compare stops the prompt re-firing on rates that never moved.

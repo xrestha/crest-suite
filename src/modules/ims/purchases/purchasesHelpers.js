@@ -1,4 +1,4 @@
-// Shared by Purchases.js, PurchaseBillModal.jsx, and ReturnsTab.jsx.
+// Shared by Purchases.js, PurchaseBillForm.jsx, and ReturnsTab.jsx.
 // Returns the effective conversion factor (>1) for an item, or 1 if no conversion set.
 export function getCf(item) {
   const cf = parseFloat(item?.conversion_factor)
@@ -16,7 +16,7 @@ export function fmtRate(v) {
 
 // Bill-level totals: taxable/non-taxable base, discount, VAT, grand total. Discount is spread
 // proportionally across taxable/non-taxable before VAT — VAT applies only to the taxable portion
-// net of its share of the discount. Shared by PurchaseBillModal's live total and the auto-printed
+// net of its share of the discount. Shared by PurchaseBillForm's live total and the auto-printed
 // PurchaseBillPrint voucher so the two can never drift apart.
 export function calcBillTotals(lines, discountAmt) {
   const taxableBase    = lines.reduce((s, l) => l.vat_inclusive ? s + (parseFloat(l.qty)||0) * (parseFloat(l.rate)||0) : s, 0)

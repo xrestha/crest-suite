@@ -26,6 +26,7 @@ const Items = lazy(() => import('./modules/ims/items/Items'))
 const Vendors = lazy(() => import('./modules/ims/vendors/Vendors'))
 const GatePasses = lazy(() => import('./modules/ims/gatepasses/GatePasses'))
 const Purchases = lazy(() => import('./modules/ims/purchases/Purchases'))
+const PurchaseBillPage = lazy(() => import('./modules/ims/purchases/PurchaseBillPage'))
 const PurchaseOrders = lazy(() => import('./modules/ims/purchases/PurchaseOrders'))
 const Stock = lazy(() => import('./modules/ims/stockcount/Stock'))
 const Recipes = lazy(() => import('./modules/ims/recipes/Recipes'))
@@ -145,6 +146,10 @@ export default function App() {
               <Route path="/vendors"   element={<ModuleGate module="ims"><Vendors /></ModuleGate>} />
               <Route path="/gate-passes" element={<ModuleGate module="ims"><GatePasses /></ModuleGate>} />
               <Route path="/purchases" element={<ModuleGate module="ims"><Purchases /></ModuleGate>} />
+              {/* Bill entry is its own route, not a modal (S647). Static segments outrank the
+                  dynamic one in React Router v7, so /purchases/new can never be read as a groupId. */}
+              <Route path="/purchases/new" element={<ModuleGate module="ims"><PurchaseBillPage /></ModuleGate>} />
+              <Route path="/purchases/:groupId/edit" element={<ModuleGate module="ims"><PurchaseBillPage /></ModuleGate>} />
               <Route path="/stock"     element={<ModuleGate module="ims"><Stock /></ModuleGate>} />
 
               {/* IMS Starter */}

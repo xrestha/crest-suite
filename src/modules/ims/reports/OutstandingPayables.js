@@ -202,7 +202,7 @@ export default function OutstandingPayables() {
     // What this page shows must be what the vendor actually invoiced. `value` used to be a bare
     // qty × rate: no VAT, no bill discount, no returns — so a VAT-inclusive credit bill read ~13%
     // LOW and "Settle Bill" marked it fully paid at 88.5% of the real amount, while discounts and
-    // returns pushed it the other way. calcBillTotals() is the same function PurchaseBillModal's
+    // returns pushed it the other way. calcBillTotals() is the same function PurchaseBillForm's
     // live total and the printed voucher use, so routing through it is what makes the three agree.
     //
     // The grand total is then spread back across the bill's lines in proportion to their net

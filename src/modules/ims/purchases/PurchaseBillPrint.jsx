@@ -3,7 +3,7 @@ import { getCf, calcBillTotals } from './purchasesHelpers'
 
 // A4 print-only Purchase Entry Voucher — auto-printed right after a new bill is saved (Purchases.js)
 // so it can be stapled to the vendor's physical bill for record-keeping/approval. Line items print
-// in purchase units exactly as entered (the pre-conversion `lines` PurchaseBillModal hands back via
+// in purchase units exactly as entered (the pre-conversion `lines` PurchaseBillForm hands back via
 // onSaved), matching what's written on the vendor's bill rather than the base-unit values
 // purchase_entries stores — see CLAUDE.md's "Purchases: qty/rate storage convention".
 export default function PurchaseBillPrint({ header, lines, items, vendorName, period, bizInfo, enteredBy }) {

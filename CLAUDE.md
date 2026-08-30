@@ -422,6 +422,16 @@ each named route has a matching early return in its own component.** The general
 in `.claude/rules/design-system.md` — put the condition on the nav ITEM, where every consumer reads
 it, rather than hand-writing it at each render site.
 
+**A SUB-route has no nav item to audit, and inherits nothing from its parent page (S647).**
+`/purchases/new` and `/purchases/:groupId/edit` are reached from a button on `/purchases`, so
+neither appears in `Layout.js` and the grep above cannot find them — but they are typeable, and
+`ModuleGate` checks the module, never the role. They carry `hasImsAccess('staff')` themselves.
+The second half is the one that is easy to miss: **turning a modal into a route makes its record id
+a URL parameter, so a filter the parent page performed in memory has to become a real check.** The
+bill form used to receive rows already narrowed from a client-scoped list; the page loads by id, and
+`purchases_select` passes `is_admin()` — so an admin viewing client A could open client B's bill by
+id. The page requires the bill's `period_id` to appear in its own scoped period list.
+
 ### A report page must not show a number it has not computed (S594)
 
 See `.claude/rules/report-pages.md` (auto-loads when editing `ReportPage.jsx` or any reports

@@ -169,7 +169,7 @@ export const IMS_GUIDE_GROUPS = [
         summary:
           'The most important operational page in IMS: a daily log of multi-line vendor purchase bills and vendor returns for the selected period, plus a read-only Daily Register pivot. Nearly every cost report in the module ultimately traces back to data entered here.',
         workflow: [
-          'Pick a period (defaults to open). "+ Add Purchase" opens a bill-entry modal mirroring a real vendor invoice: header (Vendor, Day, Invoice Ref, VAT toggle, Discount, Payment Method) + one row per item.',
+          'Pick a period (defaults to open). "+ Add Purchase" opens the bill-entry screen at /purchases/new, mirroring a real vendor invoice: header (Vendor, Day, Invoice Ref, VAT toggle, Discount, Payment Method) + one row per item. It is a full page rather than a dialog — the line table is wide, and on a laptop a dialog put it in a box that scrolled inside another box. Edit opens the same screen at /purchases/<bill>/edit; "← Purchases" or Cancel returns to the list, and so does the browser Back button.',
           'All lines saved in one go share a purchase_group_id — this is what lets the list treat a multi-item bill as one editable/deletable unit.',
           'Saving a NEW bill auto-triggers a browser print of a purchase voucher (edits don\'t re-print).',
           'If an entered rate differs from the Item Master rate, a "Rate changes detected" prompt offers to sync the Item Master to the new rate — this affects future recipe costing, not retroactively.',
@@ -183,7 +183,7 @@ export const IMS_GUIDE_GROUPS = [
           { label: 'Total (NPR) per line', desc: 'Type a line total instead of a rate; Rate is reverse-computed as amount ÷ qty ÷ (1.13 if VAT else 1).' },
           { label: 'Shelf Life (days)', desc: 'Auto-computes Expiry Date from the bill\'s day + N days; changing the bill Day recomputes expiry for every line with a shelf-life set.' },
           { label: 'Arithmetic in Qty / Rate', desc: 'Both fields accept an expression as well as a plain number — "12*4" in Qty, or "450/12" to work a per-unit rate back out of a case price. The result previews above the field and commits on Enter or blur. The expression is evaluated before the base-unit conversion above, so what gets stored is still entered_qty × conversion_factor with the evaluated number as entered_qty. Same behaviour as Stock Count\'s qty boxes; Alt+C opens a standalone Quick Calculator anywhere in the app.' },
-          { label: '⌗ button (modal header)', desc: 'The Add/Edit Purchase Bill modal has its own Quick Calculator button next to its close (×) button — the same calculator as Alt+C, opened without leaving the bill. Pressing Esc closes only the calculator, never the bill underneath.' },
+          { label: 'Quick Calculator (Alt+C)', desc: 'Press Alt+C while entering a bill for the app-wide calculator, floating over the form — useful for working out a per-carton rate mid-entry. The bill screen used to carry a second ⌗ button of its own; that existed only because the dialog it sat in swallowed Escape before the calculator saw it, and it went when the dialog did.' },
         ],
         formulas: [
           'Bill totals: taxableBase = Σ(qty×rate) of VAT lines; nonTaxableBase = Σ(qty×rate) of non-VAT lines; subTotal = taxableBase + nonTaxableBase; vatTaxable = subTotal>0 ? taxableBase × (1 − discount/subTotal) : 0 (discount spread proportionally); vatTotal = vatTaxable × 0.13; grandTotal = subTotal − discount + vatTotal.',
@@ -948,7 +948,7 @@ export const IMS_GUIDE_GROUPS = [
           { label: 'Status badge', desc: 'Partial (purple, some payment recorded but not full) vs the aging-bucket label.' },
         ],
         formulas: [
-          'Bill Total = what the vendor actually invoiced, via the SAME calcBillTotals() helper that backs the live total in PurchaseBillModal and the printed purchase voucher: line values net of any goods returned against them, minus the bill-level discount (deduped per purchase_group_id), plus 13% VAT on the VAT-inclusive portion net of its share of that discount.',
+          'Bill Total = what the vendor actually invoiced, via the SAME calcBillTotals() helper that backs the live total in PurchaseBillForm and the printed purchase voucher: line values net of any goods returned against them, minus the bill-level discount (deduped per purchase_group_id), plus 13% VAT on the VAT-inclusive portion net of its share of that discount.',
           'That grand total is then spread back across the lines of the bill in proportion to their net value, because payments allocate per purchase_entry_id.',
           'Remaining (per line) = max(0, value − Σ payments against it). A bill only moves to Paid History once EVERY one of its line items individually reaches full payment.',
         ],

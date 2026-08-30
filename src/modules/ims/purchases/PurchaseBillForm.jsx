@@ -1,13 +1,10 @@
 import { useState } from 'react'
-import { Calculator as CalculatorIcon } from 'lucide-react'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import Tip from '../../../components/Tip'
-import Modal from '../../../components/Modal'
 import SearchableSelect from '../../../components/SearchableSelect'
 import QtyInput from '../../../components/QtyInput'
-import QuickCalculator from '../../../components/Calculator'
 import FieldError from '../../../components/FieldError'
 import { getCf, calcBillTotals, fmtRate } from './purchasesHelpers'
 
@@ -47,9 +44,16 @@ function initFromEditingEntries(entries, items) {
 
 // Add/Edit Purchase Bill — a multi-row bill entry form. Self-contained: owns its own
 // header/line state and the save/validation logic; the parent only supplies the data it needs
-// (period, items, vendors) and gets a single onSaved(validLines) callback so it can reload the
-// purchases list and run its own "did any item's rate change" check.
-export default function PurchaseBillModal({ period, items, itemOptions, vendors, editingGroupId, editingEntries, onClose, onSaved }) {
+// (period, items, vendors) and gets a single onSaved(validLines) callback so it can print the
+// voucher and run its own "did any item's rate change" check.
+//
+// This was a <Modal maxWidth={1160}> until S647. It is the widest surface in the product — the
+// line table alone declares minWidth: 956 — so on any laptop it was a wide form scrolling inside
+// an overlay that was itself scrolling, on top of a page that could not be consulted while it was
+// open. It is now the body of a real route (PurchaseBillPage) and renders at the full content
+// width. Kept as a separate component from the page so the page owns routing, loading and what
+// happens after a save, and this file stays what it always was: the form.
+export default function PurchaseBillForm({ period, items, itemOptions, vendors, editingGroupId, editingEntries, onClose, onSaved }) {
   const initial = editingEntries?.length ? initFromEditingEntries(editingEntries, items) : { header: { ...EMPTY_HEADER }, lines: [newLine()] }
   const [billHeader, setBillHeader] = useState(initial.header)
   const [billLines, setBillLines]   = useState(initial.lines)
@@ -58,7 +62,6 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
   // Per-field validation. `error` above stays the form-level channel — a rejected write, and the
   // "add at least one line" rule, which belongs to the line table rather than any one box (S603).
   const [dayErr, setDayErr] = useState('')
-  const [calcOpen, setCalcOpen] = useState(false)
 
   function handleHeaderDayChange(day) {
     setDayErr('')
@@ -167,24 +170,13 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
     onSaved(billHeader, valid)
   }
 
+  // No QuickCalculator here any more. The form carried its own second instance plus a header
+  // button only because the Modal around it ran a document keydown listener that ate Escape
+  // before the calculator saw it (see the comment in Calculator.js). On a route there is no such
+  // listener, so Layout.js's global Alt+C calculator — which was always mounted underneath —
+  // simply works, and a duplicate would now be two calculators on one screen.
   return (
-    <Modal
-      onClose={onClose}
-      title={editingGroupId ? 'Edit Purchase Bill' : 'Add Purchase Bill'}
-      maxWidth={1160}
-      headerExtra={
-        <button
-          className="btn btn-ghost"
-          onClick={() => setCalcOpen(true)}
-          title="Quick calculator (Alt+C)"
-          aria-label="Open quick calculator"
-          style={{ display: 'flex', alignItems: 'center', padding: '5px 8px' }}
-        >
-          <CalculatorIcon size={15} strokeWidth={2} aria-hidden="true" />
-        </button>
-      }
-    >
-      <QuickCalculator open={calcOpen} onClose={() => setCalcOpen(false)} />
+    <>
       {/* Header row */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.4fr auto 90px 1fr', gap: 14, marginBottom: 20, alignItems: 'end' }}>
         <div className="form-field">
@@ -437,6 +429,6 @@ export default function PurchaseBillModal({ period, items, itemOptions, vendors,
           {saving ? 'Saving…' : editingGroupId ? 'Update Bill' : `Save ${billLines.filter(l => l.item_id && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0).length || ''} Entr${billLines.filter(l => l.item_id && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0).length === 1 ? 'y' : 'ies'}`}
         </button>
       </div>
-    </Modal>
+    </>
   )
 }
