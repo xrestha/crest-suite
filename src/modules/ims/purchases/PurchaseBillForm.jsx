@@ -150,15 +150,41 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
     })
 
     if (editingGroupId) {
+      // An edit with nothing to supersede is a contradiction, and the one that would duplicate the
+      // bill: the insert below always runs, so if this list were empty we would add a second copy
+      // of every line and delete none. Refuse instead — the caller only renders this form for an
+      // edit once it has loaded the bill's rows, so reaching here means something is wrong.
+      const supersededIds = (editingEntries || []).map(e => e.id)
+      if (supersededIds.length === 0) {
+        setError('This bill could not be re-read, so it was not saved. Reopen it from the list and try again.')
+        setSaving(false); return
+      }
+
       // Insert the new lines BEFORE removing the old ones (not delete-then-insert) — if the
       // insert fails partway (network blip, an item deleted mid-edit), the bill keeps its
       // previous, still-valid line items instead of being left with none.
-      const { data: inserted, error: insErr } = await supabase.from('purchase_entries')
-        .insert(entries.map(e => ({ ...e, purchase_group_id: editingGroupId }))).select('id')
+      const { error: insErr } = await supabase.from('purchase_entries')
+        .insert(entries.map(e => ({ ...e, purchase_group_id: editingGroupId })))
       if (insErr) { setError(insErr.message); setSaving(false); return }
-      const newIds = (inserted || []).map(r => r.id)
+
+      // Remove the superseded lines BY ID — the rows this form was opened on — not by matching
+      // `purchase_group_id = editingGroupId`.
+      //
+      // That predicate silently missed the LEGACY case and duplicated the bill (fixed S648). A bill
+      // written before grouping existed has `purchase_group_id IS NULL`, so the list keys it by the
+      // row's own id (`p.purchase_group_id || p.id`) and hands that id here as editingGroupId. The
+      // insert above then stamps the NEW rows with it — but the original row's group column is
+      // still NULL, so the delete matched nothing but the rows it had just written, and the old
+      // line survived alongside its own replacement. Every figure in IMS that sums purchases would
+      // have counted that bill's original line twice, with nothing on screen to say so.
+      //
+      // Deleting the loaded ids is exact in both cases and needs no `.not('id','in',…)` guard,
+      // since a fresh insert can never collide with an id we already held. It also declines to
+      // delete a line added to this bill by someone else since it was opened: the group predicate
+      // would have taken that with it, and removing a row this editor never saw is the worse of
+      // the two failures. Not chunked — the list is one vendor bill's lines.
       const { error: delErr } = await supabase.from('purchase_entries')
-        .delete().eq('purchase_group_id', editingGroupId).not('id', 'in', `(${newIds.join(',')})`)
+        .delete().in('id', supersededIds)
       if (delErr) { setError(delErr.message); setSaving(false); return }
     } else {
       const groupId = crypto.randomUUID()

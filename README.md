@@ -159,6 +159,47 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S648 — 2026-08-30 — editing a pre-grouping purchase bill duplicated it
+
+Service worker `crest-v165`. No migration. One file: `PurchaseBillForm.jsx`'s edit save path.
+
+Flagged while moving this form to a route in S647 and left alone there, because a layout change is
+not the place to alter what a save writes. Fixed on its own now.
+
+**A bill is `purchase_group_id || id`.** Bills written before grouping existed carry
+`purchase_group_id IS NULL`, so their key is the single row's own id — which is what the list keys
+them by and what it passes to the form as `editingGroupId`. The save then inserted the new lines
+stamped with that id and deleted the old ones with `.eq('purchase_group_id', editingGroupId)`. That
+predicate matches the rows it had **just written** and not the legacy row, whose group column is
+still NULL. The original line survived beside its own replacement.
+
+Nothing failed. The form closed, the voucher printed, the list reloaded — and the bill was now two
+bills. Every IMS figure that sums purchases (Stock, Variance, COGS, Vendor Report, Outstanding
+Payables, the Monthly Owner Report) counted that line twice from then on.
+
+**`deleteGroup()` had always branched for this** — `hasGroupId ? .eq(group) : .in('id', …)`, with a
+comment naming legacy bills — which is exactly why the gap in the edit path was invisible: one
+reading of the file says the case is handled.
+
+**The fix stops deriving the row set from the key.** The edit deletes the ids it actually loaded,
+which is exact for both shapes and needs no `.not('id','in',…)` guard, since a fresh insert cannot
+collide with an id already held. Two deliberate consequences: a line added to this bill by someone
+else since it was opened now **survives** (the group predicate would have deleted it, and removing a
+row this editor never saw is the worse of the two failures), and an edit arriving with an empty id
+list is **refused** rather than saved — the insert runs either way, so an empty delete is precisely
+the duplicate.
+
+Insert-still-before-delete is unchanged: a failed insert must leave the bill's previous lines intact.
+
+The general rule — **`a || b` as an identity means every read, write and delete that touches it needs
+both branches; grep the fallback expression, not the column name, because the column name is what
+appears in the predicate that is wrong** — is in `.claude/rules/vendor-payables.md`, whose `paths:`
+now covers the whole purchases module rather than `purchasesHelpers.js` alone.
+
+**Not verified against a real legacy bill**: whether this client's book still contains any row with
+a NULL `purchase_group_id` was not checked, so the duplicate may never have been reachable in
+production. The code path was.
+
 ### S647 — 2026-08-30 — Add/Edit Purchase Bill is a page, not a modal
 
 Service worker `crest-v164`. No migration. New: `PurchaseBillPage.jsx`; `PurchaseBillModal.jsx` →

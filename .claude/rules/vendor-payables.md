@@ -1,13 +1,39 @@
 ---
 paths:
   - "src/modules/ims/reports/**"
-  - "src/modules/ims/purchases/purchasesHelpers.js"
+  - "src/modules/ims/purchases/**"
   - "src/modules/ownerReport/computeVendorPurchasingSection.js"
 ---
 
 # Vendor balance / payables (billKeyOf, aging, payment allocation layers)
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
+
+### A key with a fallback must be honoured by every predicate that reads it (S648)
+
+A bill is identified by **`purchase_group_id || id`** — the `billKeyOf` shape above, and the same
+expression `Purchases.js` keys its rows by. The fallback half is not hypothetical: bills written
+before grouping existed carry `purchase_group_id IS NULL`, so their key is the single row's own id.
+
+Editing one of those duplicated it, silently, from the day grouping was added until S648. The save
+inserts the new lines stamped with `editingGroupId` and then deleted the old ones with
+`.eq('purchase_group_id', editingGroupId)` — which matches the rows it had *just written* and not
+the legacy row, whose group column is still NULL. The original line survived beside its own
+replacement, and every IMS figure that sums purchases counted it twice with nothing on screen to
+say so. `deleteGroup()` had always branched for this (`hasGroupId ? .eq(group) : .in('id', …)`),
+which is what made the omission in the edit path invisible: the feature looked handled.
+
+**The fix is to stop deriving the row set from the key at all.** The edit path deletes the ids it
+actually loaded. That is exact for both shapes, needs no `.not('id','in',…)` guard (a fresh insert
+cannot collide with an id you already held), and it declines to remove a line someone else added to
+the bill since it was opened — the group predicate would have taken that with it, and deleting a row
+this editor never saw is the worse of the two failures. An edit that arrives with an empty id list
+is refused rather than saved, since the insert runs either way and an empty delete is exactly the
+duplicate.
+
+**Generally: `a || b` as an identity means every read, write and delete that touches it needs both
+branches.** Grep the fallback expression, not the column name — the column name appears in the
+predicate that is wrong.
 
 ### `billKeyOf`/`aging` are centralized in `purchasesHelpers.js` — but not everywhere
 
