@@ -159,6 +159,45 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S649 — 2026-08-30 — the category badge goes, and the bill table's names wrap
+
+Service worker `crest-v166`. No migration.
+
+Reported from a second screenshot: the Del button was still sliced after S646, and — separately —
+"I don't think we need to display the category next to the item name as well."
+
+**S646 measured the wrong data.** It used an invented row and got 912px min-content. Measuring with
+values off the actual screen gave **1030px**: a real "BHAT BHATENI CHICKEN SAUSAGE" is 239px of
+unbreakable text and "Bhat Bhateni Super Market" 186px, both `nowrap`. S646's chosen escape valve —
+letting the category badge drop to a second line — could not help, because the names were the wall.
+*Measure with the longest values the client actually has, not with a plausible row.*
+
+**The badge is gone.** A category repeated on every line of a bill is not what anyone scans a
+purchase ledger for, and it is still on the page twice: the Item filter's own option labels carry it
+(`NAME (Category)`), and the Daily Register groups by it. That is ~100px back.
+
+**And both NAMES now wrap, while everything else in the row stays `nowrap`.** This is the rule the
+two rounds were circling: a day, a figure, a unit, an invoice ref, an expiry and a button are each
+things a line break either corrupts or cuts — a name is not. A word stays atomic, so a name never
+breaks mid-word; it just takes a second line when the window is tight. Measured across widths:
+
+| Viewport | Scrolls | Item | Vendor | Actions |
+| --- | --- | --- | --- | --- |
+| 1152 | no | 86 | 107 | 171 |
+| 1280 | no | 171 | 150 | 171 |
+| 1366 | no | 227 | 180 | 171 |
+| 1440 | no | 252 | 196 | 180 |
+
+The Actions column never gives up a pixel, and at 1440+ nothing wraps at all — the rows are the same
+55/52px they were before. `.purchases-item-cell` is retired: with no badge and a wrapping name it had
+become a no-op rule, and the reasoning it carried moved to the comment above the padding rule that is
+still live.
+
+Three rewrites of the same cell in four sessions (S595 pinned it, S646 unpinned the name, S649 emptied
+it) are worth reading as one lesson, which is now in `DESIGN.md` and
+`.claude/rules/design-system.md`: **decide which column absorbs a squeeze, and make it a text column
+that can spare a line.**
+
 ### S648 — 2026-08-30 — editing a pre-grouping purchase bill duplicated it
 
 Service worker `crest-v165`. No migration. One file: `PurchaseBillForm.jsx`'s edit save path.

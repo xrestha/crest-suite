@@ -360,6 +360,17 @@ that genuinely cannot break. The item cell went from `nowrap` to `normal` with t
 a nowrap span: the name still never breaks, and the badge beside it drops to a second line only when
 there is no room. Min-content fell 1134 → 912.
 
+**Which column absorbs it is a decision, and text is the only honest candidate (S649).** S646 chose
+the Item column because its category badge could drop to a second line — but the reported screen still
+sliced the Del button, because with the badge gone the *names* were the wall: a real
+"BHAT BHATENI CHICKEN SAUSAGE" is 239px of unbreakable text and "Bhat Bhateni Super Market" 186px,
+both `nowrap`. Sample data chosen from a screenshot measured 1030px min-content where invented data
+had measured 912. **Measure with the longest values the client actually has, not with a plausible
+row.** The answer was to let both NAMES wrap and keep everything else nowrap: a day, a figure, a
+unit, an invoice ref, an expiry and a button are all things a line break either corrupts or cuts,
+and a name is not. A word stays atomic, so a name never breaks mid-word. No horizontal scroll from
+1152px up, Actions holds its full width at every size, and nothing wraps at all at 1440+.
+
 **A long header is a column width, and it can be two lines.** `Bill Total (incl. VAT)` cost 150px to
 label figures needing 75px. A `display: block` child inside the `th` breaks the line regardless of
 the inherited nowrap, so nothing has to be deleted to halve the column. Same for a second line of

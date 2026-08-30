@@ -1486,21 +1486,29 @@ table.data-table--sticky-first tr:hover td:first-child {
   background: var(--theme-table-hover);
 }
 
-/* Purchases bill list. The Item cell carries the item name AND its category badge, so the auto
-   table layout used to collapse this column first, wrapping a two-word name ("COCONUT WATER")
-   over two lines and dropping the badge onto a third — three lines tall to show one line of
-   figures. The original fix pinned the whole CELL to one line and let `.table-wrap` scroll, but
-   with every one of the nine columns then refusing to give any width back, the table's
-   min-content came to 1134px against 1086px of room at a 1440px window: it overflowed at every
-   ordinary desktop size, and what the reader saw was a cut-off Edit button, not a scrollbar.
+/* Purchases bill list. The Item and Vendor cells are deliberately the only wrappable columns in
+   this table, and there is no `.purchases-item-cell` rule any more — that history is worth the
+   paragraph, because it was rewritten three times and each fix caused the next.
 
-   The nowrap now sits on the item NAME (inline, in Purchases.js) rather than on the cell. The
-   name still never breaks mid-name, which is all the original fix was protecting, while the
-   badge is free to drop to a second line — so this is the one column that can absorb a narrow
-   window, and it only does so once there is genuinely no room. Measured min-content: 918px.
-   The tighter vertical padding is the other half of the original fix and still applies, since
-   this table is read as a dense ledger of bills rather than a report of a dozen rows. */
-table.purchases-table td.purchases-item-cell { white-space: normal; }
+   S595: the Item cell held the name AND a category badge, so the auto layout collapsed it first —
+   "COCONUT WATER" broke over two lines with the badge on a third, three lines tall to show one
+   line of figures. The fix pinned the whole CELL to `nowrap`. S646: with all nine columns then
+   refusing to give width back, min-content reached 1134px against 1086px of room at a 1440px
+   window — the table overflowed at every ordinary desktop size, and the reader saw a sliced Edit
+   button rather than a scrollbar. That moved the nowrap onto the name so the badge could absorb
+   the squeeze. S648: the badge was removed outright (a category repeated on every line of a bill
+   is not what anyone scans a purchase ledger for, and it is still on the page twice — the Item
+   filter's option labels carry it and the Daily Register groups by it), and the names themselves
+   turned out to be the wall: a real "BHAT BHATENI CHICKEN SAUSAGE" is 239px of unbreakable text.
+
+   So both names now WRAP, and everything else in the row — day, figures, units, invoice ref,
+   expiry, the action buttons — stays `nowrap`. Width is given up by the two columns that can spare
+   a second line and never by the ones where a break would corrupt a value or cut a control. A word
+   is still atomic, so a name never breaks mid-word. Measured: no horizontal scroll at 1152px and
+   up, Actions holds its full 171px at every width, and at 1440+ nothing wraps at all.
+
+   The tighter vertical padding is the other half of S595's fix and still applies, since this
+   table is read as a dense ledger of bills rather than a report of a dozen rows. */
 table.purchases-table td { padding-top: 7px; padding-bottom: 7px; }
 
 /* The expand control on a table row (RowDisclosure.jsx). It sits inside a <td> so the <tr> keeps

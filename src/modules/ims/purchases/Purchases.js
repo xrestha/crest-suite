@@ -522,15 +522,12 @@ export default function Purchases() {
                           return [
                             <tr key={`gh-${gid}`} style={{ background: 'rgba(201,168,76,0.04)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
                               {dayCell}
-                              <td className="purchases-item-cell" style={{ fontWeight: 500, color: 'var(--theme-text1)', fontSize: 13 }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>{entry.items?.name}</span>
-                                {entry.items?.categories?.name && (
-                                  <span className="badge badge-yellow" style={{ marginLeft: 8 }}>{entry.items.categories.name}</span>
-                                )}
+                              <td style={{ fontWeight: 500, color: 'var(--theme-text1)', fontSize: 13 }}>
+                                {entry.items?.name}
                               </td>
-                              <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                              <td style={{ verticalAlign: 'middle' }}>
                                 <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{first.vendors?.name || <span style={{ color: 'var(--theme-text2)' }}>No Vendor</span>}</span>
-                                {first.invoice_ref && <span style={{ display: 'block', color: 'var(--theme-text2)', fontSize: 11, marginTop: 2 }}>#{first.invoice_ref}</span>}
+                                {first.invoice_ref && <span style={{ display: 'block', whiteSpace: 'nowrap', color: 'var(--theme-text2)', fontSize: 11, marginTop: 2 }}>#{first.invoice_ref}</span>}
                               </td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                 {Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
@@ -563,9 +560,9 @@ export default function Purchases() {
                                 it. Inline, in a nowrap cell, this was the bill row's own 223px column for a
                                 name that needs ~120px — and the two are supporting detail, not a peer of the
                                 name they describe. */}
-                            <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                            <td style={{ verticalAlign: 'middle' }}>
                               <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{first.vendors?.name || <span style={{ color: 'var(--theme-text2)' }}>No Vendor</span>}</span>
-                              <span style={{ display: 'block', fontSize: 11, marginTop: 2, color: 'var(--theme-text3)' }}>
+                              <span style={{ display: 'block', whiteSpace: 'nowrap', fontSize: 11, marginTop: 2, color: 'var(--theme-text3)' }}>
                                 {first.invoice_ref && <span style={{ color: 'var(--theme-text2)' }}>#{first.invoice_ref} · </span>}
                                 {groupEntries.length} items
                               </span>
@@ -583,11 +580,8 @@ export default function Purchases() {
                           ...groupEntries.map(entry => (
                             <tr key={entry.id} style={{ background: 'rgba(0,0,0,0.12)', borderBottom: '1px solid var(--theme-card)' }}>
                               <td></td>
-                              <td className="purchases-item-cell" style={{ fontWeight: 500, color: 'var(--theme-text2)', paddingLeft: 20, fontSize: 13 }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>{entry.items?.name}</span>
-                                {entry.items?.categories?.name && (
-                                  <span className="badge badge-yellow" style={{ marginLeft: 8 }}>{entry.items.categories.name}</span>
-                                )}
+                              <td style={{ fontWeight: 500, color: 'var(--theme-text2)', paddingLeft: 20, fontSize: 13 }}>
+                                {entry.items?.name}
                               </td>
                               <td></td>
                               {(() => {
