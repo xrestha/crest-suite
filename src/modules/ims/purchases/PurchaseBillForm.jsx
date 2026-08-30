@@ -6,10 +6,9 @@ import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import QtyInput from '../../../components/QtyInput'
 import FieldError from '../../../components/FieldError'
-import { getCf, calcBillTotals, fmtRate } from './purchasesHelpers'
+import { getCf, calcBillTotals, fmtRate, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false }
-const PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
 const newLine = () => ({ _key: Date.now() + Math.random(), item_id: '', qty: '', rate: '', expiry_date: '', shelf_life: '', vat_inclusive: false, _amtDraft: '' })
 
 // Builds the initial header/lines from the group of raw purchase_entries being edited — mirrors
@@ -258,7 +257,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
         <div className="form-field">
           <label htmlFor="purcha-f4"><Tip text="Cash: paid on delivery. Credit: pay later. FonePay: digital payment. Applied to all items on this bill.">Payment</Tip></label>
           <select id="purcha-f4" className="form-select" style={{ fontSize: 13 }} value={billHeader.payment_method} onChange={e => setBillHeader(h => ({ ...h, payment_method: e.target.value }))}>
-            {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+            {PURCHASE_PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
       </div>

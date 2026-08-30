@@ -1,4 +1,16 @@
 // Shared by Purchases.js, PurchaseBillForm.jsx, and ReturnsTab.jsx.
+
+// How a vendor bill was settled. Distinct from POS's PAYMENT_METHODS (posOrdersConstants.js) on
+// purpose — that is how a GUEST pays us, this is how we pay a SUPPLIER, and the two lists have no
+// reason to move together. It had been retyped identically in PurchaseBillForm.jsx and
+// PurchaseOrders.js; S650 added a third reader (the Purchases payment filter), which is the point
+// at which two copies become a list that can disagree with itself.
+//
+// 'Cash' is also the fallback everything renders for a NULL — bills written before the column
+// existed, and the form's own default. Anything filtering on a method must therefore treat NULL as
+// Cash, or the filter returns fewer rows than the screen it is filtering shows.
+export const PURCHASE_PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
+
 // Returns the effective conversion factor (>1) for an item, or 1 if no conversion set.
 export function getCf(item) {
   const cf = parseFloat(item?.conversion_factor)

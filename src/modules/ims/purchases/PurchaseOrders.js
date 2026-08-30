@@ -10,8 +10,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
-
-const PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
+import { PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 
 const STATUS_META = {
   draft:     { label: 'Draft',     color: 'var(--theme-text2)', bg: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-text2) 30%, transparent)' },
@@ -389,7 +388,7 @@ export default function PurchaseOrders() {
                 </Tip>
               </label>
               <select id="purcha-f2" className="form-select" value={receivePayment} onChange={e => setReceivePayment(e.target.value)}>
-                {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                {PURCHASE_PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
             <div className="form-field" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>

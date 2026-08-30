@@ -159,6 +159,47 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S650 — 2026-08-30 — Purchases gains a Bill no. search and a Payment filter
+
+Service worker `crest-v167`. No migration.
+
+Two filters added to the Purchases list, beside the existing day pills, Item and Vendor. Both feed
+the same `filtered` set, so the entry count and **both** footer totals (goods value ex-VAT, and
+payable incl. VAT) follow them; changing period clears all five.
+
+**Bill no.** searches `purchase_entries.invoice_ref` — the `#TII6339` printed under the vendor name
+on each bill row. Case-insensitive substring, because a reference is remembered by its tail digits
+rather than its prefix, and **a leading `#` is stripped** so pasting it back exactly as displayed
+works rather than matching nothing.
+
+**Payment** is Cash / Credit / FonePay, and two decisions in it are the ones worth keeping:
+
+- **The option list is built from the methods the period actually used**, in the bill form's order,
+  with any unrecognised value appended rather than dropped. An option that returns nothing is
+  noise; a value in the data with no option is a row nothing can reach. Same reasoning as the day
+  pills being built from the data instead of 1..32. The whole control hides when a period has only
+  one method.
+- **A blank `payment_method` is Cash**, which every display already assumed via `|| 'Cash'` — bills
+  written before the column existed, and anything the form defaulted. Filtering the raw column
+  would have hidden rows the screen labels Cash. `methodOf(p)` is now the single place that
+  fallback lives, shared by the filter, the option list and the row badge, so they cannot disagree.
+  (Same family as the standing `.neq drops NULL rows` trap: a NULL is not a value you can compare.)
+
+**`PURCHASE_PAYMENT_METHODS` moved to `purchasesHelpers.js`.** It had been retyped identically in
+`PurchaseBillForm.jsx` and `PurchaseOrders.js`; this filter was the third reader, which is where two
+copies become a list that can disagree with itself. Deliberately still separate from POS's
+`PAYMENT_METHODS` — that is how a guest pays *us*, this is how we pay a *supplier*, and they have no
+reason to move together.
+
+**`filtered`, `byDay` and `filteredPayable` are now memoized.** This page had no text input until
+now; a controlled one re-runs every render-body derivation per keystroke, and `filteredPayable`
+walks each bill group through `calcBillTotals`. The values are unchanged — this is the shape
+`.claude/rules/frontend-performance.md` exists for, and adding a search box without it would have
+introduced exactly what that rule warns about.
+
+Filter row measured at 1366px: all five controls plus Clear Filters and the entry count sit on one
+line.
+
 ### S649 — 2026-08-30 — the category badge goes, and the bill table's names wrap
 
 Service worker `crest-v166`. No migration.

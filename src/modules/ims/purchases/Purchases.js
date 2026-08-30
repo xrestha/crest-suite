@@ -10,11 +10,16 @@ import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
-import { getCf, calcBillTotals } from './purchasesHelpers'
+import { getCf, calcBillTotals, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 import ReturnsTab from './ReturnsTab'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+
+// A bill row's payment method as every screen displays it. NULL means Cash — the form's default,
+// and what pre-column bills hold — so the filter, the option list and the row badge all resolve it
+// the same way here rather than each repeating `|| 'Cash'`.
+const methodOf = p => p.payment_method || 'Cash'
 
 export default function Purchases() {
   const { clientId, profile, loading: authLoading, isAdmin, hasImsAccess } = useAuth()
@@ -50,6 +55,8 @@ export default function Purchases() {
   const [filterDay, setFilterDay]           = useState('all')
   const [filterItem, setFilterItem]         = useState('all')
   const [filterVendor, setFilterVendor]     = useState('all')
+  const [filterPayment, setFilterPayment]   = useState('all')
+  const [filterRef, setFilterRef]           = useState('')
   // Returns tab
   const [returns, setReturns]               = useState(() =>
     (cachedOpenPeriod ? readPageCache('purchases', `returns_${cachedOpenPeriod.id}`, effectiveClientId) : null) ?? [])
@@ -112,6 +119,8 @@ export default function Purchases() {
     setFilterDay('all')
     setFilterItem('all')
     setFilterVendor('all')
+    setFilterPayment('all')
+    setFilterRef('')
     await Promise.all([loadPurchases(periodId), loadReturns(periodId)])
   }
 
@@ -187,12 +196,26 @@ export default function Purchases() {
     [vendors]
   )
 
-  const filtered = purchases.filter(p => {
-    const matchDay    = filterDay    === 'all' || p.bs_day === parseInt(filterDay)
-    const matchItem   = filterItem   === 'all' || p.item_id === filterItem
-    const matchVendor = filterVendor === 'all' || p.vendor_id === filterVendor
-    return matchDay && matchItem && matchVendor
-  })
+  // Memoized because the Bill no. box is a controlled input: without this, every keystroke re-ran
+  // this filter, `byDay`'s regroup and `filteredPayable`'s per-bill calcBillTotals over the whole
+  // period (see .claude/rules/frontend-performance.md). The values are unchanged.
+  //
+  // A bill's payment method is stored per LINE, and every display of it reads
+  // `payment_method || 'Cash'` — bills written before the column existed hold NULL, and so does
+  // anything the form defaulted. Filtering on the raw column would therefore hide rows the screen
+  // labels Cash; `methodOf` is the one place that fallback is applied, shared with the option list
+  // below so the two cannot disagree.
+  const filtered = useMemo(() => {
+    const ref = filterRef.trim().replace(/^#/, '').toLowerCase()
+    return purchases.filter(p => {
+      const matchDay     = filterDay     === 'all' || p.bs_day === parseInt(filterDay)
+      const matchItem    = filterItem    === 'all' || p.item_id === filterItem
+      const matchVendor  = filterVendor  === 'all' || p.vendor_id === filterVendor
+      const matchPayment = filterPayment === 'all' || methodOf(p) === filterPayment
+      const matchRef     = !ref || (p.invoice_ref || '').toLowerCase().includes(ref)
+      return matchDay && matchItem && matchVendor && matchPayment && matchRef
+    })
+  }, [purchases, filterDay, filterItem, filterVendor, filterPayment, filterRef])
 
   const vendorTotal = filterVendor === 'all' ? 0 : purchases
     .filter(p => p.vendor_id === filterVendor)
@@ -212,6 +235,17 @@ export default function Purchases() {
     : ''
   const uniqueDays  = [...new Set(purchases.map(p => p.bs_day))].sort((a, b) => a - b)
 
+  // Only methods this period actually used, in the order the bill form offers them, with anything
+  // unrecognised (a legacy value, a method since retired from the form) appended rather than
+  // dropped — an option list that silently omits a value present in the data is a row nothing can
+  // reach. Same reasoning as the day pills above being built from the data, not from 1..32.
+  const paymentOptions = useMemo(() => {
+    const present = new Set(purchases.map(methodOf))
+    const known = PURCHASE_PAYMENT_METHODS.filter(m => present.has(m))
+    const extra = [...present].filter(m => !PURCHASE_PAYMENT_METHODS.includes(m)).sort()
+    return [...known, ...extra]
+  }, [purchases])
+
   // Number of distinct bills (groups) per day — shown on each day pill
   const billCountPerDay = useMemo(() => {
     const map = {}
@@ -223,23 +257,23 @@ export default function Purchases() {
     return Object.fromEntries(Object.entries(map).map(([d, s]) => [parseInt(d), s.size]))
   }, [purchases])
 
-  const byDay = filtered.reduce((acc, p) => {
+  const byDay = useMemo(() => filtered.reduce((acc, p) => {
     const day = p.bs_day
     if (!acc[day]) acc[day] = {}
     const gid = p.purchase_group_id || p.id
     if (!acc[day][gid]) acc[day][gid] = []
     acc[day][gid].push(p)
     return acc
-  }, {})
+  }, {}), [filtered])
 
   // The Total column on each bill row shows what was actually PAYABLE (incl. VAT, after the
   // bill's discount) while the footer and the Gross Purchases KPI are the ex-VAT, pre-discount
   // base. Both are legitimate figures, neither was labelled, and they differ by exactly
   // (VAT − discount) — so the column visibly did not add up to the total printed beneath it.
   // Footer now carries both, each named. Grouped the same way the table groups.
-  const filteredPayable = Object.values(byDay).reduce((sum, dayGroups) =>
+  const filteredPayable = useMemo(() => Object.values(byDay).reduce((sum, dayGroups) =>
     sum + Object.values(dayGroups).reduce((s, lines) =>
-      s + calcBillTotals(lines, lines[0]?.discount_amount).grandTotal, 0), 0)
+      s + calcBillTotals(lines, lines[0]?.discount_amount).grandTotal, 0), 0), [byDay])
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
@@ -421,13 +455,38 @@ export default function Purchases() {
                 options={vendorFilterOptions}
                 style={{ minWidth: 220 }}
               />
+              {/* Bill no. — matches the vendor's own invoice reference, the `#TII6339` printed on
+                  each bill row. A leading # is stripped so typing it back exactly as displayed
+                  works; matching is a case-insensitive substring, since a reference is usually
+                  remembered by its tail digits rather than its prefix. */}
+              <input
+                className="form-input"
+                type="search"
+                value={filterRef}
+                onChange={e => setFilterRef(e.target.value)}
+                placeholder="Bill no…"
+                aria-label="Search by bill number"
+                style={{ width: 160 }}
+              />
+              {paymentOptions.length > 1 && (
+                <select
+                  className="form-select"
+                  value={filterPayment}
+                  onChange={e => setFilterPayment(e.target.value)}
+                  aria-label="Filter by payment method"
+                  style={{ width: 150 }}
+                >
+                  <option value="all">All Payments</option>
+                  {paymentOptions.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              )}
               {filterVendor !== 'all' && (
                 <span style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
                   Vendor Total: NPR {vendorTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               )}
-              {(filterDay !== 'all' || filterItem !== 'all' || filterVendor !== 'all') && (
-                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => { setFilterDay('all'); setFilterItem('all'); setFilterVendor('all') }}>Clear Filters</button>
+              {(filterDay !== 'all' || filterItem !== 'all' || filterVendor !== 'all' || filterPayment !== 'all' || filterRef !== '') && (
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => { setFilterDay('all'); setFilterItem('all'); setFilterVendor('all'); setFilterPayment('all'); setFilterRef('') }}>Clear Filters</button>
               )}
               <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 'auto' }}>{filtered.length} entr{filtered.length !== 1 ? 'ies' : 'y'}</span>
             </div>
@@ -498,8 +557,8 @@ export default function Purchases() {
                               {/* Credit is a normal commercial arrangement, not a fault — it was badge-red beside a green
                                   Cash, which reads as a warning on every credit bill a restaurant enters.
                                   badge-yellow is the categorical tag; overdue-ness is Outstanding Payables' job. */}
-                              <span className={`badge ${first.payment_method === 'Cash' ? 'badge-green' : first.payment_method === 'Credit' ? 'badge-yellow' : 'badge-purple'}`}>
-                                {first.payment_method || 'Cash'}
+                              <span className={`badge ${methodOf(first) === 'Cash' ? 'badge-green' : methodOf(first) === 'Credit' ? 'badge-yellow' : 'badge-purple'}`}>
+                                {methodOf(first)}
                               </span>
                               {!isLocked && <>
                                 <button className="btn btn-ghost" style={{ fontSize: 11, padding: '7px 11px' }} onClick={() => openEditGroup(gid)}>Edit</button>
