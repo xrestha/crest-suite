@@ -334,7 +334,10 @@ palette out of the semantic tokens (Recharts SVG props stay literal hex); motion
 series needs `{...chartMotion()}`; the radius/type scales are CLOSED sets defined in `DESIGN.md`;
 reach for a global class (`data-table`, `btn`, `badge-*`, `form-input`, `form-select`) rather than
 inline styles — an inline-styled control escapes the `:disabled` treatment, the `[aria-invalid]`
-hook and the `@media (pointer: coarse)` 16px touch floor. There is no `badge-gold`.
+hook and the `@media (pointer: coarse)` 16px touch floor. There is no `badge-gold`. A table needs
+at least one column that can absorb a squeeze, so `white-space: nowrap` goes on the unbreakable
+ATOM (a date, an item name), never on the whole cell — every column nowrap and the table can only
+overflow, which is not the same thing as scrolling.
 ### Component library (reusable)
 
 See `.claude/rules/component-library.md` (auto-loads when editing components, pages or modules) for

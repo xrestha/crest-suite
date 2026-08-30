@@ -159,6 +159,43 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S646 — 2026-08-30 — the Purchases bill table stopped running off the right edge
+
+Service worker `crest-v163`. No migration.
+
+Reported from a real screen: the bill list's Edit button cut mid-word at the right edge. Measured in
+a headless browser against the shipped CSS, the table's **min-content was 1134px against 1086px of
+room at a 1440px window** — so it overflowed at every ordinary desktop size, and needed a 1382px
+window before it fit at all.
+
+**Every one of the nine columns refused to give width back.** S595 had pinned the Item cell to
+`white-space: nowrap` to stop a two-word name wrapping over three lines; the Vendor cell was nowrap
+beside it; `data-table th` is nowrap globally, which made "Bill Total (incl. VAT)" a **150px** header
+over figures that need 75px. With nothing compressible the table could only overflow, and `.table-wrap`
+scrolled — but see the scrollbar note below for why nobody could tell.
+
+Three cuts, none of which drops anything the page was saying:
+
+- **The nowrap moved from the Item CELL to the item NAME.** The name still never breaks mid-name,
+  which is all S595 was protecting; the category badge is now free to drop to a second line, so this
+  is the one column that can absorb a narrow window — and it only does once there is genuinely no room.
+- **`(incl. VAT)` onto its own line** under "Bill Total". A block child breaks the line regardless of
+  the inherited nowrap. 150px → 75px.
+- **`#3066 · 5 items` onto a second line** under the vendor name — supporting detail, not a peer of
+  the name it describes. 223px → 122px.
+
+Numeric cells (Qty, Rate, Bill Total, Expiry) took an explicit nowrap in the same pass, so a figure
+can never be the thing that breaks. Result: **min-content 912px**, fits unscrolled from a ~1272px
+window, rows unchanged at 52–56px.
+
+**And `.table-wrap--fab-clear` now reserves its Fab clearance with `margin-bottom`, not
+`padding-bottom`** — 21 tables across IMS/HR/POS. Padding sits INSIDE the scroll container, so the
+horizontal scrollbar rendered 88px below the last row: off the bottom of the viewport on any table
+long enough to scroll the page, and with Windows' overlay scrollbars, not on screen at all. A too-wide
+table therefore read as content *silently cut off* rather than as something scrollable — which is why
+this arrived as "the screen is flowing to the right" rather than "the table scrolls". The card's
+height is unchanged; the scrollbar now sits directly under the table.
+
 ### S645 — 2026-08-29 — `/impeccable document`, sidecar only
 
 No service-worker bump: `.impeccable/design.json` ships in no bundle.

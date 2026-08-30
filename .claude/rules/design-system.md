@@ -328,11 +328,13 @@ screenshots of the same Purchases bill list rather than found by any detector:
 category badge, the Vendor cell beside it is `nowrap` — so a two-word name broke over two lines with
 the badge dropping onto a third, and the row stood three lines tall to show one line of figures.
 
-**The fix is `nowrap` on the cell, never a fixed width.** `.table-wrap`'s horizontal scroll exists
-to carry exactly this; a width pins the column and moves the wrap somewhere else on the next screen
-size. Same failure with no second element at all: a Day cell holding `2026-08-17` collapsed to its
-widest *unbreakable fragment*, `2026-`, and broke the date at every hyphen — a date, a code, an
-invoice ref and a phone number all need `nowrap` for this reason, not just crowded cells.
+**The fix is `nowrap` on the ATOM, never a fixed width — and never the whole cell** (corrected
+S646; the original rule said the cell, and see the section below for what that cost). A width pins
+the column and moves the wrap somewhere else on the next screen size. Same failure with no second
+element at all: a Day cell holding `2026-08-17` collapsed to its widest *unbreakable fragment*,
+`2026-`, and broke the date at every hyphen — a date, a code, an invoice ref and a phone number all
+need `nowrap` for this reason, not just crowded cells. But a cell holding a name *and* a badge needs
+it on the name only: nowrap the cell and the badge becomes unbreakable too, for no reason.
 
 **Row density is a table-level decision.** The global `td` padding is 11px; a table read as a dense
 ledger opts down through its own scoped class (`table.purchases-table`, 7px), never per cell — a
@@ -342,6 +344,41 @@ column, and inline beats the class silently.
 **Day columns say the month.** `formatBsDay(day, bsMonth)` → "1st Bhadra", not a bare `1` that only
 reads correctly while the page header is on screen. Full rule in `DESIGN.md` and `CLAUDE.md`'s BS
 calendar section; Excel exports keep the numeric column.
+
+### A table where every column is `nowrap` can only overflow (S646)
+
+The section above is the fix that caused this one. Each nowrap was individually right — a date must
+not break at its hyphens, an item name must not break mid-name — but they accumulate, and
+`data-table th` is `white-space: nowrap` **globally**, so every header is load-bearing width too.
+By S646 the Purchases bill list had nine columns and not one of them could give width back: its
+min-content was **1134px against 1086px of room at a 1440px window**. It needed a 1382px window
+before it fit at all, and it had been overflowing on every ordinary desktop since.
+
+**A table needs at least one column that can absorb the squeeze**, and that column should be chosen
+rather than discovered — the widest text column, with the nowrap pushed down onto the one fragment
+that genuinely cannot break. The item cell went from `nowrap` to `normal` with the *name* wrapped in
+a nowrap span: the name still never breaks, and the badge beside it drops to a second line only when
+there is no room. Min-content fell 1134 → 912.
+
+**A long header is a column width, and it can be two lines.** `Bill Total (incl. VAT)` cost 150px to
+label figures needing 75px. A `display: block` child inside the `th` breaks the line regardless of
+the inherited nowrap, so nothing has to be deleted to halve the column. Same for a second line of
+supporting detail in a body cell — `#3066 · 5 items` under a vendor name rather than trailing it took
+that column 223px → 122px, and reads better besides.
+
+**Measure it, don't eyeball it.** Every number above came from the real `Layout.css` and a
+representative row rendered in a headless browser and queried for `scrollWidth` vs `clientWidth` per
+viewport. A table that fits on the machine it was built on tells you nothing about the one it was
+reported from.
+
+**A scroll container's clearance must be MARGIN, not padding.** `.table-wrap--fab-clear` (21 tables)
+reserved its 88px of Fab clearance with `padding-bottom` — inside the scroll container, so the
+horizontal scrollbar rendered 88px below the last row: below the fold on any table long enough to
+scroll the page, and with Windows' overlay scrollbars, not on screen at all. So the overflow above
+never presented as *scrollable*; it presented as an Edit button sliced down the middle, which is how
+it got reported. Margin gives byte-identical clearance (a margin on the last child of a padded
+`.card` cannot collapse out of it) and puts the scrollbar directly under the table. **Generally: any
+padding on an `overflow: auto` element pushes its scrollbar away from the content it scrolls.**
 
 ## A saved theme pins the user to the preset as it was, so a corrected token never ships (S620)
 

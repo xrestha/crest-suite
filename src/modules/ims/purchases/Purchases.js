@@ -617,7 +617,13 @@ export default function Purchases() {
                       <th style={{ textAlign: 'right' }}><Tip text="Quantity in your purchase unit, with the base-unit figure in brackets where the two differ — e.g. 2 Crate (24 Bottle). Stock and costing always use the base unit." width={280}>Qty</Tip></th>
                       <th>UOM</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Cost per base unit, not per purchase unit. A NPR 1,200 crate of 24 bottles stores as NPR 50 per bottle — which is what Recipe Costing and Stock value use." width={280}>Rate</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="What the bill came to in total — after any discount and including 13% VAT on the VAT-marked lines. This is the amount payable to the vendor." width={260}>Bill Total (incl. VAT)</Tip></th>
+                      {/* "(incl. VAT)" on its own line, not inline. `data-table th` is nowrap, so as one
+                          string this was a 150px column — the single widest thing in the header — to label
+                          figures that need 75px. A block child breaks the line regardless of nowrap. */}
+                      <th style={{ textAlign: 'right' }}>
+                        <Tip text="What the bill came to in total — after any discount and including 13% VAT on the VAT-marked lines. This is the amount payable to the vendor." width={260}>Bill Total</Tip>
+                        <span style={{ display: 'block', fontWeight: 400, opacity: 0.75 }}>incl. VAT</span>
+                      </th>
                       <th>Expiry</th><th></th>
                     </tr>
                   </thead>
@@ -680,30 +686,30 @@ export default function Purchases() {
                             <tr key={`gh-${gid}`} style={{ background: 'rgba(201,168,76,0.04)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
                               {dayCell}
                               <td className="purchases-item-cell" style={{ fontWeight: 500, color: 'var(--theme-text1)', fontSize: 13 }}>
-                                {entry.items?.name}
+                                <span style={{ whiteSpace: 'nowrap' }}>{entry.items?.name}</span>
                                 {entry.items?.categories?.name && (
                                   <span className="badge badge-yellow" style={{ marginLeft: 8 }}>{entry.items.categories.name}</span>
                                 )}
                               </td>
                               <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                                 <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{first.vendors?.name || <span style={{ color: 'var(--theme-text2)' }}>No Vendor</span>}</span>
-                                {first.invoice_ref && <span style={{ color: 'var(--theme-text2)', fontSize: 12, marginLeft: 10 }}>#{first.invoice_ref}</span>}
+                                {first.invoice_ref && <span style={{ display: 'block', color: 'var(--theme-text2)', fontSize: 11, marginTop: 2 }}>#{first.invoice_ref}</span>}
                               </td>
-                              <td style={{ textAlign: 'right' }}>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                 {Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
                                 {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString()} {entry.items?.uom}</div>}
                               </td>
                               <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
-                              <td style={{ textAlign: 'right' }}>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                 {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                 {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
                               </td>
-                              <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
                                 {groupGrand.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                                 {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                               </td>
-                              <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                              <td style={{ fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
                                 {entry.expiry_date ? <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
                               </td>
                               {actionsCell}
@@ -716,13 +722,19 @@ export default function Purchases() {
                           <tr key={`gh-${gid}`} style={{ background: 'rgba(201,168,76,0.04)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
                             {dayCell}
                             <td></td>
+                            {/* Invoice ref and line count on a second line under the vendor name, not trailing
+                                it. Inline, in a nowrap cell, this was the bill row's own 223px column for a
+                                name that needs ~120px — and the two are supporting detail, not a peer of the
+                                name they describe. */}
                             <td style={{ verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                               <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{first.vendors?.name || <span style={{ color: 'var(--theme-text2)' }}>No Vendor</span>}</span>
-                              {first.invoice_ref && <span style={{ color: 'var(--theme-text2)', fontSize: 12, marginLeft: 10 }}>#{first.invoice_ref}</span>}
-                              <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 10 }}>{groupEntries.length} items</span>
+                              <span style={{ display: 'block', fontSize: 11, marginTop: 2, color: 'var(--theme-text3)' }}>
+                                {first.invoice_ref && <span style={{ color: 'var(--theme-text2)' }}>#{first.invoice_ref} · </span>}
+                                {groupEntries.length} items
+                              </span>
                             </td>
                             <td colSpan={3}></td>
-                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
+                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
                               {groupGrand.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                               {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
@@ -735,7 +747,7 @@ export default function Purchases() {
                             <tr key={entry.id} style={{ background: 'rgba(0,0,0,0.12)', borderBottom: '1px solid var(--theme-card)' }}>
                               <td></td>
                               <td className="purchases-item-cell" style={{ fontWeight: 500, color: 'var(--theme-text2)', paddingLeft: 20, fontSize: 13 }}>
-                                {entry.items?.name}
+                                <span style={{ whiteSpace: 'nowrap' }}>{entry.items?.name}</span>
                                 {entry.items?.categories?.name && (
                                   <span className="badge badge-yellow" style={{ marginLeft: 8 }}>{entry.items.categories.name}</span>
                                 )}
@@ -748,22 +760,22 @@ export default function Purchases() {
                                 const displayRate = cf > 1 ? entry.rate * cf : entry.rate
                                 return (
                                   <>
-                                    <td style={{ textAlign: 'right' }}>
+                                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                       {Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
                                       {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString()} {entry.items?.uom}</div>}
                                     </td>
                                     <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
-                                    <td style={{ textAlign: 'right' }}>
+                                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                       {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                       {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
                                     </td>
                                   </>
                                 )
                               })()}
-                              <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--theme-accent-ink)' }}>
                                 {(entry.qty * entry.rate).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>
-                              <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                              <td style={{ fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
                                 {entry.expiry_date ? <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
                               </td>
                               <td></td>

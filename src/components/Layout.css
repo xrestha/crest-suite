@@ -1378,9 +1378,17 @@ tr.interactive-row:focus-visible {
 
 /* Reserves space at the bottom of a scrollable table so the fixed-position Fab
    (bottom: 28px, ~40px tall) never overlaps the last row's action buttons.
-   Apply alongside .table-wrap only on pages that also render a <Fab>. */
+   Apply alongside .table-wrap only on pages that also render a <Fab>.
+
+   MARGIN, not padding. Padding sits INSIDE the scroll container, so the horizontal scrollbar
+   rendered 88px below the last row — on a table long enough to scroll the page, that is off the
+   bottom of the viewport, and with overlay scrollbars (Windows default) there was nothing on
+   screen at all. A too-wide table therefore read as content silently cut off at the right edge
+   rather than as something scrollable. Margin puts the scrollbar directly under the table and
+   keeps the identical 88px of Fab clearance, since a margin on the last child of a padded .card
+   cannot collapse out of it. */
 .table-wrap--fab-clear {
-  padding-bottom: 88px;
+  margin-bottom: 88px;
 }
 
 table.data-table {
@@ -1478,14 +1486,21 @@ table.data-table--sticky-first tr:hover td:first-child {
   background: var(--theme-table-hover);
 }
 
-/* Purchases bill list. The Item cell carries the item name AND its category badge, while the
-   Vendor cell beside it is `white-space: nowrap` — so the item column was the one the auto table
-   layout collapsed, wrapping a two-word name ("COCONUT WATER") over two lines and dropping the
-   badge onto a third. The row then stood three lines tall to show one line of figures. Keep the
-   cell on one line and let `.table-wrap`'s own horizontal scroll carry the extra width instead;
-   the tighter vertical padding is the second half of the same fix, since this table is read as a
-   dense ledger of bills rather than a report of a dozen rows. */
-table.purchases-table td.purchases-item-cell { white-space: nowrap; }
+/* Purchases bill list. The Item cell carries the item name AND its category badge, so the auto
+   table layout used to collapse this column first, wrapping a two-word name ("COCONUT WATER")
+   over two lines and dropping the badge onto a third — three lines tall to show one line of
+   figures. The original fix pinned the whole CELL to one line and let `.table-wrap` scroll, but
+   with every one of the nine columns then refusing to give any width back, the table's
+   min-content came to 1134px against 1086px of room at a 1440px window: it overflowed at every
+   ordinary desktop size, and what the reader saw was a cut-off Edit button, not a scrollbar.
+
+   The nowrap now sits on the item NAME (inline, in Purchases.js) rather than on the cell. The
+   name still never breaks mid-name, which is all the original fix was protecting, while the
+   badge is free to drop to a second line — so this is the one column that can absorb a narrow
+   window, and it only does so once there is genuinely no room. Measured min-content: 918px.
+   The tighter vertical padding is the other half of the original fix and still applies, since
+   this table is read as a dense ledger of bills rather than a report of a dozen rows. */
+table.purchases-table td.purchases-item-cell { white-space: normal; }
 table.purchases-table td { padding-top: 7px; padding-bottom: 7px; }
 
 /* The expand control on a table row (RowDisclosure.jsx). It sits inside a <td> so the <tr> keeps
