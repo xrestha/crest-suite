@@ -484,11 +484,11 @@ export default function Stock() {
   // repair a period that was closed before the carry-forward feature existed (pre-2026-07-17).
   async function pullFromLastMonthClosing() {
     if (!selectedPeriod || isLocked) return
-    if (!navigator.onLine) { alert('You need to be online to pull last month’s closing stock.'); return }
+    if (!navigator.onLine) { alert('You’re offline. Last month’s closing counts are on the server, so this needs a connection. The counts you have entered on this page are saved on this device and will sync when you’re back online.'); return }
     const prevPeriod = periods
       .filter(p => p.bs_year < selectedPeriod.bs_year || (p.bs_year === selectedPeriod.bs_year && p.bs_month < selectedPeriod.bs_month))
       .sort((a, b) => (b.bs_year - a.bs_year) || (b.bs_month - a.bs_month))[0]
-    if (!prevPeriod) { alert('No earlier period found to pull closing stock from.'); return }
+    if (!prevPeriod) { alert('This is the earliest period on record, so there is no previous month to carry a closing count forward from. Enter the opening stock directly.'); return }
     const prevLabel = `${BS_MONTHS[prevPeriod.bs_month - 1]} ${prevPeriod.bs_year}`
     setSaveAllLoading(true)
     const { data: closingRows } = await supabase.from('closing_stock')
@@ -496,7 +496,7 @@ export default function Stock() {
     const counted = (closingRows || []).filter(r => r.physical_qty != null && parseFloat(r.physical_qty) > 0)
     if (counted.length === 0) {
       setSaveAllLoading(false)
-      alert(`${prevLabel} has no saved closing counts to pull.`)
+      alert(`${prevLabel} was never closing-counted, so there is nothing to carry forward. Count the closing stock for ${prevLabel} first, or enter this month’s opening figures directly.`)
       return
     }
     setSaveAllLoading(false)

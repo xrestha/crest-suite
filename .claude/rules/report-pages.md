@@ -77,7 +77,12 @@ Three rules came out of it:
   audiences, and no message that claims a failed write did not land. Before S619 the only such
   table lived inside HR Self-Service and no IMS or POS screen could reach it, so a dead connection
   reached an Owner as a bare `TypeError: Failed to fetch`. Pass the error object through it rather
-  than `error.message`, and keep `detail` as fine print.
+  than `error.message`, and keep `detail` as fine print. **Since S658 `ActionError` renders that
+  pair for you** (`src/components/ActionError.jsx` + `asActionError`) — the third channel beside
+  `FieldError` (one control) and `ReportLoadError` (a whole failed read), for the button just
+  pressed. Convert at the call site, and name the CONSEQUENCE before the cause: on the two-write
+  sequences this replaced, the first write had already committed, so what the reader needed was
+  which state the record is in now, not the constraint that rejected the second one.
 - **A dropped WRITE error is silent data loss, and a guard that drops its READ error passes
   vacuously (S613).** The silent-zero rule above is about rendering; these are its two write-side
   twins, and both shipped. **Write:** `Roster.jsx` painted the shift optimistically and dropped the

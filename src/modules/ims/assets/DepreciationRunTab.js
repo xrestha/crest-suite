@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import QtyInput from '../../../components/QtyInput'
 import { computeDepreciationPreview } from './depreciationCompute'
 
@@ -21,13 +22,17 @@ export default function DepreciationRunTab({ assets, onReload }) {
   const [loading, setLoading] = useState(false)
   const [posting, setPosting] = useState(false)
   const [msg, setMsg] = useState('')
+  // Errors moved out of `msg` and into their own state (S658): the toolbar span they shared is one
+  // line beside the Post button, which is fine for "Posted — schedule locked" and much too small
+  // for a failure that has to say what happened AND carry its technical detail.
+  const [err, setErr] = useState(null)
 
   const canPost = hasImsAccess('manager')
   const assetsById = Object.fromEntries(assets.map(a => [a.id, a]))
 
   async function preview() {
-    if (!periodStart || !periodEnd) { setMsg('error:Pick both a period start and end date.'); return }
-    setLoading(true); setMsg('')
+    if (!periodStart || !periodEnd) { setErr('Pick both a period start and end date before previewing the run.'); return }
+    setLoading(true); setMsg(''); setErr(null)
 
     const { data: postedRows } = await scopedFrom('assets_depreciation_schedule')
       .eq('is_posted', true).order('period_end', { ascending: true })
@@ -50,8 +55,8 @@ export default function DepreciationRunTab({ assets, onReload }) {
 
   async function post() {
     if (!lines || lines.length === 0) return
-    if (invalidOverride) { setMsg('error:Every line with an override amount needs a reason.'); return }
-    setPosting(true); setMsg('')
+    if (invalidOverride) { setErr('Every line you have overridden needs a reason — the reason is what an auditor reads to understand why the computed figure was changed.'); return }
+    setPosting(true); setMsg(''); setErr(null)
 
     const payloadLines = lines.map(l => {
       const override = l.override_amount === '' ? null : parseFloat(l.override_amount)
@@ -73,7 +78,13 @@ export default function DepreciationRunTab({ assets, onReload }) {
     })
 
     setPosting(false)
-    if (error) { setMsg('error:' + error.message); return }
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setErr({ text: `The depreciation run was not posted, so this period is still open and nothing has been locked.
+
+${text}`, detail })
+      return
+    }
     setMsg('ok:Posted — depreciation schedule locked for this period.')
     setLines(null)
     onReload()
@@ -99,8 +110,9 @@ export default function DepreciationRunTab({ assets, onReload }) {
               </button>
             </Tip>
           )}
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
+          {msg && <span style={{ fontSize: 12, color: 'var(--theme-green-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
+        <ActionError error={err} />
       </div>
 
       {lines && (

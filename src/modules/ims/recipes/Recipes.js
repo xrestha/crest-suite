@@ -9,6 +9,7 @@ import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
 import FieldError, { fieldAria } from '../../../components/FieldError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { NUTRIENTS, calcRecipeNutrition, calcLiveNutrition, hasNutrition } from '../../../utils/nutrition'
 import { getSuggestedPrice } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -289,7 +290,7 @@ export default function Recipes() {
       // ("unsaved") forever with zero indication why, indistinguishable from just not having
       // clicked Save yet. Now surfaces through the same error banner the main Save Recipe uses.
       console.error('Target FC% save error:', err)
-      setError(err.message || 'Failed to save target FC% — please try again.')
+      setError(asActionError(err))
     } finally {
       setFcPctSaving(false)
     }
@@ -649,7 +650,15 @@ export default function Recipes() {
       setView('list')
     } catch (err) {
       console.error('Recipe save error:', err)
-      setError(/timed out/i.test(err.message || '') ? err.message : (err.message || 'Failed to save — please try again.'))
+      // A timeout is the one failure that cannot say whether the write landed — the response can
+      // be lost after the server has committed it, and this save retries on a duplicate product
+      // code, so a blind retry can leave two recipes behind. withTimeout's own message is already
+      // written for a reader; it just needs the part it cannot know saying out loud.
+      setError(/timed out/i.test(err.message || '')
+        ? `${err.message}
+
+Check the recipe list before saving again — if it timed out after the recipe was written, saving a second time creates a duplicate.`
+        : asActionError(err))
     } finally {
       setSaving(false)
     }
@@ -677,7 +686,15 @@ export default function Recipes() {
       await scopedUpdate('items', { is_active: false }).eq('id', recipe.linked_item_id)
     }
     const { error } = await scopedDelete('recipes').eq('id', recipe.id)
-    if (error) { setError('Delete failed — ' + error.message); return }
+    if (error) {
+      // The ingredient rows and the mirror item are already gone by this point, so say so — the
+      // recipe still on screen is not the untouched record the user is about to assume it is.
+      const { text, detail } = asActionError(error)
+      setError({ text: `"${recipe.name}" was not deleted, but its ingredient list has already been cleared. Reopen it and re-enter the ingredients, or try the delete again.
+
+${text}`, detail })
+      return
+    }
     init()
   }
 
@@ -691,7 +708,11 @@ export default function Recipes() {
   // is_active), so toggling it off can never break another recipe's cost calculation.
   async function toggleActive(recipe) {
     const { error } = await scopedUpdate('recipes', { is_active: !recipe.is_active }).eq('id', recipe.id)
-    if (error) { setError('Failed to update status — ' + error.message); return }
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setError({ text: `"${recipe.name}" is still ${recipe.is_active ? 'active' : 'hidden'} — the change did not save. ${text}`, detail })
+      return
+    }
     init()
   }
 
@@ -1494,7 +1515,7 @@ export default function Recipes() {
             </div>
           </div>
 
-          {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '0 0 16px' }}>{error}</p>}
+          <ActionError error={error} className="action-error--top" />
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="btn btn-ghost" onClick={() => setView('list')}>Cancel</button>
             <button className="btn btn-primary" onClick={save} disabled={saving}>

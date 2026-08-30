@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import RowDisclosure from '../../../components/RowDisclosure'
 import ReportLoadError from '../../../components/ReportLoadError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { supabase } from '../../../supabaseClient'
 import { BS_MONTHS, bsToAd, adToBs } from '../../../utils/bsCalendar'
 import { calcBillTotals, billKeyOf, aging } from '../purchases/purchasesHelpers'
@@ -54,7 +55,7 @@ export default function OutstandingPayables() {
   const [expandedBill, setExpandedBill] = useState(null)
   const [payForm, setPayForm]           = useState({ amount: '', paid_at: TODAY, note: '', payment_mode: 'Cash' })
   const [savingPayment, setSavingPayment] = useState(false)
-  const [payError, setPayError]           = useState('')
+  const [payError, setPayError]           = useState(null)
 
   // Bulk "pay several bills at once" — for a monthly credit run across many invoices.
   const [selectedBills, setSelectedBills] = useState(new Set())
@@ -312,7 +313,11 @@ export default function OutstandingPayables() {
     if (rows.length === 0) { setSavingPayment(false); return }
 
     const { error: insErr } = await insertPayments(rows)
-    if (insErr) { setPayError(insErr.message || 'Failed to save payment.'); setSavingPayment(false); return }
+    if (insErr) {
+      const { text, detail } = asActionError(insErr)
+      setPayError({ text: `The payment was not recorded, so this bill still shows its full outstanding balance. ${text}`, detail })
+      setSavingPayment(false); return
+    }
     if (settleIds.length > 0) {
       await supabase.from('purchase_entries').update({ paid_at: date }).in('id', settleIds)
     }
@@ -379,7 +384,11 @@ export default function OutstandingPayables() {
     if (!window.confirm(`Delete ${toDelete.length} selected payment${toDelete.length === 1 ? '' : 's'} totaling ${fmt(total)}? This cannot be undone.`)) return
     const ids = toDelete.map(p => p.id)
     const { error } = await scopedDelete('payable_payments').in('id', ids)
-    if (error) { alert(error.message || 'Failed to delete payments.'); return }
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setPayError({ text: `${toDelete.length === 1 ? 'That payment is' : 'Those payments are'} still recorded against this bill — nothing was removed. ${text}`, detail })
+      return
+    }
     // Always clear paid_at on any affected line rather than re-checking against entry.value —
     // that field is a proportional split of the bill's grand total across whichever lines are
     // CURRENTLY still marked paid, which becomes unreliable (even negative) once a bill-level
@@ -853,6 +862,10 @@ export default function OutstandingPayables() {
                                             </button>
                                           </>)}
                                         </div>
+                                        {/* The pay form below (and the message slot inside it) only
+                                            renders on the Outstanding tab, so a failed delete on the
+                                            Settled tab had nowhere to appear at all. */}
+                                        {activeTab !== 'outstanding' && <ActionError error={payError} />}
                                         <table style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: 400 }}>
                                           <thead>
                                             <tr>
@@ -942,7 +955,7 @@ export default function OutstandingPayables() {
                                             {savingPayment ? '…' : 'Save'}
                                           </button>
                                         </div>
-                                        {payError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--theme-red-text)' }}>⚠ {payError}</div>}
+                                        <ActionError error={payError} />
                                         {willSettle && !payError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--theme-green-text)' }}>✓ This will fully settle the bill</div>}
                                       </div>
                                     )}

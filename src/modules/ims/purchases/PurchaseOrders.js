@@ -9,6 +9,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 
@@ -47,6 +48,10 @@ export default function PurchaseOrders() {
   const [pos,            setPos]            = useState([])
   const [loading,        setLoading]        = useState(true)
   const [view,           setView]           = useState('list') // list | form | receive
+  // The three list-row actions below (Mark Sent, Cancel, Delete) all discarded their write error,
+  // so a refusal reloaded the same row unchanged and read as "that did nothing because it was
+  // already in that state". `formError`/`receiveError` belong to the other two views.
+  const [listError,      setListError]      = useState(null)
 
   // Form state
   const [editingPo,  setEditingPo]  = useState(null)
@@ -165,10 +170,10 @@ export default function PurchaseOrders() {
 
   async function savePo() {
     if (!effectiveClientId) { setFormError('No client selected. Pick a client in the top-left switcher before saving.'); return }
-    if (!poForm.vendor_id) { setFormError('Select a vendor.'); return }
-    if (!poForm.period_id) { setFormError('Select a period.'); return }
+    if (!poForm.vendor_id) { setFormError('Pick the vendor this order goes to.'); return }
+    if (!poForm.period_id) { setFormError('Pick the period this order belongs to.'); return }
     const validItems = poItems.filter(x => x.item_id && parseFloat(x.qty_ordered) > 0)
-    if (validItems.length === 0) { setFormError('Add at least one item with qty > 0.'); return }
+    if (validItems.length === 0) { setFormError('Add at least one item with a quantity above zero — an order with no lines cannot be sent.'); return }
 
     setSaving(true)
     setFormError('')
@@ -183,7 +188,13 @@ export default function PurchaseOrders() {
     let poId
     if (editingPo) {
       const { error } = await scopedUpdate('purchase_orders', poPayload).eq('id', editingPo.id)
-      if (error) { setFormError(error.message); setSaving(false); return }
+      if (error) {
+        const { text, detail } = asActionError(error)
+        setFormError({ text: `${text}
+
+PO ${editingPo.po_number} still has the details it had before — nothing has changed.`, detail })
+        setSaving(false); return
+      }
       poId = editingPo.id
     } else {
       // getNextPoNumber() computes from in-memory state, not a DB sequence — a genuine collision
@@ -196,7 +207,13 @@ export default function PurchaseOrders() {
         ;({ data, error } = await scopedInsert('purchase_orders', { ...poPayload, po_number: poNumber, status: 'draft' }, { single: true }))
         if (!error || error.code !== '23505') break
       }
-      if (error) { setFormError(error.message); setSaving(false); return }
+      if (error) {
+        const { text, detail } = asActionError(error)
+        setFormError({ text: `${text}
+
+No purchase order was created.`, detail })
+        setSaving(false); return
+      }
       poId = data.id
     }
 
@@ -211,7 +228,15 @@ export default function PurchaseOrders() {
         qty_received: 0,
       }))
     ).select('id')
-    if (itemErr) { setFormError(itemErr.message); setSaving(false); return }
+    if (itemErr) {
+      const { text, detail } = asActionError(itemErr)
+      setFormError({ text: editingPo
+        ? `The items were not saved, so PO ${editingPo.po_number} still has the lines it had before. ${text}`
+        : `The purchase order was created but none of its items were saved, so it is now sitting in the list empty. Open it and add the items, or delete it.
+
+${text}`, detail })
+      setSaving(false); return
+    }
     if (editingPo) {
       const newIds = (insertedItems || []).map(r => r.id)
       await supabase.from('purchase_order_items').delete().eq('po_id', poId).not('id', 'in', `(${newIds.join(',')})`)
@@ -223,13 +248,29 @@ export default function PurchaseOrders() {
   }
 
   async function markSent(po) {
-    await scopedUpdate('purchase_orders', { status: 'sent' }).eq('id', po.id)
+    setListError(null)
+    const { error } = await scopedUpdate('purchase_orders', { status: 'sent' }).eq('id', po.id)
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setListError({ text: `PO ${po.po_number} is still showing as a draft — the change did not save. ${text}`, detail })
+      return
+    }
     await loadPos(selectedPeriod.id)
   }
 
   async function cancelPo(po) {
-    if (!window.confirm(`Cancel PO ${po.po_number}? This cannot be undone.`)) return
-    await scopedUpdate('purchase_orders', { status: 'cancelled' }).eq('id', po.id)
+    // Worded around the dialog's own OK/Cancel buttons: "Cancel PO 1234?" in a box whose Cancel
+    // button does the opposite is a coin toss.
+    if (!window.confirm(`Mark PO ${po.po_number} as cancelled?
+
+It stays on the list as a record, but can no longer be sent or received against. This cannot be undone.`)) return
+    setListError(null)
+    const { error } = await scopedUpdate('purchase_orders', { status: 'cancelled' }).eq('id', po.id)
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setListError({ text: `PO ${po.po_number} was not cancelled and is still open. ${text}`, detail })
+      return
+    }
     await loadPos(selectedPeriod.id)
   }
 
@@ -239,8 +280,22 @@ export default function PurchaseOrders() {
       ? `Delete ${po.status.toUpperCase()} PO ${po.po_number}?\n\nThis permanently removes the PO and its line items. Purchase entries already created from receiving are NOT deleted — manage those in Purchases.\n\nThis cannot be undone.`
       : `Delete draft PO ${po.po_number}? This cannot be undone.`
     if (!window.confirm(msg)) return
-    await supabase.from('purchase_order_items').delete().eq('po_id', po.id)
-    await scopedDelete('purchase_orders').eq('id', po.id)
+    setListError(null)
+    const { error: lineErr } = await supabase.from('purchase_order_items').delete().eq('po_id', po.id)
+    if (lineErr) {
+      const { text, detail } = asActionError(lineErr)
+      setListError({ text: `PO ${po.po_number} was not deleted — nothing has been removed. ${text}`, detail })
+      return
+    }
+    const { error } = await scopedDelete('purchase_orders').eq('id', po.id)
+    if (error) {
+      // The line items are already gone, so the PO left on screen is now an empty shell.
+      const { text, detail } = asActionError(error)
+      setListError({ text: `PO ${po.po_number} was not deleted, but its line items have already been removed — it is now an empty PO. Try the delete again.
+
+${text}`, detail })
+      return
+    }
     await loadPos(selectedPeriod.id)
   }
 
@@ -272,9 +327,9 @@ export default function PurchaseOrders() {
 
   async function confirmReceive() {
     const toReceive = receiveLines.filter(l => parseFloat(l.receiving) > 0)
-    if (toReceive.length === 0) { setReceiveError('Enter received qty for at least one item.'); return }
+    if (toReceive.length === 0) { setReceiveError('Enter how much arrived against at least one line.'); return }
     const day = parseInt(receiveBsDay)
-    if (!day || day < 1 || day > 32) { setReceiveError('Enter a valid BS day (1–32).'); return }
+    if (!day || day < 1 || day > 32) { setReceiveError('Pick the day the delivery arrived.'); return }
 
     // The "max" on the qty input was only an HTML hint, never actually enforced — a typo (e.g.
     // 100 instead of 10) silently over-received, inflating qty_received past qty_ordered.
@@ -300,7 +355,13 @@ export default function PurchaseOrders() {
         vat_inclusive: receiveVatInclusive,
       }))
     )
-    if (purchErr) { setReceiveError(purchErr.message); setReceiveSaving(false); return }
+    if (purchErr) {
+      const { text, detail } = asActionError(purchErr)
+      setReceiveError({ text: `Nothing was received. The stock was not recorded and this PO's remaining quantities are unchanged, so you can safely try again.
+
+${text}`, detail })
+      setReceiveSaving(false); return
+    }
 
     // Stock/purchase history is now written for every line — a line whose qty_received update
     // fails would otherwise still show its old remaining qty and let staff receive (and
@@ -316,10 +377,10 @@ export default function PurchaseOrders() {
     const failedUpds = updResults.filter(r => r.error)
     if (failedUpds.length > 0) {
       const names = failedUpds.map(f => `"${f.line.name || f.line.item_id}"`).join(', ')
-      setReceiveError(
-        `Stock was recorded, but updating the received qty failed for ${names} (${failedUpds[0].error.message}). ` +
-        `Reload this PO before receiving again to avoid double-counting.`
-      )
+      setReceiveError({
+        text: `The delivery was added to stock, but this PO still shows ${names} as outstanding. Reload the PO before receiving against it again, or the same delivery will be counted twice.`,
+        detail: asActionError(failedUpds[0].error).detail,
+      })
       setReceiveSaving(false)
       return
     }
@@ -470,7 +531,7 @@ export default function PurchaseOrders() {
             </table>
           </div>
 
-          {receiveError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '16px 0 0' }}>{receiveError}</p>}
+          <ActionError error={receiveError} />
 
           <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
             <button className="btn btn-ghost" onClick={() => setView('list')}>Cancel</button>
@@ -613,7 +674,7 @@ export default function PurchaseOrders() {
           </table>
           </div>
 
-          {formError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '16px 0 0' }}>{formError}</p>}
+          <ActionError error={formError} />
 
           <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
             <button className="btn btn-ghost" onClick={() => setView('list')}>Cancel</button>
@@ -753,6 +814,8 @@ export default function PurchaseOrders() {
         </div>
       </div>
 
+      <ActionError error={listError} className="action-error--top" />
+
       {/* Status filter pills */}
       <div className="tab-bar" style={{ marginBottom: 20 }}>
         {[['all', 'All', pos.length], ...Object.entries(STATUS_META).map(([k, m]) => [k, m.label, statusCounts[k] || 0])].map(([key, label, count]) => (
@@ -767,8 +830,8 @@ export default function PurchaseOrders() {
           <div className="empty-state-icon">▤</div>
           <p className="empty-state-text">
             {pos.length === 0
-              ? 'No purchase orders for this period. Click + New PO to create one.'
-              : `No ${filterStatus} POs.`}
+              ? `No purchase orders raised for ${periodLabel} yet. Use + New PO to raise one against a vendor.`
+              : `No ${filterStatus} purchase orders in ${periodLabel} — there ${pos.length === 1 ? 'is 1 in another status' : `are ${pos.length} in other statuses`}. Choose All to see them.`}
           </p>
         </div>
       ) : (

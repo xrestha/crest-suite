@@ -159,6 +159,87 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S658 — 2026-08-30 — IMS stops handing Postgres to the owner, and a failed write stops reading as a no-op
+
+Service worker `crest-v173`. No migration. `/impeccable clarify ims module`. No feature changed;
+nothing new for Help or the module guides. One new shared component and one new class pair.
+
+#### The rule existed, and the module it was written for had not adopted it
+
+S619 built `src/shared/errorText.js` — the one table turning a Supabase/Postgres error into a
+sentence its reader can act on, with two audiences because "tell your manager" is as useless to an
+Owner as `PGRST202` is to a waiter. Nine months of sessions later, **10 files imported it and ~20
+sites in IMS alone still rendered `error.message` verbatim**, in one of two hand-rolled shapes:
+
+```jsx
+{error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13 }}>{error}</p>}
+alert('Error: ' + error.message)
+```
+
+So an owner who lost their connection mid-save got `TypeError: Failed to fetch` under the form —
+supabase-js's rendering of every dropped connection, since `PostgrestBuilder` stringifies the thrown
+`TypeError` into `error.message` rather than rethrowing. A duplicate got
+`duplicate key value violates unique constraint`. Neither says whether the thing saved.
+
+**`src/components/ActionError.jsx`** is the third member of a family whose other two already
+existed: `FieldError` speaks for one control, `ReportLoadError` for a report that could not be read,
+this one for the button just pressed. It renders the sentence plus, when there is one, a quiet
+monospace detail line carrying `code · message` — because whoever eventually diagnoses this still
+needs it, and it must never be the headline. `asActionError(err, audience)` converts **at the call
+site**, not at render: the audience is a fact about who is looking at that screen, and a plain
+validation string passes through untouched rather than being flattened into "that didn't work".
+
+#### The finding that made it worth more than a wording pass
+
+Most of the replaced sites are **two-write sequences where the first write has already committed**,
+and the message said nothing about it:
+
+| Site | What the user was told | What had actually happened |
+| --- | --- | --- |
+| `PurchaseBillForm` edit | the constraint name | new lines written, old ones **not** removed — the bill holds both versions and every purchase figure counts it twice |
+| `Requisitions` save | `Failed to save.` | header committed, no lines — an empty requisition in the list, "issued" if that button was used |
+| `Items` force-delete | the constraint name | every referencing record already deleted; only the item survived |
+| `PurchaseOrders` delete | *nothing* | line items gone, PO left as an empty shell |
+| `AssetCategoryModal` save | the constraint name | the loop is row-by-row, so everything above the failing row was saved |
+
+Each of those now names the consequence and the recovery first, and carries the technical sentence
+after it.
+
+#### A write whose error is discarded reads as "that did nothing"
+
+Separate from the wording: several list actions dropped the error entirely, so a refusal reloaded
+the same row unchanged. `Vendors`' hide and delete, and `PurchaseOrders`' Mark Sent / Cancel /
+Delete, all had this shape — and all five live on the LIST, where the file's existing `error` state
+renders inside a modal and could not have shown them anyway. Both pages gained a page-level slot.
+`OutstandingPayables` had the same gap on one tab only: its message slot lives inside the pay form,
+which renders on Outstanding, while the Delete Selected Payments button renders on both.
+
+#### Smaller, found while reading
+
+- The Item Master empty-state banner promised "your **7** standard categories matching your Excel
+  structure". `DEFAULT_CATEGORIES` holds **six**, and the spreadsheet is not something a new client
+  has seen. It now names them, from the array.
+- `TaxPoolTab`'s guard read `!parseFloat(amount) > 0`, which parses as `(!parseFloat(amount)) > 0`
+  and is `false` for **any** non-zero number — so a negative repair expense passed a check whose
+  own message said "a positive amount are required". Fixed in the same change as the message.
+- `Items.js` styled its error detail line with `var(--theme-text-muted)`, which is not a token in
+  this product — it resolved to nothing. Now `--theme-text3`, measured 5.45:1 on the dark card.
+- `PurchaseOrders` asked `Cancel PO 1234?` in a `window.confirm`, whose own buttons are OK and
+  **Cancel**. Reworded to "Mark PO 1234 as cancelled?".
+- Recipes' save timeout now says to check the list before retrying: a timeout cannot know whether
+  the write landed, and that save retries on a duplicate product code, so a blind retry can leave
+  two recipes behind.
+- Validation copy that named the control rather than the task — `Select a day.`, `Select a vendor.`,
+  `Name is required.` — now says what to do and why it matters.
+
+#### Verified
+
+Built (`CI=true`), and the message component measured in headless Chromium against the real
+`index.css`: **6.15:1** on the dark card and **6.47:1** on light for the message, **5.45:1** for the
+detail line, no overflow at 390px with a full Postgres string, and `white-space: pre-line` carrying
+the paragraph break between consequence and cause. Sweep is clean — no `error.message` or
+`'Error: '` reaches a user anywhere in `src/modules/ims/` except inside a comment describing this.
+
 ### S657 — 2026-08-30 — the Suite closes the shell campaign, and the Group Console stops reporting last month
 
 Service worker `crest-v172`. No migration. `/impeccable layout crest suite module`, then

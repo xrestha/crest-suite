@@ -12,6 +12,7 @@ import QtyInput from '../../../components/QtyInput'
 import { Navigate } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
 import { errorInfo } from '../../../shared/errorText'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 
 const DEFAULT_CATEGORIES = [
@@ -48,6 +49,10 @@ export default function Items() {
   const [categories, setCategories] = useState(() => readPageCache('items', 'categories', clientId) ?? [])
   const [loading, setLoading] = useState(!cachedItems)
   const [showForm, setShowForm] = useState(false)
+  // The form's `error` renders inside the Add/Edit modal, so it is unreachable from the toolbar and
+  // the row actions. Those failures used to go to `alert('Error: ' + error.message)` — the browser's
+  // own chrome, carrying a Postgres string with the word "Error" as its headline.
+  const [pageError, setPageError] = useState(null)
   const [activeTab, setActiveTab] = useState('details') // 'details' | 'conversion'
   const [form, setForm] = useState(EMPTY_FORM)
   const [editing, setEditing] = useState(null)
@@ -139,7 +144,7 @@ export default function Items() {
     if (refs.length > 0) {
       const fullNames = refs.map(code => USAGE_LABELS[code] || code).join(', ')
       if (!isAdmin) {
-        alert(`Cannot delete "${item.name}" — referenced in: ${fullNames}. Hide it instead.`)
+        setPageError(`"${item.name}" can't be deleted — it already appears in ${fullNames}, and deleting it would take those records with it. Hide it instead: it stops being offered on new entries, and everything it is already on keeps its item.`)
         return
       }
       // Admin: offer to force-delete (removes the referencing records too).
@@ -167,12 +172,12 @@ export default function Items() {
         }
         return
       }
-      alert(
-        `Could not delete "${item.name}".\n\n` +
-        (isFk
-          ? 'It is still referenced by an older record (purchase, stock, wastage, staff meal, requisition, vendor return, or recipe). Use "Hide" instead to keep that history intact.'
-          : error.message)
-      )
+      if (isFk) {
+        setPageError(`"${item.name}" can't be deleted — an older record still refers to it (a purchase, stock count, wastage, staff meal, requisition, vendor return or recipe line) even though nothing shows against it here. Hide it instead, which keeps that history intact.`)
+      } else {
+        const { text, detail } = asActionError(error)
+        setPageError({ text: `"${item.name}" was not deleted. ${text}`, detail })
+      }
       return
     }
     loadItems()
@@ -193,7 +198,11 @@ export default function Items() {
     }
     const { error } = await supabase.from('items').delete().eq('id', id)
     if (error) {
-      alert(`References were cleared but the item still couldn't be deleted:\n\n${error.message}`)
+      // The reference-clearing loop above has already run, so this is not a no-op failure.
+      const { text, detail } = asActionError(error)
+      setPageError({ text: `"${item.name}" was not deleted, but every record that referenced it has already been removed — its purchases, stock counts, wastage, staff meals, requisitions, vendor returns and recipe lines are gone. Reports covering those periods will have changed. Try the delete again.
+
+${text}`, detail })
       return
     }
     loadItems()
@@ -202,11 +211,12 @@ export default function Items() {
 
   async function clearAllConversions() {
     const withConversion = items.filter(i => i.purchase_unit)
-    if (withConversion.length === 0) { alert('No items have a conversion set.'); return }
+    setPageError(null)
+    if (withConversion.length === 0) { setPageError('No items have a purchase-unit conversion set, so there is nothing to clear.'); return }
     if (!window.confirm(`Clear conversions on ${withConversion.length} item${withConversion.length !== 1 ? 's' : ''}?\n\nThis resets Purchase Unit, Base Unit, Conversion Factor and Purchase Qty to 1 for each affected item. This cannot be undone.`)) return
     const { error } = await scopedUpdate('items', { purchase_unit: null, base_unit: null, conversion_factor: 1, purchase_qty: 1 })
       .not('purchase_unit', 'is', null)
-    if (error) { alert('Error: ' + error.message); return }
+    if (error) { setPageError(asActionError(error)); return }
     await loadItems()
   }
 
@@ -230,9 +240,10 @@ export default function Items() {
     // scopedUpsert refuses (and returns an error) if no client is selected, instead of
     // seeding a null-client_id row — see memory: bug-null-client-id.
     setInitingCats(true)
+    setPageError(null)
     const inserts = DEFAULT_CATEGORIES.map((name, i) => ({ name, sort_order: i }))
     const { error } = await scopedUpsert('categories', inserts, { onConflict: 'client_id,name', ignoreDuplicates: true })
-    if (error) alert('Error: ' + error.message)
+    if (error) setPageError(asActionError(error))
     await loadCategories()
     setInitingCats(false)
   }
@@ -505,10 +516,12 @@ export default function Items() {
       {categories.length === 0 && !loading && (
         <div className="card" style={{ marginBottom: 20, borderColor: 'rgba(201,168,76,0.3)' }}>
           <p style={{ color: 'var(--theme-accent-ink)', fontSize: 13, margin: 0 }}>
-            No categories found. Click <strong>⚡ Load Default Categories</strong> to set up your 7 standard categories matching your Excel structure.
+            You have no item categories yet, so there is nothing to file a new item under. Click <strong>⚡ Load Default Categories</strong> to add the {DEFAULT_CATEGORIES.length} Crest starts with — {DEFAULT_CATEGORIES.slice(0, -1).join(', ')} and {DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length - 1]}. Rename them or add your own afterwards.
           </p>
         </div>
       )}
+
+      <ActionError error={pageError} className="action-error--top" />
 
       {showForm && (
         <Modal onClose={() => setShowForm(false)} title={editing ? 'Edit Item' : 'Add Item'}>
@@ -706,14 +719,7 @@ export default function Items() {
             </>
           )}
 
-          {error && (
-            <div style={{ margin: '10px 0 0' }}>
-              <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: 0 }}>{error}</p>
-              {errorDetail && (
-                <p style={{ color: 'var(--theme-text-muted)', fontSize: 11, margin: '3px 0 0', fontFamily: 'monospace' }}>{errorDetail}</p>
-              )}
-            </div>
-          )}
+          <ActionError error={error ? { text: error, detail: errorDetail } : null} />
           <div className="form-actions" style={{ justifyContent: 'space-between' }}>
             {editing ? (() => {
               const idx = filtered.findIndex(i => i.id === editing)

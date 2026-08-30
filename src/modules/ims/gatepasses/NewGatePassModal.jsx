@@ -3,6 +3,7 @@ import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import FieldError, { fieldAria } from '../../../components/FieldError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 
 const PURPOSES = [
   { value: 'delivery', label: 'Delivery' },
@@ -22,7 +23,7 @@ export default function NewGatePassModal({ vendors, onClose, onSaved }) {
   const [purpose, setPurpose]         = useState('delivery')
   const [notes, setNotes]             = useState('')
   const [saving, setSaving]           = useState(false)
-  const [error, setError]             = useState('')
+  const [error, setError]             = useState(null)
   // Per-field validation; `error` above stays the form-level channel for a rejected write (S603).
   const [fieldErr, setFieldErr] = useState({})
 
@@ -37,7 +38,7 @@ export default function NewGatePassModal({ vendors, onClose, onSaved }) {
     if (!vehicleNumber.trim()) fe.vehicle = 'Vehicle number is required.'
     setFieldErr(fe)
     if (Object.keys(fe).length) return
-    setSaving(true); setError('')
+    setSaving(true); setError(null)
     const result = await onSaved({
       vendor_id: useExisting ? (vendorId || null) : null,
       vendor_name: finalVendorName,
@@ -47,7 +48,7 @@ export default function NewGatePassModal({ vendors, onClose, onSaved }) {
       notes: notes.trim() || null,
     })
     setSaving(false)
-    if (result?.error) setError(result.error.message)
+    if (result?.error) setError(asActionError(result.error))
   }
 
   return (
@@ -94,7 +95,7 @@ export default function NewGatePassModal({ vendors, onClose, onSaved }) {
             style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }} />
         </div>
       </div>
-      {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
+      <ActionError error={error} />
       <div className="form-actions" style={{ justifyContent: 'flex-end' }}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>

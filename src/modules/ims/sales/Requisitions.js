@@ -10,6 +10,7 @@ import { BS_MONTHS, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -242,7 +243,7 @@ export default function Requisitions() {
 
   async function saveReq(statusOverride) {
     if (!effectiveClientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return }
-    if (!formDay) { setError('Select a day.'); return }
+    if (!formDay) { setError('Pick the day this requisition is for.'); return }
     const validLines = formLines.filter(l => l.item_id && parseFloat(l.qty_requested) > 0)
     if (validLines.length === 0) { setError('Add at least one item with a requested quantity.'); return }
 
@@ -266,7 +267,12 @@ export default function Requisitions() {
       status: statusOverride || 'draft'
     }, { single: true })
 
-    if (hErr || !header) { setError(hErr?.message || 'Failed to save.'); setSaving(false); return }
+    if (hErr || !header) {
+      setError(hErr
+        ? asActionError(hErr)
+        : "The requisition was not saved, and the database didn't say why. Try again — nothing has been recorded.")
+      setSaving(false); return
+    }
 
     const lineRows = validLines.map(l => ({
       requisition_id: header.id,
@@ -278,7 +284,16 @@ export default function Requisitions() {
     }))
 
     const { error: lErr } = await supabase.from('requisition_lines').insert(lineRows)
-    if (lErr) { setError(lErr.message); setSaving(false); return }
+    if (lErr) {
+      // The header row is already committed, so an empty requisition is now sitting in the list
+      // under this day — and if it was issued, it reads as a real issue of nothing. Say that,
+      // rather than leaving the user to find it.
+      const { text, detail } = asActionError(lErr)
+      setError({ text: `The requisition was created but none of its items were saved, so it is now showing as an empty ${statusOverride === 'issued' ? 'issued requisition' : 'draft'} for this day. Delete it from the list and enter it again.
+
+${text}`, detail })
+      setSaving(false); return
+    }
 
     await loadReqs(selectedPeriod.id)
     backToList()
@@ -504,7 +519,7 @@ export default function Requisitions() {
             <button className="btn btn-ghost" style={{ marginTop: 10, fontSize: 12 }} onClick={addFormLine}>+ Add Item</button>
           </div>
 
-          {error && <div style={{ color: 'var(--theme-red-text)', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+          <ActionError error={error} className="action-error--top" />
 
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button className="btn btn-ghost" onClick={backToList} disabled={saving}>Cancel</button>

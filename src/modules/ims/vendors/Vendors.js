@@ -7,6 +7,7 @@ import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import FieldError, { fieldAria } from '../../../components/FieldError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { Navigate, Link } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
@@ -24,6 +25,11 @@ export default function Vendors() {
   const [vendors, setVendors] = useState(cachedVendors ?? [])
   const [loading, setLoading] = useState(!cachedVendors)
   const [showForm, setShowForm] = useState(false)
+  // Separate from the form's `error`, which only ever renders inside the Add/Edit modal — a delete
+  // or a hide that fails happens from the LIST, where that message has nowhere to appear. Both
+  // writes below used to discard their error entirely: the row simply reloaded unchanged, which
+  // reads as "nothing was wrong with that" rather than as a refusal.
+  const [listError, setListError] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -82,7 +88,7 @@ export default function Vendors() {
         pan_vat_no: form.pan_vat_no.trim(),
         payment_terms: form.payment_terms.trim() || null
       }).eq('id', editing)
-      if (error) { setError(error.message); setSaving(false); return false }
+      if (error) { setError(asActionError(error)); setSaving(false); return false }
     } else {
       const { error } = await scopedInsert('vendors', {
         vendor_code: getNextVendorCode(),
@@ -93,7 +99,7 @@ export default function Vendors() {
         pan_vat_no: form.pan_vat_no.trim(),
         payment_terms: form.payment_terms.trim() || null
       })
-      if (error) { setError(error.message); setSaving(false); return false }
+      if (error) { setError(asActionError(error)); setSaving(false); return false }
     }
     setSaving(false)
     return true
@@ -122,7 +128,9 @@ export default function Vendors() {
   }
 
   async function toggleActive(vendor) {
-    await supabase.from('vendors').update({ is_active: !vendor.is_active }).eq('id', vendor.id)
+    setListError(null)
+    const { error } = await supabase.from('vendors').update({ is_active: !vendor.is_active }).eq('id', vendor.id)
+    if (error) { setListError(asActionError(error)); return }
     loadVendors()
   }
 
@@ -132,11 +140,15 @@ export default function Vendors() {
       .select('*', { count: 'exact', head: true })
       .eq('vendor_id', vendor.id)
     if (count > 0) {
-      alert(`Cannot delete "${vendor.name}" — it has ${count} purchase entr${count === 1 ? 'y' : 'ies'} linked to it. Deactivate instead.`)
+      // Not an error the user caused — it is the system protecting purchase history. Say what the
+      // alternative is, and that it achieves what they actually wanted.
+      setListError(`"${vendor.name}" can't be deleted — ${count} purchase entr${count === 1 ? 'y is' : 'ies are'} recorded against it, and deleting the vendor would take that history with it. Hide it instead: it stops appearing when you enter new purchases, and every past bill keeps its supplier.`)
       return
     }
     if (!window.confirm(`Permanently delete "${vendor.name}"? This cannot be undone.`)) return
-    await supabase.from('vendors').delete().eq('id', vendor.id)
+    setListError(null)
+    const { error } = await supabase.from('vendors').delete().eq('id', vendor.id)
+    if (error) { setListError(asActionError(error)); return }
     loadVendors()
   }
 
@@ -162,6 +174,8 @@ export default function Vendors() {
         </div>
         <button className="btn btn-ghost" onClick={() => printWithTitle('Vendors')}>Print</button>
       </div>
+
+      <ActionError error={listError} />
 
       {showForm && (
         <Modal onClose={() => setShowForm(false)} title={editing ? 'Edit Vendor' : 'Add Vendor'}>
@@ -222,7 +236,7 @@ export default function Vendors() {
               />
             </div>
           </div>
-          {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
+          <ActionError error={error} />
           <div className="form-actions" style={{ justifyContent: 'space-between' }}>
             {editing ? (() => {
               const idx = filtered.findIndex(v => v.id === editing)

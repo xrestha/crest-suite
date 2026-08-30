@@ -44,3 +44,42 @@ code {
   color: var(--theme-red-text, #f87171);
   line-height: 1.4;
 }
+
+/* The message for an ACTION that failed — a save, a delete, a post. Sits between `.field-error`
+   (one control) and `.report-error` (a whole report that could not be read): this one belongs to
+   the button the user just pressed, so it lives with the form's actions rather than the page.
+
+   Deliberately NOT a card like `.report-error`. That one has to outweigh a page of figures and say
+   they are not real; this one appears under a form the user is still looking at, and a filled panel
+   there reads as a second section rather than as a consequence of the click.
+
+   `.action-error-detail` is monospace for the one reason monospace is ever earned — it holds a
+   Postgres code and message, which is data being quoted, not prose being dressed up. It is sized
+   and toned to be findable and not readable: whoever has to diagnose this will look for it, and the
+   owner it sits in front of must never mistake it for the message. */
+.action-error {
+  margin: 12px 0 0;
+}
+
+/* Above the content it belongs to rather than below it — for a form whose error sits at the top of
+   a panel, where the message has to be read before the fields, not after the Save button. */
+.action-error--top {
+  margin: 0 0 16px;
+}
+
+.action-error-text {
+  font-size: 13px;
+  color: var(--theme-red-text, #f87171);
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-line;
+}
+
+.action-error-detail {
+  font-size: 11px;
+  color: var(--theme-text3, #8a92a3);
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  line-height: 1.4;
+  margin: 4px 0 0;
+  word-break: break-word;
+}

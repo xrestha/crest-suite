@@ -4,6 +4,7 @@ import Tip from '../../../components/Tip'
 import QtyInput from '../../../components/QtyInput'
 import SearchableSelect from '../../../components/SearchableSelect'
 import FieldError, { fieldAria } from '../../../components/FieldError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { POOL_LABELS, POOL_EXAMPLES } from './taxPoolConstants'
 
@@ -93,7 +94,7 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
       : await scopedInsert('assets_register', payload)
 
     setSaving(false)
-    if (err) { setError(err.message); return }
+    if (err) { setError(asActionError(err)); return }
     onSaved()
   }
 
@@ -178,12 +179,10 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
         </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
-        {error && <span style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>{error}</span>}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
-        </div>
+      <ActionError error={error} />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 16 }}>
+        <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
     </Modal>
   )

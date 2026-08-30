@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { POOL_SHORT_LABELS, POOL_EXAMPLES } from './taxPoolConstants'
 
@@ -28,7 +29,11 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
     const row = rows[idx]
     if (row.id) {
       const { error: delErr } = await scopedDelete('assets_categories').eq('id', row.id)
-      if (delErr) { setError(delErr.message); return }
+      if (delErr) {
+        const { text, detail } = asActionError(delErr)
+        setError({ text: `"${row.name || 'That category'}" could not be removed — it is probably still assigned to one or more assets. ${text}`, detail })
+        return
+      }
     }
     setRows(prev => prev.filter((_, i) => i !== idx))
   }
@@ -45,7 +50,14 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
       const { error: err } = row.id
         ? await scopedUpdate('assets_categories', payload).eq('id', row.id)
         : await scopedInsert('assets_categories', payload)
-      if (err) { setError(err.message); setSaving(false); return }
+      if (err) {
+        // The loop saves row by row, so anything before this one is already committed.
+        const { text, detail } = asActionError(err)
+        setError({ text: `Stopped at "${row.name.trim()}" — any categories above it in the list were saved, and it and anything below it were not.
+
+${text}`, detail })
+        setSaving(false); return
+      }
     }
     setSaving(false)
     onSaved()
@@ -112,9 +124,10 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={addRow}>+ Add Category</button>
-        {error && <span style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>{error}</span>}
         <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
+
+      <ActionError error={error} />
     </Modal>
   )
 }

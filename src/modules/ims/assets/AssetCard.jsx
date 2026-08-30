@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import FieldError, { fieldAria } from '../../../components/FieldError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { computeDisposalGainLoss } from './depreciationCompute'
@@ -54,7 +55,15 @@ export default function AssetCard({ asset, onClose, onChanged }) {
       updated_at: new Date().toISOString(),
     }).eq('id', asset.id)
     setSaving(false)
-    if (err) { setError(err.message); return }
+    if (err) {
+      // Disposal is the one write on this card that changes what the asset is worth on the books,
+      // so an unsaved one must not be mistaken for a saved one.
+      const { text, detail } = asActionError(err)
+      setError({ text: `${text}
+
+The asset is still on the register as active.`, detail })
+      return
+    }
     onChanged()
   }
 
@@ -156,12 +165,10 @@ export default function AssetCard({ asset, onClose, onChanged }) {
               <input id="assetc-f4" className="form-input" value={disposalForm.disposal_reason} onChange={e => setDisposalForm(f => ({ ...f, disposal_reason: e.target.value }))} style={{ width: '100%' }} />
             </div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-            {error && <span style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>{error}</span>}
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-              <button className="btn btn-ghost" onClick={() => setDisposing(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={submitDisposal} disabled={saving}>{saving ? 'Saving…' : 'Confirm Disposal'}</button>
-            </div>
+          <ActionError error={error} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 10 }}>
+            <button className="btn btn-ghost" onClick={() => setDisposing(false)}>Cancel</button>
+            <button className="btn btn-primary" onClick={submitDisposal} disabled={saving}>{saving ? 'Saving…' : 'Confirm Disposal'}</button>
           </div>
         </div>
       )}

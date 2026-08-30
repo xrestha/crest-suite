@@ -177,13 +177,13 @@ export default function ImsStaff() {
 
   async function addStaff() {
     const role = effectiveRoles.find(r => r.label === addForm.job_title)
-    if (!role) { setAddMsg('Select a role.'); return }
+    if (!role) { setAddMsg('Pick a role — it decides which IMS pages this person can open.'); return }
 
     // 'existing' assigns an ims_role to an account that already exists for this client (e.g.
     // created via Admin → Clients → Manage → Users) — no new login is created, so it skips the
     // email/password validation entirely and calls update_ims_role, not create_ims_staff.
     if (addMode === 'existing') {
-      if (!addForm.existing_user_id) { setAddMsg('Select a user.'); return }
+      if (!addForm.existing_user_id) { setAddMsg('Pick which existing login to give IMS access to.'); return }
       setAdding(true); setAddMsg('')
       const { data, error } = await supabase.functions.invoke('admin-user-ops', {
         body: {
@@ -194,18 +194,18 @@ export default function ImsStaff() {
         },
       })
       if (error || data?.error) {
-        let detail = data?.error || error?.message || 'Failed to assign role'
+        let detail = data?.error || error?.message || 'The role was not assigned — this account still has the access it had before.'
         try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-        setAddMsg('Error: ' + detail); setAdding(false); return
+        setAddMsg(detail); setAdding(false); return
       }
       setAddModal(false); setAdding(false); load()
       return
     }
 
     if (addMode === 'hr') {
-      if (!addForm.employee_id) { setAddMsg('Select an employee.'); return }
-    } else if (!addForm.full_name.trim()) { setAddMsg('Name is required.'); return }
-    if (!emailValid(addForm.email))       { setAddMsg('Enter a valid email.'); return }
+      if (!addForm.employee_id) { setAddMsg('Pick which employee this login is for.'); return }
+    } else if (!addForm.full_name.trim()) { setAddMsg('Enter the staff member’s full name.'); return }
+    if (!emailValid(addForm.email))       { setAddMsg('Enter a valid email address — this is what they will sign in with.'); return }
     if (!passwordValid(addForm.password)) { setAddMsg('Password must be at least 8 characters.'); return }
     setAdding(true); setAddMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
@@ -220,9 +220,9 @@ export default function ImsStaff() {
       },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to create staff'
+      let detail = data?.error || error?.message || 'The account was not created. Check your internet and try again — if the email is already in use, add them through “Existing user” instead.'
       try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setAddMsg('Error: ' + detail); setAdding(false); return
+      setAddMsg(detail); setAdding(false); return
     }
     setAddModal(false); setAdding(false); load()
   }
@@ -234,9 +234,9 @@ export default function ImsStaff() {
       body: { action: 'delete_ims_staff', userId: p.id },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to delete'
+      let detail = data?.error || error?.message || `${p.full_name} was not deleted — their login is still active.`
       try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setMsg('Error: ' + detail); return
+      setMsg(detail); return
     }
     load()
   }
@@ -251,9 +251,9 @@ export default function ImsStaff() {
       body: { action: 'reset_ims_password', userId: pwTarget.id, password: newPassword },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to reset password'
+      let detail = data?.error || error?.message || 'The password was not changed — the old one still works.'
       try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setPwMsg('Error: ' + detail); setResetting(false); return
+      setPwMsg(detail); setResetting(false); return
     }
     setPwTarget(null); setResetting(false)
   }
@@ -271,9 +271,9 @@ export default function ImsStaff() {
       },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to update role'
+      let detail = data?.error || error?.message || 'The role was not changed — this account still has the access it had before.'
       try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setMsg('Error: ' + detail)
+      setMsg(detail)
     } else {
       setStaff(prev => prev.map(p => p.id === profileId
         ? { ...p, ims_role: role?.level || null, ims_job_title: jobTitle || null }

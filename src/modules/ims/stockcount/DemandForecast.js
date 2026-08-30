@@ -8,6 +8,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd } from '../../../utils/bsCalendar'
 import { runForecast } from '../../../utils/demandForecastData'
 import { printWithTitle } from '../../../utils/printTitle'
+import { errorText } from '../../../shared/errorText'
 import SuiteGate from '../../../components/SuiteGate'
 import { Navigate } from 'react-router-dom'
 
@@ -96,10 +97,10 @@ export default function DemandForecast() {
     setRecomputing(true); setMsg('')
     try {
       const { rowsWritten } = await runForecast(clientId, horizon)
-      setMsg(`ok:Forecast recomputed — ${rowsWritten} rows written.`)
+      setMsg(`ok:Forecast rebuilt — ${rowsWritten} row${rowsWritten === 1 ? '' : 's'} recalculated from your sales history.`)
       await loadStored()
     } catch (err) {
-      setMsg('error:' + (err.message || 'Recompute failed.'))
+      setMsg('error:' + errorText(err, 'operator') + ' The figures below are from the last forecast that ran, not a new one.')
     }
     setRecomputing(false)
   }

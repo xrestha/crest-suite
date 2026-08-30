@@ -238,7 +238,7 @@ export default function Overheads() {
   }
 
   async function save() {
-    if (!effectiveClientId) { alert('No client selected. Pick a client in the top-left switcher before saving.'); return }
+    if (!effectiveClientId) { alert('Nothing was saved — no client is selected. Pick one in the switcher at the top left, then save again.'); return }
     setSaving(true)
     await scopedDelete('overheads').eq('period_id', periodId)
     const inserts = []

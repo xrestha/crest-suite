@@ -6,6 +6,7 @@ import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import QtyInput from '../../../components/QtyInput'
 import FieldError from '../../../components/FieldError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { getCf, calcBillTotals, fmtRate, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false }
@@ -164,7 +165,13 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
       // previous, still-valid line items instead of being left with none.
       const { error: insErr } = await supabase.from('purchase_entries')
         .insert(entries.map(e => ({ ...e, purchase_group_id: editingGroupId })))
-      if (insErr) { setError(insErr.message); setSaving(false); return }
+      if (insErr) {
+        const { text, detail } = asActionError(insErr)
+        setError({ text: `${text}
+
+Your changes were not saved, and the bill still has the lines it had before — nothing has been lost.`, detail })
+        setSaving(false); return
+      }
 
       // Remove the superseded lines BY ID — the rows this form was opened on — not by matching
       // `purchase_group_id = editingGroupId`.
@@ -184,11 +191,20 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
       // the two failures. Not chunked — the list is one vendor bill's lines.
       const { error: delErr } = await supabase.from('purchase_entries')
         .delete().in('id', supersededIds)
-      if (delErr) { setError(delErr.message); setSaving(false); return }
+      if (delErr) {
+        // The new lines are already written by this point, so the bill is now carrying both
+        // versions and every purchase figure that reads it is double-counting. That is the fact
+        // the user needs — not the constraint name.
+        const { text, detail } = asActionError(delErr)
+        setError({ text: `Your changes were saved, but the lines they replaced could not be removed — this bill now holds both versions, so its total and every purchase report reading it are counting it twice. Reopen the bill and delete the duplicated lines before relying on any purchase figure.
+
+${text}`, detail })
+        setSaving(false); return
+      }
     } else {
       const groupId = crypto.randomUUID()
       const { error: insErr } = await supabase.from('purchase_entries').insert(entries.map(e => ({ ...e, purchase_group_id: groupId })))
-      if (insErr) { setError(insErr.message); setSaving(false); return }
+      if (insErr) { setError(asActionError(insErr)); setSaving(false); return }
     }
 
     setSaving(false)
@@ -443,7 +459,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
         })()}
       </div>
 
-      {error && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
+      <ActionError error={error} />
       {/* Cancel is plain ghost: it carried the red tint + red border DESIGN.md reserves for
           destructive actions, on a fully reversible action on an unsaved form — the same treatment
           Purchases' real "Delete All" uses. And the row is one group at the right edge rather than

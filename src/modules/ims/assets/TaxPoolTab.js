@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { getBsFiscalYear, getBsFiscalYearStart, getBsToday, formatAd } from '../../../utils/bsCalendar'
 import { getFiscalYearAdRange } from '../reports/vendorBalanceHelpers'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -35,6 +36,9 @@ export default function TaxPoolTab({ assets }) {
   const [loading, setLoading] = useState(false)
   const [posting, setPosting] = useState(false)
   const [msg, setMsg] = useState('')
+  // Errors live apart from `msg` (S658) — see the same split in DepreciationRunTab. `msg` is now
+  // only ever the one-line success confirmation beside the Post button.
+  const [err, setErr] = useState(null)
 
   const fyLabel = getBsFiscalYear(fyStart, 4)
   const canPost = hasImsAccess('manager')
@@ -53,12 +57,20 @@ export default function TaxPoolTab({ assets }) {
   }, [repairExpenses])
 
   async function addExpense() {
-    if (!newExpense.expense_date || !parseFloat(newExpense.amount) > 0) { setMsg('error:Date and a positive amount are required.'); return }
+    setErr(null)
+    if (!newExpense.expense_date || !(parseFloat(newExpense.amount) > 0)) {
+      setErr('A repair expense needs a date and an amount above zero.')
+      return
+    }
     const { error } = await scopedInsert('assets_repair_expenses', {
       pool: newExpense.pool, fiscal_year: fyLabel, expense_date: newExpense.expense_date,
       amount: parseFloat(newExpense.amount), description: newExpense.description.trim() || null,
     })
-    if (error) { setMsg('error:' + error.message); return }
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setErr({ text: `The repair expense was not added, so it is not counting toward this year's Section 16 cap. ${text}`, detail })
+      return
+    }
     setNewExpense({ pool: 'A', expense_date: '', amount: '', description: '' })
     loadRepairExpenses()
   }
@@ -69,7 +81,7 @@ export default function TaxPoolTab({ assets }) {
   }
 
   async function preview() {
-    setLoading(true); setMsg('')
+    setLoading(true); setMsg(''); setErr(null)
     const priorFyLabel = getBsFiscalYear(fyStart - 1, 4)
     const { data: priorRun } = await scopedFrom('assets_tax_pool_runs')
       .eq('fiscal_year', priorFyLabel).eq('status', 'posted')
@@ -145,12 +157,18 @@ export default function TaxPoolTab({ assets }) {
 
   async function post() {
     if (!lines) return
-    setPosting(true); setMsg('')
+    setPosting(true); setMsg(''); setErr(null)
     const { error } = await supabase.rpc('post_tax_pool_run', {
       p_client_id: clientId, p_fiscal_year: fyLabel, p_lines: lines, p_notes: null,
     })
     setPosting(false)
-    if (error) { setMsg('error:' + error.message); return }
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setErr({ text: `The pool schedule was not posted, so FY ${fyLabel} is still unlocked and nothing has been written.
+
+${text}`, detail })
+      return
+    }
     setMsg('ok:Posted — tax pool schedule locked for FY ' + fyLabel)
     setLines(null)
   }
@@ -186,8 +204,9 @@ export default function TaxPoolTab({ assets }) {
           {lines && (
             <button className="btn btn-ghost" onClick={() => printWithTitle(`Tax Depreciation Schedule - FY ${fyLabel}`)}>Print</button>
           )}
-          {msg && <span style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
+          {msg && <span style={{ fontSize: 12, color: 'var(--theme-green-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
+        <ActionError error={err} />
       </div>
 
       {/* Repair/maintenance expense ledger — feeds the Section 16 cap check */}
